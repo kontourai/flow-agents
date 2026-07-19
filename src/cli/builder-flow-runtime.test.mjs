@@ -13,6 +13,7 @@ import {
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
   pauseBuilderFlowSession,
+  prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
@@ -27,7 +28,7 @@ import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/buil
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
-import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain } from "../../build/src/cli/workflow-sidecar.js";
+import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -372,11 +373,18 @@ test("small-model client can start and advance from projected actions without ch
   assert.ok(started.projection.next_action.command.includes(`'workflow' 'status' '--session-dir' '.kontourai/flow-agents/${session.slug}' '--json'`));
   const envelope = started.gateActionEnvelope;
   assert.equal(Object.hasOwn(started.projection.next_action, "gate_action_envelope"), false, "durable state has no duplicate envelope");
-  assert.equal(envelope.schema_version, "2.0");
+  assert.equal(envelope.schema_version, "3.0");
   assert.equal(envelope.gate.requirements[0].gate_id, "pull-work-gate");
   assert.equal(envelope.action.implementation_allowed, false, "implementation is forbidden before builder.build/execute");
   assert.deepEqual(envelope.action.declared_evidence, ["selected-work"]);
-  assert.deepEqual(envelope.action.declared_artifacts, [`<slug>--pull-work.md`, "trust.bundle#selected-work"]);
+  assert.deepEqual(envelope.action.declared_artifacts, [
+    { kind: "file", ref: "<slug>--pull-work.md", path: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, direct_write_allowed: true, produced_via: { interface: "skill", skill_ids: ["pull-work"] } },
+    { kind: "trust_slice", ref: "trust.bundle#selected-work", bundle_file: "trust.bundle", slice_id: "selected-work", direct_write_allowed: false, record_via: ["workflow.evidence"] },
+  ]);
+  assert.deepEqual(envelope.action.artifact_bindings, envelope.action.declared_artifacts.map((target) => ({
+    target,
+    expectation_ids: ["selected-work"],
+  })));
   assert.equal(envelope.stop_condition.kind, "one_turn");
   assert.equal(envelope.stop_condition.scope.current_gate_only, true);
   assert.deepEqual(envelope.stop_condition.required.unresolved_evidence_ids, ["selected-work"]);
@@ -387,8 +395,19 @@ test("small-model client can start and advance from projected actions without ch
   assert.match(envelope.action.skills[0].path, /kits\/builder\/skills\/pull-work\/SKILL\.md$/);
   assert.match(envelope.action.skills[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(envelope.public_interfaces.mutations[0].expectation_id, "selected-work");
+  assert.deepEqual(envelope.public_interfaces.status, {
+    package: { name: "@kontourai/flow-agents", version: PACKAGE_VERSION },
+    command: "flow-agents",
+    argv: ["workflow", "status", "--session-dir", `.kontourai/flow-agents/${session.slug}`, "--json"],
+  });
   assert.deepEqual(envelope.public_interfaces.mutations[0].package, { name: "@kontourai/flow-agents", version: PACKAGE_VERSION });
   assert.deepEqual(envelope.public_interfaces.mutations[0].argv.slice(0, 2), ["workflow", "evidence"]);
+  assert.equal(envelope.public_interfaces.mutations[0].parameters.find((entry) => entry.name === "evidence_ref_json").value_schema_ref, "#/public_interfaces/schemas/evidence_ref_json");
+  assert.deepEqual(envelope.public_interfaces.schemas.evidence_ref_json.properties.kind.enum, ["source", "command", "artifact", "provider", "external"]);
+  assert.deepEqual(envelope.public_interfaces.schemas.evidence_ref_json.examples[0], { kind: "artifact", file: "<project-relative-artifact-path>", summary: "<what this artifact proves>" });
+  for (const example of envelope.public_interfaces.schemas.evidence_ref_json.examples) {
+    assert.deepEqual(validateEvidenceRef(structuredClone(example), "projected evidence example"), example);
+  }
   assert.equal(envelope.public_interfaces.mutations[0].argv.some((value) => value.includes("<")), false, "argv contains no substitution placeholders");
   assert.ok(fs.existsSync(runDir(session.slug, session.projectRoot)));
   assert.ok(!fs.existsSync(path.join(session.projectRoot, ".flow", "runs")), "retired runtime path must not be created");
@@ -422,8 +441,8 @@ test("gate-action implementation policy permits code only at builder.build/execu
   const executing = await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   assert.equal(executing.run.state.current_step, "execute");
   assert.equal(executing.gateActionEnvelope.action.implementation_allowed, true);
-  assert.equal(executing.gateActionEnvelope.action.declared_artifacts.includes("state.json"), false, "control state is not a declared model artifact");
-  assert.equal(executing.gateActionEnvelope.stop_condition.required.artifact_refs.includes("state.json"), false, "control state is not a required model artifact");
+  assert.equal(executing.gateActionEnvelope.action.declared_artifacts.some((artifact) => artifact.ref === "state.json"), false, "control state is not a declared model artifact");
+  assert.equal(executing.gateActionEnvelope.stop_condition.required.artifact_refs.some((artifact) => artifact.ref === "state.json"), false, "control state is not a required model artifact");
   assert.equal(executing.gateActionEnvelope.progress.observed_artifacts.some((entry) => entry.startsWith("state.json:")), false, "control state never counts as progress");
 
   const requests = [];
@@ -570,6 +589,18 @@ test("public workflow evidence accepts only live signed turn authority after ord
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    source_request: "Advance a bounded continuation through public workflow evidence.",
+    criteria: [{
+      id: "AC-1",
+      description: "The complete continuation reaches its terminal workflow gate.",
+      status: "pending",
+      evidence_refs: [],
+    }],
+    goal_fit: { status: "pending", summary: "The bounded continuation is still active." },
+  });
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const unrelatedSlug = "unrelated-pointer-session";
   const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
@@ -634,6 +665,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
     "drive",
     "--session-dir", session.sessionDir,
     "--adapter-command-file", commandFile,
+    "--context-policy", "fresh",
     "--max-turns", "2",
     "--turn-timeout-ms", "5000",
     "--barrier-wait-ms", "0",
@@ -644,6 +676,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   const request = readJson(path.join(session.projectRoot, "adapter-request.json"));
   assert.equal(request.current_step, "design-probe", fs.existsSync(path.join(session.projectRoot, "adapter-evidence-error.json")) ? fs.readFileSync(path.join(session.projectRoot, "adapter-evidence-error.json"), "utf8") : "adapter did not advance canonical Flow");
   assert.deepEqual(request.next_action.skills, ["pickup-probe"]);
+  assert.deepEqual(request.context_strategy, { thread: "new", handoff: "canonical", reason: "configured_policy" });
   assert.equal(Object.hasOwn(request, "system_prompt"), false);
   const authority = readJson(path.join(session.projectRoot, "adapter-authority.json"));
   assert.match(authority.turnSecret, /^[A-Za-z0-9_-]{43}$/);
@@ -657,9 +690,11 @@ test("public workflow evidence accepts only live signed turn authority after ord
   assert.equal(authority.authorityValidation.valid, true, authority.authorityValidation.reason);
   assert.equal(authority.hookStatus, 0, `the blocking Stop hook returns control during the signed adapter turn: ${authority.hookStderr}`);
   assert.match(authority.hookStderr, /continuation driver active turn is authorized/);
+  assert.match(authority.hookStderr, /Final Acceptance: 1 acceptance criterion\/criteria still pending/);
   assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
   const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
   assert.equal(driverState.status, "budget_exhausted");
+  assert.equal(driverState.context_policy, "fresh");
   const canonical = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(canonical.run.state.status, "active");
   assert.equal(canonical.run.state.current_step, "plan");
@@ -763,7 +798,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests);
   assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
   assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
-  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "2.0");
+  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "3.0");
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
   assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
   const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
@@ -888,6 +923,171 @@ test("authorized cancellation is canonical, terminal, and releases the assignmen
     authorizationFile,
   }), /nonce has already been consumed/);
   assert.deepEqual(readJson(assignmentFile).audit_trail, firstAudit);
+});
+
+// #659 Slice C — friendly cancel. The linchpin: a payload minted by
+// prepareBuilderCancelRequest, once signed by the operator key, must verify and
+// cancel the run. If buildUnsignedLifecycleAuthorization's signing payload
+// diverged by even one byte from what the verifier recomputes, this fails.
+test("prepareBuilderCancelRequest emits a payload that, signed by the operator key, cancels the run end-to-end", async () => {
+  const session = makeSession("friendly-cancel-e2e");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  // Identity is carried from the run's active assignment, never fabricated.
+  assert.equal(req.runId, session.slug);
+  assert.equal(req.authorization.operation, "cancel");
+  assert.equal(req.authorization.run_id, session.slug);
+  assert.equal(req.authorization.subject, SUBJECT);
+  assert.equal(req.authorization.assignment_actor_key, ACTOR_KEY);
+  assert.deepEqual(req.authorization.assignment_actor, ACTOR);
+  assert.equal(req.alreadyTerminal, false);
+  // signing_payload is exactly JSON.stringify(unsigned) — the bytes to sign.
+  assert.equal(req.signingPayload, JSON.stringify(req.authorization));
+  assert.ok(Date.parse(req.authorization.expires_at) > Date.parse(req.authorization.request.authority.requested_at));
+
+  // The operator signs EXACTLY the emitted payload with their ed25519 key and
+  // drops the signature into the file — nothing else changes.
+  const signed = {
+    ...req.authorization,
+    signature: {
+      algorithm: "ed25519",
+      key_id: AUTHORITY_KEY_ID,
+      value: sign(null, Buffer.from(req.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64"),
+    },
+  };
+  const file = path.join(session.projectRoot, "friendly-cancel-e2e.authorization.json");
+  writeJson(file, signed);
+
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  assert.equal(canceled.run.state.status, "canceled");
+  assert.equal(canceled.assignmentReleased, true);
+  assert.equal(canceled.idempotent, false);
+});
+
+test("prepareBuilderCancelRequest refuses a run with no assignment holder", async () => {
+  const session = makeSession("friendly-cancel-no-holder");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await assert.rejects(
+    () => prepareBuilderCancelRequest({ sessionDir: session.sessionDir }),
+    /no assignment holder/,
+  );
+});
+
+test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {
+  const session = makeSession("friendly-cancel-custom");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const req = await prepareBuilderCancelRequest({
+    sessionDir: session.sessionDir,
+    reason: "stale orphaned run",
+    requestActor: "brian",
+    expiresInHours: 2,
+    now: "2026-07-15T12:00:00.000Z",
+  });
+  assert.equal(req.authorization.request.reason, "stale orphaned run");
+  assert.equal(req.authorization.request.authority.actor, "brian");
+  assert.equal(req.authorization.request.authority.requested_at, "2026-07-15T12:00:00.000Z");
+  assert.equal(req.authorization.expires_at, "2026-07-15T14:00:00.000Z");
+});
+
+test("a cancel-request payload signed with the WRONG key is rejected (signature lock intact)", async () => {
+  const session = makeSession("friendly-cancel-badsig");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  // Default (live) timing so the request is not expired — the signature, not the
+  // clock, must be what rejects it.
+  const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  const wrongKey = generateKeyPairSync("ed25519");
+  const badSigned = {
+    ...req.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(req.signingPayload), wrongKey.privateKey).toString("base64") },
+  };
+  const file = path.join(session.projectRoot, "friendly-cancel-badsig.authorization.json");
+  writeJson(file, badSigned);
+  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file }), /signature is invalid/);
+});
+
+test("builder-run cancel-request CLI writes the unsigned authorization and prints signing guidance", async () => {
+  const session = makeSession("friendly-cancel-cli");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const outFile = path.join(session.projectRoot, "out.unsigned.json");
+
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...args) => output.push(args.join(" "));
+  let rc;
+  try {
+    rc = await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--out", outFile, "--actor", "brian"]);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(rc, 0);
+
+  // The unsigned authorization file is written and structurally valid.
+  const unsigned = readJson(outFile);
+  assert.equal(unsigned.operation, "cancel");
+  assert.equal(unsigned.run_id, session.slug);
+  assert.equal(unsigned.assignment_actor_key, ACTOR_KEY);
+  assert.equal(unsigned.signature, undefined, "the emitted file is UNSIGNED — the operator adds the signature");
+
+  // The printed JSON carries the signing payload + human next-steps.
+  const printed = JSON.parse(output.join("\n"));
+  assert.equal(printed.unsigned_authorization_file, outFile);
+  assert.equal(printed.signing_payload, JSON.stringify(unsigned));
+  assert.ok(Array.isArray(printed.next_steps) && printed.next_steps.some((s) => s.includes("builder-run cancel")));
+
+  // Unknown flags are rejected with a usage error, not silently accepted.
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--bogus", "x"]), 64);
+  // --expires-in-hours is bounded: non-positive, non-finite, and absurd values
+  // return a clean usage code instead of crashing the Date math.
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "0"]), 64);
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "1e309"]), 64);
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "100000"]), 64);
+});
+
+test("cancel-request signing-payload parity holds for non-ASCII reason/actor (unicode regression)", async () => {
+  const session = makeSession("friendly-cancel-unicode");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const req = await prepareBuilderCancelRequest({
+    sessionDir: session.sessionDir,
+    reason: "café — Ünïcödé 😀 العربية",
+    requestActor: "brián-Ω-中文",
+  });
+  assert.equal(req.signingPayload, JSON.stringify(req.authorization));
+  const signed = {
+    ...req.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(req.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64") },
+  };
+  const file = path.join(session.projectRoot, "unicode.authorization.json");
+  writeJson(file, signed);
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  assert.equal(canceled.run.state.status, "canceled");
+});
+
+test("prepareBuilderCancelRequest mints from the released assignment once the run is canceled (redemption-gate aligned)", async () => {
+  const session = makeSession("friendly-cancel-recovery");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  // Cancel the run first — this releases the assignment and sets status=canceled.
+  const first = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  const firstSigned = {
+    ...first.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(first.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64") },
+  };
+  const firstFile = path.join(session.projectRoot, "recovery-1.authorization.json");
+  writeJson(firstFile, firstSigned);
+  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile });
+
+  // Now canceled with a RELEASED assignment: the mint-time fallback matches the
+  // redemption gate, so cancel-request still mints (an idempotent-recovery auth).
+  const recovery = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  assert.equal(recovery.runStatus, "canceled");
+  assert.equal(recovery.alreadyTerminal, true);
+  assert.equal(recovery.authorization.assignment_actor_key, ACTOR_KEY);
 });
 
 test("assignment release is independent of Flow lifecycle", async () => {
@@ -1306,7 +1506,7 @@ test("partial passing review snapshot waits for the complete verify expectation 
   assert.deepEqual(partialEnvelope.gate.unresolved_requirement_ids.sort(), ["acceptance-criteria", "policy-compliance", "tests-evidence"]);
   assert.equal(partialEnvelope.gate.requirements.find((entry) => entry.id === "policy-compliance").required, false);
   assert.deepEqual(partialEnvelope.stop_condition.required.unresolved_evidence_ids.sort(), ["acceptance-criteria", "tests-evidence"]);
-  assert.equal(partialEnvelope.stop_condition.required.artifact_refs.includes("trust.bundle#policy-compliance"), false);
+  assert.equal(partialEnvelope.stop_condition.required.artifact_refs.some((artifact) => artifact.ref === "trust.bundle#policy-compliance"), false);
   const critique = partialEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "workflow.critique");
   assert.deepEqual(critique.parameters.find((entry) => entry.name === "verdict").allowed_values, [...WORKFLOW_CRITIQUE_STATUSES]);
   assert.deepEqual(critique.parameters.find((entry) => entry.name === "artifact_ref"), {
@@ -1580,6 +1780,17 @@ test("publish-change reports an external capability gap and self-authored result
 
   const operationView = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   const publish = operationView.gateActionEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "operation");
+  assert.deepEqual(operationView.gateActionEnvelope.action.declared_artifacts, [{
+    kind: "file",
+    ref: "publish-change.result.json",
+    path: `.kontourai/flow-agents/${session.slug}/publish-change.result.json`,
+    direct_write_allowed: false,
+    produced_via: { interface: "operation", operations: ["publish-change"] },
+  }]);
+  assert.deepEqual(operationView.gateActionEnvelope.action.artifact_bindings, [{
+    target: operationView.gateActionEnvelope.action.declared_artifacts[0],
+    expectation_ids: ["pull-request-opened"],
+  }]);
   assert.equal(publish.operation, "publish-change");
   assert.equal(publish.protocol.capability, "pull_request.create");
   assert.deepEqual(publish.protocol.result.required, ["provider", "repository", "number", "url", "head_ref", "base_ref"]);
@@ -1647,6 +1858,92 @@ test("publish-change reports an external capability gap and self-authored result
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+async function advanceSessionToPrOpen(session) {
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const steps = [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+  ];
+  let latest = null;
+  for (const entries of steps) latest = await writeAndSync(session, entries());
+  assert.equal(latest.run.state.current_step, "pr-open");
+  return latest;
+}
+
+test("pr-open route-back with missing_evidence returns the run to verify and supports repair re-entry (#695 item a)", async () => {
+  const session = makeSession("propen-routeback");
+  await advanceSessionToPrOpen(session);
+
+  // The #663 wedge scenario: a trust divergence is discovered at pr-open. A failing
+  // pull-request-opened claim declaring the missing_evidence route reason must land
+  // the canonical run back at verify — the sanctioned repair surface — not throw.
+  const failureTimestamp = new Date().toISOString();
+  const routed = await writeAndSync(session, [bundleClaim({
+    expectation: "pull-request-opened",
+    claimType: "builder.pr-open.pull-request",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+    timestamp: failureTimestamp,
+  })]);
+
+  assert.equal(routed.attached, true);
+  assert.equal(routed.run.state.current_step, "verify");
+  const routeBacks = routed.run.state.transitions.filter((transition) => transition.type === "route_back");
+  assert.equal(routeBacks.length, 1);
+  assert.equal(routeBacks[0].from_step, "pr-open");
+  assert.equal(routeBacks[0].to_step, "verify");
+  assert.equal(routeBacks[0].route_reason, "missing_evidence");
+  assert.equal(routeBacks[0].gate_id, "builder.publish-learn:pr-open-gate");
+  assert.equal(routed.projection.flow_run.route_back_attempt, 1);
+  assert.equal(routed.projection.flow_run.route_back_max_attempts, 3);
+  assert.match(routed.projection.next_action.summary, /Route-back history: attempt 1\/3 returned to `verify` for `missing_evidence`/);
+
+  // Repair loop: fresh verify evidence re-passes verify, fresh merge-readiness
+  // re-passes merge-ready, and the run returns to pr-open.
+  const repairedAt = new Date(Date.parse(routed.run.state.transitions.at(-1).at) + 1).toISOString();
+  const reverified = await writeAndSync(session, [
+    withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: repairedAt }), "repair"),
+    ...verifiedTestsPrerequisites(session, repairedAt).map((entry, index) => withIdentitySuffix(entry, `repair-${index}`)),
+  ]);
+  assert.equal(reverified.run.state.current_step, "merge-ready");
+  const returned = await writeAndSync(session, [
+    withIdentitySuffix(bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change", timestamp: new Date().toISOString() }), "repair"),
+  ]);
+  assert.equal(returned.run.state.current_step, "pr-open");
+});
+
+test("pr-open route-back with an undeclared reason still throws and mutates nothing", async () => {
+  const session = makeSession("propen-undeclared-reason");
+  await advanceSessionToPrOpen(session);
+
+  const flowDirectory = runDir(session.slug, session.projectRoot);
+  const beforeState = readJson(path.join(flowDirectory, "state.json"));
+  const beforeManifest = readJson(path.join(flowDirectory, FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+
+  writeBundle(session.sessionDir, [bundleClaim({
+    expectation: "pull-request-opened",
+    claimType: "builder.pr-open.pull-request",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "stale_critique",
+    timestamp: new Date().toISOString(),
+  })]);
+  await assert.rejects(
+    () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /route_reason.*is not declared by gate builder\.publish-learn:pr-open-gate/,
+  );
+  assert.deepEqual(readJson(path.join(flowDirectory, "state.json")), beforeState);
+  assert.deepEqual(readJson(path.join(flowDirectory, FLOW_RUN_EVIDENCE_MANIFEST_PATH)), beforeManifest);
 });
 
 test("recovery loads the slug-bound run, restores every matching projection, and preserves every Flow byte", async () => {

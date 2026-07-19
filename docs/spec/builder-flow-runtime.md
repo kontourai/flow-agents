@@ -157,7 +157,7 @@ authority for pointer navigation.
 ### Gate-Action Envelope
 
 Every active Builder continuation request includes a bounded
-`gate_action_envelope` with schema version `1.0`. Flow Agents derives it from
+`gate_action_envelope` with schema version `3.0`. Flow Agents derives it from
 the persisted canonical Flow run and effective Flow Definition, then joins it
 to the installed Builder Kit's validated `flow_step_actions` record. It is an
 execution context, not a second gate evaluator: Flow remains the only authority
@@ -179,12 +179,30 @@ Declared operations, artifacts, and evidence expectation ids come from product
 metadata. `implementation_allowed` is also product metadata; the shipped Builder
 Kit declares it true only for `builder.build/execute`.
 
-The read-only status interface is an exact version-pinned command. Mutation
+Declared artifact targets are typed. A `file` target includes its resolved
+project-relative path under the active session, its direct-write policy, and
+the skill or external operation that produces it. Operation result files are
+not model-writable. A `trust_slice` target names a
+logical `trust.bundle#<slice>` projection, sets `direct_write_allowed` to false,
+and identifies the public evidence or critique interface that records it. A
+trust slice is never a filename and adapters must not edit `trust.bundle`
+directly.
+
+The read-only status interface identifies the exact package version, binary,
+and argv without requiring an adapter to parse a shell command. Mutation
 interfaces are typed per expectation: `workflow.evidence`, `workflow.critique`,
 or a named product operation such as `publish-change`. Evidence and critique
 interfaces expose fixed argv plus typed required parameters and allowed values;
-they do not publish shell strings with substitution placeholders. Consumers add
-parameter values as distinct argv entries.
+they do not publish shell strings with substitution placeholders. Structured
+evidence parameters reference `public_interfaces.schemas.evidence_ref_json`, a
+bounded JSON Schema with required fields for source, command, artifact,
+provider, and external evidence. Consumers add parameter values as distinct
+argv entries.
+
+Adapters that perform an allowed direct file write remain responsible for
+opening the target without following symlinks and for confirming that the final
+path remains inside the active session. The envelope declares authority and
+identity; it does not make an arbitrary adapter filesystem write atomic.
 
 `publish-change` is a provider-capability protocol, not a claim that the local
 `flow-agents publish-change` helper opens a pull request. Its envelope binds the
@@ -204,7 +222,14 @@ checks; it is not the provider action executor.
 empty lists for terminal actions. Expectation ids must exactly equal the resolved
 Flow expectation set. Artifact bindings map each artifact to its owning
 expectations, allowing optional artifacts to remain declared without appearing
-under `stop_condition.required`. Operation bindings must resolve through the
+under `stop_condition.required`. The same ownership is projected publicly as
+typed `action.artifact_bindings`; consumers derive required targets by selecting
+bindings that own an unresolved required expectation. These bindings are
+product-owned gate semantics, not grader hints or consumer-authored guidance.
+For file artifacts, an empty `expectation_ids` list keeps the artifact declared
+and observable but never gate-required. Trust slices must own at least one
+expectation because ownership determines their recording interface.
+Operation bindings must resolve through the
 canonical public operation catalog, not merely a self-declared string. Artifact
 refs are either lexically safe session-relative paths or validated
 `trust.bundle#<safe-id>` virtual refs; absolute paths, traversal, and arbitrary
@@ -265,11 +290,16 @@ exception applies, or every effective expectation is optional. This advances
 those gates without prematurely evaluating ordinary missing-required gates, and
 once the run advances no obsolete action skill remains required.
 
-The envelope and its prior-turn delta are additive fields of
+The envelope, its prior-turn delta, and `context_strategy` are additive fields of
 `ContinuationTurnRequest` schema `1.0`; adapters that only consume the existing
-request fields remain compatible. When `workflow drive` produces its optional
+request fields remain compatible. `context_strategy` tells a capable adapter to
+start a `new` context or `resume` the mission context and identifies the handoff
+as canonical. The mission-bound policy defaults to warm continuation; selecting
+fresh context changes only transcript routing, never the Flow contract, gate
+requirements, or evidence authority. When `workflow drive` produces its optional
 signed request/result attestation, the exact request object (including the
-envelope) is included in the signed payload without transformation.
+envelope and context strategy) is included in the signed payload without
+transformation.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may
@@ -295,6 +325,7 @@ Flow issue #118.
 ```text
 flow-agents builder-run pause --session-dir <dir> --reason <text>
 flow-agents builder-run resume --session-dir <dir> --reason <text>
+flow-agents builder-run cancel-request --session-dir <dir> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]
 flow-agents builder-run cancel --session-dir <dir> --authorization-file <record.json>
 flow-agents builder-run release-assignment --session-dir <dir> --reason <text>
 flow-agents builder-run archive --session-dir <dir> --authorization-file <record.json>
@@ -307,3 +338,13 @@ assignment while holding the same lock; a successfully consumed cancellation non
 replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
+
+`cancel-request` is a **read-only convenience** that removes the friction of hand-assembling a
+cancellation record: it mints the *unsigned* authorization for the run (correct `run_id`,
+`subject`, active `assignment_actor`, a fresh `nonce` and expiry) and prints the exact
+`signing_payload` bytes to sign. It does not sign, cancel, or mutate anything — the operator signs
+the payload with their Ed25519 lifecycle-authority key, adds the `signature` block to the emitted
+file, and runs `cancel --authorization-file` as above. The signing payload is produced through the
+same actor/request normalization the verifier applies, so a signature over it verifies by
+construction. Like `cancel`, it requires an active assignment holder; an active run whose
+assignment has already been released cannot be authorized this way without re-claiming it first.

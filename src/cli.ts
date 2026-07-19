@@ -11,12 +11,15 @@ import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
+import { main as narrativeRender } from "./cli/narrative-render.js";
+import { main as narrativeSources } from "./cli/narrative-sources.js";
 import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
 import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
 import { main as workflow } from "./cli/workflow.js";
 import { main as buildBundles } from "./tools/build-universal-bundles.js";
+import { main as capabilityMatrix } from "./tools/generate-capability-matrix.js";
 import { main as contextMap } from "./tools/generate-context-map.js";
 import { main as validateSource } from "./tools/validate-source-tree.js";
 import { main as validatePackage } from "./tools/validate-package.js";
@@ -29,6 +32,7 @@ import { main as verify } from "./cli/verify.js";
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
   ["builder-run", builderRun],
+  ["capability-matrix", capabilityMatrix],
   ["console-learning-projection", consoleLearningProjection],
   ["context-map", contextMap],
   ["assignment-provider", assignmentProvider],
@@ -36,6 +40,8 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["narrative-render", narrativeRender],
+  ["narrative-sources", narrativeSources],
   ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["publish-change", publishChange],
@@ -56,6 +62,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
 
 const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
+  ["flow-agents-capability-matrix", "capability-matrix"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-assignment-provider", "assignment-provider"],
@@ -63,6 +70,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],
+  ["flow-agents-narrative-render", "narrative-render"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],

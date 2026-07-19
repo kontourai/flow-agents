@@ -32,6 +32,18 @@ Select ready backlog work and prepare a bounded handoff without implementing it.
 
 An optional GitHub adapter may implement these interfaces. Do not require GitHub issue numbers, labels, Projects, pull requests, `gh`, or provider-native dependency APIs.
 
+### Readiness Source Integrity
+
+A configured `BoardProvider` is the canonical Backlog Readiness Source
+(`docs/decisions/backlog-readiness-source.md`). When the configured board
+yields zero ready items or cannot be read, record the provider warning
+(`zero_ready_items`, or the read failure) in the pull-work artifact and route
+to triage/intake for an explicit readiness decision. Never silently
+substitute `WorkItemProvider` issue-level listing for board-driven selection:
+a deliberate issue-listing pass must carry the `board_provider_bypassed`
+warning it received into the artifact, with the reason the board was
+bypassed.
+
 ## Model Routing
 
 For board scans, WIP assessment, dependency joins, and selection bookkeeping, resolve `delegate-mechanical` from `.datum/config.json`. If unavailable, inherit the session model and record the fallback.

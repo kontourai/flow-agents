@@ -68,6 +68,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check content-boundary
 
+      - name: Layer boundary
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check layer-boundary
+
+      - name: Hachure boundary
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check hachure-boundary
+
       - name: Decision registry
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check decision-registry
@@ -79,6 +87,10 @@ jobs:
       - name: Context map drift
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check context-map-drift
+
+      - name: Capability matrix drift
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-matrix-drift
 
       - name: Static eval suite
         continue-on-error: true
@@ -136,6 +148,42 @@ jobs:
       - name: Fixture retirement audit integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
+
+      - name: Narrative source contract integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration
+
+      - name: Narrative runtime projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-runtime-projection-integration
+
+      - name: Narrative grounded envelope integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-envelope-integration
+
+      - name: Narrative redaction fail-closed integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration
+
+      - name: Narrative trust isolation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-trust-isolation-integration
+
+      - name: Narrative grounding validator integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounding-validator-integration
+
+      - name: Narrative prose renderer integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-prose-renderer-integration
+
+      - name: Narrative grounded evals integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-evals-integration
+
+      - name: Narrative intent annotation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-intent-annotation-integration
 
       - name: Publish-change helper integration
         continue-on-error: true
@@ -201,6 +249,18 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-tenant-isolation-integration
 
+      - name: Telemetry tool outcome integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-tool-outcome-integration
+
+      - name: Telemetry delegation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-delegation-integration
+
+      - name: Telemetry action-class integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-action-class-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
@@ -246,6 +306,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
 
+      - name: Plain stop messaging integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check plain-stop-messaging-integration
+
+      - name: Goal Fit narrative exclusion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-narrative-exclusion-integration
+
       - name: Hook category behavior integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check hook-category-behavior-integration
@@ -261,6 +329,10 @@ jobs:
       - name: Flow Kit repository integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flow-kit-repository-integration
+
+      - name: Kit provisioning integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-provisioning-integration
 
       - name: Runtime adapter activation integration
         continue-on-error: true
@@ -338,9 +410,21 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-tool-usage-integration
 
+      - name: Telemetry sanitize usage integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-sanitize-usage-integration
+
+      - name: Telemetry task slug integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-task-slug-integration
+
       - name: Economics record integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
+
+      - name: Capability declarations integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
 
       - name: Learning review proposals integration
         continue-on-error: true

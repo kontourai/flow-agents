@@ -7,7 +7,7 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 
 import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
-import { parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository } from "../../build/src/flow-kit/validate.js";
+import { parseKitAgentSpawnTriggers, parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
 import { observeBuilderArtifactsForProgress } from "../../build/src/builder-gate-action-envelope.js";
 
 const require = createRequire(import.meta.url);
@@ -148,6 +148,85 @@ test("flow step action metadata preserves explicit operation expectation ownersh
   assert.deepEqual(result.entries[0]?.artifacts, []);
 });
 
+test("flow step action metadata preserves optional artifacts without expectation ownership", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: ["observe-work"],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["optional.md"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "optional.md", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.entries[0].artifact_bindings, [{ artifact: "optional.md", expectation_ids: [] }]);
+});
+
+test("flow step action metadata rejects unowned trust slices without a recording interface", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: [],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["trust.bundle#optional"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "trust.bundle#optional", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.match(result.errors.join("\n"), /trust slice must own at least one expectation/);
+});
+
+test("flow step action metadata permits mixed workflow and operation ownership for files", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "publish",
+      skills: ["publish-summary"],
+      operations: ["publish-change"],
+      implementation_allowed: false,
+      artifacts: ["publish-change.result.json"],
+      expectation_ids: ["published-change", "published-summary"],
+      expectation_bindings: [
+        { expectation_id: "published-change", interface: "operation", operation: "publish-change" },
+        { expectation_id: "published-summary", interface: "workflow.evidence" },
+      ],
+      artifact_bindings: [{ artifact: "publish-change.result.json", expectation_ids: ["published-change", "published-summary"] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+});
+
+test("flow step action metadata rejects artifact ownership without a compatible producer", () => {
+  const operationTrustSlice = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build", step_id: "publish", skills: [], operations: ["publish-change"], implementation_allowed: false,
+      artifacts: ["trust.bundle#published"], expectation_ids: ["published-change"],
+      expectation_bindings: [{ expectation_id: "published-change", interface: "operation", operation: "publish-change" }],
+      artifact_bindings: [{ artifact: "trust.bundle#published", expectation_ids: ["published-change"] }],
+    }],
+  }, "fixture/kit.json");
+  assert.match(operationTrustSlice.errors.join("\n"), /trust slice cannot own an operation expectation/);
+
+  const unproducedFile = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build", step_id: "observe", skills: [], operations: [], implementation_allowed: false,
+      artifacts: ["optional.md"], expectation_ids: [], expectation_bindings: [],
+      artifact_bindings: [{ artifact: "optional.md", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+  assert.match(unproducedFile.errors.join("\n"), /file has no skill or operation producer/);
+});
+
 test("Builder action validation rejects expectation omissions, unsafe artifacts, and unknown operations", async () => {
   async function errorsFor(name, mutate) {
     const root = tempRoot(`flow-agents-action-contract-${name}-`);
@@ -222,7 +301,7 @@ test("metadata validation matches runtime skill and run-wide observable artifact
   const actions = Array.from({ length: 5 }, (_, actionIndex) => {
     const slice = artifacts.slice(actionIndex * 32, (actionIndex + 1) * 32);
     return {
-      flow_id: "builder.build", step_id: `step${actionIndex}`, skills: [], operations: [], implementation_allowed: false,
+      flow_id: "builder.build", step_id: `step${actionIndex}`, skills: ["observe-work"], operations: [], implementation_allowed: false,
       artifacts: slice, expectation_ids: [], expectation_bindings: [],
       artifact_bindings: slice.map((artifact) => ({ artifact, expectation_ids: [] })),
     };
@@ -231,7 +310,12 @@ test("metadata validation matches runtime skill and run-wide observable artifact
   assert.match(tooManyArtifacts.errors.join("\n"), /exceed 128 distinct observable file artifacts/);
 
   actions[4].artifacts = ["state.json", "trust.bundle#virtual"];
-  actions[4].artifact_bindings = actions[4].artifacts.map((artifact) => ({ artifact, expectation_ids: [] }));
+  actions[4].expectation_ids = ["virtual-evidence"];
+  actions[4].expectation_bindings = [{ expectation_id: "virtual-evidence", interface: "workflow.evidence" }];
+  actions[4].artifact_bindings = [
+    { artifact: "state.json", expectation_ids: [] },
+    { artifact: "trust.bundle#virtual", expectation_ids: ["virtual-evidence"] },
+  ];
   const excluded = parseKitFlowStepActions({ flow_step_actions: actions }, "fixture/kit.json");
   assert.doesNotMatch(excluded.errors.join("\n"), /distinct observable file artifacts/);
 });
@@ -380,6 +464,10 @@ test("mixed skill and operation ownership follows each expectation binding inter
   const policyBinding = action.expectation_bindings.find((entry) => entry.expectation_id === "policy-compliance");
   policyBinding.interface = "operation";
   policyBinding.operation = "publish-change";
+  const policyArtifactBinding = action.artifact_bindings.find((entry) => entry.expectation_ids.includes("policy-compliance"));
+  const policyArtifactIndex = action.artifacts.indexOf(policyArtifactBinding.artifact);
+  action.artifacts[policyArtifactIndex] = "publish-change.result.json";
+  policyArtifactBinding.artifact = "publish-change.result.json";
   const verifier = manifest.skill_roles.find((entry) => entry.skill_id === "builder.verify-work");
   verifier.expectation_ids = verifier.expectation_ids.filter((id) => id !== "policy-compliance");
   writeJson(manifestFile, manifest);
@@ -819,4 +907,166 @@ test("workflowTriggersFor returns Knowledge's structured capture trigger", () =>
   assert.match(trigger.steering, /`knowledge\.knowledge-capture`/);
   assert.match(trigger.steering, /Keep the session on `knowledge\.ingest`/);
   assert.match(trigger.steering, /unsupported-runtime blocker/);
+});
+
+test("agent spawn trigger metadata accepts a fully guarded declaration without errors or warnings", () => {
+  const result = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      {
+        id: "on-check-failure",
+        description: "Escalates failing checks to a headless agent run.",
+        spawns_agent_runs: true,
+        guards: { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 },
+      },
+      {
+        id: "notify-only",
+        description: "Fires a notification; never spawns agent runs.",
+        spawns_agent_runs: false,
+      },
+    ],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.entries.length, 2);
+  assert.deepEqual(result.entries[0].guards, { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 });
+  assert.equal(result.entries[1].guards, undefined);
+});
+
+test("agent spawn trigger without guards warns (never errors) when it spawns agent runs", () => {
+  const missing = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "on-schedule", description: "Scheduled automation spawning agent runs.", spawns_agent_runs: true },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(missing.errors, []);
+  assert.equal(missing.warnings.length, 1);
+  assert.match(missing.warnings[0], /agent_spawn_triggers\[0\] \('on-schedule'\) spawns agent runs without complete guard config/);
+  assert.match(missing.warnings[0], /missing: dedup_key, cooldown_seconds, daily_cap, max_concurrent/);
+  assert.match(missing.warnings[0], /context\/contracts\/trigger-guards\.md/);
+  assert.equal(missing.entries.length, 1);
+
+  const incomplete = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "on-check-failure", description: "Escalation.", spawns_agent_runs: true, guards: { cooldown_seconds: 900 } },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(incomplete.errors, []);
+  assert.equal(incomplete.warnings.length, 1);
+  assert.match(incomplete.warnings[0], /missing: dedup_key, daily_cap, max_concurrent/);
+
+  const nonSpawning = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "notify-only", description: "Notification only.", spawns_agent_runs: false },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(nonSpawning.errors, []);
+  assert.deepEqual(nonSpawning.warnings, []);
+});
+
+test("agent spawn trigger metadata rejects malformed shapes as errors", () => {
+  const notAList = parseKitAgentSpawnTriggers({ agent_spawn_triggers: {} }, "fixture/kit.json");
+  assert.match(notAList.errors.join("\n"), /\.agent_spawn_triggers must be a list/);
+
+  const result = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "Bad Id", description: "x", spawns_agent_runs: true },
+      { id: "dup", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 } },
+      { id: "dup", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 } },
+      { id: "no-description", spawns_agent_runs: true },
+      { id: "no-boolean", description: "x", spawns_agent_runs: "yes" },
+      { id: "bad-guards", description: "x", spawns_agent_runs: true, guards: [] },
+      { id: "bad-guard-values", description: "x", spawns_agent_runs: true, guards: { dedup_key: " ", cooldown_seconds: 0, daily_cap: 1.5, max_concurrent: -1 } },
+      { id: "unknown-guard", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1, burst: 5 } },
+      { id: "unknown-field", description: "x", spawns_agent_runs: true, command: "private-bypass" },
+    ],
+  }, "fixture/kit.json");
+
+  const errors = result.errors.join("\n");
+  assert.match(errors, /agent_spawn_triggers\[0\]\.id must match/);
+  assert.match(errors, /agent_spawn_triggers\[2\]\.id duplicates 'dup'/);
+  assert.match(errors, /agent_spawn_triggers\[3\]\.description must be a non-empty string/);
+  assert.match(errors, /agent_spawn_triggers\[4\]\.spawns_agent_runs must be a boolean/);
+  assert.match(errors, /agent_spawn_triggers\[5\]\.guards must be an object/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.dedup_key must be a non-empty string/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.cooldown_seconds must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.daily_cap must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.max_concurrent must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[7\]\.guards contains unsupported field\(s\): burst/);
+  assert.match(errors, /agent_spawn_triggers\[8\] contains unsupported field\(s\): command/);
+  // Malformed entries fail shape validation; only the first 'dup' entry (valid shape) parses.
+  assert.equal(result.entries.length, 1);
+  // Shape violations are errors, never demoted to the guard-completeness warning channel.
+  assert.deepEqual(result.warnings, []);
+});
+
+test("kit repository diagnostics carry the guardless-spawn warning and never leak it into errors", async () => {
+  const root = tempRoot("flow-agents-agent-spawn-trigger-repo-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  manifest.agent_spawn_triggers = [
+    { id: "on-check-failure", description: "Escalates failing checks to a headless agent run.", spawns_agent_runs: true },
+  ];
+  writeJson(manifestFile, manifest);
+
+  const diagnostics = await validateKitRepositoryDiagnostics(kit);
+  assert.deepEqual(diagnostics.errors, []);
+  assert.equal(diagnostics.warnings.length, 1);
+  assert.match(diagnostics.warnings[0], /spawns agent runs without complete guard config/);
+  // validateKitRepository keeps its errors-only contract: a warning is not an error.
+  assert.deepEqual(await validateKitRepository(kit), []);
+
+  // A fully guarded declaration is clean on both channels.
+  manifest.agent_spawn_triggers[0].guards = { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 };
+  writeJson(manifestFile, manifest);
+  const guarded = await validateKitRepositoryDiagnostics(kit);
+  assert.deepEqual(guarded.errors, []);
+  assert.deepEqual(guarded.warnings, []);
+
+  // agent_spawn_triggers is recognized Flow Agents metadata, not a third-party namespace.
+  const { deriveKitTargets } = await import("../../build/src/flow-kit/validate.js");
+  const targets = await deriveKitTargets(manifest, kit);
+  assert.deepEqual(targets.third_party_extensions, []);
+});
+
+test("kit install surfaces the guardless-spawn warning non-blockingly for BOTH source forms (local path and git URL)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const root = tempRoot("flow-agents-agent-spawn-trigger-install-");
+  const kitSource = path.join(root, "guarded-kit");
+  fs.mkdirSync(path.join(kitSource, "flows"), { recursive: true });
+  writeJson(path.join(kitSource, "kit.json"), {
+    schema_version: "1.0",
+    id: "guardless-demo",
+    name: "Guardless Demo Kit",
+    flows: [{ id: "demo.flow", path: "flows/demo.flow.json" }],
+    agent_spawn_triggers: [
+      { id: "on-check-failure", description: "Escalates failing checks to a headless agent run.", spawns_agent_runs: true },
+    ],
+  });
+  writeJson(path.join(kitSource, "flows", "demo.flow.json"), {
+    id: "demo.flow",
+    version: "1.0",
+    steps: [{ id: "only", next: null }],
+    gates: {},
+  });
+  const cli = path.resolve("build/src/cli.js");
+  const runInstall = (source, destName) => {
+    return execFileSync(process.execPath, [cli, "kit", "install", source, "--dest", path.join(root, destName)], { encoding: "utf8" });
+  };
+
+  // Local-path source form.
+  const localOut = runInstall(kitSource, "dest-local");
+  assert.match(localOut, /warning: .*agent_spawn_triggers\[0\] \('on-check-failure'\) spawns agent runs without complete guard config/);
+  assert.match(localOut, /installed local kit 'guardless-demo'/);
+
+  // Git-URL source form (file:// clone of the same kit).
+  const git = (args, cwd) => execFileSync("git", ["-c", "user.email=kit-test@example.invalid", "-c", "user.name=kit-test", ...args], { cwd, encoding: "utf8" });
+  git(["init", "--quiet"], kitSource);
+  git(["add", "-A"], kitSource);
+  git(["commit", "--quiet", "-m", "kit fixture"], kitSource);
+  const gitOut = runInstall(`file://${kitSource}`, "dest-git");
+  assert.match(gitOut, /warning: .*agent_spawn_triggers\[0\] \('on-check-failure'\) spawns agent runs without complete guard config/);
+  assert.match(gitOut, /installed git kit 'guardless-demo'/);
 });

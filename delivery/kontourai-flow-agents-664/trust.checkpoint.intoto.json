@@ -1,0 +1,1213 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "cbfb90d19852f7095061b39eeb55946c58ed5454f26926e2ed43873301464271"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#664 is durably assigned to the active workflow actor (assignment sha256:3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184).",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.pull-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "selected-work"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-664.json",
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/assignment-provider-state.json",
+              "summary": "Provider assignment state confirming ownership before the local runtime lease was mirrored; sha256:557e516bc0ca572bc1c3be0033cb75e13d254018251ed5457023dca3c39df423."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--pull-work.md",
+              "summary": "Concrete pull-work selection report for kontourai/flow-agents#664."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:16:41Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Pickup probe records goal fit, scope, non-goals, dependencies, provider and baseline state, risks, and planning readiness (ready).",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--pull-work.md",
+              "summary": "Pickup readiness, scope, dependencies, risks, and planning decision."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:17:47.256Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Probe decisions D1-D4 (declaration shape, warning surface, contract doc home, enforcement level) and accepted gaps G1-G3 are explicit in the pickup record with consequences and route reason.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--pull-work.md",
+              "summary": "Probe decisions, unresolved questions, accepted gaps, route reason, and next action."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:17:59.970Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-implementation-plan",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.plan.implementation",
+        "fieldOrBehavior": "Implementation plan records scope, sequencing T1-T6, stable acceptance criteria ac1-ac4 with task-to-criterion mapping, Definition Of Done, stop-short risks, sandbox mode, expected modified files, and required evidence.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.plan-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-plan"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--plan-work.md",
+              "summary": "Execution-ready plan with Definition Of Done and task-to-criterion mapping."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/acceptance.json",
+              "summary": "Stable acceptance criteria ac1-contract-doc, ac2-validation-warning, ac3-conforming-examples, ac4-suite-integrity with planned evidence."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/handoff.json",
+              "summary": "Execution handoff, route reason, and next action."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-plan",
+            "claim_type": "builder.plan.implementation",
+            "subject_type": "artifact",
+            "step_id": "plan",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:20:27.855Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-implementation-scope",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Implementation stayed within recorded scope: five files changed exactly as planned (contract doc, validate.ts parse+diagnostics, kit CLI warning surface, tests, authoring-guide listing); changed files and supported acceptance criteria ac1-ac4 are documented with no deviations.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.execute-plan",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-scope"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--deliver.md",
+              "summary": "Execution report with changed scope and acceptance mapping."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/state.json",
+              "summary": "Current execution state and canonical next action."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-scope",
+            "claim_type": "builder.execute.scope",
+            "subject_type": "change",
+            "step_id": "execute",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:27:59.261Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-acceptance-criteria",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "All four accepted criteria pass. ac1-contract-doc: context/contracts/trigger-guards.md requires dedup/cooldown/daily-cap/concurrency-lock declarations with defaults and binds #252/#250 to the contract. ac2-validation-warning: parseKitAgentSpawnTriggers warns (never errors) on a guardless spawning surface; kit install surfaces it non-blockingly; unit tests cover warning, shape errors, and channel separation. ac3-conforming-examples: plumb#1 and ephemeris cited (citation-only, accepted gap G1). ac4-suite-integrity: kits/builder still validates clean; errors-only validateKitRepository signature preserved; build and static suite green.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/acceptance.json",
+              "summary": "Per-criterion statuses with source-line and command evidence references."
+            },
+            {
+              "kind": "artifact",
+              "file": "context/contracts/trigger-guards.md",
+              "summary": "The delivered standing contract (guards table, declaration contract, enforcement rationale, conforming examples, future-consumer note)."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--deliver.md",
+              "summary": "Execution report mapping changed files to criteria with an acceptance evidence table."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "acceptance-criteria",
+            "claim_type": "workflow.acceptance.criterion",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T15:31:43.880Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-tests-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Manifest-lane integration proof: the kit install/merge suite (87 checks) passes on the delivered change, exercising the kit CLI install machinery that now runs validateKitRepositoryDiagnostics and prints guard warnings on every install. The direct behavioral proof for the new declaration parsing, warning channel, and both-install-source warning emission is the extended kit-metadata-security unit suite (37/37 via node --test), which CI reconciles through its own fresh trust-reconcile-verify static run (test_unit_helpers lane); it is not recorded as a separate labeled command here because it is not an individually reconcilable manifest lane.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_install_merge.sh",
+              "summary": "Exact substantive manifest integration command recorded and executed by the canonical writer for this verification result."
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_install_merge.sh",
+              "exit_code": 0,
+              "output_sha256": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3",
+              "test_count": 1,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "bash",
+                "static_test_units": 1
+              }
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "tests-evidence",
+            "claim_type": "builder.verify.tests",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T21:43:33.684Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-664/gate-claim-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready.readiness",
+        "fieldOrBehavior": "Evidence confidence PASS: acceptance evidence maps to the intended five-file scope with no unexplained drift; strongest-class evidence (37/37 unit tests incl. both-install-forms CLI test, 87/87 install-merge manifest lane, live CLI warning observation) plus reproducible canonical commands (npm run build, npm run eval:static both exit 0); independent distinct-actor critique iteration 1 FAIL routed back and fixed, iteration 2 PASS on both lanes; residual items are disclosed accepted gaps (plumb#1/ephemeris citation-only; no runtime enforcement by design; two session-env-only integration lanes proven environmental on a pristine origin/main baseline; one stale line pointer in the recorded ac4 source ref, corrected in this report). Merge-review confidence only — not release or deployment authorization; publish is the orchestrator's.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#664",
+          "expected_producer": "builder.evidence-gate",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--evidence-gate.md",
+              "summary": "Evidence confidence, criterion coverage, scope-integrity decision, disclosed corrections, and residual risks."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "merge-readiness",
+            "claim_type": "builder.merge-ready.readiness",
+            "subject_type": "change",
+            "step_id": "merge-ready",
+            "identity_version": 2,
+            "recorded_at": "2026-07-16T21:45:22.947Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/ac1-contract-doc",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "A standing contract doc exists in context/contracts/ requiring that any kit, hook, or integration spawning an agent run from a trigger declares, with defaults: dedup by trigger/failure signature, cooldown per subject, daily cap, and a concurrency lock; it notes that any implementation of kontourai/flow-agents#252 (background-review fork, autonomy epic #250) must declare its guards.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "updatedAt": "2026-07-16T21:43:33.684Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac1-contract-doc",
+            "description": "A standing contract doc exists in context/contracts/ requiring that any kit, hook, or integration spawning an agent run from a trigger declares, with defaults: dedup by trigger/failure signature, cooldown per subject, daily cap, and a concurrency lock; it notes that any implementation of kontourai/flow-agents#252 (background-review fork, autonomy epic #250) must declare its guards.",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Executed manifest lane green on the tree containing the contract doc; the doc content itself is source evidence."
+              },
+              {
+                "kind": "source",
+                "file": "context/contracts/trigger-guards.md",
+                "line_start": 18,
+                "line_end": 30,
+                "excerpt": "## Required Guard Declarations — dedup_key / cooldown_seconds / daily_cap / max_concurrent table with defaults",
+                "summary": "All four guard declarations with defaults; §Future Consumers binds #252/#250."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-16T21:43:33.684Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#664"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/ac2-validation-warning",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "kit.json supports an optional, additive agent_spawn_triggers declaration; kit repository validation emits a WARNING (never an error) when an entry with spawns_agent_runs=true lacks complete guard config (dedup_key, cooldown_seconds, daily_cap, max_concurrent), and the kit CLI surfaces that warning non-blockingly.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "updatedAt": "2026-07-16T21:43:33.684Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac2-validation-warning",
+            "description": "kit.json supports an optional, additive agent_spawn_triggers declaration; kit repository validation emits a WARNING (never an error) when an entry with spawns_agent_runs=true lacks complete guard config (dedup_key, cooldown_seconds, daily_cap, max_concurrent), and the kit CLI surfaces that warning non-blockingly.",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Install machinery (which now invokes the diagnostics warning path on every install) passes 87/87."
+              },
+              {
+                "kind": "source",
+                "file": "src/flow-kit/validate.ts",
+                "line_start": 386,
+                "line_end": 393,
+                "excerpt": "warnings.push(`${manifestPath}: agent_spawn_triggers[...] spawns agent runs without complete guard config (missing: ...)`)",
+                "summary": "Warning-not-error channel; unit tests 37/37 (node --test src/cli/kit-metadata-security.test.mjs) cover warning, shape errors, and both install source forms — reconciled by CI static lane."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-16T21:43:33.684Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#664"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/ac3-conforming-examples",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "kontourai/plumb#1 (cooldown + failure-signature dedup + max-concurrent cap) and ephemeris (per-claim coalescing, idempotent, rate-limited firing) are cited in the contract doc as conforming reference implementations.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "updatedAt": "2026-07-16T21:43:33.684Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac3-conforming-examples",
+            "description": "kontourai/plumb#1 (cooldown + failure-signature dedup + max-concurrent cap) and ephemeris (per-claim coalescing, idempotent, rate-limited firing) are cited in the contract doc as conforming reference implementations.",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Executed manifest lane green on the tree containing the citations; the citations are source evidence."
+              },
+              {
+                "kind": "source",
+                "file": "context/contracts/trigger-guards.md",
+                "line_start": 64,
+                "line_end": 67,
+                "excerpt": "kontourai/plumb#1 — per-subject cooldown, failure-signature dedup, max-concurrent cap; ephemeris — coalesced per claim, idempotent, rate-limited",
+                "summary": "Both conforming examples cited (citation-only; accepted gap G1: sources not re-audited)."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-16T21:43:33.684Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#664"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-664/ac4-suite-integrity",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Existing kits and validation callers are unaffected: validateKitRepository(\"kits/builder\") still returns no errors, validateKitRepository keeps its errors-only signature, and npm run build plus bash evals/run.sh static pass.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "updatedAt": "2026-07-16T21:43:33.684Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac4-suite-integrity",
+            "description": "Existing kits and validation callers are unaffected: validateKitRepository(\"kits/builder\") still returns no errors, validateKitRepository keeps its errors-only signature, and npm run build plus bash evals/run.sh static pass.",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Install/merge regression lane 87/87 on HEAD; npm run build and npm run eval:static (80/80 + 69/69 + 37/37 unit) also exit 0, reconciled by CI trust-reconcile-verify."
+              },
+              {
+                "kind": "source",
+                "file": "src/flow-kit/validate.ts",
+                "line_start": 508,
+                "line_end": 512,
+                "excerpt": "export async function validateKitRepository(kitDir: string): Promise<string[]> { return (await validateKitRepositoryDiagnostics(kitDir)).errors; }",
+                "summary": "Errors-only public signature preserved for existing callers."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "c37ef71104dcb08293b0acd452eb8dae6fc332ba1a4b2465e8be18c547db99d3",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-16T21:43:33.684Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#664"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-664-review.flow-agents-workflow.iteration-2-re-review-pass-the-prior-git-source-warning-finding-is-resolved-by-the-shared-printkitvalidationwarnings-choke-point-used-by-both-local-and-git-installs-re-reviewed-origin-main-head-across-the-contract-validation-cli-install-paths-tests-and-authoring-guide-no-new-blocking-findings-or-unresolved-gaps-reviewed-2026-07-16t16-44-26-024z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-664/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Iteration-2 re-review PASS: the prior git-source warning finding is resolved by the shared printKitValidationWarnings choke point used by both local and git installs; re-reviewed origin/main...HEAD across the contract, validation, CLI install paths, tests, and authoring guide; no new blocking findings or unresolved gaps.",
+        "value": "pass",
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "updatedAt": "2026-07-16T21:45:22.947Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-c5d6a2e7b2841ad8daf585e0:Kontour",
+          "reviewed_at": "2026-07-16T16:44:26.024Z",
+          "identity_version": 2,
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Re-reviewed origin/main...HEAD for correctness, maintainability, architecture, and standards. The prior git-source warning omission is resolved: both installLocalSource and installGitSource call printKitValidationWarnings, with CLI-level coverage proving warning emission remains non-blocking for local-path and file:// git installs. No new blocking findings.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--deliver.md",
+                  "summary": "Reviewed delivery report iteration-2 section and changed-scope context."
+                }
+              ]
+            },
+            {
+              "id": "security-review",
+              "status": "pass",
+              "summary": "Re-reviewed hostile-input boundaries including manifest shape validation, warning rendering, the shared printKitValidationWarnings path, and the new file:// clone install test. Guard fields remain strictly typed, unknown fields fail closed, warning data is constrained, and git clone argument separation is unchanged; no new security findings.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": "src/cli/kit.ts",
+                  "summary": "Reviewed shared warning choke point and both install paths."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--deliver.md",
+                "sha256": "7fdaec88f4420c71b1c7884adc4ecd112e0b99f161cb94e11ea3cd80e78f3d54"
+              },
+              {
+                "file": "context/contracts/trigger-guards.md",
+                "sha256": "ba9ec0f0ee2e4f1e34331bfd6535e9bffec364a0e4e3a84ba311cf6f74e5c375"
+              },
+              {
+                "file": "src/flow-kit/validate.ts",
+                "sha256": "d1b799b215d5868bb1958592447d87be3a13ca1e6062e810c21a633986170759"
+              },
+              {
+                "file": "src/cli/kit.ts",
+                "sha256": "12137a4248a1316b993e9bdd4b8eba27a64cf48f39c4365eca4a6d108c2da7b1"
+              },
+              {
+                "file": "src/cli/kit-metadata-security.test.mjs",
+                "sha256": "8040e99d9140422a66bdddcdcb9379ee4dffd98971385322e23f3e66560f9b97"
+              },
+              {
+                "file": "docs/kit-authoring-guide.md",
+                "sha256": "e22bc667c10d28e7dbaf39d24299be5382301473d9a3b630080297e1d6982c63"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "88866e70bb8603f2180835a6951a312905ffe2a3420c244c01596d64348d542d",
+              "head_sha": "6045e1a862734947a5a38c14eeb00b100ba7e8e2"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-664/kontourai-flow-agents-664--deliver.md",
+            "context/contracts/trigger-guards.md",
+            "src/flow-kit/validate.ts",
+            "src/cli/kit.ts",
+            "src/cli/kit-metadata-security.test.mjs",
+            "docs/kit-authoring-guide.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#664"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#664 is durably assigned to the active workflow actor (assignment sha256:3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184).",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Pickup probe records goal fit, scope, non-goals, dependencies, provider and baseline state, risks, and planning readiness (ready).",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Probe decisions D1-D4 (declaration shape, warning surface, contract doc home, enforcement level) and accepted gaps G1-G3 are explicit in the pickup record with consequences and route reason.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Implementation plan records scope, sequencing T1-T6, stable acceptance criteria ac1-ac4 with task-to-criterion mapping, Definition Of Done, stop-short risks, sandbox mode, expected modified files, and required evidence.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Implementation stayed within recorded scope: five files changed exactly as planned (contract doc, validate.ts parse+diagnostics, kit CLI warning surface, tests, authoring-guide listing); changed files and supported acceptance criteria ac1-ac4 are documented with no deviations.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "All four accepted criteria pass. ac1-contract-doc: context/contracts/trigger-guards.md requires dedup/cooldown/daily-cap/concurrency-lock declarations with defaults and binds #252/#250 to the contract. ac2-validation-warning: parseKitAgentSpawnTriggers warns (never errors) on a guardless spawning surface; kit install surfaces it non-blockingly; unit tests cover warning, shape errors, and channel separation. ac3-conforming-examples: plumb#1 and ephemeris cited (citation-only, accepted gap G1). ac4-suite-integrity: kits/builder still validates clean; errors-only validateKitRepository signature preserved; build and static suite green.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-664/command-log.jsonl",
+        "excerptOrSummary": "Manifest-lane integration proof: the kit install/merge suite (87 checks) passes on the delivered change, exercising the kit CLI install machinery that now runs validateKitRepositoryDiagnostics and prints guard warnings on every install. The direct behavioral proof for the new declaration parsing, warning channel, and both-install-source warning emission is the extended kit-metadata-security unit suite (37/37 via node --test), which CI reconciles through its own fresh trust-reconcile-verify static run (test_unit_helpers lane); it is not recorded as a separate labeled command here because it is not an individually reconcilable manifest lane.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-664/evidence.json",
+        "excerptOrSummary": "Evidence confidence PASS: acceptance evidence maps to the intended five-file scope with no unexplained drift; strongest-class evidence (37/37 unit tests incl. both-install-forms CLI test, 87/87 install-merge manifest lane, live CLI warning observation) plus reproducible canonical commands (npm run build, npm run eval:static both exit 0); independent distinct-actor critique iteration 1 FAIL routed back and fixed, iteration 2 PASS on both lanes; residual items are disclosed accepted gaps (plumb#1/ephemeris citation-only; no runtime enforcement by design; two session-env-only integration lanes proven environmental on a pristine origin/main baseline; one stale line pointer in the recorded ac4 source ref, corrected in this report). Merge-review confidence only — not release or deployment authorization; publish is the orchestrator's.",
+        "observedAt": "2026-07-16T21:45:22.947Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-664/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-16T21:43:33.684Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-664/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-16T21:43:33.684Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-664/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-16T21:43:33.684Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-664/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-16T21:43:33.684Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.plan.implementation:attestation",
+        "claimType": "builder.plan.implementation",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.plan.implementation claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:attestation",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion:attestation",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests:test_output",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.merge-ready.readiness:attestation",
+        "claimType": "builder.merge-ready.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion:test_output",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-664-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-3a4ed4e6f037acce29cf79dca1ee290b6d7c68944720591fc5240cd2f9a73184-gate-visit-2026-07-16t15-16-41z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-scope-non-goals-dependencies-provider-and-baseline-state-risks-and-planning-readiness-ready-gate-visit-2026-07-16t15-17-47-256z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-d1-d4-declaration-shape-warning-surface-contract-doc-home-enforcement-level-and-accepted-gaps-g1-g3-are-explicit-in-the-pickup-record-with-consequences-and-route-reason-gate-visit-2026-07-16t15-17-59-970z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-scope-sequencing-t1-t6-stable-acceptance-criteria-ac1-ac4-with-task-to-criterion-mapping-definition-of-done-stop-short-risks-sandbox-mode-expected-modified-files-and-required-evidence-gate-visit-2026-07-16t15-20-27-855z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-five-files-changed-exactly-as-planned-contract-doc-validate-ts-parse-diagnostics-kit-cli-warning-surface-tests-authoring-guide-listing-changed-files-and-supported-acceptance-criteria-ac1-ac4-are-documented-with-no-deviations-gate-visit-2026-07-16t15-27-59-261z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-acceptance-criteria.flow-agents-workflow.all-four-accepted-criteria-pass-ac1-contract-doc-context-contracts-trigger-guards-md-requires-dedup-cooldown-daily-cap-concurrency-lock-declarations-with-defaults-and-binds-252-250-to-the-contract-ac2-validation-warning-parsekitagentspawntriggers-warns-never-errors-on-a-guardless-spawning-surface-kit-install-surfaces-it-non-blockingly-unit-tests-cover-warning-shape-errors-and-channel-separation-ac3-conforming-examples-plumb-1-and-ephemeris-cited-citation-only-accepted-gap-g1-ac4-suite-integrity-kits-builder-still-validates-clean-errors-only-validatekitrepository-signature-preserved-build-and-static-suite-green-gate-visit-2026-07-16t15-31-43-880z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-integration-proof-the-kit-install-merge-suite-87-checks-passes-on-the-delivered-change-exercising-the-kit-cli-install-machinery-that-now-runs-validatekitrepositorydiagnostics-and-prints-guard-warnings-on-every-install-the-direct-behavioral-proof-for-the-new-declaration-parsing-warning-channel-and-both-install-source-warning-emission-is-the-extended-kit-metadata-security-unit-suite-37-37-via-node-test-which-ci-reconciles-through-its-own-fresh-trust-reconcile-verify-static-run-test-unit-helpers-lane-it-is-not-recorded-as-a-separate-labeled-command-here-because-it-is-not-an-individually-reconcilable-manifest-lane-gate-visit-2026-07-16t21-43-33-684z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z",
+        "claimId": "kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-acceptance-evidence-maps-to-the-intended-five-file-scope-with-no-unexplained-drift-strongest-class-evidence-37-37-unit-tests-incl-both-install-forms-cli-test-87-87-install-merge-manifest-lane-live-cli-warning-observation-plus-reproducible-canonical-commands-npm-run-build-npm-run-eval-static-both-exit-0-independent-distinct-actor-critique-iteration-1-fail-routed-back-and-fixed-iteration-2-pass-on-both-lanes-residual-items-are-disclosed-accepted-gaps-plumb-1-ephemeris-citation-only-no-runtime-enforcement-by-design-two-session-env-only-integration-lanes-proven-environmental-on-a-pristine-origin-main-baseline-one-stale-line-pointer-in-the-recorded-ac4-source-ref-corrected-in-this-report-merge-review-confidence-only-not-release-or-deployment-authorization-publish-is-the-orchestrator-s-gate-visit-2026-07-16t21-45-22-947z"
+        ],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-ac1-contract-doc.flow-agents-workflow.a-standing-contract-doc-exists-in-context-contracts-requiring-that-any-kit-hook-or-integration-spawning-an-agent-run-from-a-trigger-declares-with-defaults-dedup-by-trigger-failure-signature-cooldown-per-subject-daily-cap-and-a-concurrency-lock-it-notes-that-any-implementation-of-kontourai-flow-agents-252-background-review-fork-autonomy-epic-250-must-declare-its-guards-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "verifiedAt": "2026-07-16T21:43:33.684Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-ac2-validation-warning.flow-agents-workflow.kit-json-supports-an-optional-additive-agent-spawn-triggers-declaration-kit-repository-validation-emits-a-warning-never-an-error-when-an-entry-with-spawns-agent-runs-true-lacks-complete-guard-config-dedup-key-cooldown-seconds-daily-cap-max-concurrent-and-the-kit-cli-surfaces-that-warning-non-blockingly-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "verifiedAt": "2026-07-16T21:43:33.684Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-ac3-conforming-examples.flow-agents-workflow.kontourai-plumb-1-cooldown-failure-signature-dedup-max-concurrent-cap-and-ephemeris-per-claim-coalescing-idempotent-rate-limited-firing-are-cited-in-the-contract-doc-as-conforming-reference-implementations-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "verifiedAt": "2026-07-16T21:43:33.684Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z",
+        "claimId": "kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-664-ac4-suite-integrity.flow-agents-workflow.existing-kits-and-validation-callers-are-unaffected-validatekitrepository-kits-builder-still-returns-no-errors-validatekitrepository-keeps-its-errors-only-signature-and-npm-run-build-plus-bash-evals-run-sh-static-pass-verified-2026-07-16t21-43-33-684z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-16T21:43:33.684Z",
+        "verifiedAt": "2026-07-16T21:43:33.684Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-664-review.flow-agents-workflow.iteration-2-re-review-pass-the-prior-git-source-warning-finding-is-resolved-by-the-shared-printkitvalidationwarnings-choke-point-used-by-both-local-and-git-installs-re-reviewed-origin-main-head-across-the-contract-validation-cli-install-paths-tests-and-authoring-guide-no-new-blocking-findings-or-unresolved-gaps-reviewed-2026-07-16t16-44-26-024z",
+        "claimId": "kontourai-flow-agents-664-review.flow-agents-workflow.iteration-2-re-review-pass-the-prior-git-source-warning-finding-is-resolved-by-the-shared-printkitvalidationwarnings-choke-point-used-by-both-local-and-git-installs-re-reviewed-origin-main-head-across-the-contract-validation-cli-install-paths-tests-and-authoring-guide-no-new-blocking-findings-or-unresolved-gaps-reviewed-2026-07-16t16-44-26-024z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-16T21:45:22.947Z",
+        "verifiedAt": "2026-07-16T21:45:22.947Z"
+      }
+    ]
+  }
+}

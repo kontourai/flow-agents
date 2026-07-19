@@ -8,53 +8,93 @@
 // Run: `npm run test:unit` (builds first). Requires `npm run build` output under build/.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
-  buildClaimExplanation as buildClaimExplanationReexport,
   deriveGateCalibration,
   gateAdvisoryFix,
   buildGateInquiryRecords,
+  isNarrativeNamespacePath,
+  isNarrativeArtifactContent,
   validateEvidenceRef,
   normalizeEvidenceRefs,
   normalizeCheck,
+  normalizeFinding,
+  normalizeLearning,
   reduceCaptureLogByCommand,
 } from "../../build/src/cli/workflow-sidecar.js";
-import { buildClaimExplanation } from "../../build/src/cli/sidecar-claim-explain.js";
 
-// ── buildClaimExplanation (extracted pure projection) ────────────────────────
+// ── explainClaim (#171: consumed from @kontourai/surface >=2.10) ─────────────
+// The local buildClaimExplanation prototype was lifted into Surface (surface#151)
+// with the drilldown composition folded inside; these tests pin the consumed
+// function's behavior through the SAME expectations the prototype carried, so a
+// Surface regression (or an accidental un-lift) fails here.
+import { explainClaim, buildTrustReport, TrustBundleBuilder } from "@kontourai/surface";
 
-test("buildClaimExplanation: re-export from workflow-sidecar === the extracted module", () => {
-  assert.equal(buildClaimExplanationReexport, buildClaimExplanation);
-});
-
-test("buildClaimExplanation: unknown claim id returns found:false sentinel", () => {
-  const out = buildClaimExplanation({ claims: [] }, { claims: [] }, "missing");
+test("explainClaim (Surface): unknown claim id returns found:false sentinel", () => {
+  const report = buildTrustReport(new TrustBundleBuilder({ source: "unit:171" }).build());
+  const out = explainClaim(report, "missing");
   assert.equal(out.found, false);
   assert.equal(out.status, "unknown");
   assert.deepEqual(out.evidence, []);
   assert.equal(out.policy, null);
 });
 
-test("buildClaimExplanation: projects status, policy, and evidence for a found claim", () => {
-  const report = {
-    claims: [{ id: "c1", status: "verified", value: "pass", claimType: "workflow.check" }],
-    transparencyGaps: [{ claimId: "c1", reason: "x" }, { claimId: "other" }],
-    changeRecords: [],
-  };
-  const bundle = {
-    claims: [{ id: "c1", verificationPolicyId: "p1", value: "pass", claimType: "workflow.check" }],
-    policies: [{ id: "p1", requiredEvidence: ["test"], acceptanceCriteria: ["AC1"], reviewAuthority: "owner" }],
-    evidence: [{ claimId: "c1", evidenceType: "command", execution: { runner: "npm test", label: "npm test", exitCode: 0 } }],
-  };
-  const out = buildClaimExplanation(report, bundle, "c1");
+test("explainClaim (Surface): projects status, policy, evidence, and filtered gaps for a found claim", () => {
+  const builder = new TrustBundleBuilder({ source: "unit:171" });
+  builder.addClaim({
+    id: "c1", subjectType: "repo", subjectId: "flow-agents", claimType: "workflow.check",
+    fieldOrBehavior: "unit-tests", value: "pass", verificationPolicyId: "p1",
+    createdAt: "2026-07-14T00:00:00.000Z", updatedAt: "2026-07-14T00:00:00.000Z",
+  });
+  builder.addPolicy({
+    id: "p1", claimType: "workflow.check", requiredEvidence: ["test_output"], requiredMethods: ["validation"],
+    acceptanceCriteria: ["AC1"], reviewAuthority: "owner", validityRule: { kind: "manual" },
+    stalenessTriggers: [], conflictRules: [], impactLevel: "high",
+  });
+  builder.addEvidence({
+    id: "e1", claimId: "c1", evidenceType: "test_output", method: "validation",
+    sourceRef: "run:e1", excerptOrSummary: "npm test", observedAt: "2026-07-14T00:00:00.000Z",
+    collectedBy: "ci", execution: { runner: "bash", label: "npm test", exitCode: 0 },
+  });
+  const out = explainClaim(buildTrustReport(builder.build()), "c1");
   assert.equal(out.found, true);
-  assert.equal(out.status, "verified");
+  assert.equal(out.status, "proposed");               // derived by the report (no verifying event), projected verbatim
+  assert.equal(out.value, "pass");                    // String coercion of the claim value
+  assert.equal(out.claimType, "workflow.check");
   assert.equal(out.policy.id, "p1");
-  assert.deepEqual(out.policy.requiredEvidence, ["test"]);
+  assert.deepEqual(out.policy.requiredEvidence, ["test_output"]);
   assert.equal(out.evidence.length, 1);
   assert.equal(out.evidence[0].passing, true);        // exitCode 0 → not error → passing
   assert.equal(out.evidence[0].execution.exitCode, 0);
-  assert.equal(out.why.transparencyGaps.length, 1);   // only the c1 gap, not "other"
+  // Gap filtering: only THIS claim's transparency gaps appear (none seeded for c1,
+  // and a report-level gap for another claim must not leak in).
+  assert.deepEqual(out.why.transparencyGaps.filter((gap) => gap.claimId !== "c1"), []);
+});
+
+test("explainClaim (Surface): legacy evidence label/summary fallback tolerance survives the lift", () => {
+  // Pre-lift bundles could carry top-level label/summary on evidence; the consumed
+  // function keeps the prototype's fallback chains (label ?? excerptOrSummary ?? ...).
+  const builder = new TrustBundleBuilder({ source: "unit:171-legacy" });
+  builder.addClaim({
+    id: "c2", subjectType: "repo", subjectId: "flow-agents", claimType: "workflow.check",
+    fieldOrBehavior: "legacy", value: "pass",
+    createdAt: "2026-07-14T00:00:00.000Z", updatedAt: "2026-07-14T00:00:00.000Z",
+  });
+  builder.addEvidence({
+    id: "e2", claimId: "c2", evidenceType: "attestation", method: "attestation",
+    sourceRef: "run:e2", excerptOrSummary: "excerpt-wins-for-summary", observedAt: "2026-07-14T00:00:00.000Z",
+    collectedBy: "ci",
+  });
+  const out = explainClaim(buildTrustReport(builder.build()), "c2");
+  assert.equal(out.found, true);
+  assert.equal(out.evidence.length, 1);
+  assert.equal(out.evidence[0].label, "excerpt-wins-for-summary");   // label falls back to excerptOrSummary
+  assert.equal(out.evidence[0].summary, "excerpt-wins-for-summary"); // summary prefers excerptOrSummary
+  assert.equal(out.evidence[0].execution, null);
+  assert.equal(out.evidence[0].passing, true);                       // no execution, not disputed → passing
 });
 
 // ── deriveGateCalibration (pure mapping) ─────────────────────────────────────
@@ -91,6 +131,99 @@ test("validateEvidenceRef: rejects bad kind, unsupported field, and incomplete s
   assert.throws(() => validateEvidenceRef({ kind: "nope" }, "refs"), /kind must be one of/);
   assert.throws(() => validateEvidenceRef({ kind: "command", bogus: 1, summary: "s" }, "refs"), /unsupported field/);
   assert.throws(() => validateEvidenceRef({ kind: "source", file: "a.ts" }, "refs"), /source refs require/);
+});
+
+test("narrative namespace paths and free-form references are rejected with the typed #619 diagnostic", () => {
+  const root = "/tmp/project";
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/.kontourai/narrative/run/n1/envelope.json"), true);
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/.kontourai/flow-agents/run/narrative/legacy.md"), true);
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/docs/narrative/design.md"), false);
+  for (const ref of [
+    { kind: "source", file: "src/file.ts", line_start: 1, line_end: 1, excerpt: "see .kontourai/narrative/run/n1/envelope.json" },
+    { kind: "artifact", file: ".kontourai/narrative/run/n1/envelope.json", summary: "rendered narrative" },
+    { kind: "command", excerpt: "cat .kontourai/flow-agents/run/narrative/envelope.md" },
+    { kind: "provider", url: "file:///.kontourai/narrative/run/n1/envelope.json" },
+    { kind: "external", url: "https://example.invalid/.kontourai/narrative/run/n1/envelope.json" },
+  ]) {
+    assert.throws(() => validateEvidenceRef(ref, "refs"), /narrative trust isolation \(#619\)/);
+  }
+});
+
+test("narrative isolation canonicalizes aliases and rejects narrative content independent of location", { concurrency: false }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-isolation-unit-"));
+  const narrativeDir = path.join(root, ".kontourai", "narrative", "run", "n1");
+  const envelope = path.join(narrativeDir, "envelope.json");
+  const relocated = path.join(root, "evidence", "relocated.json");
+  const hardlink = path.join(root, "evidence", "hardlink.json");
+  const symlink = path.join(root, "evidence", "symlink.json");
+  const commandSymlink = path.join(root, "evidence", "narrative-symlink.sh");
+  const source = path.join(root, "src", "narrative", "composer.ts");
+  fs.mkdirSync(narrativeDir, { recursive: true });
+  fs.mkdirSync(path.dirname(relocated), { recursive: true });
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  const bytes = Buffer.from('{"schema_version":"grounded-execution-narrative/v1","narrative_id":"n1"}');
+  fs.writeFileSync(envelope, bytes);
+  fs.copyFileSync(envelope, relocated);
+  fs.linkSync(envelope, hardlink);
+  fs.symlinkSync(envelope, symlink);
+  fs.symlinkSync(envelope, commandSymlink);
+  fs.writeFileSync(source, 'export const narrativeSource = true;\n');
+  try {
+    assert.equal(isNarrativeNamespacePath(root, path.join(root, ".KONTOURAI", "NARRATIVE", "run", "n1", "envelope.json")), true);
+    assert.equal(isNarrativeArtifactContent(bytes), true);
+    for (const file of [envelope, relocated, hardlink, symlink]) {
+      assert.throws(
+        () => validateEvidenceRef({ kind: "artifact", file, summary: "must reject" }, "refs", root),
+        /narrative trust isolation \(#619\)/,
+      );
+    }
+    assert.throws(
+      () => validateEvidenceRef({ kind: "provider", url: "file%3A%2F%2F%2F.KONTOURAI%2FNARRATIVE%2Frun%2Fn1%2Fenvelope.json" }, "refs", root),
+      /narrative trust isolation \(#619\)/,
+    );
+    assert.doesNotThrow(() => validateEvidenceRef({ kind: "source", file: source, line_start: 1, line_end: 1, excerpt: "source code" }, "refs", root));
+    for (const command of [
+      "test -f .kontourai/narrative/run/n1/envelope.json",
+      "test -f .KONTOURAI/NARRATIVE/run/n1/envelope.json",
+      "test -f .kontourai%2Fnarrative%2Frun%2Fn1%2Fenvelope.json",
+      "bash evidence/narrative-symlink.sh",
+      "cd .kontourai && test -f narrative/run/n1/envelope.json",
+    ]) {
+      assert.throws(() => normalizeCheck({ id: "n", kind: "command", status: "pass", summary: "n", command }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    }
+    assert.doesNotThrow(() => normalizeCheck({
+      id: "variable-composition", kind: "command", status: "pass", summary: "static scanner residual",
+      command: 'base=.kontourai; test -f "$base/narrative/run/n1/envelope.json"',
+    }, false, undefined, root));
+    assert.throws(() => normalizeCheck({
+      id: "standard-ref", kind: "test", status: "pass", summary: "must reject",
+      standard_refs: [{ standard: "junit", ref: ".kontourai/narrative/run/n1/envelope.json" }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "surface-ref", kind: "policy", status: "pass", summary: "must reject",
+      surface_trust_refs: [{
+        artifact_kind: "trust.bundle", artifact_ref: ".kontourai/narrative/run/n1/envelope.json",
+        claim_status: "accepted", freshness: { status: "fresh" }, authority: { producer: "surface-local" },
+        integrity: { status: "matched" }, status: "pass", summary: "accepted",
+      }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "standard-content", kind: "test", status: "pass", summary: "must reject",
+      standard_refs: [{ standard: "junit", ref: hardlink }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "surface-content", kind: "policy", status: "pass", summary: "must reject",
+      surface_trust_refs: [{
+        artifact_kind: "trust.bundle", artifact_ref: relocated, claim_status: "accepted",
+        freshness: { status: "fresh" }, authority: { producer: "surface-local" },
+        integrity: { status: "matched" }, status: "pass", summary: "accepted",
+      }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeFinding({ file_refs: [hardlink] }, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeLearning({ source_refs: [relocated], facts: [], routing: [], outcome: "unknown", correction: { needed: false, evidence: "none" } }, "2026-07-14T00:00:00.000Z", root), /narrative trust isolation \(#619\)/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("normalizeEvidenceRefs: rejects non-arrays and legacy string refs; passes valid arrays", () => {
@@ -229,4 +362,63 @@ test("buildGateInquiryRecords: emits a single missed_block record for an empty b
   const records = buildGateInquiryRecords(bundle, { blocked: false, hash: null, count: 0 }, "slug", [], fakeSurface, new Date("2026-01-01T00:00:00Z"));
   assert.equal(records.length, 1);
   assert.equal(records[0].answer.value.calibration, "missed_block");
+});
+
+// ── #634: writer-observed execution entries in the capture fold ─────────────
+test("writer-observed pass lifts an otherwise ambiguous command to pass", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm run test:unit", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+    { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+  ]);
+  assert.equal(fold.get("npm run test:unit").observedResult, "pass");
+});
+
+test("a hook-observed fail is never buried by a writer-observed pass, in either order", () => {
+  for (const entries of [
+    [
+      { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
+      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    ],
+    [
+      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+      { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
+    ],
+  ]) {
+    const fold = reduceCaptureLogByCommand(entries);
+    assert.equal(fold.get("npm run test:unit").observedResult, "fail");
+    // Review finding (#634): fail/0 would be contradictory evidence (isError:true, exitCode:0) —
+    // the exit code must travel with the winning status, never a losing entry's.
+    assert.equal(fold.get("npm run test:unit").exitCode, 1);
+  }
+});
+
+test("when both entries carry the winning status the newer non-null exit code wins", () => {
+  const sticky = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "fail", exitCode: 2, source: "postToolUse-capture" },
+    { command: "npm test", observedResult: "fail", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(sticky.get("npm test").exitCode, 2);
+  const newer = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "fail", exitCode: 2, source: "postToolUse-capture" },
+    { command: "npm test", observedResult: "fail", exitCode: 3, source: "canonical-writer-execution" },
+  ]);
+  assert.equal(newer.get("npm test").exitCode, 3);
+});
+
+test("an ambiguous entry's null exit code never displaces the winning pass's code", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    { command: "npm test", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(fold.get("npm test").observedResult, "pass");
+  assert.equal(fold.get("npm test").exitCode, 0);
+});
+
+test("a writer-observed fail is sticky like any other observed fail", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm run test:unit", observedResult: "fail", exitCode: 2, source: "canonical-writer-execution" },
+    { command: "npm run test:unit", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(fold.get("npm run test:unit").observedResult, "fail");
+  assert.equal(fold.get("npm run test:unit").exitCode, 2);
 });

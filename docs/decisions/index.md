@@ -12,6 +12,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | --- | --- | --- |
 | [agent-coordination](./agent-coordination.md) | current | Agent coordination |
 | [anti-gaming-trust-security](./anti-gaming-trust-security.md) | needs-decision | Anti-gaming trust security |
+| [backlog-readiness-source](./backlog-readiness-source.md) | current | Backlog Readiness Source |
 | [context-lifecycle](./context-lifecycle.md) | needs-decision | Context lifecycle |
 | [core-domain-kit-boundary](./core-domain-kit-boundary.md) | needs-decision | Core vs domain kit boundary |
 | [decision-records](./decision-records.md) | current | Decision records |
@@ -36,3 +37,4 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
 | [workflow-enforcement](./workflow-enforcement.md) | current | Workflow Enforcement |
 | [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |
+| [writer-observed-execution](./writer-observed-execution.md) | current | Writer-observed execution |

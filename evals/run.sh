@@ -177,6 +177,14 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_telemetry_tool_usage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_tool_outcome.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_delegation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_action_class.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_sanitize_usage.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1
@@ -307,6 +315,10 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_gate_bypass_chain.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_narrative_source_contract.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_narrative_redaction_failclosed.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
   echo ""

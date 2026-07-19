@@ -21,6 +21,83 @@ normalize_tool_name() {
   esac
 }
 
+# classify_action_class — normalized cross-runtime activity taxonomy (#582).
+# Given a RAW tool_name and its compact tool_input JSON, echoes ONE of the
+# action classes {edit, search, test, git, build, web, read}, or empty when the
+# tool is not classifiable (delegation / unknown / ambiguous shell -> no class;
+# the field is then ABSENT, never fabricated). Additive & orthogonal to
+# normalize_tool_name (canonical tool identity): this describes WHAT KIND of
+# activity the tool performs. Privacy: for shell tools the command is read
+# transiently ONLY to extract the leading (and 2nd/3rd) verb token; the raw
+# command/args are never stored to derive the class. Any jq hiccup degrades to
+# empty and never blocks the event.
+classify_action_class() {
+  local tool_name="$1" tool_input="$2"
+  [[ -z "$tool_input" ]] && tool_input="null"
+  case "$tool_name" in
+    Edit|Write|MultiEdit|NotebookEdit|apply_patch|fs_write|write|code)
+      echo "edit" ;;
+    Grep|Glob|find|search)
+      echo "search" ;;
+    Read|fs_read|NotebookRead)
+      echo "read" ;;
+    WebFetch|WebSearch|web_search|web_fetch)
+      echo "web" ;;
+    Bash|bash|shell|execute_bash)
+      # Bash-family verb sub-classification. Reuses #581's leading-token
+      # extraction (resolve_delegation_targets): peel one bash/sh/zsh -c
+      # wrapper, strip leading VAR=val env-assignments, then match the WHOLE
+      # leading token (word-boundary: gitfoo / /path/git-helper / echo git MUST
+      # NOT match git). test-vs-build for pkg-runners (npm/pnpm/yarn/bun) is
+      # disambiguated by the 2nd (and 3rd for `run <script>`) token; a bare
+      # runner / unknown script -> empty (NO guess). The command is read
+      # transiently and never stored (privacy).
+      echo "$tool_input" | jq -r '
+        ((.command // "") | if type=="string" then . else "" end) as $cmd
+        | ($cmd | gsub("^\\s+|\\s+$";"")) as $s
+        | if $s=="" then ""
+          else
+            ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+              elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+              else $s end
+            ) as $inner0
+            | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+            | ( {r:$inner}
+                | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                         .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+                | .r ) as $rest
+            | ($rest | gsub("^\\s+|\\s+$";"")) as $rt
+            | (if $rt=="" then [] else [$rt | splits("\\s+")] end) as $toks
+            | ($toks[0] // "") as $t0
+            | ($toks[1] // "") as $t1
+            | ($toks[2] // "") as $t2
+            | if $t0=="git" then "git"
+              elif ($t0=="npm" or $t0=="pnpm" or $t0=="yarn" or $t0=="bun") then
+                ( if $t1=="test" then "test"
+                  elif ($t1=="run" and ($t2|test("^test([:_-]|$)"))) then "test"
+                  elif ($t1=="run" and ($t2|test("^build([:_-]|$)"))) then "build"
+                  else "" end )
+              elif ($t0=="pytest" or $t0=="jest" or $t0=="vitest" or $t0=="mocha" or $t0=="tox") then "test"
+              elif $t0=="go" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
+              elif $t0=="cargo" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
+              elif $t0=="make" then
+                ( if $t1=="" then "build"
+                  elif ($t1|test("^test([:_-]|$)")) then "test"
+                  elif ($t1|test("^build([:_-]|$)")) then "build"
+                  else "" end )
+              elif ($t0=="tsc" or $t0=="webpack") then "build"
+              elif ($t0=="vite" and $t1=="build") then "build"
+              else "" end
+          end
+      ' 2>/dev/null || echo ""
+      ;;
+    *)
+      echo "" ;;
+  esac
+}
+
 telemetry_session_id() {
   local event_type="$1" agent_name="$2"
   local session_id=""
@@ -107,8 +184,20 @@ build_base_event() {
 
 add_hook_context() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input
+  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input task_slug
   cwd=$(echo "$stdin_json" | jq -r '.cwd // ""')
+  # Work-item attribution: stamp the active Builder run's slug (from the same
+  # current.json .active_slug the economics relay reads) so tool/turn events can
+  # be grouped per work item downstream. Absent for non-Builder sessions — never
+  # fabricated. Only the slug string is stored; no prompt/args/file content.
+  task_slug=""
+  if [[ -n "$cwd" ]]; then
+    if [[ -f "$cwd/.kontourai/flow-agents/current.json" ]]; then
+      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.kontourai/flow-agents/current.json" 2>/dev/null)
+    elif [[ -f "$cwd/.flow-agents/current.json" ]]; then
+      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.flow-agents/current.json" 2>/dev/null)
+    fi
+  fi
   runtime_session_id=$(echo "$stdin_json" | jq -r '.session_id // ""')
   runtime_turn_id=$(echo "$stdin_json" | jq -r '.turn_id // ""')
   transcript_path=$(echo "$stdin_json" | jq -r '.transcript_path // ""')
@@ -133,6 +222,7 @@ add_hook_context() {
     --arg source "$source" \
     --arg stop_hook_active "$stop_hook_active" \
     --arg last_assistant_message "$last_assistant_message" \
+    --arg task_slug "$task_slug" \
     --argjson raw "$raw_hook_input" \
     '. + {
       hook: {
@@ -146,7 +236,8 @@ add_hook_context() {
         last_assistant_message: $last_assistant_message,
         raw_input: $raw
       }
-    }'
+    }
+    + (if $task_slug == "" then {} else {task_slug: $task_slug} end)'
 }
 
 add_runtime_context() {
@@ -200,98 +291,406 @@ add_user_prompt_data() {
 
 add_tool_event_data() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local tool_name tool_normalized_name tool_input tool_output permission_description
+  local tool_name tool_normalized_name tool_input tool_output permission_description tool_action
   tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
   tool_normalized_name=$(normalize_tool_name "$tool_name")
   tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
   tool_output=$(echo "$stdin_json" | jq -c '.tool_response // null')
   permission_description=$(echo "$stdin_json" | jq -r '.tool_input.description // ""')
+  # #582: normalized action class {edit,search,test,git,build,web,read}, or
+  # empty when unclassifiable. Stamped additively inside .tool below (guarded so
+  # a classifier hiccup degrades to NO .tool.action, never a dropped event).
+  tool_action=$(classify_action_class "$tool_name" "$tool_input")
 
   if [[ "$event_type" == "preToolUse" ]]; then
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson ti "$tool_input" \
-      '. + {tool: {name: $tn, normalized_name: $nn, input: $ti}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, input: $ti} + (if $ac == "" then {} else {action: $ac} end))}')
   elif [[ "$event_type" == "permissionRequest" || "$event_type" == "PermissionRequest" ]]; then
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson ti "$tool_input" \
       --arg desc "$permission_description" \
-      '. + {tool: {name: $tn, normalized_name: $nn, input: $ti}, permission: {description: $desc}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, input: $ti} + (if $ac == "" then {} else {action: $ac} end)), permission: {description: $desc}}')
   else
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson to "$tool_output" \
-      '. + {tool: {name: $tn, normalized_name: $nn, output: $to}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, output: $to} + (if $ac == "" then {} else {action: $ac} end))}')
   fi
 
   echo "$event"
 }
 
+# resolve_delegation_targets — single source of truth for the delegation
+# vocabulary (#581 D1). Given a RAW tool_name and its compact tool_input JSON,
+# echoes a JSON array of delegation target identities, or [] when the tool does
+# not delegate. Both the standalone agent.delegate event (emit_delegation_event)
+# and the additive on-record .delegation enrichment (add_tool_data_and_emit_
+# delegation) call this, so the two can never drift. Privacy: only target
+# identities (agent type / "codex") are produced — never command args or prompt
+# content. Any jq hiccup degrades to [] and never blocks the event.
+resolve_delegation_targets() {
+  local tool_name="$1" tool_input="$2"
+  [[ -z "$tool_input" ]] && tool_input="null"
+  case "$tool_name" in
+    InvokeSubagents)
+      echo "$tool_input" | jq -c '.targets // []' 2>/dev/null || echo '[]'
+      ;;
+    spawn_agent)
+      echo "$tool_input" | jq -c '
+        ((.agent_type // "default") | tostring) as $t
+        | if ($t != "" and $t != "null") then [$t] else [] end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    use_subagent|subagent|"delegate to a specialist agent")
+      echo "$tool_input" | jq -c '
+        if (.targets? | type) == "array" then .targets
+        elif (.subagents? | type) == "array" then .subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
+        elif (.content.subagents? | type) == "array" then .content.subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
+        elif (.agent_name? // .agent? // .subagent_type? // empty) != "" then [(.agent_name // .agent // .subagent_type)]
+        else ["subagent"]
+        end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    Task|Agent)
+      echo "$tool_input" | jq -c '
+        ((.subagent_type // .agent_type // .agent // "general-purpose") | tostring) as $t
+        | if ($t != "" and $t != "null") then [$t] else [] end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    Bash|bash|shell|execute_bash)
+      # Direct-CLI Codex (#581 D3): target is "codex" iff the command's FIRST
+      # real shell token is exactly `codex`. Mirrors _is_ambiguous_absence's
+      # unwrap/strip discipline — peel one `bash -lc '...'` / `sh -c "..."`
+      # wrapper, strip leading VAR=val env-assignments, then match the WHOLE
+      # first token (word-boundary: codexfoo, mycodex, /x/codex-helper MUST NOT
+      # match). The command is read transiently and never stored (privacy).
+      echo "$tool_input" | jq -c '
+        ((.command // "") | if type=="string" then . else "" end) as $cmd
+        | ($cmd | gsub("^\\s+|\\s+$";"")) as $s
+        | if $s=="" then []
+          else
+            ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+              elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+              else $s end
+            ) as $inner0
+            | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+            | ( {r:$inner}
+                | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                         .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+                | .r ) as $rest
+            | (($rest|gsub("^\\s+|\\s+$";"")) as $rt | (first($rt|splits("\\s+")) // "")) as $first
+            | if $first=="codex" then ["codex"] else [] end
+          end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    *)
+      echo '[]'
+      ;;
+  esac
+}
+
 emit_delegation_event() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local tool_name tool_input
+  # The standalone agent.delegate event stays preToolUse-only (#581 D4) with
+  # targets IDENTICAL to pre-#581 for every existing vocabulary case.
+  case "$event_type" in
+    preToolUse|PreToolUse) ;;
+    *) return 0 ;;
+  esac
+  local tool_name
   tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
+  # Direct-CLI Codex is a Bash-family tool that never produced an agent.delegate
+  # event before #581; it is surfaced SOLELY via the additive on-record
+  # .delegation, so the agent.delegate stream (and delegation COUNTS) stay
+  # byte-identical to before. Only the subagent-tool vocabulary emits here.
+  case "$tool_name" in
+    Bash|bash|shell|execute_bash) return 0 ;;
+  esac
+  local tool_input targets
   tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
-
-  if [[ "$tool_name" == "InvokeSubagents" && "$event_type" == "preToolUse" ]]; then
-    local targets
-    targets=$(echo "$tool_input" | jq -c '.targets // []')
-    if [[ "$targets" != "[]" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --argjson targets "$targets" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "spawn_agent" && "$event_type" == "preToolUse" ]]; then
-    local target
-    target=$(echo "$tool_input" | jq -r '.agent_type // "default"')
-    if [[ -n "$target" && "$target" != "null" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --arg target "$target" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: [$target]}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "use_subagent" || "$tool_name" == "subagent" || "$tool_name" == "delegate to a specialist agent" ]] && [[ "$event_type" == "preToolUse" ]]; then
-    local targets
-    targets=$(echo "$tool_input" | jq -c '
-      if (.targets? | type) == "array" then .targets
-      elif (.subagents? | type) == "array" then .subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
-      elif (.content.subagents? | type) == "array" then .content.subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
-      elif (.agent_name? // .agent? // .subagent_type? // empty) != "" then [(.agent_name // .agent // .subagent_type)]
-      else ["subagent"]
-      end
-    ')
-    if [[ "$targets" != "[]" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --argjson targets "$targets" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "Task" || "$tool_name" == "Agent" ]] && [[ "$event_type" == "preToolUse" ]]; then
-    local target
-    target=$(echo "$tool_input" | jq -r '.subagent_type // .agent_type // .agent // "general-purpose"')
-    if [[ -n "$target" && "$target" != "null" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --arg target "$target" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: [$target]}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
+  targets=$(resolve_delegation_targets "$tool_name" "$tool_input")
+  if [[ -n "$targets" && "$targets" != "[]" ]]; then
+    local delegate_event
+    delegate_event=$(echo "$event" | jq -c \
+      --argjson targets "$targets" \
+      '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
+    transport_emit "$delegate_event"
   fi
 }
 
 add_tool_data_and_emit_delegation() {
   local event="$1" event_type="$2" stdin_json="$3"
   event=$(add_tool_event_data "$event" "$event_type" "$stdin_json")
+
+  # Emit the standalone agent.delegate event FIRST, from the UN-stamped tool
+  # event, so its shape stays byte-identical to pre-#581 (the on-record
+  # .delegation below is strictly additive — #581 D4).
   emit_delegation_event "$event" "$event_type" "$stdin_json"
+
+  # #581 W2: stamp .delegation = {targets, target} on the tool event whenever the
+  # invoked tool delegates (subagent tools OR direct-CLI codex).
+  # resolve_delegation_targets is the shared vocabulary source (D1). Guarded
+  # --argjson so a resolution hiccup degrades to no .delegation and never
+  # blackholes the event (D5). Privacy: target identities only.
+  local tool_name tool_input dtargets
+  tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
+  tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
+  dtargets=$(resolve_delegation_targets "$tool_name" "$tool_input")
+  if [[ -n "$dtargets" && "$dtargets" != "[]" ]]; then
+    local stamped
+    stamped=$(echo "$event" | jq -c --argjson t "$dtargets" \
+      '. + {delegation: {targets: $t, target: ($t[0])}}' 2>/dev/null) || stamped=""
+    [[ -n "$stamped" ]] && event="$stamped"
+  fi
+
   echo "$event"
+}
+
+# --- #580 tool.result enrichment: duration_ms / outcome / status -------------
+# These three fields are added to the existing .tool object of tool.result
+# records only (co-located with .tool.name/.tool.output). tool.invoke has no
+# result yet and tool.permission_request is not a tool result, so neither is
+# touched. Every unavailable signal degrades to null/ambiguous — never a
+# fabricated value.
+
+# Shared jq definitions for the deterministic outcome tri-state. This is a
+# faithful port of scripts/hooks/evidence-capture.js `observeResult` (the
+# canonical contract, docs/spec/runtime-hook-surface.md §2.5) into jq so the
+# Claude hot path stays hermetic (no node subprocess). A drift-guard test
+# (evals/integration/test_telemetry_tool_outcome.sh) feeds a shared fixture
+# battery through BOTH this jq path and node observeResult and asserts they
+# agree, so the port can never silently diverge from the canonical source.
+# Regex note: \x27 / \x22 are the single/double quote chars (avoids embedding a
+# literal quote inside this single-quoted bash string).
+_TOOL_OUTCOME_JQ_DEFS='
+def _clean(v):
+  (v) as $x
+  | if ($x|type)=="number" then (if $x==($x|floor) then $x else null end)
+    elif ($x|type)=="string"
+      then (($x|gsub("^\\s+|\\s+$";"")) as $t | if ($t|test("^-?[0-9]+$")) then ($t|tonumber) else null end)
+    else null end;
+def _is_ambiguous_absence($text):
+  (($text | if type=="string" then . else "" end) | gsub("^\\s+|\\s+$";"")) as $s
+  | if $s=="" then false
+    else
+      ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+        then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+        elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+        then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+        else $s end
+      ) as $inner0
+      | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+      | if $inner=="" then false
+        elif ($inner|test("^!\\s*")) then false
+        elif (($inner|test("\\|\\|")) or ($inner|test("&&"))) then false
+        else
+          ( {r:$inner}
+            | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                     .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+            | .r ) as $rest
+          | if ($rest|test("\\|")) then false
+            else ( ($rest|gsub("^\\s+|\\s+$";"")) as $rt
+                   | ([$rt|splits("\\s+")][0] // "") as $first
+                   | ($first=="grep" or $first=="diff") )
+            end
+        end
+    end;
+def _is_failure:
+  (.error) as $err
+  | ( ($err|type=="string") and (($err|gsub("^\\s+|\\s+$";""))|length>0) ) as $e1
+  | ( ($err|type=="object" or type=="array") and (($err|length)>0) ) as $e2
+  | ( [ (.tool_response // null), (.tool_output // null) ]
+      | map(select(type=="object"))
+      | any(
+          (.success==false)
+          or (.failed==true) or (.is_error==true) or (.isError==true)
+          or ((.error|type=="string") and ((.error|gsub("^\\s+|\\s+$";""))|length>0))
+          or ( ($err==null)
+               and (.stderr|type=="string")
+               and ((.stderr|gsub("^\\s+|\\s+$";""))|length>0)
+               and ( ((if (.stdout|type)=="string" then .stdout else "" end)|gsub("^\\s+|\\s+$";"")|length)==0 ) )
+        ) ) as $e3
+  | ($e1 or $e2 or $e3);
+'
+
+# Main program: derives {exitCode, observedResult} from the hook payload,
+# folding a PostToolUseFailure event to fail. Consumes $et (event_type).
+_TOOL_OUTCOME_JQ_MAIN='
+( [ (.tool_response // null), (.tool_output // null) ]
+  | map(select(type=="object"))
+  | [ .[] | (.exitCode, .exit_code, .exitcode, .status, .code, .returnCode, .return_code) ] ) as $srcCands
+| ( $srcCands + [ .exitCode, .exit_code, .status, .code ] ) as $cands
+| ( first( $cands[] | _clean(.) | select(.!=null) ) // null ) as $exit
+| ((.tool_input.command // "") | if type=="string" then . else "" end) as $cmd
+| ( if $exit != null
+    then ( if ($exit==1 and $cmd!="" and _is_ambiguous_absence($cmd))
+           then {exitCode:$exit, observedResult:"ambiguous"}
+           else {exitCode:$exit, observedResult:(if $exit==0 then "pass" else "fail" end)} end )
+    else ( if _is_failure then {exitCode:null, observedResult:"fail"} else {exitCode:null, observedResult:"ambiguous"} end )
+    end ) as $base
+| ( if ($et=="PostToolUseFailure") then ($base + {observedResult:"fail"}) else $base end )
+'
+
+# Codex re-derivation: given a host-banner $code and $cmd, produce the
+# observedResult string via the SAME tri-state (incl. the #362 grep/diff
+# carve-out) so the codex path can never diverge from the jq/node contract.
+_TOOL_OUTCOME_JQ_CODEX='
+( if ($code==0) then "pass"
+  elif ($code==1 and ($cmd|length)>0 and _is_ambiguous_absence($cmd)) then "ambiguous"
+  else "fail" end )
+'
+
+# now_epoch_ms — portable millisecond wall clock. Prefer bash5 $EPOCHREALTIME
+# (µs precision) -> ms; else GNU `date +%s%3N` when it returns pure digits
+# (BSD/macOS date echoes a literal "%3N", which is rejected); else the
+# second-granular `date +%s`*1000 fallback (resolution-honest).
+now_epoch_ms() {
+  local er="${EPOCHREALTIME:-}"
+  if [[ "$er" =~ ^([0-9]+)[.,]([0-9]{3}) ]]; then
+    printf '%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  fi
+  local gnu
+  gnu=$(date +%s%3N 2>/dev/null)
+  if [[ "$gnu" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$gnu"
+    return
+  fi
+  printf '%s000\n' "$(date +%s)"
+}
+
+# tool_call_correlation_key — a best-effort key that is stable across a tool's
+# invoke and its result. Prefers a host-provided call id; else a content hash
+# of tool_name + compact(tool_input) via whichever portable hasher is present.
+# Output is filesystem-safe (any char outside [A-Za-z0-9._-] -> '_'). The
+# content-hash fallback can theoretically collide for two identical tool+input
+# runs with overlapping lifetimes (the disclosed start_record_liveness gap) —
+# correlation is best-effort and yields null rather than a wrong number.
+tool_call_correlation_key() {
+  local stdin_json="$1"
+  local call_id key
+  call_id=$(printf '%s' "$stdin_json" | jq -r '.tool_use_id // .tool_call_id // .call_id // .id // ""' 2>/dev/null)
+  if [[ -n "$call_id" && "$call_id" != "null" ]]; then
+    key="id:${call_id}"
+  else
+    local tool_name tool_input hash
+    tool_name=$(printf '%s' "$stdin_json" | jq -r '.tool_name // ""' 2>/dev/null)
+    tool_input=$(printf '%s' "$stdin_json" | jq -c '.tool_input // null' 2>/dev/null)
+    hash=$(printf '%s%s' "$tool_name" "$tool_input" | { shasum 2>/dev/null || sha256sum 2>/dev/null || cksum; } | awk '{print $1}')
+    key="sha:${hash}"
+  fi
+  printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+tool_start_record_path() {
+  printf '%s\n' "${TELEMETRY_SESSION_DIR}/toolstart-${session_id}-$1"
+}
+
+# write_tool_start_record — records the tool's start ms on preToolUse so the
+# matching result can compute duration_ms. Best-effort/non-blocking: any
+# failure is swallowed and simply yields duration_ms:null downstream. The
+# stored value is a timestamp only — never any args/output content (privacy).
+write_tool_start_record() {
+  local stdin_json="$1"
+  [[ -z "${TELEMETRY_SESSION_DIR:-}" ]] && return 0
+  local key path
+  key=$(tool_call_correlation_key "$stdin_json") || return 0
+  [[ -z "$key" ]] && return 0
+  path=$(tool_start_record_path "$key")
+  mkdir -p "${TELEMETRY_SESSION_DIR}" 2>/dev/null || true
+  now_epoch_ms >"$path" 2>/dev/null || true
+  return 0
+}
+
+# add_tool_result_meta — enriches a tool.result event with the three #580
+# fields on its existing .tool object: duration_ms (wall-clock ms since the
+# matching invoke, or null when the start record is absent), outcome
+# (deterministic pass|fail|ambiguous), and status (host exit code int or null).
+# Never fails the hook.
+add_tool_result_meta() {
+  local event="$1" event_type="$2" stdin_json="$3"
+
+  # --- duration_ms: read + unlink the matching start record ---
+  local duration_ms="null"
+  if [[ -n "${TELEMETRY_SESSION_DIR:-}" ]]; then
+    local key path start_ms end_ms
+    key=$(tool_call_correlation_key "$stdin_json")
+    if [[ -n "$key" ]]; then
+      path=$(tool_start_record_path "$key")
+      if [[ -f "$path" ]]; then
+        start_ms=$(cat "$path" 2>/dev/null)
+        rm -f "$path" 2>/dev/null || true
+        if [[ "$start_ms" =~ ^[0-9]+$ ]]; then
+          end_ms=$(now_epoch_ms)
+          if [[ "$end_ms" =~ ^[0-9]+$ ]]; then
+            duration_ms=$(( end_ms - start_ms ))
+            (( duration_ms < 0 )) && duration_ms=0
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # --- outcome/status: hermetic jq tri-state (canonical observeResult port) ---
+  local verdict outcome status
+  verdict=$(printf '%s' "$stdin_json" | jq -c --arg et "$event_type" \
+    "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_MAIN}" 2>/dev/null)
+  [[ -z "$verdict" ]] && verdict='{"exitCode":null,"observedResult":"ambiguous"}'
+  status=$(printf '%s' "$verdict" | jq -c '.exitCode' 2>/dev/null)
+  outcome=$(printf '%s' "$verdict" | jq -r '.observedResult' 2>/dev/null)
+  [[ -z "$status" ]] && status="null"
+  [[ -z "$outcome" ]] && outcome="ambiguous"
+
+  # --- Codex-only exit-code resolution when the payload carried no clean code.
+  # Codex surfaces its exit code in the rollout banner, not the hook payload, so
+  # the jq scan alone yields ambiguous/null. Gated strictly to the codex runtime
+  # so the Claude path stays 100% hermetic (jq only, no node). An unreadable
+  # rollout leaves the honest ambiguous/null verdict untouched.
+  if [[ "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" == "codex" && "$status" == "null" ]]; then
+    local codex_lib
+    codex_lib="${TELEMETRY_DIR}/../hooks/lib/codex-exit-code.js"
+    if [[ -f "$codex_lib" ]]; then
+      local tpath call_id cmd code
+      tpath=$(printf '%s' "$stdin_json" | jq -r '.transcript_path // ""' 2>/dev/null)
+      call_id=$(printf '%s' "$stdin_json" | jq -r '.call_id // .tool_call_id // .id // ""' 2>/dev/null)
+      cmd=$(printf '%s' "$stdin_json" | jq -r '.tool_input.command // ""' 2>/dev/null)
+      if [[ -n "$tpath" ]]; then
+        code=$(FLOW_CODEX_LIB="$codex_lib" FLOW_TPATH="$tpath" FLOW_CALLID="$call_id" FLOW_CMD="$cmd" node -e '
+          try {
+            const m = require(process.env.FLOW_CODEX_LIB);
+            const c = m.readExitCodeFromRollout(process.env.FLOW_TPATH, {
+              callId: process.env.FLOW_CALLID || undefined,
+              command: process.env.FLOW_CMD || undefined,
+            });
+            if (Number.isInteger(c)) process.stdout.write(String(c));
+          } catch (e) {}
+        ' 2>/dev/null)
+        if [[ "$code" =~ ^-?[0-9]+$ ]]; then
+          status="$code"
+          outcome=$(jq -nr --argjson code "$code" --arg cmd "$cmd" \
+            "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_CODEX}" 2>/dev/null)
+          [[ -z "$outcome" ]] && outcome="fail"
+        fi
+      fi
+    fi
+  fi
+
+  echo "$event" | jq -c \
+    --argjson dm "$duration_ms" \
+    --argjson st "$status" \
+    --arg oc "$outcome" \
+    '.tool = ((.tool // {}) + {duration_ms: $dm, outcome: $oc, status: $st})'
 }
 
 # add_tool_usage_data — populates .usage on tool.invoke/tool.result events
@@ -315,14 +714,20 @@ add_tool_usage_data() {
   transcript_path=$(echo "$event" | jq -r '.hook.transcript_path // ""')
   hook_model=$(echo "$event" | jq -r '.hook.model // ""')
 
-  local turn_usage
+  local turn_usage joined
   turn_usage=""
   if [[ -n "$transcript_path" ]]; then
     turn_usage=$(usage_last_turn_usage "$transcript_path")
   fi
 
   if [[ -n "$turn_usage" ]]; then
-    echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
+    # Guard the transcript-join jq. usage_last_turn_usage is well-formed today,
+    # but if it ever emits non-JSON (a future regression), `--argjson tu` errors
+    # to empty stdout, which would blackhole the ENTIRE tool event downstream
+    # (transport_emit drops an empty event). Degrade to the model-only / full-
+    # null tiers below instead of losing the record — consistent with this
+    # feature's "never invent, always degrade gracefully, never block" contract.
+    joined=$(echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
       usage: {
         model: $tu.model,
         input_tokens: $tu.input_tokens,
@@ -332,8 +737,14 @@ add_tool_usage_data() {
         estimated_cost_usd: $tu.estimated_cost_usd,
         pricing_version: $tu.pricing_version
       }
-    }'
-  elif [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
+    }' 2>/dev/null) || joined=""
+    if [[ -n "$joined" ]]; then
+      printf '%s\n' "$joined"
+      return
+    fi
+  fi
+
+  if [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
     echo "$event" | jq -c --arg m "$hook_model" '. + {
       usage: {
         model: $m,
@@ -467,6 +878,16 @@ add_event_specific_data() {
       ;;
     preToolUse|PreToolUse|postToolUse|PostToolUse|PostToolUseFailure)
       event=$(add_tool_data_and_emit_delegation "$event" "$event_type" "$stdin_json")
+      case "$event_type" in
+        preToolUse|PreToolUse)
+          # #580: record the tool's start ms so its result can compute duration.
+          write_tool_start_record "$stdin_json"
+          ;;
+        postToolUse|PostToolUse|PostToolUseFailure)
+          # #580: add .tool.duration_ms / .tool.outcome / .tool.status.
+          event=$(add_tool_result_meta "$event" "$event_type" "$stdin_json")
+          ;;
+      esac
       if [[ "$TELEMETRY_USAGE_TRACKING" == "true" ]]; then
         event=$(add_tool_usage_data "$event")
       fi

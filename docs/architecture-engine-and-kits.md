@@ -102,9 +102,26 @@ Kit trust is orthogonal to engine privilege. A marketplace may call a kit offici
 
 The answer is determined by validation, activation, and gate evidence, not by a privileged kit list.
 
+## The Portfolio Layer Doctrine
+
+The engine/kits split here is Flow Agents' instance of the portfolio-wide **Layer Doctrine**
+([surface/docs/architecture/portfolio-layer-doctrine.md](https://github.com/kontourai/surface/blob/main/docs/architecture/portfolio-layer-doctrine.md)):
+dependency direction is one-way up the stack (open trust format → building-block tools → Surface →
+products), and no layer reaches sideways into a peer. A product engine (e.g. `@kontourai/veritas`)
+never depends on the platform, and a **kit consumes an engine only through its CLI + recorded
+artifacts, never as an npm library import** — the whole point of the manifest/catalog model above.
+Both edges are now enforced executably: veritas-side by `check-no-flow-agents-dep.mjs` (the engine
+declares no flow-agents dependency) and here by [`scripts/check-layer-boundary.mjs`](../scripts/check-layer-boundary.mjs)
+(no kit imports the veritas engine as a library). See veritas's
+[Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md)
+for the canonical engine-vs-kit capability inventory that the Veritas Governance Kit row above
+builds on.
+
 ## Related docs
 
 - [Flow Kit Authoring Guide](kit-authoring-guide.md)
 - [Flow Kit Repository Contract](flow-kit-repository-contract.md)
 - [Runtime Hook Surface spec](spec/runtime-hook-surface.md)
 - [Verifiable Trust](verifiable-trust.md)
+- [Veritas Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md) — how `@kontourai/veritas` splits into an engine library + the kit-owned product surface
+- [Portfolio Layer Doctrine](https://github.com/kontourai/surface/blob/main/docs/architecture/portfolio-layer-doctrine.md)

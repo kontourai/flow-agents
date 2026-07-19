@@ -59,7 +59,11 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | builder-lifecycle-authorization.schema.json | Builder Lifecycle Authorization | https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json |
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
 | flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |
+| grounded-execution-narrative.schema.json | Flow Agents Grounded Execution Narrative | https://flow-agents.dev/schemas/grounded-execution-narrative.schema.json |
 | lifecycle-authority-keys.schema.json | Lifecycle Authority Key Registry | https://kontourai.dev/schemas/lifecycle-authority-keys.schema.json |
+| narrative-eval-result.schema.json | Flow Agents Narrative Eval Result | https://flow-agents.dev/schemas/narrative-eval-result.schema.json |
+| narrative-runtime-projection.schema.json | Flow Agents Grounded Runtime Projection | https://flow-agents.dev/schemas/narrative-runtime-projection.schema.json |
+| narrative-source-manifest.schema.json | Flow Agents Narrative Source Manifest | https://flow-agents.dev/schemas/narrative-source-manifest.schema.json |
 | workflow-acceptance.schema.json | Flow Agents Workflow Acceptance | https://flow-agents.dev/schemas/workflow-acceptance.schema.json |
 | workflow-critique.schema.json | Flow Agents Workflow Critique | https://flow-agents.dev/schemas/workflow-critique.schema.json |
 | workflow-evidence.schema.json | Flow Agents Workflow Evidence | https://flow-agents.dev/schemas/workflow-evidence.schema.json |
@@ -67,6 +71,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | workflow-learning.schema.json | Flow Agents Workflow Learning | https://flow-agents.dev/schemas/workflow-learning.schema.json |
 | workflow-release.schema.json | Flow Agents Workflow Release Readiness | https://flow-agents.dev/schemas/workflow-release.schema.json |
 | workflow-state.schema.json | Flow Agents Workflow State | https://flow-agents.dev/schemas/workflow-state.schema.json |
+| workflow-waves.schema.json | Flow Agents Workflow Waves | https://flow-agents.dev/schemas/workflow-waves.schema.json |
 
 Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validation, `scripts/hooks/stop-goal-fit.js`, and `scripts/hooks/workflow-steering.js`. The package-internal writer is not an agent or consumer interface.
 
@@ -96,6 +101,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | agentic-engineering | skills/agentic-engineering/SKILL.md | Eval-first execution, task decomposition, and cost-aware model routing for AI-driven development workflows. |
 | browser-test | skills/browser-test/SKILL.md | Headless browser automation via Playwright — screenshots, accessibility checks, form filling, UI testing, DOM inspection. |
 | builder-shape | kits/builder/skills/builder-shape/SKILL.md | Builder Kit shaping entrypoint. Turns a raw idea into a provider-neutral, reviewable backlog proposal and stops before build selection unless the user explicitly continues. |
+| consult-standards | kits/veritas-governance/skills/consult-standards/SKILL.md | Get just-in-time Veritas governance guidance for a file or work area before editing it: run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, the Repo Standards rules that apply, their do/don't/exampl... |
 | dependency-update | skills/dependency-update/SKILL.md | Analyze and upgrade project dependencies — latest versions, security vulnerabilities, actionable update plan across all package managers. |
 | design-probe | kits/builder/skills/design-probe/SKILL.md | Generic one-question-at-a-time design probe for turning unclear goals, designs, and handoffs into shared understanding. |
 | eval-rebuild | skills/eval-rebuild/SKILL.md | Project-specific build and install commands for the eval feedback loop. Injected into eval-builder agent. Replace this skill for different build systems. |
@@ -104,6 +110,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |
+| standards-authoring | kits/veritas-governance/skills/standards-authoring/SKILL.md | Author or update a repo's Veritas Repo Standards through the kit's standards-authoring flow: run `veritas init --explore`/`--guided` to derive a proposed starter set (project name, repo-shape-adaptive Repo Map nodes, evidence-check infer... |
 
 ## Agents
 

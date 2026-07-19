@@ -11,6 +11,12 @@ CLI invocation plus a small kit-local trust.bundle adapter. It does **not** fork
 reimplement Veritas's Repo Standards / evidence-check evaluation — Veritas evaluates; the kit
 only projects Veritas's own recorded verdict into the Flow trust.bundle vocabulary.
 
+The engine/surface line this kit builds on — which veritas capabilities stay an importable
+evaluation-engine library and which product surface moves into this kit (the thick-kit
+migration, [#646](https://github.com/kontourai/flow-agents/issues/646)–652) — is ratified in
+veritas's [Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md)
+doc, which also freezes the CLI + artifact + claim-shape contract this kit's adapter consumes.
+
 ## What it contains
 
 | Asset | Path | Purpose |
@@ -20,6 +26,11 @@ only projects Veritas's own recorded verdict into the Flow trust.bundle vocabula
 | Fixtures | `fixtures/readiness/*.readiness-report.json` | Captured **real** Veritas readiness reports (a ready clean tree, and a not-ready tree with a required CLI artifact deleted) used by the eval. |
 | Flow | `flows/exemption-issuance.flow.json` | Single-gate agentless flow `request -> human-approval-gate -> issue`. The gate requires a **verified** `no-agent-delivery-exemption-approval` trust.bundle claim (`subjectType: "delivery-scope"`) before the `issue` step's write is flow-sanctioned. Issues a `delivery/DECLARED` exemption entry per ADR 0022 §2/§3. |
 | Skill | `skills/exemption-usage-review/SKILL.md` | Periodic audit skill (ADR 0022 §3): walks `delivery/DECLARED` + its `git log --follow` history and reports every standing exemption (scope, reason, approver, age since `declared_at`), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement — read-only, never mutates `delivery/DECLARED` or the reconciler. |
+| Provisions | `assets/starter-standards/**` → `provisions[]` | Starter `.veritas/` Repo Standards a consumer repo needs to run `veritas readiness` — a faithful snapshot of `veritas init`'s Day-0 output (Repo Map, Repo Standards, authority settings, `GOVERNANCE.md`, `README.md`, claim store), shipped as data and copied verbatim by `flow-agents kit provision`. See "Scaffolding starter standards" below. |
+| Provisions | `assets/starter-hooks/githooks/**` → `provisions[]` | The two governance git hooks (`veritas setup repo-hooks`'s static output): `.githooks/pre-push` (`npm run --if-present prepush`) and `.githooks/post-commit` (`veritas readiness`). Shipped verbatim; landed non-executable — activation (`chmod +x` + `git config core.hooksPath`) is a documented operator step a copy cannot perform. See "Provisioning the governance hooks". |
+| Flow | `flows/standards-authoring.flow.json` | Single-gate agentless flow `propose -> human-approval-gate -> apply`. The gate requires a **verified** `standards-authoring-approval` trust.bundle claim (`subjectType: "repo-governance-change"`) before `veritas init --apply` writes the derived standards. Veritas derives and writes; the kit gates the human sign-off. See "How to author standards for a repo". |
+| Skill | `skills/standards-authoring/SKILL.md` | Runbook for the standards-authoring flow: runs `veritas init --explore`/`--guided` to derive a recommendation (project name, adaptive Repo Map nodes, evidence-check inference, governance-block splice), surfaces it for human approval, then `veritas init --apply`. Wraps the veritas CLI; reimplements nothing. |
+| Skill | `skills/consult-standards/SKILL.md` | Just-in-time governance guidance before editing: tells an agent to run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, applicable Repo Standards rules (do/don't/examples), and latest surface status, then edit within them. Pull-based advisory — does not block (the PreToolUse hook is enforcement). No MCP server. See "Consulting standards just in time". |
 
 The gate uses provider-neutral Flow vocabulary (`kind: "trust.bundle"`, `bundle_claim`) — the
 same vocabulary `kits/builder/flows/build.flow.json` uses. Veritas is simply the producer that
@@ -45,6 +56,118 @@ flow attach-evidence readiness --gate gate-check-gate --file readiness.bundle --
 flow evaluate readiness --gate gate-check-gate --exit-code
 #    exit 0 when readiness is ready (claim verified); exit 1 (block) otherwise.
 ```
+
+## Scaffolding starter standards
+
+A repo needs a `.veritas/` Repo Standards set before `veritas readiness` can evaluate it. For kit
+users this replaces standalone `veritas init`: the kit declares that starter set as `provisions[]`
+in `kit.json`, and the engine copies it into the repo.
+
+```bash
+# Copy the starter .veritas/ standards into the current repo (create-only; never overwrites).
+flow-agents kit provision veritas-governance
+#   -> .veritas/repo-map.json, .veritas/repo-standards/default.repo-standards.json,
+#      .veritas/authority/default.authority-settings.json, .veritas/GOVERNANCE.md,
+#      .veritas/README.md, veritas.claims.json
+# (flow-agents init --activate-kit veritas-governance provisions the same set at adoption time.)
+
+# Then run readiness against the scaffolded repo.
+veritas readiness --working-tree     # 0 failures on the fresh starter
+```
+
+The provisioned files are a **faithful snapshot of `veritas init`'s Day-0 output** — data the kit
+copies verbatim, not evaluation logic it reimplements. The project name is a `your-project`
+placeholder; edit the Repo Map's work-area graph and `evidence.evidenceChecks[0].command` for your
+repo, then regenerate the claim store with `veritas claim init`.
+
+**Beyond the static starter:** the per-repo *derivation* `veritas init` performs (project-name
+slug, repo-shape-adaptive Repo Map nodes, evidence-check inference) and the *splice* of the
+governance block into an existing `AGENTS.md`/`CLAUDE.md` (a create-only copy cannot edit files in
+place — the starter's `ai-instruction-files-synced` standard reports advisory until those blocks
+are wired) are handled by the **standards-authoring flow** below; repo-hook setup remains #648.
+
+## How to author standards for a repo
+
+Beyond the static starter set, the kit's `standards-authoring` flow drives Veritas's *adaptive*
+authoring — deriving the project name, repo-shape Repo Map nodes, and evidence-check command from
+the actual repo, and splicing the governance block into existing `AGENTS.md`/`CLAUDE.md` (the
+per-repo work a verbatim provision copy cannot do). The `standards-authoring` **skill**
+(`skills/standards-authoring/SKILL.md`) is the operator's runbook; **Veritas does the derivation
+and the write — the kit only gates the human sign-off.**
+
+```bash
+# 1. PROPOSE — derive a recommendation (writes nothing under .veritas/ yet).
+veritas init --explore          # or: veritas init --guided --answers <answers.json>
+
+# 2. APPROVE — a human reviews the recommendation, then authors a Hachure trust.bundle asserting
+#    a standards-authoring-approval / repo-governance-change claim with status verified.
+flow init
+flow start kits/veritas-governance/flows/standards-authoring.flow.json --run-id authoring
+flow attach-evidence authoring --gate human-approval-gate --file approval.bundle --bundle
+flow evaluate authoring --gate human-approval-gate --exit-code
+#    exit 0 once the approval claim is verified; exit 1 (block) otherwise.
+
+# 3. APPLY — only after the gate passes, write the approved standards (hash-verified;
+#    refuses to overwrite existing standards without --force).
+veritas init --apply --plan <path-to-recommendation-artifact>
+```
+
+Like `exemption-issuance`'s gate, "human-approved" here is an **operating convention** the claim
+encodes, not a structural human-only guarantee — see "Human-approval evidence: what is and is not
+enforced" below. This flow is **agentless** (the kit declares no `flow_step_actions`; the approval
+bundle is human-authored out of band, and the skill is the runbook, not a step-bound action). The
+kit **wraps** the `veritas` CLI and reimplements no derivation or evaluation.
+
+## Provisioning the governance hooks
+
+The kit ships the two governance git hooks (`veritas setup repo-hooks`'s static output) as
+`provisions[]`, so kit adoption drops them into the repo alongside the starter standards:
+
+- `.githooks/pre-push` — runs `npm run --if-present prepush` before a push.
+- `.githooks/post-commit` — runs `veritas readiness --changed-from HEAD~1 --changed-to HEAD` after each commit.
+
+```bash
+# 1. Land the hook files (part of `kit provision` / `init --activate-kit`).
+flow-agents kit provision veritas-governance
+
+# 2. ACTIVATE — the two steps a create-only file copy cannot perform:
+chmod +x .githooks/pre-push .githooks/post-commit
+git config core.hooksPath .githooks
+```
+
+**Activation is required and is not a copy.** A provision lands the hook files **non-executable**
+and does not touch git config — so until you `chmod +x` them and point `core.hooksPath` at
+`.githooks`, git will not run them. This is the same class of limitation as the governance-block
+splice above: the engine's file copy is deliberately agent-blind (it never sets an executable bit
+or mutates git config), so making the hooks *active* is an explicit operator step. The hooks
+themselves only **invoke** the `veritas` CLI (`npm run prepush`, `veritas readiness`); the kit
+reimplements no evaluation, and the live per-edit PreToolUse *evaluation* entry point stays in the
+engine (`evaluatePreToolUse` → `evaluateRepoStandards`), reached by the installed hook shelling
+into `veritas` — hook wiring is the kit's; per-edit evaluation is the engine's.
+
+## Consulting standards just in time
+
+The `consult-standards` skill (`skills/consult-standards/SKILL.md`) gives an agent just-in-time
+governance guidance **before** it edits a file, so it shapes the change to pass rather than
+learning about a violation only when the PreToolUse hook blocks the write:
+
+```bash
+veritas explain --file src/path/to/file.ts     # rules that apply to this file
+veritas explain --work-area <work-area-id>      # rules for a whole Repo Map work area
+```
+
+`veritas explain` prints a **`Veritas JIT Context`** briefing — the `.veritas/GOVERNANCE.md`
+excerpt, one block per matching Repo Standard (`Rule`/`Kind`/`Enforcement Level`/`Summary`/
+`Do`/`Do not`/`Good`/`Bad`/`Context`), and the latest recorded surface status for each. The skill
+is **pull-based advisory**: it never blocks (enforcement stays the engine-side PreToolUse hook)
+and reimplements no rule evaluation — `veritas explain` does the matching and projection.
+
+**No MCP server.** Just-in-time guidance here is an agent invoking `veritas explain`, not a
+standing MCP service. Per the flow-agents MCP posture (ADR 0011), MCP never carries the gate and
+enforcement stays hooks; this skill is the deliberate agent-pull replacement for a guidance
+server — the veritas-owned MCP guidance server the migration once imagined was never actually
+built (the `@modelcontextprotocol/sdk` dependency in veritas is only the evidence-check *client*),
+so this slice builds the guidance path new in the kit rather than moving one.
 
 ## How to issue a no-agent-delivery exemption
 
@@ -156,13 +279,17 @@ verdict derives `verified` → the gate **passes**.
 
 This matches Veritas's own `readinessHasBlockingFailure` helper (`veritas/src/surface/readiness.mjs`)
 and Surface's weakest-link claim derivation (`buildTrustReport` downgrades a readiness claim to
-`rejected` on any rejected Require). The adapter intentionally does **not** apply Veritas's
-`promotion_allowed` short-circuit — `promotion_allowed` is a workstream-routing hint (set by
-file-pattern lane resolution in `src/repo/routing.mjs`), not a safety signal, and applying it as
-one lets a record with blocking Require failures read as ready. That short-circuit is a filed
-Veritas bug, [kontourai/veritas#106](https://github.com/kontourai/veritas/issues/106), not a
-legitimate alternate reading. Investigation conclusion: the adapter's stricter blocking-failure
-derivation is correct today and will agree with Veritas's own exported functions once #106 lands.
+`rejected` on any rejected Require). The adapter does **not** apply Veritas's `promotion_allowed`
+short-circuit as a safety signal — `promotion_allowed` is a workstream-routing hint (set by
+file-pattern lane resolution in `src/repo/routing.mjs`) and cannot account for blocking failures.
+The historical divergence this guarded against,
+[kontourai/veritas#106](https://github.com/kontourai/veritas/issues/106) (Veritas's exported
+verdict functions honored `promotion_allowed` before checking blocking failures), is **fixed**:
+`readinessVerdict`/`readinessSurfaceStatus` now check `readinessHasBlockingFailure()` first
+(regression-tested in veritas `tests/surface/readiness-verdict.test.mjs`), so the adapter's
+derivation and Veritas's exported functions agree. The adapter keeps its own derivation because
+kit code consumes Veritas's recorded artifact, not Veritas's library exports — that
+blocking-failure semantics is now frozen in veritas's Engine / Surface Seam doc (see above).
 
 ## Trust status
 
@@ -172,9 +299,13 @@ to a later slice (see the WS5 shaping's open decisions).
 
 ## Not in slice 1
 
-Skills `consult-standards` and `governance-evidence`, the fuller `merge-readiness` flow, the
-`standards-authoring` flow, and the `knowledge` dependency are later slices — see the WS5
-backlog. `exemption-usage-review` (ADR 0022 §3's periodic audit skill, walking
+Skills `consult-standards` and `governance-evidence`, the fuller `merge-readiness` flow, and the
+`knowledge` dependency are later slices — see the WS5 backlog. The **starter-standards scaffold**
+(`veritas init`'s Day-0 `.veritas/` set) **has now shipped** as `provisions[]` (see "Scaffolding
+starter standards"), and the **`standards-authoring` flow** that covers the per-repo derivation
+and governance-block splice a static copy cannot **has now shipped** too (see "How to author
+standards for a repo") — both #647 Slice 2; repo-hook setup remains #648.
+`exemption-usage-review` (ADR 0022 §3's periodic audit skill, walking
 `delivery/DECLARED` history and surfacing standing exemptions for owner re-confirmation —
 process visibility, not enforcement) **has now shipped** — see "What it contains" above and
 "How to run the review". Nothing schedules it automatically; an operator runs it periodically

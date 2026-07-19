@@ -42,7 +42,36 @@ Execution may upgrade to a stronger mode when risk increases. Downgrades require
 - Independent tasks with no shared files can run in the same wave.
 - Shared files, generated artifacts, migrations, and cross-cutting contracts should be serialized unless the plan gives explicit file ownership.
 - Worker delegation must name the exact worker role (`tool-worker`) rather than spawning an unnamed/default implementation agent.
-- After each wave, collect results, check conflicts, and update the session artifact before starting the next wave.
+- After each wave, reconcile results against the wave manifest (below), check conflicts, and update the session artifact before starting the next wave.
+
+## Wave Manifest And Reconciliation
+
+Fan-out collection is machine-checkable, not prose. A reduce step that silently
+drops a worker's stream is worse than one that errors.
+
+- **Declare before dispatch.** Before dispatching a wave that delegates work,
+  declare it in the session's `waves.json` sidecar (schema:
+  `schemas/workflow-waves.schema.json`): `wave_id`, owning step, and one
+  `expected_workers` entry per worker. The expected count (M) must exist before
+  any result arrives.
+- **One terminal record per worker.** Each worker lands exactly one terminal
+  status record: `completed`, `failed`, or `blocked`. Duplicate records and
+  undeclared reporters are validation errors.
+- **Reconcile at wave close.** The orchestrator's collect step is
+  reconcile-against-manifest: record every declared worker that has no terminal
+  record as `not_reported` — never silently absorb a missing worker — then
+  record the wave's `reconciliation` with `expected_count` M, `reported_count`
+  N, and an explicit "N of M reported" summary naming the `not_reported`
+  workers (for example "2 of 3 reported; worker-3 not_reported").
+- **Incomplete is visible, never silent.** A wave is `complete` only when N
+  equals M. An incomplete wave stays visible data and routes to re-dispatch, a
+  blocker report, or an explicit accepted gap; it must never be treated as
+  complete because the missing worker was forgotten.
+- **Enforcement boundary (slice 1).** `validate-workflow-artifacts` enforces
+  the shape and the cross-record arithmetic (counts, exactly-one-record,
+  undeclared reporters, impossible `complete` claims) as data-level validation.
+  Stop-hook refusal of wave completion is #663 part 3 (slice 2), deferred until
+  the hook correctness issues (#453/#450/#494) are resolved.
 
 ## Delegation: Model Routing
 

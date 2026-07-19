@@ -22,7 +22,7 @@ Use these local references when you need more detail:
 - [ADR 0005](adr/0005-kubernetes-inspired-resource-contracts.md) records the Kontour Resource Contract direction.
 - [Kontour Resource Contract](kontour-resource-contract.md) documents the shared durable record shape.
 - [Flow Kit Repository Contract](flow-kit-repository-contract.md) documents local kit validation and activation boundaries.
-- [Veritas Integration Boundary](veritas-integration.md) documents optional governance evidence.
+- [Veritas Integration Boundary](veritas-integration.md) records the early integration rationale; the shipped path is the **Veritas Governance Kit** (`kits/veritas-governance`) — see its [README](../kits/veritas-governance/docs/README.md) and [Engine and kits](architecture-engine-and-kits.md).
 
 ## Coordination Map
 
@@ -63,10 +63,10 @@ flowchart LR
 | Flow Agents | Agent-facing workflow bundles, skills, sidecars, artifact contracts, evals, runtime export, provider wiring, and local-first docs. | Does not become the core workflow engine for all Kontour products and should not copy product-native rule models into this repo. |
 | Flow | Generic workflow semantics, Flow Definitions, gate transitions, attempts, route-back behavior, Flow Runs, and Flow Reports. | Flow Agents may consume or project Flow concepts, but Flow owns enforcement semantics once the Flow surface is available. |
 | Builder Kit | The first Kontour-authored Flow Kit for build work: shaping, pickup probes, planning, execution, review, verification, publication, release readiness, and learning workflows. | Flow Agents validates, installs, activates, and routes Builder Kit assets; it does not make every Builder Kit specialization a core Flow Agents concept. |
-| Veritas | Repo-local standards, authority settings, policy/rule checks, and native governance reports. | Flow Agents records compact Veritas evidence references when configured; Veritas is optional and not a mandatory dependency for every workflow. |
+| Veritas | The repo-local governance **evaluation engine** (`@kontourai/veritas`): repo standards, authority settings, policy/rule checks, merge-readiness, and native governance reports. | Flow Agents ships the **Veritas Governance Kit** (`kits/veritas-governance`), which owns the repo-installed governance surface (standards scaffold, hooks, authoring, agent guidance) and gates a real `veritas readiness` verdict as a `software-readiness-verdict` trust.bundle claim — wrapping the engine's CLI, never importing or reimplementing it. The kit is optional; the engine it wraps is a standalone library. |
 | Surface | Portable trust state, claims, TrustReports, Trust Snapshots, and user-facing trust surfaces. | Flow Agents can reference Surface-shaped claims for gates, but Surface owns claim models and trust presentation. |
 
-**Current state:** Builder Kit is the first proof point for extracting out-of-the-box behavior into normal Flow Kits. Veritas integration is documented as optional and adapter-driven. Surface references appear as a trust-state boundary in local Veritas and Builder Kit evidence docs.
+**Current state:** Builder Kit is the first proof point for extracting out-of-the-box behavior into normal Flow Kits. Veritas is consumed through the **Veritas Governance Kit** (`kits/veritas-governance`) — an agentless kit that wraps the `veritas` CLI and projects its recorded readiness verdict into a trust.bundle gate; it owns the repo-installed governance surface, while veritas stays the standalone evaluation engine. Surface references appear as a trust-state boundary in local Veritas and Builder Kit evidence docs.
 
 **Future direction:** Flow Agents should support more runtime adapters, provider adapters, and Flow Kits without forcing all users to install Builder Kit, Veritas, Surface, or a specific hosted provider.
 

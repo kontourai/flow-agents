@@ -133,6 +133,72 @@ echo "--- exemption-issuance: gate blocks without a verified approval, passes wi
 exemption_gate_case "$KIT/fixtures/exemption/approved.trust-bundle.json"     "exemption-positive" 0
 exemption_gate_case "$KIT/fixtures/exemption/not-approved.trust-bundle.json" "exemption-negative" 1
 
+# --- standards-authoring flow (Slice 2 PR3): registration, gate shape, gate cases ---
+# Agentless propose -> apply flow whose human-approval-gate blocks the `veritas init --apply`
+# write until a human-authored standards-authoring-approval claim is verified. The kit only
+# gates the sign-off; Veritas does the derivation and the write (no evaluation reimplemented).
+AUTHORING_FLOWDEF="$KIT/flows/standards-authoring.flow.json"
+if node -e "const f=require('$AUTHORING_FLOWDEF'); if(f.id!=='veritas-governance.standards-authoring') process.exit(1);" 2>/dev/null; then
+  pass "standards-authoring flow file has id veritas-governance.standards-authoring"
+else
+  fail "standards-authoring flow file missing or has unexpected id"
+fi
+if rg -q '"id": *"veritas-governance\.standards-authoring"' "$KIT/kit.json" && rg -q '"path": *"flows/standards-authoring\.flow\.json"' "$KIT/kit.json"; then
+  pass "standards-authoring flow is registered in kit.json flows[]"
+else
+  fail "standards-authoring flow is NOT registered in kit.json flows[]"
+fi
+if rg -q '"id": *"veritas-governance\.standards-authoring"' "$KIT/kit.json" && rg -q '"path": *"skills/standards-authoring/SKILL.md"' "$KIT/kit.json"; then
+  pass "standards-authoring skill is registered in kit.json skills[]"
+else
+  fail "standards-authoring skill is NOT registered in kit.json skills[]"
+fi
+# Agentless invariant: the kit declares no flow_step_actions (would opt into Builder's
+# producer-ownership contract and break the agentless gate flows).
+if rg -q 'flow_step_actions' "$KIT/kit.json"; then
+  fail "kit.json declares flow_step_actions — veritas-governance flows are agentless"
+else
+  pass "kit stays agentless (no flow_step_actions)"
+fi
+if node -e "
+const f=require('$AUTHORING_FLOWDEF');
+const g=f.gates['human-approval-gate'];
+const bc=g.expects[0].bundle_claim;
+if (g.expects[0].kind!=='trust.bundle') process.exit(1);
+if (bc.claimType!=='standards-authoring-approval') process.exit(1);
+if (bc.subjectType!=='repo-governance-change') process.exit(1);
+if (JSON.stringify(bc.accepted_statuses)!=='[\"verified\"]') process.exit(1);
+" 2>/dev/null; then
+  pass "standards-authoring gate expects[] kind is trust.bundle and pins claimType/subjectType/accepted_statuses exactly"
+else
+  fail "standards-authoring gate expects[] shape does not match the pinned claim selector"
+fi
+# Positive/negative gate cases against the committed fixtures. $1 bundle, $2 label, $3 expect.
+authoring_gate_case() {
+  local bundle="$1" label="$2" expect="$3"
+  local work="$TMP_DIR/$label"; mkdir -p "$work"; ( cd "$work" && node "$FLOW_CLI" init >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" start "$AUTHORING_FLOWDEF" --run-id "$label" >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" attach-evidence "$label" --gate human-approval-gate --file "$bundle" --bundle >"$work/attach.out" 2>&1 )
+  if ! rg -q 'kind: trust.bundle' "$work/attach.out"; then
+    fail "[$label] evidence did not attach as kind: trust.bundle"; sed -n '1,20p' "$work/attach.out"; return
+  fi
+  ( cd "$work" && node "$FLOW_CLI" evaluate "$label" --gate human-approval-gate --exit-code >"$work/eval.out" 2>&1 )
+  local got=$?
+  if [[ "$got" == "$expect" ]]; then
+    pass "[$label] standards-authoring gate evaluate exit $got as expected"
+  else
+    fail "[$label] standards-authoring gate evaluate exit $got, expected $expect"; sed -n '1,20p' "$work/eval.out"
+  fi
+}
+authoring_gate_case "$KIT/fixtures/standards-authoring/approved.trust-bundle.json"     "authoring-positive" 0
+authoring_gate_case "$KIT/fixtures/standards-authoring/not-approved.trust-bundle.json" "authoring-negative" 1
+# No-fork: the authoring skill wraps the veritas CLI; it must not vendor rule/claim evaluation.
+if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine|repo-standards/default\.repo-standards\.json' "$KIT/skills/standards-authoring" "$KIT/flows/standards-authoring.flow.json" 2>/dev/null; then
+  fail "standards-authoring skill/flow appears to vendor Veritas evaluation logic (no-fork violated)"
+else
+  pass "no-fork: standards-authoring wraps the veritas CLI, no vendored rule/claim engine"
+fi
+
 # --- exemption-issuance: issue-step DECLARED append semantics (AC4) --------------
 # Seed a scratch delivery/DECLARED with main's real 2-entry array (inlined here, not read
 # live from the repo, so this eval is not coupled to that file's future contents), then
@@ -362,6 +428,196 @@ if command -v "$VBIN" >/dev/null 2>&1 && [[ -n "${VERITAS_GOVERNED_REPO:-}" && -
   fi
 else
   echo "  - SKIP live Veritas leg (set VERITAS_BIN + VERITAS_GOVERNED_REPO to enable); fixtures are captured real output"
+fi
+
+# --- Starter-standards provisioning (Slice 2 PR2): the kit scaffolds a runnable .veritas/ ---
+# The kit declares its starter Repo Standards as provisions[]; `kit provision` copies them into
+# a consumer repo. This asserts the scaffold lands and is well-formed; when a Veritas binary is
+# available it further asserts `veritas readiness` runs end-to-end against the scaffolded repo.
+echo "--- starter-standards provisioning ---"
+FA_CLI="$ROOT/build/src/cli.js"
+if [[ ! -f "$FA_CLI" ]]; then
+  fail "flow-agents CLI not built at build/src/cli.js (run npm run build)"
+else
+  prov="$TMP_DIR/provisioned-repo"; mkdir -p "$prov"
+  if node "$FA_CLI" kit provision "$KIT" --target "$prov" >"$TMP_DIR/provision.out" 2>&1; then
+    pass "kit provision scaffolds starter standards into a consumer repo"
+  else
+    fail "kit provision failed"; sed -n '1,20p' "$TMP_DIR/provision.out"
+  fi
+  # Every declared provision target must land and (for JSON) parse.
+  starter_targets=(
+    ".veritas/repo-map.json"
+    ".veritas/repo-standards/default.repo-standards.json"
+    ".veritas/authority/default.authority-settings.json"
+    ".veritas/GOVERNANCE.md"
+    ".veritas/README.md"
+    "veritas.claims.json"
+  )
+  for rel in "${starter_targets[@]}"; do
+    if [[ -f "$prov/$rel" ]]; then
+      if [[ "$rel" == *.json ]]; then
+        if node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$prov/$rel" >/dev/null 2>&1; then
+          pass "scaffolded $rel is present and valid JSON"
+        else
+          fail "scaffolded $rel is not valid JSON"
+        fi
+      else
+        pass "scaffolded $rel is present"
+      fi
+    else
+      fail "expected scaffolded file missing: $rel"
+    fi
+  done
+  # The scaffold must reference the Veritas engine's OWN starter output, not reimplement it:
+  # every provision source lives under assets/, never in adapter/ or flows/ (no-fork already
+  # scopes there). Assert the declared sources exist inside the kit's assets tree.
+  if node -e "
+    const fs=require('fs'),path=require('path');
+    const kit=JSON.parse(fs.readFileSync(process.argv[1]+'/kit.json','utf8'));
+    const bad=(kit.provisions||[]).filter(p=>!p.path.startsWith('assets/')||!fs.existsSync(path.join(process.argv[1],p.path)));
+    if(bad.length){console.error('bad provisions:',bad.map(p=>p.id).join(','));process.exit(1)}
+  " "$KIT" >/dev/null 2>&1; then
+    pass "all starter provisions source from the kit's assets/ tree"
+  else
+    fail "a starter provision points outside assets/ or at a missing file"
+  fi
+  # Live: a Veritas binary must be able to run readiness against the scaffolded repo.
+  VBIN2="${VERITAS_BIN:-veritas}"
+  if command -v "$VBIN2" >/dev/null 2>&1 || [[ -x "$VBIN2" ]]; then
+    ( cd "$prov" && git init -q && printf '{"name":"scaffold-eval","scripts":{"test":"node -e \"process.exit(0)\""}}\n' > package.json \
+        && git add -A && git -c user.email=eval@local -c user.name=eval commit -qm scaffold ) >/dev/null 2>&1
+    if ( cd "$prov" && "$VBIN2" readiness --working-tree >/dev/null 2>&1 ); then :; fi
+    if ls "$prov/.kontourai/veritas/evidence/"*.json >/dev/null 2>&1; then
+      pass "veritas readiness runs end-to-end on the kit-scaffolded repo (evidence report produced)"
+    else
+      fail "veritas readiness produced no evidence report on the scaffolded repo"
+    fi
+  else
+    echo "  - SKIP scaffold readiness leg (no Veritas binary; set VERITAS_BIN to enable)"
+  fi
+fi
+
+# --- Governance git-hook provisioning (Slice 3 PR / #648) --------------------------
+# The kit ships the two governance git hooks as provisions[]; `kit provision` lands them
+# (non-executable), and a documented chmod + core.hooksPath step activates them. This asserts
+# the hook files land with the expected bodies and that, once activated, the pre-push hook fires.
+echo "--- governance git-hook provisioning ---"
+FA_CLI2="$ROOT/build/src/cli.js"
+if [[ ! -f "$FA_CLI2" ]]; then
+  fail "flow-agents CLI not built at build/src/cli.js (run npm run build)"
+else
+  hookrepo="$TMP_DIR/hook-provisioned-repo"; mkdir -p "$hookrepo"
+  ( cd "$hookrepo" && git init -q && printf '{"name":"hook-eval","scripts":{"prepush":"echo PREPUSH-RAN"}}\n' > package.json )
+  if node "$FA_CLI2" kit provision "$KIT" --target "$hookrepo" >"$TMP_DIR/hookprov.out" 2>&1; then
+    pass "kit provision lands the governance git hooks"
+  else
+    fail "kit provision (hooks) failed"; sed -n '1,20p' "$TMP_DIR/hookprov.out"
+  fi
+  # Both hook files present, match the committed kit assets byte-for-byte, AND carry their
+  # defining command. The byte-match alone cannot catch a corrupted kit asset (a bad asset is
+  # copied verbatim and still matches itself), so a content assertion pins what each hook must do.
+  declare -A hook_must_contain=(
+    [pre-push]='npm run --if-present prepush'
+    [post-commit]='veritas readiness --changed-from HEAD~1 --changed-to HEAD'
+  )
+  for hook in pre-push post-commit; do
+    if [[ -f "$hookrepo/.githooks/$hook" ]]; then
+      if cmp -s "$hookrepo/.githooks/$hook" "$KIT/assets/starter-hooks/githooks/$hook"; then
+        pass "scaffolded .githooks/$hook matches the kit asset byte-for-byte"
+      else
+        fail "scaffolded .githooks/$hook differs from the kit asset"
+      fi
+      if grep -qF "${hook_must_contain[$hook]}" "$hookrepo/.githooks/$hook"; then
+        pass "scaffolded .githooks/$hook invokes its defining command (${hook_must_contain[$hook]})"
+      else
+        fail "scaffolded .githooks/$hook is missing its defining command (${hook_must_contain[$hook]}) — corrupted asset?"
+      fi
+    else
+      fail "expected git hook missing: .githooks/$hook"
+    fi
+  done
+  # Provisions land non-executable by design (the engine copy is agent-blind) — assert for BOTH.
+  for hook in pre-push post-commit; do
+    if [[ -x "$hookrepo/.githooks/$hook" ]]; then
+      fail "provisioned .githooks/$hook is already executable — provisioning should be agent-blind (no +x)"
+    else
+      pass "provisioned .githooks/$hook lands non-executable (agent-blind copy; activation is explicit)"
+    fi
+  done
+  ( cd "$hookrepo" && chmod +x .githooks/pre-push .githooks/post-commit && git config core.hooksPath .githooks )
+  if [[ "$(cd "$hookrepo" && git config --get core.hooksPath)" == ".githooks" ]]; then
+    pass "activation sets core.hooksPath to .githooks"
+  else
+    fail "activation did not set core.hooksPath"
+  fi
+  # Prove GIT actually dispatches the hook via core.hooksPath — not just direct invocation. Push
+  # to a local bare remote; the pre-push hook (runs `npm run --if-present prepush`) fires through
+  # git's own hook machinery. Output captured to a file so pipefail + git's SIGPIPE can't interfere.
+  ( cd "$hookrepo" && git -c user.email=eval@local -c user.name=eval commit -qm base --allow-empty ) >/dev/null 2>&1
+  bare="$TMP_DIR/hook-remote.git"; git init --bare -q "$bare"
+  ( cd "$hookrepo" && git remote add origin "$bare" && git push -q origin HEAD:refs/heads/main ) >"$TMP_DIR/gitpush.out" 2>&1
+  if grep -qF PREPUSH-RAN "$TMP_DIR/gitpush.out"; then
+    pass "git dispatches the pre-push hook via core.hooksPath (real git push fires it)"
+  else
+    fail "git push did not fire the pre-push hook via core.hooksPath"; sed -n '1,12p' "$TMP_DIR/gitpush.out"
+  fi
+  # No-fork: hook assets live under assets/, and invoke the veritas CLI — they must not vendor
+  # rule/claim evaluation. (assets/ is outside the adapter/flows no-fork scope; assert explicitly.)
+  if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine' "$KIT/assets/starter-hooks" 2>/dev/null; then
+    fail "governance hook assets appear to vendor Veritas evaluation logic (no-fork violated)"
+  else
+    pass "no-fork: governance hooks invoke the veritas CLI only (no vendored rule/claim engine)"
+  fi
+fi
+
+# --- consult-standards skill (Slice 4 / #649): JIT guidance via `veritas explain` ---------
+# A pull-based advisory skill telling an agent to run `veritas explain --file <path>` before
+# editing. No MCP server; wraps the veritas CLI, reimplements no evaluation.
+echo "--- consult-standards skill ---"
+CONSULT_SKILL="$KIT/skills/consult-standards/SKILL.md"
+if [[ -f "$CONSULT_SKILL" ]]; then
+  pass "consult-standards SKILL.md is present"
+else
+  fail "consult-standards SKILL.md is missing"
+fi
+if rg -q '"id": *"veritas-governance\.consult-standards"' "$KIT/kit.json" && rg -q '"path": *"skills/consult-standards/SKILL.md"' "$KIT/kit.json"; then
+  pass "consult-standards skill is registered in kit.json skills[]"
+else
+  fail "consult-standards skill is NOT registered in kit.json skills[]"
+fi
+# It must point agents at `veritas explain` (the JIT producer), not vendor evaluation.
+if grep -qF 'veritas explain' "$CONSULT_SKILL"; then
+  pass "consult-standards points at the veritas explain CLI"
+else
+  fail "consult-standards does not reference veritas explain"
+fi
+if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine' "$KIT/skills/consult-standards" 2>/dev/null; then
+  fail "consult-standards appears to vendor Veritas evaluation logic (no-fork violated)"
+else
+  pass "no-fork: consult-standards wraps the veritas CLI, no vendored rule/claim engine"
+fi
+# No-MCP invariant (#649 / ADR 0011): the kit ships no MCP server CODE and declares no MCP
+# dependency. Scoped to non-markdown files so the docs' explicit "no MCP server" prose (which
+# names the concept precisely to say the kit avoids it) does not trip the check.
+if rg -q -i 'modelcontextprotocol|new +McpServer|StdioServerTransport|createMcpServer' "$KIT" --glob '!*.md' 2>/dev/null; then
+  fail "kit ships MCP server code/dependency — #649 guidance is a skill, not an MCP server (ADR 0011)"
+else
+  pass "no MCP server: JIT guidance is an agent-pull skill (ADR 0011)"
+fi
+# Live leg: with a Veritas binary, a scaffolded repo's `veritas explain --file` produces JIT context.
+VBIN3="${VERITAS_BIN:-veritas}"
+if command -v "$VBIN3" >/dev/null 2>&1 || [[ -x "$VBIN3" ]]; then
+  cs="$TMP_DIR/consult-repo"; mkdir -p "$cs"
+  ( cd "$cs" && git init -q && printf '{"name":"consult-eval","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n' > package.json && "$VBIN3" init >/dev/null 2>&1 )
+  explain_out="$( cd "$cs" && "$VBIN3" explain --file package.json 2>&1 )"
+  if printf '%s' "$explain_out" | grep -qF 'Veritas JIT Context'; then
+    pass "veritas explain --file produces JIT context on a governed repo (the guidance the skill invokes)"
+  else
+    fail "veritas explain --file did not produce JIT context"; printf '%s\n' "$explain_out" | sed -n '1,8p'
+  fi
+else
+  echo "  - SKIP consult-standards live leg (no Veritas binary; set VERITAS_BIN to enable)"
 fi
 
 echo ""

@@ -1,0 +1,35 @@
+{
+  "id": "veritas-governance.standards-authoring",
+  "version": "1.0",
+  "steps": [
+    { "id": "propose", "next": "apply" },
+    { "id": "apply", "next": null }
+  ],
+  "gates": {
+    "human-approval-gate": {
+      "step": "apply",
+      "expects": [
+        {
+          "id": "standards-authoring-approval",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A human maintainer has reviewed the proposed starter Repo Standards (the `veritas init --explore` recommendation: derived project name, adaptive Repo Map nodes, evidence-check inference, and any AGENTS.md/CLAUDE.md governance-block splice) and approved writing them, recorded as a verified standards-authoring-approval trust.bundle claim. Veritas does the derivation; the kit only gates the human sign-off before `veritas init --apply` writes.",
+          "explore_hint": "Run the standards-authoring skill (`veritas init --explore` / `--guided`) to produce a recommendation artifact, have a human approver author a Hachure trust.bundle carrying a standards-authoring-approval / repo-governance-change claim with status verified, then `flow attach-evidence <run> --gate human-approval-gate --file <bundle> --bundle`.",
+          "bundle_claim": {
+            "claimType": "standards-authoring-approval",
+            "subjectType": "repo-governance-change",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "apply",
+        "default": "apply"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    }
+  }
+}

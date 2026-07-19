@@ -16,11 +16,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
 const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
 const { readOwnCurrentPointer } = require('./lib/current-pointer');
-const { workflowTriggersFor } = require('./lib/kit-catalog');
+const { readKitManifests, workflowTriggersFor } = require('./lib/kit-catalog');
+const { canonicalFlowState } = require('./stop-goal-fit');
 
 const STEERING = {
   'tool-planner': [
@@ -69,6 +71,7 @@ const ACTIVE_STATE_STATUSES = new Set([
   'not_verified',
   'failed',
   'delivered',
+  'canceled',
 ]);
 
 function findRepoRoot(startDir) {
@@ -231,6 +234,115 @@ function stateNeedsAmbientSteering(state) {
   );
 }
 
+const CANONICAL_NONTERMINAL_STATUSES = new Set(['active', 'blocked', 'needs_decision', 'paused']);
+const CANONICAL_TERMINAL_STATUSES = new Set(['completed', 'canceled', 'failed', 'accepted_by_exception']);
+const ACTION_ID_RE = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+
+function flowStepAction(flowId, stepId) {
+  const packageRoot = path.resolve(__dirname, '..', '..');
+  const inventory = readKitManifests(packageRoot);
+  if (inventory.warnings.length) return { action: null, error: 'installed kit metadata is unavailable or malformed' };
+  const matches = [];
+  for (const kit of inventory.kits) {
+    const actions = kit.manifest && kit.manifest.flow_step_actions;
+    if (!Array.isArray(actions)) continue;
+    for (const action of actions) {
+      if (action && action.flow_id === flowId && action.step_id === stepId) matches.push({ ...action, kit_id: kit.kit_id });
+    }
+  }
+  if (matches.length !== 1) return { action: null, error: `expected one installed step action for ${flowId}/${stepId}; found ${matches.length}` };
+  const action = matches[0];
+  const skills = action.skills === undefined ? [] : action.skills;
+  const operations = action.operations === undefined ? [] : action.operations;
+  if (!Array.isArray(skills) || !skills.every(value => ACTION_ID_RE.test(value))
+    || !Array.isArray(operations) || !operations.every(value => ACTION_ID_RE.test(value))
+    || typeof action.implementation_allowed !== 'boolean') {
+    return { action: null, error: `installed step action for ${flowId}/${stepId} is malformed` };
+  }
+  return {
+    action: {
+      kit_id: action.kit_id,
+      flow_id: action.flow_id,
+      step_id: action.step_id,
+      skills,
+      operations,
+      implementation_allowed: action.implementation_allowed,
+    },
+    error: null,
+  };
+}
+
+function guidanceConflict(reason) {
+  return { kind: 'conflict', code: 'GUIDANCE_CONFLICT', reason: safeStateText(reason, 240) };
+}
+
+function canonicalGuidance(root, current) {
+  const sidecar = current && current.payload;
+  const projected = sidecar && sidecar.flow_run;
+  if (!projected) return { kind: 'legacy' };
+  if (typeof projected !== 'object' || Array.isArray(projected)) return guidanceConflict('Flow Agents flow_run projection is malformed');
+
+  const canonical = canonicalFlowState(root, path.dirname(current.file));
+  if (canonical.error || !canonical.state || !canonical.definition) {
+    return guidanceConflict(canonical.error || 'canonical Flow state is unavailable');
+  }
+  const state = canonical.state;
+  const expected = {
+    run_id: state.run_id,
+    definition_id: state.definition_id,
+    definition_version: state.definition_version,
+    status: state.status,
+    current_step: state.current_step,
+  };
+  for (const [field, value] of Object.entries(expected)) {
+    if (projected[field] !== value) return guidanceConflict(`Flow Agents ${field} does not match canonical Flow state`);
+  }
+  if (!CANONICAL_NONTERMINAL_STATUSES.has(state.status) && !CANONICAL_TERMINAL_STATUSES.has(state.status)) {
+    return guidanceConflict(`canonical Flow status ${state.status} is unsupported for guidance`);
+  }
+
+  const terminal = CANONICAL_TERMINAL_STATUSES.has(state.status);
+  const resolved = terminal ? { action: null, error: null } : flowStepAction(state.definition_id, state.current_step);
+  if (resolved.error) return guidanceConflict(resolved.error);
+  const identityPayload = { state, definition: canonical.definition, action: resolved.action };
+  const identity = crypto.createHash('sha256').update(JSON.stringify(identityPayload)).digest('hex');
+  return {
+    kind: terminal ? 'terminal' : 'canonical',
+    state,
+    action: resolved.action,
+    identity,
+  };
+}
+
+function canonicalGuidanceLines(guidance) {
+  if (guidance.kind === 'conflict') {
+    return [
+      `${guidance.code}: ${guidance.reason}.`,
+      'No executable workflow recommendation is available until canonical Flow and Flow Agents state agree.',
+    ];
+  }
+  const { state } = guidance;
+  const lines = [
+    `Canonical Flow: ${safeStateText(state.definition_id, 120)}@${safeStateText(state.definition_version, 80)}/${safeStateText(state.run_id, 120)} status:${state.status} current_step:${safeStateText(state.current_step, 120)}.`,
+    `Canonical guidance identity: sha256:${guidance.identity}.`,
+  ];
+  if (guidance.kind === 'terminal') {
+    lines.push('This canonical run is terminal; no gate action or implementation is authorized.');
+    return lines;
+  }
+  const { action } = guidance;
+  lines.push(`Gate action source: installed kit ${safeStateText(action.kit_id, 80)}.`);
+  if (action.skills.length) lines.push(`Gate skills: ${action.skills.join(' -> ')}.`);
+  if (action.operations.length) lines.push(`Gate operations: ${action.operations.join(' -> ')}.`);
+  if (!action.skills.length && !action.operations.length) lines.push('Gate action: no skill or operation declared.');
+  lines.push(`Implementation allowed: ${action.implementation_allowed ? 'yes' : 'no'}.`);
+  if (state.status === 'blocked') lines.push('The run is blocked; clear or route the blocker before executing the gate action.');
+  else if (state.status === 'needs_decision') lines.push('The run needs a decision; record it before executing the gate action.');
+  else if (state.status === 'paused') lines.push('The run is paused; resume it before executing the gate action.');
+  else lines.push(`Continue only with the declared action for ${safeStateText(state.current_step, 120)}; do not restart or route to another step.`);
+  return lines;
+}
+
 function critiqueSteering(workflowDir) {
   const critique = readJson(path.join(workflowDir, 'critique.json'));
   if (!critique || critique.required !== true) return '';
@@ -266,10 +378,12 @@ function critiqueSteering(workflowDir) {
   return parts.join(' ');
 }
 
-function stateSteering(root) {
-  const current = latestWorkflowState(root);
+function stateSteering(root, currentState = null, resolvedGuidance = null) {
+  const current = currentState || latestWorkflowState(root);
   if (!current) return '';
   const state = current.payload;
+  const guidance = resolvedGuidance || canonicalGuidance(root, current);
+  if (guidance.kind !== 'legacy') return canonicalGuidanceLines(guidance).join(' ');
   const next = state.next_action || {};
   if (next.status === 'done' || state.status === 'archived' || state.status === 'accepted') return '';
   const parts = [
@@ -417,19 +531,24 @@ function kitWorkflowSteering(input, root) {
  * @param {{ file: string, payload: object }} current  Latest active state entry
  * @returns {string}
  */
-function resumeSteering(root, current) {
+function resumeSteering(root, current, resolvedGuidance = null) {
   try {
     const state = current.payload;
     const workflowDir = path.dirname(current.file);
     const slug = state.task_slug || path.basename(workflowDir);
     const next = state.next_action || {};
 
+    const guidance = resolvedGuidance || canonicalGuidance(root, current);
+    if (guidance.kind !== 'legacy') {
+      return canonicalGuidanceLines(guidance).join('\n');
+    }
     if (next.status === 'done' || state.status === 'archived' || state.status === 'accepted') return '';
 
     const lines = [];
 
     // Header line
     lines.push(`RESUME: ${slug} status:${safeStateText(state.status, 60)} phase:${safeStateText(state.phase, 60)}`);
+    lines.push('Guidance source: NON-CANONICAL FALLBACK.');
 
     // Full next action (240-char display path, not the 80-char normalization)
     const nextSummary = next.summary ? safeStateText(next.summary, 240) : 'none';
@@ -441,6 +560,16 @@ function resumeSteering(root, current) {
       lines.push(`Required operations: ${next.operations.map(operation => safeStateText(operation, 80)).join(' -> ')}`);
     }
     if (next.command) lines.push(`Run: ${safeStateText(next.command, 240)}`);
+    if (next.target_phase) lines.push(`Target phase: ${safeStateText(next.target_phase, 80)}`);
+    if (stateNeedsAmbientSteering(state)) {
+      lines.push('WORKFLOW STATE ATTENTION: unresolved workflow state must be addressed before completion.');
+    }
+    if (next.status === 'needs_user' || state.status === 'needs_decision' || state.status === 'not_verified') {
+      lines.push('Do not deliver as complete until the user decision or accepted gap is recorded.');
+    }
+    if (state.status === 'failed') lines.push('Route back through execution, then re-review and re-verify.');
+    const critiqueHint = critiqueSteering(workflowDir);
+    if (critiqueHint) lines.push(critiqueHint);
 
     // Plan artifact path
     let planPath = 'not found';
@@ -456,7 +585,7 @@ function resumeSteering(root, current) {
     } catch { /* skip */ }
     lines.push(`Plan: ${planPath}`);
 
-    // Handoff: next_steps[0] and blockers
+    // Legacy sessions use handoff.next_steps as a noncanonical compatibility fallback.
     let nextStep = 'none';
     let blockers = 'none';
     try {
@@ -519,8 +648,7 @@ function resumeSteering(root, current) {
       lines.push(`ACTOR: ${safeStateText(selfActor)} (${resolved.source})`);
     } catch { /* skip */ }
 
-    // Pull-work route hint
-    lines.push('To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.');
+    lines.push('To continue (noncanonical fallback): resume this work. Or run pull-work to assess WIP and start new/parallel work.');
 
     return lines.join('\n');
   } catch {
@@ -581,30 +709,39 @@ function run(rawInput) {
     const toolInput = input.tool_input || {};
     const root = findRepoRoot(input.cwd || process.cwd());
     const current = latestWorkflowState(root);
+    const guidance = current ? canonicalGuidance(root, current) : { kind: 'legacy' };
     const hints = [];
     let shouldAppendWorkflowContext = false;
 
     if (toolInput.command === 'InvokeSubagents') {
-      const subagents = toolInput.content?.subagents || [];
-      hints.push(...subagents
-        .map(s => STEERING[s.agent_name])
-        .filter(Boolean));
-      shouldAppendWorkflowContext = hints.length > 0;
+      if (guidance.kind === 'legacy') {
+        const subagents = toolInput.content?.subagents || [];
+        hints.push(...subagents
+          .map(s => STEERING[s.agent_name])
+          .filter(Boolean));
+        shouldAppendWorkflowContext = hints.length > 0;
+      } else {
+        hints.push(canonicalGuidanceLines(guidance).join(' '));
+        const contextHint = contextMapSteering(root);
+        if (contextHint) hints.push(contextHint);
+      }
     }
 
-    if ((event === 'UserPromptSubmit' || event === 'SessionStart') && current) {
-      const stateHint = stateSteering(root);
+    if (event === 'UserPromptSubmit' && current) {
+      const stateHint = stateSteering(root, current, guidance);
       if (stateHint) {
-        hints.push(stateNeedsAmbientSteering(current.payload)
-          ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
-          : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
+        if (guidance.kind === 'legacy') {
+          hints.push(stateNeedsAmbientSteering(current.payload)
+            ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
+            : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
+        }
         hints.push(stateHint);
         const contextHint = contextMapSteering(root);
         if (contextHint) hints.push(contextHint);
       }
     }
 
-    if (event === 'UserPromptSubmit') {
+    if (event === 'UserPromptSubmit' && guidance.kind === 'legacy') {
       const kitHint = kitWorkflowSteering(input, root);
       if (kitHint) {
         hints.push(kitHint);
@@ -622,8 +759,10 @@ function run(rawInput) {
 
     // SessionStart only: append the RESUME block for richer situational awareness
     if (event === 'SessionStart' && current) {
-      const resumeBlock = resumeSteering(root, current);
+      const resumeBlock = resumeSteering(root, current, guidance);
       if (resumeBlock) hints.push(resumeBlock);
+      const contextHint = contextMapSteering(root);
+      if (contextHint) hints.push(contextHint);
       const supersessionHint = supersessionSteering(root, current);
       if (supersessionHint) hints.push(supersessionHint);
     }
@@ -676,4 +815,6 @@ module.exports = {
   promptText,
   looksLikeImplementationWork,
   kitWorkflowSteering,
+  flowStepAction,
+  canonicalGuidance,
 };

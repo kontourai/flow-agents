@@ -138,6 +138,45 @@ if [[ -n "$agents_dir" && -d "$agents_dir" ]]; then
   [[ -n "$assembled" && "$assembled" != "null" ]] && delegations_json="$assembled"
 fi
 
+# --- per_delegation_tokens signal: DERIVED from the capability declaration (#620) ------------------
+# Replaces the former hardcoded `false` literal. The value is read from the build-only generated
+# JSON (build/generated/capability-declarations.json — src/tools/generate-capability-matrix.ts, keyed
+# on canonical runtime id), keyed on the NORMALIZED `.agent.runtime`. The alias fold mirrors
+# src/lib/capability-declarations.ts::normalizeRuntimeId (lowercase, trim, collapse whitespace,
+# kiro-cli→kiro / raw-model→base) so a Kiro record (whose runtime value is `kiro-cli`) resolves its
+# declaration instead of silently missing. Kept hermetic: jq-only, no node subprocess at emit time.
+#
+# SENTINEL SEMANTICS (never fabricate a `true` one layer down): the boolean is true IFF the declared
+# per_delegation_tokens capability STATUS is "supported". An unresolved runtime (blank, or a runtime
+# with no declaration) OR a missing/unreadable JSON yields the EXPLICIT sentinel `false` — matching
+# the prior default — via a DISTINCT jq branch from a declared-false value. Declared-false (status
+# unsupported/partial) and unresolved both map to `false` today, but because they travel separate
+# branches, a future `supported` declaration flips the signal ONLY for a genuinely-declared runtime
+# while an unknown runtime stays sentinel-false. The final `case` re-clamps any non-boolean jq output
+# (parse/read failure) back to the `false` sentinel so a fabricated `true` is impossible.
+capability_decl_file="${FLOW_AGENTS_CAPABILITY_DECL_FILE:-$SCRIPT_DIR/../../build/generated/capability-declarations.json}"
+capability_decl_json="$(read_json_or_null "$capability_decl_file")"
+raw_runtime="$(printf '%s' "$usage_event" | jq -r '.agent.runtime // ""' 2>/dev/null)" || raw_runtime=""
+per_delegation_tokens="$(
+  printf '%s' "$capability_decl_json" | jq -r \
+    --arg raw "$raw_runtime" '
+    ( $raw | ascii_downcase | gsub("^\\s+";"") | gsub("\\s+$";"") | gsub("\\s+";"-") ) as $lc
+    | ( if   $lc == "kiro-cli"         then "kiro"
+        elif $lc == "raw-model"        then "base"
+        elif $lc == "raw-model-runner" then "base"
+        else $lc end ) as $canon
+    | if   . == null            then false   # missing/unreadable JSON  -> sentinel false (unresolved)
+      elif ($canon == "")       then false   # blank runtime            -> sentinel false (unresolved)
+      elif (has($canon) | not)  then false   # runtime not declared     -> sentinel false (unresolved)
+      else ((.[$canon].per_delegation_tokens.status // "") == "supported")  # DECLARED value
+      end
+  ' 2>/dev/null
+)" || per_delegation_tokens="false"
+case "$per_delegation_tokens" in
+  true | false) ;;
+  *) per_delegation_tokens="false" ;;   # re-clamp any jq parse/read failure to the sentinel
+esac
+
 tenant_self="${CONSOLE_TENANT_ID:-${FLOW_AGENTS_CONSOLE_TENANT:-}}"
 
 # --- assemble the record with ONE jq -c filter (injection-safe, valid JSON) -------------------------
@@ -148,6 +187,7 @@ record="$(printf '%s' "$usage_event" | jq -c \
   --argjson critique "$critique_json" \
   --argjson acceptance "$acceptance_json" \
   --argjson delegations "$delegations_json" \
+  --argjson per_delegation_tokens "$per_delegation_tokens" \
   --arg tenant "$tenant_self" '
   . as $e
   | ($e.usage // {}) as $u
@@ -219,14 +259,18 @@ record="$(printf '%s' "$usage_event" | jq -c \
       delegations: ($delegations // []),
       # signals: what telemetry the CURRENT runtime actually exposed, so a consumer can tell a real zero
       # from a harness-blind gap (never fabricate — see docs/specs/harness-capability-matrix.md).
-      #   per_delegation_tokens: no runtime isolates per-sub-agent token usage today → cost-per-delegation
-      #     is unavailable; the console attributes at (role,model) granularity via cost.by_model instead.
+      #   per_delegation_tokens: DERIVED (not hardcoded, #620) from the runtime capability declaration
+      #     via build/generated/capability-declarations.json, keyed on the normalized .agent.runtime
+      #     (kiro-cli→kiro). true IFF the declared status is "supported"; unresolved runtime / missing
+      #     JSON → explicit sentinel false (never a fabricated true). No runtime isolates per-sub-agent
+      #     token usage today → cost-per-delegation is unavailable; the console attributes at
+      #     (role,model) granularity via cost.by_model instead.
       #   per_delegation_outcome: coverage of the outcome signal on THIS run — "full" (every delegation has
       #     a real outcome), "partial" (some do), "none" (delegations exist but none had a verdict/escalation),
       #     "n/a" (no delegations observed).
       signals: {
         runtime: ($e.agent.runtime // null),
-        per_delegation_tokens: false,
+        per_delegation_tokens: $per_delegation_tokens,
         per_delegation_outcome: (
           ($delegations // []) as $d
           | ($d | length) as $n

@@ -196,6 +196,11 @@ _Avoid_: Boundary Crossing as the generic Flow Agents term
 An executable backlog or queue unit selected by a workflow. Work Items are provider-backed when a backlog provider is configured, and Flow Agents keeps a portable local-first Kontour Resource Contract shape for local use, tests, kit demos, and migration. A Work Item is smaller than an Initiative and large enough to move through one coherent Workflow Run with clear acceptance evidence.
 _Avoid_: Task as the generic term, Issue as the provider-neutral term
 
+### Backlog Readiness Source
+
+The provider-backed signal that marks a Work Item intentionally ready for pickup, read by `pull-work` to build the ready queue. The readiness source is declared by backlog provider settings (currently the configured BoardProvider's ready statuses); a configured readiness source that yields nothing is a surfaced warning, never a silent fallback to unranked issue listing. The live decision is recorded in `docs/decisions/backlog-readiness-source.md`.
+_Avoid_: ready label, board status as interchangeable generic terms
+
 ### Work Item Group
 
 A Builder Kit Selected Scope containing multiple related Work Items delivered through one Delivery Run because grouping reduces coordination risk and preserves one coherent acceptance and evidence story. Work Item Groups are exceptions justified by `pull-work`; they do not replace Initiatives.

@@ -13,6 +13,11 @@
       "id": "veritas-governance.exemption-issuance",
       "path": "flows/exemption-issuance.flow.json",
       "description": "Agentless K0 flow issuing a delivery/DECLARED no-agent-delivery exemption (ADR 0022 §2/§3): step request -> gate human-approval-gate (requires a verified no-agent-delivery-exemption-approval trust.bundle claim, satisfiable only by a human-authored approval bundle by convention -- see docs/README.md) -> step issue, which appends the approved entry to delivery/DECLARED. CI-callable."
+    },
+    {
+      "id": "veritas-governance.standards-authoring",
+      "path": "flows/standards-authoring.flow.json",
+      "description": "Agentless-gate flow authoring a repo's Veritas Repo Standards: step propose (the standards-authoring skill runs `veritas init --explore`/`--guided` to derive a recommendation) -> gate human-approval-gate (requires a verified standards-authoring-approval / repo-governance-change trust.bundle claim, human-authored by convention) -> step apply (`veritas init --apply` writes the approved standards and splices the governance block). Veritas derives and writes; the kit gates the human sign-off. No evaluation reimplemented."
     }
   ],
   "skills": [
@@ -20,6 +25,16 @@
       "id": "veritas-governance.exemption-usage-review",
       "path": "skills/exemption-usage-review/SKILL.md",
       "description": "Periodic audit skill (ADR 0022 §3): walks delivery/DECLARED + its git log --follow history and reports every standing no-agent-delivery exemption (scope, reason, approver, age since declared_at), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement -- read-only, never mutates delivery/DECLARED or scripts/ci/trust-reconcile.js's behavior."
+    },
+    {
+      "id": "veritas-governance.standards-authoring",
+      "path": "skills/standards-authoring/SKILL.md",
+      "description": "Author or re-derive a repo's Veritas Repo Standards by running `veritas init --explore`/`--guided` (adaptive derivation + governance-block splice), surfacing the recommendation for human approval, then `veritas init --apply` once the standards-authoring flow's human-approval gate is satisfied. Wraps the veritas CLI; reimplements no evaluation or derivation. The agent action for both steps of the standards-authoring flow."
+    },
+    {
+      "id": "veritas-governance.consult-standards",
+      "path": "skills/consult-standards/SKILL.md",
+      "description": "Just-in-time governance guidance before editing: run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, the Repo Standards rules that apply, their do/don't/examples, and the latest surface status, then edit within those rules. Pull-based advisory (does not block; the PreToolUse hook is enforcement). No MCP server -- the agent-pull replacement for a guidance server (ADR 0011). Wraps the veritas CLI; reimplements no evaluation."
     }
   ],
   "assets": [
@@ -31,5 +46,55 @@
   ],
   "docs": [
     { "id": "veritas-governance.readme", "path": "docs/README.md" }
+  ],
+  "provisions": [
+    {
+      "id": "veritas-governance.starter-repo-map",
+      "path": "assets/starter-standards/veritas/repo-map.json",
+      "target": ".veritas/repo-map.json",
+      "description": "Starter Repo Map (from `veritas init`): work-area graph plus the `evidence.evidenceChecks` entry `veritas readiness` requires. Placeholder project name `your-project`; adopters edit for their repo shape and evidence-check command."
+    },
+    {
+      "id": "veritas-governance.starter-repo-standards",
+      "path": "assets/starter-standards/veritas/repo-standards/default.repo-standards.json",
+      "target": ".veritas/repo-standards/default.repo-standards.json",
+      "description": "Starter Repo Standards (from `veritas init`): the baseline required-artifacts / instruction-files-synced / routed-delivery rules the engine evaluates. Additive Standards Growth is expected on top."
+    },
+    {
+      "id": "veritas-governance.starter-authority-settings",
+      "path": "assets/starter-standards/veritas/authority/default.authority-settings.json",
+      "target": ".veritas/authority/default.authority-settings.json",
+      "description": "Starter authority settings (from `veritas init`): promotion preferences and attestation thresholds; keeps the readiness attestation-gate section clean before a bootstrap attestation is recorded."
+    },
+    {
+      "id": "veritas-governance.starter-governance",
+      "path": "assets/starter-standards/veritas/GOVERNANCE.md",
+      "target": ".veritas/GOVERNANCE.md",
+      "description": "Terse agent-facing governance instructions (from `veritas init`): names the Protected Standards and the attestation requirement. Static; no per-repo derivation."
+    },
+    {
+      "id": "veritas-governance.starter-readme",
+      "path": "assets/starter-standards/veritas/README.md",
+      "target": ".veritas/README.md",
+      "description": "Human-facing `.veritas/` orientation doc (from `veritas init`)."
+    },
+    {
+      "id": "veritas-governance.starter-claims",
+      "path": "assets/starter-standards/veritas.claims.json",
+      "target": "veritas.claims.json",
+      "description": "Starter Veritas claim store (from `veritas init`): the baseline surface claims the starter Repo Standards require to be present. A snapshot starting point; regenerate with `veritas claim init` once the Repo Map is customized."
+    },
+    {
+      "id": "veritas-governance.githook-pre-push",
+      "path": "assets/starter-hooks/githooks/pre-push",
+      "target": ".githooks/pre-push",
+      "description": "Governance pre-push git hook (from `veritas setup repo-hooks`): runs `npm run --if-present prepush` before a push. Static template. Landed non-executable — see \"Provisioning the governance hooks\" for the chmod + core.hooksPath activation a file copy cannot perform."
+    },
+    {
+      "id": "veritas-governance.githook-post-commit",
+      "path": "assets/starter-hooks/githooks/post-commit",
+      "target": ".githooks/post-commit",
+      "description": "Governance post-commit git hook (from `veritas setup repo-hooks`): runs `veritas readiness --changed-from HEAD~1 --changed-to HEAD` after each commit. Static template. Landed non-executable — see \"Provisioning the governance hooks\" for activation."
+    }
   ]
 }
