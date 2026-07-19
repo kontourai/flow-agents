@@ -1442,6 +1442,43 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   ]);
 });
 
+test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
+  const session = makeSession("same-visit-reviewer-handoff");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const timestamp = new Date().toISOString();
+  const prerequisites = verifiedTestsPrerequisites(session, timestamp);
+  prerequisites[0].claim.metadata.reviewer = "passing-reviewer";
+  const disputedCritique = withIdentitySuffix(structuredClone(prerequisites[0]), "disputed-reviewer");
+  disputedCritique.claim.value = "fail";
+  disputedCritique.claim.status = "disputed";
+  disputedCritique.claim.metadata.reviewer = "disputed-reviewer";
+  disputedCritique.claim.metadata.lanes = [{ id: "code", status: "fail" }];
+  disputedCritique.claim.metadata.findings = [{ id: "unresolved", status: "open", severity: "high" }];
+  disputedCritique.event.status = "disputed";
+
+  const blocked = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp }),
+    ...prerequisites,
+    disputedCritique,
+  ]);
+  assert.equal(blocked.attached, false);
+  assert.equal(blocked.run.state.current_step, "verify");
+  const retainedCritiques = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .filter((claim) => claim.metadata?.origin === "critique" && !claim.metadata.superseded_by);
+  assert.deepEqual(retainedCritiques.map((claim) => [claim.metadata.reviewer, claim.value]).sort(), [
+    ["disputed-reviewer", "fail"],
+    ["passing-reviewer", "pass"],
+  ]);
+});
+
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
   const session = makeSession("producer-superseded-verify");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
