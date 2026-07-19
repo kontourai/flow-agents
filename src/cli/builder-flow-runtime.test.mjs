@@ -1383,6 +1383,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
 
   const failureTimestamp = new Date().toISOString();
   const initialPrerequisites = verifiedTestsPrerequisites(session, failureTimestamp);
+  initialPrerequisites[0].claim.metadata.reviewer = "reviewer-before-route-back";
   const routed = await writeAndSync(session, [bundleClaim({
     expectation: "tests-evidence",
     claimType: "builder.verify.tests",
@@ -1418,9 +1419,12 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "corrected delivery after route-back\n");
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
+  const correctedPrerequisites = verifiedTestsPrerequisites(session, correctedAt)
+    .map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`));
+  correctedPrerequisites[0].claim.metadata.reviewer = "reviewer-after-route-back";
   const corrected = await writeAndSync(session, [
     withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
-    ...verifiedTestsPrerequisites(session, correctedAt).map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`)),
+    ...correctedPrerequisites,
     // Compose-safe writers preserve this older reviewer's still-live PASS slice. It targets the
     // prior implementation bytes and must remain audit history without deadlocking the new gate
     // visit or requiring the new reviewer to impersonate the old one.
@@ -1430,6 +1434,12 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
   assert.equal(verifyEvidence.length, 2);
   assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+  const retainedCritiques = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .filter((claim) => claim.metadata?.origin === "critique" && !claim.metadata.superseded_by);
+  assert.deepEqual(retainedCritiques.map((claim) => claim.metadata.reviewer).sort(), [
+    "reviewer-after-route-back",
+    "reviewer-before-route-back",
+  ]);
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
