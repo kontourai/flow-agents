@@ -80,16 +80,16 @@ async function bindGithubAuthentication(dependencies: GithubExecutionDependencie
   if (!token || /[\0\r\n]/u.test(token) || Buffer.byteLength(token, "utf8") > 16 * 1024) {
     throw new ChangeProviderError("provider_auth_failed", "configured ChangeProvider authentication failed");
   }
-  const env: NodeJS.ProcessEnv = {};
-  const blockedKeys = new Set(["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_REPO", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]);
-  for (const [key, value] of Object.entries(process.env)) {
-    const normalizedKey = key.toUpperCase();
-    if (!normalizedKey.startsWith("GIT_") && !blockedKeys.has(normalizedKey) && normalizedKey !== "PATH" && value !== undefined) env[key] = value;
-  }
-  env.GH_TOKEN = token;
-  env.PATH = process.platform === "win32"
-    ? "C:\\Program Files\\GitHub CLI;C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows"
-    : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+  // Use an allowlist instead of inheriting gh's evolving environment surface.
+  // In particular, GH_CONFIG_DIR and http_unix_socket must not redirect a
+  // token-bearing request to a caller-controlled transport.
+  const env: NodeJS.ProcessEnv = {
+    GH_TOKEN: token,
+    PATH: process.platform === "win32"
+      ? "C:\\Program Files\\GitHub CLI;C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows"
+      : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ...(process.platform === "win32" ? { SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
+  };
   return Object.freeze({
     ...dependencies,
     // Pin every subsequent gh invocation to the same credential. The token is

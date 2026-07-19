@@ -101,6 +101,8 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   process.env.Git_Dir = "/foreign/repository/.git";
   process.env.git_work_tree = "/foreign/repository";
   process.env.Gh_Host = "attacker.invalid";
+  process.env.GH_CONFIG_DIR = "/attacker/gh-config";
+  process.env.http_unix_socket = "/attacker/provider.sock";
   let result;
   try {
     result = await provider(fake).createOrRecover(request());
@@ -108,6 +110,8 @@ test("GitHub adapter checks authentication and repository capability, recovers e
     delete process.env.Git_Dir;
     delete process.env.git_work_tree;
     delete process.env.Gh_Host;
+    delete process.env.GH_CONFIG_DIR;
+    delete process.env.http_unix_socket;
   }
 
   assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "token"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"]]);
@@ -115,6 +119,7 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   assert.equal(fake.calls.every((call) => call.options.maxOutputBytes === 256 * 1024), true);
   assert.equal(fake.calls.slice(1).every((call) => call.options.env.GH_TOKEN === TOKEN && call.options.env.GITHUB_TOKEN === undefined), true);
   assert.equal(fake.calls.slice(1).every((call) => Object.keys(call.options.env).every((key) => !key.toUpperCase().startsWith("GIT_") && key.toUpperCase() !== "GH_HOST")), true);
+  assert.equal(fake.calls.slice(1).every((call) => call.options.env.GH_CONFIG_DIR === undefined && call.options.env.http_unix_socket === undefined), true);
   assert.equal(fake.calls.some((call) => call.argv.includes("--head") && call.argv.includes("agent/change-provider-604-v2")), true);
   assert.equal(result.change_ref.number, 610);
   assert.equal(result.assignment_actor, "codex:session:Kontour");
