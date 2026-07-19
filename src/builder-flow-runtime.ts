@@ -17,7 +17,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
+import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
@@ -170,7 +170,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
  */
 async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
 }
 
 /**
@@ -204,11 +204,11 @@ async function completePublishChangeOperation(
   const issued = assertIssuedPublishChangeAction(input.action);
   // Validate before invoking a mutating provider, but never retain the subject
   // lock across network I/O. The commit phase revalidates after observation.
-  await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     await assertPublishChangeActionCurrentOrRecoverable(context, issued);
   });
   const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
     if (recovery) return recovery;
     const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
@@ -367,7 +367,7 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
 
 export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
     assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
     const changed = await cancelBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
@@ -486,7 +486,7 @@ export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInp
 
 export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const prepared = prepareAgentLifecycleChange(input, context);
     const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
     const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
@@ -497,7 +497,7 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
 
 export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
   const prepared = await prepareAuthorizedLifecycleChange(input, "archive", context);
   const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
   const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
@@ -547,7 +547,7 @@ async function changeBuilderFlowSessionLifecycle(
   operation: "pause" | "resume",
 ): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
   const prepared = prepareAgentLifecycleChange(input, context);
   const change = operation === "pause" ? pauseBuilderFlowRun : resumeBuilderFlowRun;
   const at = new Date().toISOString();

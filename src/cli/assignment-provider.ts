@@ -395,6 +395,69 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
   return result;
 }
 
+/**
+ * Async counterpart for transactions whose body awaits I/O or whose contenders
+ * may run in the same event loop. Unlike the legacy synchronous mutator lock,
+ * contention yields with a timer so the current async owner can settle,
+ * heartbeat, and release its lock.
+ */
+export async function withSubjectLockAsync<T>(artifactRoot: string, subjectId: string, body: () => T | Promise<T>): Promise<T> {
+  const lockDir = subjectLockDir(artifactRoot, subjectId);
+  const staleMs = trustedSubjectLockStaleMs();
+  const token = randomBytes(16).toString("hex");
+  const ownerFile = path.join(lockDir, "owner.json");
+  const deadline = Date.now() + 30000;
+  while (true) {
+    let createdLockDir = false;
+    try {
+      fs.mkdirSync(lockDir);
+      createdLockDir = true;
+      fs.writeFileSync(ownerFile, `${JSON.stringify({ token, pid: process.pid, acquired_at: isoNow() })}\n`, { flag: "wx", mode: 0o600 });
+      break;
+    } catch (error) {
+      const lockError = error as NodeJS.ErrnoException;
+      if (createdLockDir) fs.rmSync(lockDir, { recursive: true, force: true });
+      if (lockError.code !== "EEXIST") {
+        throw new Error(`failed to acquire assignment lock for subject ${subjectId}: ${lockDir}: ${lockError.message || lockError.code || String(lockError)}`);
+      }
+      try {
+        const owner = readSubjectLockOwner(ownerFile);
+        const stat = fs.lstatSync(owner?.token ? ownerFile : lockDir);
+        if (stat.isSymbolicLink() || !(owner?.token ? stat.isFile() : stat.isDirectory())) {
+          throw new Error(`assignment lock has an unsafe ${owner?.token ? "owner file" : "directory"}: ${lockDir}`);
+        }
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          throw new Error(`assignment lock is stale or malformed and requires explicit operator cleanup after confirming no owner is active: ${lockDir}`);
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for assignment lock for subject ${subjectId}: ${lockDir}`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  let heartbeat: NodeJS.Timeout | undefined;
+  const ownsLock = (): boolean => readSubjectLockOwner(ownerFile)?.token === token;
+  const heartbeatMs = Math.max(10, Math.min(1_000, Math.floor(staleMs > 0 ? staleMs / 3 : 1_000)));
+  heartbeat = setInterval(() => {
+    try {
+      if (!ownsLock()) return;
+      const timestamp = new Date();
+      fs.utimesSync(ownerFile, timestamp, timestamp);
+      fs.utimesSync(lockDir, timestamp, timestamp);
+    } catch { /* release, reclamation, or process teardown owns cleanup */ }
+  }, heartbeatMs);
+  try {
+    return await body();
+  } finally {
+    clearInterval(heartbeat);
+    if (ownsLock()) fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
 function readSubjectLockOwner(file: string): { token?: string } | null {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
