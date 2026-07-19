@@ -213,16 +213,20 @@ the envelope projects the exact executable argv `flow-agents publish-change exec
 is absent or incompatible, the envelope remains `external_capability_required` with an
 `external_verification_required` wait state and no executable completion claim.
 
-The public command derives repository, immutable head SHA, assignment actor, provider
+The public command derives repository and immutable head SHA through a fixed trusted absolute
+`git` executable (never caller-controlled `PATH`), then derives assignment actor, provider
 configuration identity, run identity, and gate-visit identity under the Flow subject lock.
 It invokes the configured ChangeProvider outside that lock as necessary, then the
-Flow-owned completion transaction reacquires the lock and re-reads canonical state.
+Flow-owned completion transaction reacquires the lock, re-resolves the trusted local head ref/SHA,
+and re-reads canonical state.
 It rejects any assignment transfer, gate movement, replay, configuration change, or
 request/result mismatch before persisting the bounded result. Only an authenticated,
 fresh provider observation can write `publish-change.result.json`; it contains the
 binding, provider configuration/adapter, repository, provider record id/number/HTTPS
 URL, normalized published state (`open` or `merged`), base/head refs and immutable SHA, the bound `assignment_actor`,
-the authenticated GitHub `provider_actor`, and observation timestamp.
+the authenticated GitHub `provider_actor`, and observation timestamp. The adapter
+reauthenticates immediately after the final provider-record observation and rejects identity drift,
+so the persisted actor performed that observation.
 
 Flow attaches exactly the `pull-request-opened` evidence for that issued operation,
 requires it to advance the bound gate exactly one canonical step, and projects the result. It does not treat generic

@@ -158,7 +158,22 @@ function selectExactChange(records: GithubListRecord[], request: ChangeProviderR
 async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
   const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`]);
   const record = parseProviderRecord(parseProviderJson(output, "provider record output"), request);
-  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor, observedAt: dependencies.now() });
+  // Reject malformed or mismatched records before making a further provider
+  // call. The preflight result is deliberately discarded: only the actor
+  // obtained after the final observation is allowed into durable evidence.
+  buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor, observedAt: dependencies.now() });
+  // The actor captured before create/recovery is only a precondition. Recheck
+  // immediately after the final record observation so durable evidence names
+  // the identity that actually observed the provider result. Switching
+  // identities mid-operation is ambiguous and must not be persisted.
+  const finalCapability = await checkGithubCapability({
+    role: "ChangeProvider", kind: "github", repository: request.repository,
+    capabilities: ["change.create", "change.observe"], executor: "gh-cli",
+  }, dependencies);
+  if (finalCapability.provider_actor !== providerActor) {
+    throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed during provider observation");
+  }
+  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor: finalCapability.provider_actor, observedAt: dependencies.now() });
 }
 
 function createArgv(request: ChangeProviderRequest): string[] {

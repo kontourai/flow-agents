@@ -85,6 +85,10 @@ function prefix() {
   return ["authenticated\n", { login: "briananderson1222" }, { full_name: "kontourai/flow-agents" }];
 }
 
+function finalPrefix(actor = "briananderson1222") {
+  return ["authenticated\n", { login: actor }, { full_name: "kontourai/flow-agents" }];
+}
+
 function assertCode(error, code) {
   assert.ok(error instanceof ChangeProviderError);
   assert.equal(error.code, code);
@@ -92,10 +96,10 @@ function assertCode(error, code) {
 }
 
 test("GitHub adapter checks authentication and repository capability, recovers exactly one PR, then re-observes it", async () => {
-  const fake = fakeExecutor([...prefix(), [listRecord()], providerRecord()]);
+  const fake = fakeExecutor([...prefix(), [listRecord()], providerRecord(), ...finalPrefix()]);
   const result = await provider(fake).createOrRecover(request());
 
-  assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"]]);
+  assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"]]);
   assert.equal(fake.calls.every((call) => call.file === "gh"), true);
   assert.equal(fake.calls.every((call) => call.options.maxOutputBytes === 256 * 1024), true);
   assert.equal(fake.calls.some((call) => call.argv.includes("--head") && call.argv.includes("agent/change-provider-604-v2")), true);
@@ -107,7 +111,7 @@ test("GitHub adapter checks authentication and repository capability, recovers e
 });
 
 test("GitHub adapter truthfully recovers a matching merged PR without creating a duplicate", async () => {
-  const fake = fakeExecutor([...prefix(), [listRecord({ state: "MERGED" })], providerRecord({ state: "CLOSED", merged: true })]);
+  const fake = fakeExecutor([...prefix(), [listRecord({ state: "MERGED" })], providerRecord({ state: "CLOSED", merged: true }), ...finalPrefix()]);
   const result = await provider(fake).createOrRecover(request());
 
   assert.equal(result.change_ref.state, "merged");
@@ -117,7 +121,7 @@ test("GitHub adapter truthfully recovers a matching merged PR without creating a
 });
 
 test("GitHub adapter creates once with direct argv and verifies through a fresh bounded observation", async () => {
-  const fake = fakeExecutor([...prefix(), [], "https://github.com/kontourai/flow-agents/pull/610\n", [listRecord({ isDraft: true })], providerRecord({ draft: true })]);
+  const fake = fakeExecutor([...prefix(), [], "https://github.com/kontourai/flow-agents/pull/610\n", [listRecord({ isDraft: true })], providerRecord({ draft: true }), ...finalPrefix()]);
   await provider(fake).createOrRecover(request({ intent: { draft: true } }));
 
   const create = fake.calls[4];
@@ -129,7 +133,7 @@ test("GitHub adapter creates once with direct argv and verifies through a fresh 
 
 test("GitHub adapter re-observes after an ambiguous create timeout without a second create", async () => {
   const timedOut = new Error(`timeout after GitHub wrote ${SECRET}`);
-  const fake = fakeExecutor([...prefix(), [], timedOut, [listRecord()], providerRecord()]);
+  const fake = fakeExecutor([...prefix(), [], timedOut, [listRecord()], providerRecord(), ...finalPrefix()]);
   const result = await provider(fake).createOrRecover(request());
   assert.equal(result.change_ref.number, 610);
   assert.equal(fake.calls.filter((call) => call.argv[0] === "pr" && call.argv[1] === "create").length, 1);
@@ -142,6 +146,12 @@ test("GitHub adapter strips hostile provider failures from public errors", async
     assert.equal(String(error).includes(SECRET), false);
     return true;
   });
+});
+
+test("GitHub adapter fails closed when the authenticated actor changes after the final observation", async () => {
+  const fake = fakeExecutor([...prefix(), [listRecord()], providerRecord(), ...finalPrefix("different-user")]);
+  await assert.rejects(() => provider(fake).createOrRecover(request()), (error) => assertCode(error, "provider_observation_mismatch"));
+  assert.equal(fake.calls.length, 8, "the adapter must reauthenticate after observing the provider record");
 });
 
 test("GitHub adapter rejects ambiguity, stale SHA, wrong observations, and malformed responses before returning a result", async () => {

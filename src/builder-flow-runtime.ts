@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -19,18 +18,22 @@ import {
 import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
-import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
-import type { ChangeProviderRequest } from "./cli/change-provider.js";
-import type { ChangeProviderSettings } from "./cli/public-contracts.js";
+import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 import {
-  assertAuthenticatedPublishChangeObservation,
-  assertIssuedPublishChangeAction,
   issuePublishChangeAction,
   type AuthenticatedPublishChangeObservation,
   type IssuedPublishChangeAction,
   type PublishChangeIntent,
 } from "./publish-change-operation-authority.js";
+import {
+  completePublishChangeOperation as completePublishChangeOperationTransaction,
+  executePublishChangeOperation as executePublishChangeOperationTransaction,
+  issuePublishChangeOperation as issuePublishChangeOperationTransaction,
+  type CompletePublishChangeOperationInput,
+  type ExecutePublishChangeOperationInput,
+  type PublishChangeOperationDependencies,
+} from "./publish-change-operation.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
@@ -71,17 +74,7 @@ export interface BuilderFlowSessionResult {
   attached: boolean;
 }
 
-export interface ExecutePublishChangeOperationInput extends BuilderFlowSessionInput {
-  intent: PublishChangeIntent;
-}
-
-export interface CompletePublishChangeOperationInput extends BuilderFlowSessionInput {
-  /**
-   * An action previously derived by issuePublishChangeOperation. This is not a
-   * caller-authored result: the transaction re-derives it under the subject lock.
-   */
-  action: IssuedPublishChangeAction;
-}
+export type { CompletePublishChangeOperationInput, ExecutePublishChangeOperationInput } from "./publish-change-operation.js";
 
 export interface CompletePublishChangeOperationResult extends BuilderFlowSessionResult {
   action: IssuedPublishChangeAction;
@@ -168,9 +161,8 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
  * action from canonical state and effective configuration; no public workflow
  * writer or caller-provided result is involved.
  */
-async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
-  const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
+export async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
+  return await issuePublishChangeOperationTransaction(input, publishChangeOperationDependencies());
 }
 
 /**
@@ -179,82 +171,34 @@ async function issuePublishChangeOperation(input: ExecutePublishChangeOperationI
  * authenticated provider identity are resolved inside the operation.
  */
 export async function executePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> {
-  resolveTrustedGithubExecutable();
-  const action = await issuePublishChangeOperation(input);
-  const context = resolveSessionContext(input.sessionDir);
-  const effective = resolveEffectiveChangeProviderSettings(
-    context.projectRoot,
-    path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
-  );
-  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
-    throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
-  }
-  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
-  return await completePublishChangeOperation({ sessionDir: input.sessionDir, action }, async (issued) => {
-    const { action_id: _actionId, ...request } = issued;
-    return await provider.createOrRecover(request as ChangeProviderRequest);
-  });
+  return await executePublishChangeOperationTransaction(input, publishChangeOperationDependencies());
 }
 
-async function completePublishChangeOperation(
+export async function completePublishChangeOperation(
   input: CompletePublishChangeOperationInput,
   observe: (request: IssuedPublishChangeAction) => AuthenticatedPublishChangeObservation | Promise<AuthenticatedPublishChangeObservation>,
 ): Promise<CompletePublishChangeOperationResult> {
-  const context = resolveSessionContext(input.sessionDir);
-  const issued = assertIssuedPublishChangeAction(input.action);
-  // Validate before invoking a mutating provider, but never retain the subject
-  // lock across network I/O. The commit phase revalidates after observation.
-  await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
-    await assertPublishChangeActionCurrentOrRecoverable(context, issued);
-  });
-  const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
-  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
-    const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
-    if (recovery) return recovery;
-    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
-    if (!isDeepStrictEqual(current, issued)) {
-      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
-    }
-    const persisted = persistPublishChangeResult(context, issued, observation);
-    const run = await advancePublishChangeGate(context, issued, observation, persisted.sha256);
-    return projectCompletedPublishChange(context, issued, observation, run);
-  });
+  return await completePublishChangeOperationTransaction(input, observe, publishChangeOperationDependencies());
 }
 
-/** Reject stale actions before they can reach a mutating provider. */
-async function assertPublishChangeActionCurrentOrRecoverable(
-  context: SessionContext,
-  issued: IssuedPublishChangeAction,
-): Promise<void> {
-  try {
-    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
-    if (!isDeepStrictEqual(current, issued)) {
-      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
-    }
-    return;
-  } catch (error) {
-    if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) throw error;
-  }
-}
-
-async function recoverPublishChangeIfCommitted(
-  context: SessionContext,
-  issued: IssuedPublishChangeAction,
-  observation: AuthenticatedPublishChangeObservation,
-): Promise<CompletePublishChangeOperationResult | null> {
-  if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) return null;
-  return await recoverCommittedPublishChange(context, issued, observation);
-}
-
-function publishChangeIntentFromAction(action: IssuedPublishChangeAction): PublishChangeIntent {
+function publishChangeOperationDependencies(): PublishChangeOperationDependencies<CompletePublishChangeOperationResult, BuilderFlowRunResult> {
   return {
-    title: action.intent.title,
-    body: action.intent.body,
-    ...(action.intent.draft === undefined ? {} : { draft: action.intent.draft }),
-    base_ref: action.base_ref,
-    head_ref: action.head_ref,
-    head_sha: action.head_sha,
+    resolveSessionContext,
+    currentAction: (context, intent) => currentPublishChangeAction(context as SessionContext, intent),
+    assertTrustedHead: (context, action) => assertTrustedPublishChangeHead(context as SessionContext, action),
+    hasCommittedReceipt: (context, action) => hasCommittedPublishChangeRecoveryReceipt(context as SessionContext, action),
+    recoverCommitted: (context, action, observation) => recoverCommittedPublishChange(context as SessionContext, action, observation),
+    persistResult: (context, action, observation) => persistPublishChangeResult(context as SessionContext, action, observation),
+    advanceGate: (context, action, observation, sha256) => advancePublishChangeGate(context as SessionContext, action, observation, sha256),
+    projectCompleted: (context, action, observation, run) => projectCompletedPublishChange(context as SessionContext, action, observation, run),
+    operationStaleError: () => new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration"),
   };
+}
+
+function assertTrustedPublishChangeHead(context: SessionContext, action: IssuedPublishChangeAction): void {
+  if (resolveTrustedLocalGitCommit(context.projectRoot, action.head_ref) !== action.head_sha) {
+    throw new BuilderBuildRunInputError("publish-change.intent.head_sha", "does not match the trusted local head ref during commit");
+  }
 }
 
 /** Phase 3: attach exactly the operation-bound claim and require gate advance. */
@@ -1211,13 +1155,13 @@ function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
   const root = fs.realpathSync(projectRoot);
   const hasGitMarker = fs.existsSync(path.join(root, ".git"));
   try {
-    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const gitRoot = String(execTrustedGitSync(root, ["rev-parse", "--show-toplevel"], "utf8")).trim();
     if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
       throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
     }
-    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
-    const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] })
+    const headSha = String(execTrustedGitSync(root, ["rev-parse", "HEAD"], "utf8")).trim();
+    const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], "buffer") as Buffer;
+    const untracked = (execTrustedGitSync(root, ["ls-files", "--others", "--exclude-standard", "-z"], "buffer") as Buffer)
       .toString("utf8").split("\0").filter(Boolean).sort();
     const hash = createHash("sha256");
     hash.update("flow-agents:git-worktree:v1\0");

@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { parseArgs, flagString } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
 import { executePublishChangeOperation, type CompletePublishChangeOperationResult } from "../builder-flow-runtime.js";
+import { resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 
 const CLOSING_KEYWORD_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?<refs>(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+)(?:\s*(?:,|and)\s*(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+))*)/gi;
 const GITHUB_REF_RE = /(?<url>https:\/\/github\.com\/(?<url_owner>[^/\s)]+)\/(?<url_repo>[^/\s)]+)\/(?:issues|pull)\/(?<url_number>\d+))|(?:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+))?#(?<number>\d+)/g;
@@ -199,12 +199,7 @@ function projectRootForSession(sessionDir: string): string {
 
 function resolveImmutableHeadSha(projectRoot: string, headRef: string): string {
   try {
-    const sha = execFileSync("git", ["-C", projectRoot, "rev-parse", "--verify", `${headRef}^{commit}`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim().toLowerCase();
-    if (!/^[0-9a-f]{40,64}$/u.test(sha)) throw new Error("not an immutable commit SHA");
-    return sha;
+    return resolveTrustedLocalGitCommit(projectRoot, headRef);
   } catch {
     throw new Error("publish-change execute could not resolve --head-ref to an immutable local commit");
   }

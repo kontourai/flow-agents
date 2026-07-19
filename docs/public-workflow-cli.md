@@ -244,8 +244,9 @@ the authenticated `gh` environment, never in these settings. An absent configura
 with its compatibility reason. Neither state exposes an executable completion claim, and both
 must remain an explicit external capability/verification gap rather than a successful publish.
 
-For a configured provider, the GitHub adapter resolves `gh` only from fixed trusted absolute
-locations (never caller-controlled `PATH`), authenticates it, queries pull
+For a configured provider, the public operation resolves the local head ref through a fixed
+trusted absolute `git` executable, and the GitHub adapter resolves `gh` only from fixed trusted
+absolute locations (never caller-controlled `PATH`). The adapter authenticates, queries pull
 requests by configured repository, base ref, head ref, and immutable head SHA, and verifies the
 title, body, and draft intent before returning a result. It creates only when no exact match
 exists. If creation has an ambiguous failure (for example, a timeout after GitHub accepted it),
@@ -259,10 +260,12 @@ The durable result is bounded to 65,536 bytes and is written only by the Flow-ow
 transaction as `publish-change.result.json`. It records the bound run/definition/step/gate visit,
 provider kind/configuration/adapter, repository, provider record id and number, HTTPS URL, normalized
 published state (`open` or `merged`), base ref, head ref and SHA, the bound `assignment_actor`, the authenticated GitHub
-`provider_actor`, and observation time. Title, body, and draft are
+`provider_actor`, and observation time. The adapter reauthenticates immediately after its final
+provider-record observation and fails closed if that actor changed, so the persisted actor is the
+one that observed the record. Title, body, and draft are
 authenticated request intent rather than free-form result fields. Before persistence, Flow
-reacquires the subject lock and revalidates assignment ownership, active gate visit, exact request
-binding, and effective provider configuration; it then re-observes the provider record, attaches
+reacquires the subject lock and revalidates the trusted local head ref/SHA, assignment ownership,
+active gate visit, exact request binding, and effective provider configuration; it then re-observes the provider record, attaches
 only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
 and projects the resulting state.
 

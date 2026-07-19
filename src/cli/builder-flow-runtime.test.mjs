@@ -47,14 +47,7 @@ const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTes
 
 async function loadRuntimeTestSeams() {
   const source = new URL("../../build/src/builder-flow-runtime.js", import.meta.url);
-  const transient = new URL(`../../build/src/.builder-flow-runtime.test-seam-${process.pid}-${Date.now()}.mjs`, import.meta.url);
-  const instrumented = `${fs.readFileSync(source, "utf8")}\nexport { issuePublishChangeOperation, completePublishChangeOperation };\n`;
-  fs.writeFileSync(transient, instrumented, { flag: "wx" });
-  try {
-    return await import(`${transient.href}?test-seam=${Date.now()}`);
-  } finally {
-    fs.unlinkSync(transient);
-  }
+  return await import(`${source.href}?test-seam=${Date.now()}`);
 }
 const AMBIENT_IDENTITY_ENV_KEYS = [
   "FLOW_AGENTS_ACTOR",
@@ -1990,8 +1983,9 @@ test("Flow completion authenticates the exact issued publish-change observation 
     schema_version: "1.0",
     defaults: { provider: { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe"], executor: "gh-cli" } },
   });
+  initializePublishChangeGitRepository(session.projectRoot);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
-    title: "Open the authenticated transaction", body: "Provider observation fixture.", base_ref: "main", head_ref: "agent/publish-change", head_sha: "a".repeat(40),
+    title: "Open the authenticated transaction", body: "Provider observation fixture.", base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
   } });
   const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
   const beforeProjection = snapshotProjectionTargets(session);
@@ -2066,9 +2060,10 @@ async function preparePublishChangeTransaction(slug) {
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
   await advanceSessionToPrOpen(session);
+  initializePublishChangeGitRepository(session.projectRoot);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
     title: "Authenticated transaction fixture", body: "Provider observation fixture.",
-    base_ref: "main", head_ref: "agent/publish-change", head_sha: "a".repeat(40),
+    base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
   } });
   return { session, ambient, action };
 }
@@ -2180,6 +2175,22 @@ test("simultaneous publish-change recovery serializes commit without duplicate a
   assert.deepEqual(results.map((result) => result.attached).sort(), [false, true]);
   assert.equal(observations, 2, "each retry re-observes, but only one completion may attach");
   assert.equal(results[1].run.manifest.evidence.filter((entry) => entry.expectation_ids?.includes("pull-request-opened")).length, 1);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("publish-change rebinds the trusted local head under the Flow commit lock", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-commit-ref-rebind");
+  const complete = createPublishChangeOperationCompleter((request) => {
+    fs.writeFileSync(path.join(session.projectRoot, "README.md"), "head moved while provider observation was in flight\n");
+    execFileSync("git", ["add", "README.md"], { cwd: session.projectRoot });
+    execFileSync("git", ["commit", "-m", "move head during observation"], { cwd: session.projectRoot, stdio: "ignore" });
+    return publishChangeObservation(request);
+  });
+  await assert.rejects(
+    () => complete({ sessionDir: session.sessionDir, action }),
+    /does not match the trusted local head ref during commit/,
+  );
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
@@ -2302,8 +2313,10 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
   initializePublishChangeGitRepository(session.projectRoot);
   const shimDirectory = path.join(session.projectRoot, "public-path-shim");
   const shimLog = path.join(session.projectRoot, "public-path-shim.log");
+  const gitShimLog = path.join(session.projectRoot, "public-path-git-shim.log");
   fs.mkdirSync(shimDirectory, { recursive: true });
   fs.writeFileSync(path.join(shimDirectory, "gh"), `#!/bin/sh\nprintf 'shim invoked\\n' >> '${shimLog}'\nexit 0\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(shimDirectory, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${gitShimLog}'\nprintf '%s\\n' '${"f".repeat(40)}'\n`, { mode: 0o755 });
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
   const previousPath = process.env.PATH;
   const previousGhConfigDir = process.env.GH_CONFIG_DIR;
@@ -2329,6 +2342,7 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
     if (previousGithubToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = previousGithubToken;
   }
   assert.equal(fs.existsSync(shimLog), false, "public CLI must not execute a caller-controlled PATH shim");
+  assert.equal(fs.existsSync(gitShimLog) && fs.readFileSync(gitShimLog, "utf8").includes("rev-parse --verify"), false, "public CLI must not execute a caller-controlled git PATH shim to derive its head SHA");
   assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), before);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });

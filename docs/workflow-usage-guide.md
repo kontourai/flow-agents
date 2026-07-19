@@ -556,8 +556,9 @@ defaults, global project match, then global defaults take precedence.
 
 If status is `external_capability_required` (unconfigured) or reports an incompatible setting,
 do not claim completion or synthesize a result file: record the external gap and resolve the
-configuration/provider condition. For a configured GitHub adapter, `gh` is resolved from a fixed
-trusted absolute location rather than caller-controlled `PATH`; its authentication and the exact
+configuration/provider condition. For a configured GitHub adapter, the local head ref is resolved
+through fixed trusted absolute `git`, and `gh` is resolved from a fixed trusted absolute location,
+rather than caller-controlled `PATH`; its authentication and the exact
 repository/base/head/SHA/title/body/draft match are verified before Flow records the result.
 The adapter recovers one matching published pull request before creation and after an ambiguous
 create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
@@ -566,12 +567,13 @@ completed ahead of the local run. Auth, provider, ambiguity, stale/closed-but-un
 wrong-intent failures leave the gate unresolved.
 
 Only the authenticated Flow-owned transaction writes the bounded
-`publish-change.result.json`, revalidates the assignment, gate visit, and configuration under the
+`publish-change.result.json`, revalidates the trusted local head ref/SHA, assignment, gate visit, and configuration under the
 subject lock, satisfies only `pull-request-opened`, and requires Flow to advance exactly one
 canonical step. Generic driver
 JSON/evidence, caller-authored result files, and package-internal writers cannot substitute for
 that transaction. The receipt separately preserves the bound `assignment_actor` and actual
-authenticated GitHub `provider_actor`. Credentials and provider diagnostics are never stored in workflow artifacts,
+authenticated GitHub `provider_actor`, reauthenticated immediately after the final provider-record
+observation; an identity change fails closed. Credentials and provider diagnostics are never stored in workflow artifacts,
 trust bundles, logs, or snapshots. A real provider mutation remains separate from local test
 proof; do not report a live recovery as complete without its provider and canonical-run evidence.
 

@@ -90,12 +90,15 @@ the `ChangeProvider` role and compatible create/observe capabilities. Absent con
 its reason. Neither state may expose an executable completion claim or be rewritten as a completed
 provider change.
 
-An authenticated provider observation is bounded to the operation binding, provider kind,
+The public operation resolves its immutable local head SHA through a fixed trusted absolute `git`
+executable, never caller-controlled `PATH`. An authenticated provider observation is bounded to the operation binding, provider kind,
 configuration id and adapter, repository, provider record id/number/HTTPS URL, normalized
 published state (`open` or `merged`),
 base/head refs and immutable SHA, the bound `assignment_actor`, the authenticated provider's
-`provider_actor`, and observation time. Flow must reacquire its subject
-lock before persistence and revalidate assignment ownership, active gate visit, request binding,
+`provider_actor`, and observation time. The adapter must reauthenticate immediately after its
+final provider-record observation and fail closed on identity drift, so the persisted actor is the
+one that observed the record. Flow must reacquire its subject
+lock before persistence and revalidate the trusted local head ref/SHA, assignment ownership, active gate visit, request binding,
 and effective configuration. It writes only `publish-change.result.json`, attaches only
 `pull-request-opened`, requires that canonical evaluation to advance exactly one step, and projects
 the resulting state.
