@@ -1382,6 +1382,8 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(verify.run.state.current_step, "verify");
 
   const failureTimestamp = new Date().toISOString();
+  const initialPrerequisites = verifiedTestsPrerequisites(session, failureTimestamp);
+  initialPrerequisites[0].claim.metadata.reviewer = "reviewer-before-route-back";
   const routed = await writeAndSync(session, [bundleClaim({
     expectation: "tests-evidence",
     claimType: "builder.verify.tests",
@@ -1389,7 +1391,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
     status: "fail",
     routeReason: "implementation_defect",
     timestamp: failureTimestamp,
-  }), ...verifiedTestsPrerequisites(session, failureTimestamp)]);
+  }), ...initialPrerequisites]);
 
   assert.equal(routed.run.state.current_step, "execute");
   assert.equal(routed.projection.flow_run.route_back_attempt, 1);
@@ -1415,15 +1417,66 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(staleRetry.attached, false);
   assert.equal(staleRetry.run.state.current_step, "verify");
   assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "corrected delivery after route-back\n");
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
+  const correctedPrerequisites = verifiedTestsPrerequisites(session, correctedAt)
+    .map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`));
+  correctedPrerequisites[0].claim.metadata.reviewer = "reviewer-after-route-back";
   const corrected = await writeAndSync(session, [
     withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
-    ...verifiedTestsPrerequisites(session, correctedAt).map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`)),
+    ...correctedPrerequisites,
+    // Compose-safe writers preserve this older reviewer's still-live PASS slice. It targets the
+    // prior implementation bytes and must remain audit history without deadlocking the new gate
+    // visit or requiring the new reviewer to impersonate the old one.
+    initialPrerequisites[0],
   ]);
   assert.equal(corrected.run.state.current_step, "merge-ready");
   const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
   assert.equal(verifyEvidence.length, 2);
   assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+  const retainedCritiques = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .filter((claim) => claim.metadata?.origin === "critique" && !claim.metadata.superseded_by);
+  assert.deepEqual(retainedCritiques.map((claim) => claim.metadata.reviewer).sort(), [
+    "reviewer-after-route-back",
+    "reviewer-before-route-back",
+  ]);
+});
+
+test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
+  const session = makeSession("same-visit-reviewer-handoff");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const timestamp = new Date().toISOString();
+  const prerequisites = verifiedTestsPrerequisites(session, timestamp);
+  prerequisites[0].claim.metadata.reviewer = "passing-reviewer";
+  const disputedCritique = withIdentitySuffix(structuredClone(prerequisites[0]), "disputed-reviewer");
+  disputedCritique.claim.value = "fail";
+  disputedCritique.claim.status = "disputed";
+  disputedCritique.claim.metadata.reviewer = "disputed-reviewer";
+  disputedCritique.claim.metadata.lanes = [{ id: "code", status: "fail" }];
+  disputedCritique.claim.metadata.findings = [{ id: "unresolved", status: "open", severity: "high" }];
+  disputedCritique.event.status = "disputed";
+
+  const blocked = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp }),
+    ...prerequisites,
+    disputedCritique,
+  ]);
+  assert.equal(blocked.attached, false);
+  assert.equal(blocked.run.state.current_step, "verify");
+  const retainedCritiques = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .filter((claim) => claim.metadata?.origin === "critique" && !claim.metadata.superseded_by);
+  assert.deepEqual(retainedCritiques.map((claim) => [claim.metadata.reviewer, claim.value]).sort(), [
+    ["disputed-reviewer", "fail"],
+    ["passing-reviewer", "pass"],
+  ]);
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
