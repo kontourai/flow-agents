@@ -18,12 +18,13 @@ The full source-tree command validates the built-in Kit Catalog and Builder Kit 
 npm run validate:source --
 ```
 
-## Local Install
+## Install From A Local Path Or Git
 
-Installed Flow Agents bundles include a local-only install command for Flow Kit repositories that already exist on disk:
+Flow Agents accepts either a local kit repository path or a Git URL:
 
 ```bash
 npm run kit -- install path/to/local-kit --dest /path/to/installed-flow-agents
+npm run kit -- install https://github.com/example/example-kit.git#v1.0.0 --dest /path/to/installed-flow-agents
 npm run kit -- list --dest /path/to/installed-flow-agents
 npm run kit -- status --dest /path/to/installed-flow-agents
 npm run kit -- status example-kit --dest /path/to/installed-flow-agents
@@ -60,7 +61,13 @@ Each registry entry records:
 
 Reinstalling the same kit id from the same source with the same content is idempotent and leaves the registry unchanged. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--update` replaces the copied kit and registry entry after the new source validates. `--force` re-copies an existing same-source install after validation.
 
-`list` and `status` are read-only. `list` prints one summary line per installed local kit. `status` prints JSON provenance and reports copied kit state as `installed` or `missing`.
+Git sources are shallow-cloned into a temporary directory and validated at the clone root. A
+repository installed from Git must therefore place `kit.json` at its root; subdirectory selection
+is not supported. Use a URL `#ref` fragment or `--ref <branch|tag|sha>` to pin the source. Install
+records the normalized URL/ref and content hash, and never executes scripts from the cloned
+repository.
+
+`list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance and reports copied kit state as `installed` or `missing`.
 
 ## Runtime Activation
 
@@ -70,7 +77,7 @@ Reinstalling the same kit id from the same source with the same content is idemp
 codex-local
 ```
 
-Unknown adapter ids fail with JSON diagnostics that include the available adapters. No Claude, Kiro, framework, API, npm module extraction, or remote install adapters are implemented by this activation surface.
+Unknown adapter ids fail with JSON diagnostics that include the available adapters. Git fetching belongs to install, not activation; activation still does not perform npm module extraction or execute kit setup code.
 
 The `codex-local` adapter supports assets declared in `flows`, `skills`, and `docs`. It activates the built-in Builder Kit Flow Definitions, including `builder.shape` and `builder.build`, plus supported assets from locally installed kit copies under:
 

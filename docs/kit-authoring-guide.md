@@ -492,7 +492,11 @@ A third-party kit inspected before verification:
 
 ## Direction
 
-Flow Kits are designed to be shareable workflow units — authored once, carried across teams and workspaces. The intended growth path is distribution from git remotes and a curated Kontour kit catalog of Kontour-authored kits covering work modes beyond software delivery. Today install is local-path only; remote fetch is explicitly a non-goal in this version.
+Flow Kits are shareable workflow units authored once and carried across teams and workspaces.
+`flow-agents kit install` accepts local paths and Git URLs today. Git repositories are shallow-
+cloned, validated at their root, provenance-recorded, and copied without executing repository
+scripts. Put `kit.json` at the repository root and pin a branch, tag, or SHA with `#ref` or
+`--ref`.
 
 ## Migration: flow-kit → flow-agents kit
 

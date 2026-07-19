@@ -15,7 +15,6 @@ import { main as narrativeRender } from "./cli/narrative-render.js";
 import { main as narrativeSources } from "./cli/narrative-sources.js";
 import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
-import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
 import { main as workflow } from "./cli/workflow.js";
 import { main as buildBundles } from "./tools/build-universal-bundles.js";
@@ -51,7 +50,6 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["utterance-check", utteranceCheck],
   ["telemetry-doctor", telemetryDoctor],
   ["usage-feedback", usageFeedback],
-  ["veritas-governance", veritasGovernance],
   ["validate-package", validatePackage],
   ["validate-hook-influence", validateHookInfluence],
   ["verify", verify],
@@ -78,7 +76,6 @@ const aliases = new Map<string, string>([
   ["flow-agents-skill-drift-check", "skill-drift-check"],
   ["flow-agents-telemetry-doctor", "telemetry-doctor"],
   ["flow-agents-usage-feedback", "usage-feedback"],
-  ["flow-agents-veritas-governance", "veritas-governance"],
   ["flow-agents-validate-hook-influence", "validate-hook-influence"],
   ["flow-agents-utterance-check", "utterance-check"],
   ["flow-agents-validate-source", "validate-source"],

@@ -109,7 +109,7 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],
   ["evals/fixtures/codex-legacy-agents", { owners: ["evals/integration/test_install_merge.sh"], classification: "exact historical Flow Agents-generated Codex AGENTS.md migration fixtures (#563)" }],
   ["evals/fixtures/economics", { owners: ["evals/integration/test_economics_record.sh"], classification: "per-run kit-economics record fixtures (#349): a transcript with .message.usage blocks, state.json/acceptance.json/critique.json join sources, a session.usage event, and the golden expected kontour.console.economics record" }],
-  ["evals/fixtures/flow-kit-repository", { owners: ["evals/integration/test_flow_kit_repository.sh", "evals/integration/test_local_flow_kit_install.sh", "evals/integration/test_runtime_adapter_activation.sh", "evals/integration/test_activate_npx_context.sh", "evals/integration/test_flow_kit_install_git.sh", "evals/static/test_workflow_skills.sh"], classification: "Flow Kit repository contract fixtures" }],
+  ["evals/fixtures/flow-kit-repository", { owners: ["evals/integration/test_flow_kit_repository.sh", "evals/integration/test_local_flow_kit_install.sh", "evals/integration/test_runtime_adapter_activation.sh", "evals/integration/test_activate_npx_context.sh", "evals/integration/test_flow_kit_install_git.sh", "evals/static/test_validate_source_kit_asset_scope.sh", "evals/static/test_workflow_skills.sh"], classification: "Flow Kit repository contract fixtures" }],
   ["evals/fixtures/kit-conformance-levels", { owners: ["evals/integration/test_kit_conformance_levels.sh"], classification: "K-level conformance and consumer-target derivation fixtures" }],
   ["evals/fixtures/hook-influence", { owners: ["evals/integration/test_hook_influence_cases.sh", "evals/static/test_workflow_skills.sh", "scripts/validate-hook-influence-cases.js"], classification: "hook influence behavioral cases" }],
   ["evals/fixtures/learning-review-proposals", { owners: ["evals/integration/test_learning_review_proposals.sh"], classification: "learning-review kit/gate tuning proposal fixtures (#352): pattern-present (engineered cost-inflation + gate false-block-rate pattern, with sessions/ trust.bundle + gate-review.inquiries.json joins and a hand-computed expected-aggregates.json), balanced (proportional cost/findings movement -> zero proposals), under-threshold (below LR_MIN_WINDOW_SAMPLE), repeat-window (idempotency), and effect-follow-up (later-window effect-fill pass for a ratified proposal)" }],
@@ -126,7 +126,6 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/trust-reconcile-mixed-bundle", { owners: ["evals/integration/test_trust_reconcile_mixed_bundle.sh", "evals/integration/test_reconcile_preflight.sh"], classification: "WS8 trust-reconcile mixed-evidence end-to-end proof fixture; also reused by the #356 reconcile-preflight eval as its CLEAN-BUNDLE (AC4) case" }],
   ["evals/fixtures/trust-reconcile-ws3", { owners: ["evals/integration/test_trust_reconcile_negatives.sh"], classification: "WS8 AC6 backward-compat fixture: real ws3-kit-dependencies-namespacing old-style bundle" }],
   ["evals/fixtures/usage-feedback", { owners: ["evals/integration/test_usage_feedback_import.sh", "evals/integration/test_usage_feedback_outcomes.sh", "evals/integration/test_usage_feedback_report.sh"], classification: "usage feedback import/outcome fixtures" }],
-  ["evals/fixtures/veritas-governance-adapter", { owners: ["evals/integration/test_veritas_governance_adapter.sh"], classification: "Veritas governance adapter fixtures" }],
 ]);
 const requiredUsageFeedbackFiles = [
   "package.json", "tsconfig.json", "scripts/usage-feedback.js", "src/cli/usage-feedback.ts", "docs/agent-usage-feedback-loop.md",
@@ -270,8 +269,7 @@ function validateLegacyRefs(reporter: Reporter): void {
   // sibling-directory proximity — widening the exemption to "any file in the same directory
   // as a registered path" would silence real missing-path detection for every OTHER file that
   // happens to sit next to a registered asset, not just the intended one. See
-  // kits/veritas-governance/kit.json's "assets" section for the registration this exact case
-  // uses.
+  // A kit.json "assets" section provides the exact-path registration this case uses.
   const kitOwnedSubPaths = new Set<string>();
   const kitsDir = path.join(root, "kits");
   if (fs.existsSync(kitsDir)) {

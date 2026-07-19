@@ -450,10 +450,6 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-conflict-injection-integration
 
-      - name: Veritas governance kit integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check veritas-governance-kit-integration
-
       # The anti-gaming + trust regression suite runs in this REQUIRED lane so that
       # weakening the gate / CI anchor / their protections (or removing a regression
       # test) is caught and cannot merge. Convergence red-team (Round 5/7) closure.
@@ -526,10 +522,6 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check evidence-capture-hook-integration
 
-      - name: Exemption usage review integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check exemption-usage-review-integration
-
       - name: FlowDefinition session history preservation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flowdefinition-session-history-preservation-integration
@@ -589,10 +581,6 @@ jobs:
       - name: Verify CLI integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check verify-cli-integration
-
-      - name: Veritas governance adapter integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check veritas-governance-adapter-integration
 
       - name: Workspace settings integration
         continue-on-error: true

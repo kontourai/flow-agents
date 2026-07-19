@@ -154,12 +154,9 @@ mitigation applied to every other self-asserted, unauthenticated field in this t
 (ADR 0022 §2). This file (`delivery/README.md`) itself is not a protected path; only the
 `DECLARED` marker file is.
 
-**Where to go next.** To issue a new exemption through the guided, gated path (rather than
-hand-authoring JSON), see `kits/veritas-governance`'s "How to issue a no-agent-delivery
-exemption" (`kits/veritas-governance/docs/README.md`), which shows the compound-scope form in
-its own worked example and defers the full grammar here. To review which exemptions are
-currently standing and flag stale ones for re-confirmation, see this kit's
-`exemption-usage-review` skill.
+**Where to go next.** The exemption grammar and anchor enforcement remain defined here and
+in ADR 0022. Optional governance authoring or review guidance belongs in an external
+governance kit; Flow Agents does not bundle a product-specific issuer or reviewer.
 
 ## How it works
 

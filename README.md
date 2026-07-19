@@ -17,7 +17,7 @@
 
 Agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
 
-Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are the swappable solutions on top: Builder, Knowledge, Release Evidence, Veritas Governance, and any third-party kit declared with `kit.json` and registered through a catalog. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
+Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are swappable solutions on top: built-in examples such as Builder, Knowledge, and Release Evidence, plus external products such as the Veritas Governance Kit and any third-party repository with a root `kit.json`. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
 
 **You ask for outcomes. The system supplies the path, the state, the checks, and the proof.**
 
@@ -170,7 +170,13 @@ npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 
 **Release Evidence Kit** — a minimal flows-only kit that proves agentless gate evaluation over trusted `release.evidence` claims in CI.
 
-**Veritas Governance Kit** — an agentless kit that gates a real `veritas readiness` verdict as a trust.bundle software-readiness-verdict claim. It wraps @kontourai/veritas through CLI + a kit-local adapter and does not reimplement standards evaluation.
+**Veritas Governance Kit** — maintained with the Veritas product in its own root-valid kit repository. Install it directly from a pinned Git ref; it gates the canonical trust bundle emitted by `veritas readiness` and helps set up the standalone engine without giving Flow Agents any Veritas-specific runtime branch:
+
+```bash
+npx @kontourai/flow-agents kit install \
+  https://github.com/kontourai/veritas.git#v1.5.1 --dest .
+npx @kontourai/flow-agents kit activate --dest . --format json
+```
 
 **Direction**: domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall), and community-contributed kits discovered through a marketplace. Marketplace labels such as official or first-party describe provenance; they do not grant runtime privilege.
 
