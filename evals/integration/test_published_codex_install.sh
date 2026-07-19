@@ -159,6 +159,44 @@ if grep -Fq 'npm run build:bundles --silent' "$CORRUPT_ROOT/scripts/install-code
   exit 1
 fi
 
+# Closure provenance and exact coverage are fail-closed before installation.
+for closure_case in wrong-version missing-file extra-file; do
+  CLOSURE_CORRUPT_ROOT="$CONSUMER/node_modules/@kontourai/flow-agents-closure-corrupt-$closure_case"
+  CLOSURE_CORRUPT_CODEX="$TMPDIR_EVAL/closure-corrupt-codex-$closure_case"
+  CLOSURE_CORRUPT_SKILLS="$TMPDIR_EVAL/closure-corrupt-skills-$closure_case"
+  cp -R "$PACKAGE_ROOT" "$CLOSURE_CORRUPT_ROOT"
+  case "$closure_case" in
+    wrong-version)
+      node - "$CLOSURE_CORRUPT_ROOT/dist/codex/build/runtime-dependencies.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const closure = JSON.parse(fs.readFileSync(file, "utf8"));
+closure.packages[0].version = "0.0.0-corrupt";
+fs.writeFileSync(file, `${JSON.stringify(closure, null, 2)}\n`);
+NODE
+      ;;
+    missing-file)
+      rm "$CLOSURE_CORRUPT_ROOT/dist/codex/build/runtime-node-modules/@kontourai/flow/package.json"
+      ;;
+    extra-file)
+      printf 'unowned\n' > "$CLOSURE_CORRUPT_ROOT/dist/codex/build/runtime-node-modules/unowned.txt"
+      ;;
+  esac
+  if HOME="$HOME_DIR" CODEX_HOME="$CLOSURE_CORRUPT_CODEX" CODEX_REAL_HOME="$CLOSURE_CORRUPT_CODEX" \
+    FLOW_AGENTS_SKILLS_DIR="$CLOSURE_CORRUPT_SKILLS" NPM_CONFIG_CACHE="$NPM_CACHE" \
+    node "$CLOSURE_CORRUPT_ROOT/build/src/cli.js" init --runtime codex --global --activate-kits --yes \
+    >"$TMPDIR_EVAL/closure-corrupt-$closure_case.out" 2>&1; then
+    echo "corrupt runtime closure unexpectedly installed: $closure_case" >&2
+    exit 1
+  fi
+  if ! grep -Eq 'runtime dependency|required prebuilt Codex bundle is missing or invalid' "$TMPDIR_EVAL/closure-corrupt-$closure_case.out"; then
+    echo "corrupt runtime closure failed without an actionable diagnostic: $closure_case" >&2
+    cat "$TMPDIR_EVAL/closure-corrupt-$closure_case.out" >&2
+    exit 1
+  fi
+  [[ ! -e "$CLOSURE_CORRUPT_CODEX" && ! -e "$CLOSURE_CORRUPT_SKILLS" ]]
+done
+
 # The installed runtime must remain executable after its package source and npm
 # cache are gone. This is the supported seam used by installed hooks, not merely
 # a check that the npm-managed package binary can run before global installation.
@@ -166,6 +204,18 @@ rm -rf "$CONSUMER" "$NPM_CACHE"
 [[ ! -e "$PACKAGE_ROOT" && ! -e "$NPM_CACHE" ]]
 NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" --help >/dev/null
 NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" workflow --help >/dev/null
+OFFLINE_PROJECT="$TMPDIR_EVAL/offline-workflow-project"
+mkdir -p "$OFFLINE_PROJECT"
+(
+  cd "$OFFLINE_PROJECT"
+  NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" workflow start \
+    --flow builder.shape \
+    --task-slug installed-runtime-offline-smoke \
+    --summary "Exercise a substantive workflow operation from the installed offline runtime." >/dev/null
+  NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" workflow status \
+    --session-dir .kontourai/flow-agents/installed-runtime-offline-smoke --json \
+    | grep -Fq '"current_step":"shape"'
+)
 
 node - "$CODEX_DIR" <<'NODE'
 const fs = require("node:fs");

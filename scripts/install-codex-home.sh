@@ -99,6 +99,87 @@ const bundlePackage = JSON.parse(fs.readFileSync(path.join(snapshot, "build/pack
 if (bundlePackage.name !== packageJson.name || bundlePackage.version !== packageJson.version) {
   throw new Error("dist/codex/build/package.json does not match the package name and version");
 }
+const closure = JSON.parse(readRegular(path.join(snapshot, "build/runtime-dependencies.json")).toString("utf8"));
+if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages" || !Array.isArray(closure.packages)) {
+  throw new Error("runtime dependency closure manifest is missing its lockfile-bound schema");
+}
+if (closure.policy?.roots !== "package.dependencies" || closure.policy?.transitive !== "dependencies"
+    || closure.policy?.optional_dependencies !== "excluded" || closure.policy?.peer_dependencies !== "excluded") {
+  throw new Error("runtime dependency closure policy is missing or unsupported");
+}
+const stagingRoot = path.join(snapshot, "build/runtime-node-modules");
+const packageByPath = new Map();
+const expectedFiles = new Set();
+for (const item of closure.packages) {
+  if (!item || typeof item !== "object" || typeof item.path !== "string"
+      || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:\/node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(item.path)
+      || item.lock_path !== `node_modules/${item.path}` || typeof item.name !== "string"
+      || typeof item.version !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)
+      || !Array.isArray(item.files) || packageByPath.has(item.path)) {
+    throw new Error("runtime dependency closure contains an invalid or duplicate package record");
+  }
+  const packageRoot = path.join(stagingRoot, item.path);
+  const packageManifest = JSON.parse(readRegular(path.join(packageRoot, "package.json")).toString("utf8"));
+  if (packageManifest.name !== item.name || packageManifest.version !== item.version) {
+    throw new Error(`runtime dependency identity mismatch for ${item.path}`);
+  }
+  const observedFiles = [];
+  function visitPackage(absolute, relative) {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${item.path}/${relative}`);
+    if (stat.isDirectory()) {
+      if (relative && path.basename(relative) === "node_modules") return;
+      for (const entry of fs.readdirSync(absolute).sort()) visitPackage(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${item.path}/${relative}`);
+    observedFiles.push({
+      path: relative.split(path.sep).join("/"),
+      sha256: crypto.createHash("sha256").update(readRegular(absolute)).digest("hex"),
+    });
+  }
+  visitPackage(packageRoot, "");
+  if (JSON.stringify(observedFiles) !== JSON.stringify(item.files)) {
+    throw new Error(`runtime dependency file coverage or digest mismatch for ${item.path}`);
+  }
+  for (const file of observedFiles) expectedFiles.add(`${item.path}/${file.path}`);
+  packageByPath.set(item.path, packageManifest);
+}
+for (const name of Object.keys(packageJson.dependencies ?? {})) {
+  if (!packageByPath.has(name)) throw new Error(`required root dependency is absent from the closure: ${name}`);
+}
+function resolveManifestDependency(fromPath, name) {
+  let current = fromPath;
+  for (;;) {
+    const candidate = current ? `${current}/node_modules/${name}` : name;
+    if (packageByPath.has(candidate)) return candidate;
+    const marker = current.lastIndexOf("/node_modules/");
+    if (marker < 0) return packageByPath.has(name) ? name : null;
+    current = current.slice(0, marker);
+  }
+}
+for (const [packagePath, packageManifest] of packageByPath) {
+  for (const name of Object.keys(packageManifest.dependencies ?? {})) {
+    if (!resolveManifestDependency(packagePath, name)) {
+      throw new Error(`runtime dependency closure omits ${name} required by ${packagePath}`);
+    }
+  }
+}
+const observedStagedFiles = new Set();
+function visitStaging(absolute, relative) {
+  const stat = fs.lstatSync(absolute);
+  if (stat.isSymbolicLink()) throw new Error(`runtime dependency staging contains symlink: ${relative}`);
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(absolute).sort()) visitStaging(path.join(absolute, entry), path.join(relative, entry));
+    return;
+  }
+  if (!stat.isFile()) throw new Error(`runtime dependency staging contains non-regular entry: ${relative}`);
+  observedStagedFiles.add(relative.split(path.sep).join("/"));
+}
+visitStaging(stagingRoot, "");
+if (observedStagedFiles.size !== expectedFiles.size || [...observedStagedFiles].some((file) => !expectedFiles.has(file))) {
+  throw new Error("runtime dependency closure has missing or unowned staged files");
+}
 } catch (error) {
   console.error(`install-codex-home.sh: shipped bundle validation failed: ${error.message}`);
   process.exit(1);

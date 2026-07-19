@@ -83,11 +83,12 @@ else
   _fail "bundle compiled-runtime package identity is missing or stale"
 fi
 
-if node - "$ROOT_DIR/package.json" "$DIST_DIR" <<'NODE'
+if node - "$ROOT_DIR/package.json" "$ROOT_DIR/package-lock.json" "$DIST_DIR" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const [sourcePackageFile, dist] = process.argv.slice(2);
+const [sourcePackageFile, lockFile, dist] = process.argv.slice(2);
 const source = JSON.parse(fs.readFileSync(sourcePackageFile, "utf8"));
+const lock = JSON.parse(fs.readFileSync(lockFile, "utf8"));
 const codexPackage = JSON.parse(fs.readFileSync(path.join(dist, "codex", "package.json"), "utf8"));
 if (JSON.stringify(codexPackage.dependencies) !== JSON.stringify(source.dependencies)) {
   throw new Error("Codex runtime package dependencies do not match the source package");
@@ -98,12 +99,48 @@ for (const runtime of ["base", "kiro", "claude-code", "opencode", "pi"]) {
   }
 }
 const closure = JSON.parse(fs.readFileSync(path.join(dist, "codex", "build", "runtime-dependencies.json"), "utf8"));
-if (!closure.packages.some((item) => item.name === "@kontourai/flow")) {
-  throw new Error("Codex required runtime closure omits @kontourai/flow");
+if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages"
+    || closure.policy?.roots !== "package.dependencies" || closure.policy?.transitive !== "dependencies"
+    || closure.policy?.optional_dependencies !== "excluded" || closure.policy?.peer_dependencies !== "excluded") {
+  throw new Error("Codex required runtime closure policy is not explicit and lockfile-bound");
+}
+const packageByPath = new Map(closure.packages.map((item) => [item.path, item]));
+function resolveLocked(fromPath, name) {
+  let current = fromPath;
+  for (;;) {
+    const candidate = current ? `${current}/node_modules/${name}` : name;
+    if (lock.packages[`node_modules/${candidate}`]) return candidate;
+    const marker = current.lastIndexOf("/node_modules/");
+    if (marker < 0) return lock.packages[`node_modules/${name}`] ? name : null;
+    current = current.slice(0, marker);
+  }
+}
+const pending = Object.keys(source.dependencies ?? {}).sort().map((name) => ({ fromPath: "", name }));
+const expected = new Set();
+while (pending.length) {
+  const { fromPath, name } = pending.shift();
+  const dependencyPath = resolveLocked(fromPath, name);
+  if (!dependencyPath) throw new Error(`package-lock.json cannot resolve ${name} from ${fromPath || "root"}`);
+  if (expected.has(dependencyPath)) continue;
+  expected.add(dependencyPath);
+  const dependencyManifest = JSON.parse(fs.readFileSync(path.join(dist, "codex", "build", "runtime-node-modules", dependencyPath, "package.json"), "utf8"));
+  for (const child of Object.keys(dependencyManifest.dependencies ?? {}).sort()) {
+    pending.push({ fromPath: dependencyPath, name: child });
+  }
+}
+if (expected.size !== packageByPath.size || [...expected].some((dependencyPath) => !packageByPath.has(dependencyPath))) {
+  throw new Error("Codex runtime dependency manifest does not exactly cover the required lockfile topology");
+}
+for (const [dependencyPath, item] of packageByPath) {
+  const lockEntry = lock.packages[`node_modules/${dependencyPath}`];
+  if (!lockEntry || item.lock_path !== `node_modules/${dependencyPath}` || item.version !== lockEntry.version
+      || item.integrity !== lockEntry.integrity || !Array.isArray(item.files) || item.files.length === 0) {
+    throw new Error(`Codex runtime dependency ${dependencyPath} is not version/integrity/file bound to package-lock.json`);
+  }
 }
 NODE
 then
-  _pass "only Codex carries a root runtime package and its required dependency closure"
+  _pass "only Codex carries an exact lockfile-bound required dependency topology"
 else
   _fail "runtime root package or Codex dependency closure boundary is invalid"
 fi

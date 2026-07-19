@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
@@ -25,27 +26,57 @@ const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_
 type RuntimeDependency = {
   name: string;
   version: string;
+  lockPath: string;
+  integrity: string;
   packageRoot: string;
   packageJson: string;
 };
 
-function resolveRuntimeDependency(packageName: string, declaringPackageJson: string): RuntimeDependency {
+type PackageLock = {
+  lockfileVersion?: number;
+  packages?: Record<string, Record<string, unknown>>;
+};
+
+function portablePath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function resolveRuntimeDependency(
+  packageName: string,
+  declaringPackageJson: string,
+  lockPackages: Record<string, Record<string, unknown>>,
+): RuntimeDependency {
   if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(packageName)) {
     throw new Error(`unsafe runtime dependency package name: ${packageName}`);
   }
   let current = path.dirname(declaringPackageJson);
-  const filesystemRoot = path.parse(current).root;
+  const repositoryRoot = fs.realpathSync(root);
   while (true) {
     const packageRoot = path.join(current, "node_modules", ...packageName.split("/"));
     const packageJson = path.join(packageRoot, "package.json");
     if (fs.existsSync(packageJson)) {
+      const realPackageRoot = fs.realpathSync(packageRoot);
+      if (realPackageRoot !== repositoryRoot && !realPackageRoot.startsWith(`${repositoryRoot}${path.sep}`)) {
+        throw new Error(`runtime dependency resolved outside the repository: ${packageName} at ${realPackageRoot}`);
+      }
+      const lockPath = portablePath(path.relative(root, packageRoot));
+      if (!lockPath.startsWith("node_modules/")) throw new Error(`unsafe runtime dependency lock path: ${lockPath}`);
+      const lockEntry = lockPackages[lockPath];
+      if (!lockEntry) throw new Error(`runtime dependency ${packageName} is absent from package-lock.json at ${lockPath}`);
       const parsed = loadJson<Record<string, unknown>>(packageJson);
       if (parsed["name"] !== packageName) throw new Error(`runtime dependency identity mismatch at ${packageJson}`);
       const version = parsed["version"];
       if (typeof version !== "string" || !version) throw new Error(`runtime dependency ${packageName} has no version`);
-      return { name: packageName, version, packageRoot, packageJson };
+      if (lockEntry["version"] !== version) {
+        throw new Error(`runtime dependency ${packageName}@${version} does not match package-lock.json ${String(lockEntry["version"] ?? "missing")} at ${lockPath}`);
+      }
+      const integrity = lockEntry["integrity"];
+      if (typeof integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) {
+        throw new Error(`runtime dependency ${packageName}@${version} has no sha512 integrity in package-lock.json at ${lockPath}`);
+      }
+      return { name: packageName, version, lockPath, integrity, packageRoot, packageJson };
     }
-    if (current === filesystemRoot) break;
+    if (fs.realpathSync(current) === repositoryRoot) break;
     current = path.dirname(current);
   }
   throw new Error(`could not resolve runtime dependency ${packageName} from ${declaringPackageJson}`);
@@ -70,24 +101,42 @@ function copyRuntimePackageTree(source: string, destination: string): void {
   visit(source, "");
 }
 
+function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256: string }> {
+  const files: Array<{ path: string; sha256: string }> = [];
+  function visit(absolute: string, relative: string): void {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
+    if (stat.isDirectory()) {
+      if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
+      for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${absolute}`);
+    files.push({
+      path: portablePath(relative),
+      sha256: crypto.createHash("sha256").update(fs.readFileSync(absolute)).digest("hex"),
+    });
+  }
+  visit(packageRoot, "");
+  return files;
+}
+
 function exportRequiredRuntimeDependencies(bundleRoot: string): void {
   const rootPackageJson = path.join(root, "package.json");
   const rootPackage = loadJson<Record<string, unknown>>(rootPackageJson);
+  const packageLock = loadJson<PackageLock>(path.join(root, "package-lock.json"));
+  if (packageLock.lockfileVersion !== 3 || !packageLock.packages || typeof packageLock.packages !== "object") {
+    throw new Error("required runtime closure requires package-lock.json lockfileVersion 3 with a packages map");
+  }
   const seeds = Object.keys((rootPackage["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort();
   const pending = seeds.map((name) => ({ name, declaringPackageJson: rootPackageJson }));
   const resolved = new Map<string, RuntimeDependency>();
 
   while (pending.length > 0) {
     const next = pending.shift()!;
-    const dependency = resolveRuntimeDependency(next.name, next.declaringPackageJson);
-    const prior = resolved.get(dependency.name);
-    if (prior) {
-      if (prior.version !== dependency.version || fs.realpathSync(prior.packageRoot) !== fs.realpathSync(dependency.packageRoot)) {
-        throw new Error(`runtime dependency version collision for ${dependency.name}: ${prior.version} and ${dependency.version}`);
-      }
-      continue;
-    }
-    resolved.set(dependency.name, dependency);
+    const dependency = resolveRuntimeDependency(next.name, next.declaringPackageJson, packageLock.packages);
+    if (resolved.has(dependency.lockPath)) continue;
+    resolved.set(dependency.lockPath, dependency);
     const manifest = loadJson<Record<string, unknown>>(dependency.packageJson);
     for (const name of Object.keys((manifest["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort()) {
       pending.push({ name, declaringPackageJson: dependency.packageJson });
@@ -95,15 +144,29 @@ function exportRequiredRuntimeDependencies(bundleRoot: string): void {
   }
 
   const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
-  for (const dependency of [...resolved.values()].sort((a, b) => a.name.localeCompare(b.name))) {
-    copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, ...dependency.name.split("/")));
+  for (const dependency of [...resolved.values()].sort((a, b) => a.lockPath.localeCompare(b.lockPath))) {
+    const stagedRelative = dependency.lockPath.replace(/^node_modules\//, "");
+    copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, stagedRelative));
   }
   writeText(path.join(bundleRoot, "build", "runtime-dependencies.json"), `${JSON.stringify({
-    schema_version: "1.0",
-    source: "package.dependencies",
+    schema_version: "2.0",
+    source: "package-lock.json#packages",
+    policy: {
+      roots: "package.dependencies",
+      transitive: "dependencies",
+      optional_dependencies: "excluded",
+      peer_dependencies: "excluded",
+    },
     packages: [...resolved.values()]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(({ name, version }) => ({ name, version })),
+      .sort((a, b) => a.lockPath.localeCompare(b.lockPath))
+      .map(({ name, version, lockPath, integrity }) => ({
+        path: lockPath.replace(/^node_modules\//, ""),
+        lock_path: lockPath,
+        name,
+        version,
+        integrity,
+        files: runtimePackageFiles(path.join(stagingRoot, lockPath.replace(/^node_modules\//, ""))),
+      })),
   }, null, 2)}\n`);
 }
 
