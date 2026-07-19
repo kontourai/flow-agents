@@ -1382,6 +1382,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(verify.run.state.current_step, "verify");
 
   const failureTimestamp = new Date().toISOString();
+  const initialPrerequisites = verifiedTestsPrerequisites(session, failureTimestamp);
   const routed = await writeAndSync(session, [bundleClaim({
     expectation: "tests-evidence",
     claimType: "builder.verify.tests",
@@ -1389,7 +1390,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
     status: "fail",
     routeReason: "implementation_defect",
     timestamp: failureTimestamp,
-  }), ...verifiedTestsPrerequisites(session, failureTimestamp)]);
+  }), ...initialPrerequisites]);
 
   assert.equal(routed.run.state.current_step, "execute");
   assert.equal(routed.projection.flow_run.route_back_attempt, 1);
@@ -1415,10 +1416,15 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(staleRetry.attached, false);
   assert.equal(staleRetry.run.state.current_step, "verify");
   assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "corrected delivery after route-back\n");
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
   const corrected = await writeAndSync(session, [
     withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
     ...verifiedTestsPrerequisites(session, correctedAt).map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`)),
+    // Compose-safe writers preserve this older reviewer's still-live PASS slice. It targets the
+    // prior implementation bytes and must remain audit history without deadlocking the new gate
+    // visit or requiring the new reviewer to impersonate the old one.
+    initialPrerequisites[0],
   ]);
   assert.equal(corrected.run.state.current_step, "merge-ready");
   const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
