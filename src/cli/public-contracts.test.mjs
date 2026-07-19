@@ -18,7 +18,7 @@ test("publish-change contract binds canonical request and observed immutable cha
   assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.request.required, ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider"]);
   assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"]);
   assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.properties.change_ref.required, ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"]);
-  assert.equal(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.properties.change_ref.properties.state.const, "open");
+  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.properties.change_ref.properties.state.enum, ["open", "merged"]);
   assert.equal(PUBLISH_CHANGE_OPERATION_PROTOCOL.parameters.some((parameter) => parameter.flag === "--result-json"), false);
   assert.equal(JSON.stringify(PUBLISH_CHANGE_OPERATION_PROTOCOL).includes("token"), false);
 });

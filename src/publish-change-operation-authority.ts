@@ -40,7 +40,7 @@ export type AuthenticatedPublishChangeObservation = {
     provider_record_id: string;
     number: number;
     url: string;
-    state: "open";
+    state: "open" | "merged";
     base_ref: string;
     head_ref: string;
     head_sha: string;
@@ -188,7 +188,7 @@ export function assertAuthenticatedPublishChangeObservation(action: IssuedPublis
   const change = observation.change_ref as Record<string, unknown>;
   const changeKeys = ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"];
   if (Object.keys(change).length !== changeKeys.length || !changeKeys.every((key) => key in change)) fail("provider observation.change_ref", "has an unexpected shape");
-  if (change.state !== "open" || change.base_ref !== action.base_ref || change.head_ref !== action.head_ref || change.head_sha !== action.head_sha) fail("provider observation.change_ref", "does not match the issued base/head/open-state binding");
+  if ((change.state !== "open" && change.state !== "merged") || change.base_ref !== action.base_ref || change.head_ref !== action.head_ref || change.head_sha !== action.head_sha) fail("provider observation.change_ref", "does not match the issued base/head/published-state binding");
   if (!Number.isSafeInteger(change.number) || (change.number as number) < 1) fail("provider observation.change_ref.number", "must be a positive safe integer");
   const url = bounded(change.url, 8_192, "provider observation.change_ref.url");
   try { if (new URL(url).protocol !== "https:") fail("provider observation.change_ref.url", "must use https"); } catch { fail("provider observation.change_ref.url", "must be a valid https URL"); }
@@ -196,6 +196,6 @@ export function assertAuthenticatedPublishChangeObservation(action: IssuedPublis
   if (!Number.isFinite(Date.parse(observedAt))) fail("provider observation.observed_at", "must be an ISO timestamp");
   return {
     schema_version: "1.0", operation: "publish-change", binding: structuredClone(action.binding), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter }, repository: structuredClone(action.repository),
-    change_ref: { provider_record_id: bounded(change.provider_record_id, MAX_ID, "provider observation.change_ref.provider_record_id"), number: change.number as number, url, state: "open", base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha }, actor: action.actor, observed_at: observedAt,
+    change_ref: { provider_record_id: bounded(change.provider_record_id, MAX_ID, "provider observation.change_ref.provider_record_id"), number: change.number as number, url, state: change.state, base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha }, actor: action.actor, observed_at: observedAt,
   };
 }

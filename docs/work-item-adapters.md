@@ -44,7 +44,8 @@ matching project entry in `context/settings/change-provider-settings.json`; the 
 
 The command derives repository, immutable head SHA, assignment actor, canonical run, and current
 gate visit. The adapter returns a bounded, authenticated observation containing provider identity
-and adapter, repository, provider record id/number/HTTPS URL, open state, base/head refs and SHA,
+and adapter, repository, provider record id/number/HTTPS URL, normalized published state
+(`open` or `merged`), base/head refs and SHA,
 actor, and observation time. Flow rechecks the assignment, gate visit, request binding, and provider
 configuration under its subject lock; it then persists only `publish-change.result.json`, records
 only `pull-request-opened`, requires Flow to advance exactly one canonical step, and projects the result.
@@ -76,10 +77,11 @@ For GitHub, `publish-change` usually means:
 - collect pull request checks, required reviews, mergeability, and status checks
 
 The shipped GitHub adapter uses direct `gh` argv behind the `ChangeProvider` interface. It
-authenticates, finds an exact open pull request by configured repository/base/head/SHA and
+authenticates, finds an exact published pull request by configured repository/base/head/SHA and
 title/body/draft intent, or creates one only when none exists; it then re-observes the canonical
-record. An ambiguous create failure triggers one recovery query before failure is returned.
-Multiple matches, a closed/stale/wrong record, malformed output, unavailable `gh`, or failed
+record. Open records support the normal path, while merged records support truthful reconciliation
+after provider work completed ahead of the local run. An ambiguous create failure triggers one
+recovery query before failure is returned. Multiple matches, a closed-but-unmerged/stale/wrong record, malformed output, unavailable `gh`, or failed
 authentication must not select a record or create a duplicate.
 
 GitHub-specific words belong in adapter sections and examples. The shared workflow result should still be expressed as `change_ref`, `closing_reference_check`, `provider_checks`, and `evidence_refs`.
