@@ -24,6 +24,7 @@ const dropDiagnostics: string[] = [];
 // (see main()) instead of an uncaught thrown Error / stack trace.
 let skillCollisionDiagnostic: string | null = null;
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
+const PACKED_NODE_MODULES_MARKER = "__flow_agents_node_modules__";
 
 type RuntimeDependency = {
   name: string;
@@ -44,7 +45,7 @@ function portablePath(value: string): string {
 }
 
 function packSafeRuntimePath(logicalPath: string): string {
-  return logicalPath.replaceAll("/node_modules/", "/__flow_agents_node_modules__/");
+  return logicalPath.replaceAll("/node_modules/", `/${PACKED_NODE_MODULES_MARKER}/`);
 }
 
 function resolveLockedDependencyPath(
@@ -99,6 +100,9 @@ function copyRuntimePackageTree(source: string, destination: string): void {
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
     if (stat.isDirectory()) {
+      if (relative && path.basename(relative) === PACKED_NODE_MODULES_MARKER) {
+        throw new Error(`runtime dependency contains reserved packed-storage directory '${PACKED_NODE_MODULES_MARKER}': ${absolute}`);
+      }
       if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
       fs.mkdirSync(path.join(destination, relative), { recursive: true, mode: stat.mode & 0o777 });
       for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
@@ -119,7 +123,7 @@ function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256:
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
     if (stat.isDirectory()) {
-      if (relative && ["node_modules", "__flow_agents_node_modules__", ".git"].includes(path.basename(relative))) return;
+      if (relative && ["node_modules", PACKED_NODE_MODULES_MARKER, ".git"].includes(path.basename(relative))) return;
       for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
       return;
     }

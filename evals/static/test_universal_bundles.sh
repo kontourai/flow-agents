@@ -10,12 +10,15 @@ NESTED_DIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-dist.XX
 NESTED_PACK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-pack-root.XXXXXX")"
 NESTED_PACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-pack.XXXXXX")"
 NESTED_INSTALL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-install.XXXXXX")"
+COLLISION_DIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-collision-dist.XXXXXX")"
+COLLISION_LOG="${TMPDIR:-/tmp}/flow-agents-runtime-collision.log"
 REPRO_DIFF_FILE="${TMPDIR:-/tmp}/universal-bundle-reproducibility.diff"
 pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$NESTED_FIXTURE_DIR" "$NESTED_DIST_DIR" "$NESTED_PACK_ROOT" "$NESTED_PACK_DIR" "$NESTED_INSTALL_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$NESTED_FIXTURE_DIR" "$NESTED_DIST_DIR" "$NESTED_PACK_ROOT" "$NESTED_PACK_DIR" "$NESTED_INSTALL_DIR" "$COLLISION_DIST_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
+  rm -f "$COLLISION_LOG"
 }
 trap cleanup EXIT
 
@@ -152,6 +155,17 @@ NODE
   fi
 else
   _fail "nested duplicate-version fixture could not be created"
+fi
+
+mkdir -p "$NESTED_FIXTURE_DIR/node_modules/root-a/__flow_agents_node_modules__/injected"
+printf '%s\n' 'dependency-owned collision payload' >"$NESTED_FIXTURE_DIR/node_modules/root-a/__flow_agents_node_modules__/injected/payload.txt"
+if (cd "$ROOT_DIR" && FLOW_AGENTS_TEST_MODE=1 FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT="$NESTED_FIXTURE_DIR" \
+    FLOW_AGENTS_DIST_DIR="$COLLISION_DIST_DIR" npm run build:bundles >"$COLLISION_LOG" 2>&1); then
+  _fail "dependency-owned reserved packed-storage directory was accepted"
+elif grep -Fq "reserved packed-storage directory '__flow_agents_node_modules__'" "$COLLISION_LOG"; then
+  _pass "dependency-owned packed-storage marker collision is rejected before provenance attribution"
+else
+  _fail "packed-storage marker collision failed without the reserved-directory diagnostic"
 fi
 
 echo ""
