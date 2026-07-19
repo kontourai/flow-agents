@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   assertRequestMatchesProvider,
@@ -33,7 +34,7 @@ export type GithubChangeProviderDependencies = Readonly<{
 }>;
 
 type TrustedExecutable = Readonly<{ candidate: string; path: string; device: number; inode: number; size: number; mtimeMs: number; mode: number }>;
-type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null; env?: NodeJS.ProcessEnv }>;
+type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null; env?: NodeJS.ProcessEnv; authConfigDir?: string }>;
 type GithubListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; title: string; body: string; isDraft: boolean }>;
 type GithubProviderRecord = Readonly<{ id: unknown; number: unknown; url: unknown; state: unknown; baseRefName: unknown; headRefName: unknown; headRefOid: unknown; title: unknown; body: unknown; isDraft: unknown }>;
 
@@ -61,7 +62,11 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
   const normalizedConfigurationId = validateConfigurationId(configurationId);
   return Object.freeze({
     kind: "github" as const,
-    checkCapability: async () => checkGithubCapability(provider, await bindGithubAuthentication(execution)),
+    checkCapability: async () => {
+      const authenticatedExecution = await bindGithubAuthentication(execution);
+      try { return await checkGithubCapability(provider, authenticatedExecution); }
+      finally { releaseGithubAuthentication(authenticatedExecution); }
+    },
     createOrRecover: async (requestInput: ChangeProviderRequest) => {
       const request = parseChangeProviderRequest(requestInput);
       assertRequestMatchesProvider(request, provider, normalizedConfigurationId);
@@ -69,8 +74,12 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
       // the result remains bound to the Flow assignment actor in `request`.
       // This lets the Flow-owned completer reject a transferred assignment.
       const authenticatedExecution = await bindGithubAuthentication(execution);
-      const capability = await checkGithubCapability(provider, authenticatedExecution);
-      return createOrRecoverGithubChange(request, authenticatedExecution, capability.provider_actor);
+      try {
+        const capability = await checkGithubCapability(provider, authenticatedExecution);
+        return await createOrRecoverGithubChange(request, authenticatedExecution, capability.provider_actor);
+      } finally {
+        releaseGithubAuthentication(authenticatedExecution);
+      }
     },
   });
 }
@@ -90,12 +99,20 @@ async function bindGithubAuthentication(dependencies: GithubExecutionDependencie
       : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     ...(process.platform === "win32" ? { SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
   };
+  const authConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-gh-auth-"));
+  fs.chmodSync(authConfigDir, 0o700);
+  env.GH_CONFIG_DIR = authConfigDir;
   return Object.freeze({
     ...dependencies,
     // Pin every subsequent gh invocation to the same credential. The token is
     // process-local, never copied into argv, errors, results, or artifacts.
     env,
+    authConfigDir,
   });
+}
+
+function releaseGithubAuthentication(dependencies: GithubExecutionDependencies): void {
+  if (dependencies.authConfigDir) fs.rmSync(dependencies.authConfigDir, { recursive: true, force: true });
 }
 
 async function checkGithubCapability(settings: ChangeProviderSettings, dependencies: GithubExecutionDependencies): Promise<ChangeProviderCapability> {

@@ -2617,6 +2617,22 @@ test("publish-change rejects symlinked and forged persisted results before canon
     assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
+
+  await t.test("timestamp-only forgery cannot retain caller-authored result bytes", async () => {
+    const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-timestamp-forgery");
+    const observation = publishChangeObservation(action);
+    writeJson(path.join(session.sessionDir, "publish-change.result.json"), {
+      ...observation, observed_at: "2000-01-01T00:00:00.000Z", operation_action_id: action.action_id,
+    });
+    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+    const beforeProjection = snapshotProjectionTargets(session);
+    await assert.rejects(
+      () => createPublishChangeOperationCompleter(() => observation)({ sessionDir: session.sessionDir, action }),
+      /already exists with different authenticated operation bytes/,
+    );
+    assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
+    await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+  });
 });
 
 test("stale publish-change actions fail before provider execution or canonical mutation", async (t) => {

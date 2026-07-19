@@ -694,7 +694,7 @@ function persistPublishChangeResult(
   if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
   const existing = readPublishChangeResultBytes(context);
   if (existing) {
-    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
+    if (!existing.equals(payload)) {
       throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
     }
     return { file, sha256: createHash("sha256").update(existing).digest("hex") };
