@@ -43,6 +43,10 @@ function portablePath(value: string): string {
   return value.split(path.sep).join("/");
 }
 
+function packSafeRuntimePath(logicalPath: string): string {
+  return logicalPath.replaceAll("/node_modules/", "/__flow_agents_node_modules__/");
+}
+
 function resolveLockedDependencyPath(
   packageName: string,
   declaringLockPath: string,
@@ -115,7 +119,7 @@ function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256:
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
     if (stat.isDirectory()) {
-      if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
+      if (relative && ["node_modules", "__flow_agents_node_modules__", ".git"].includes(path.basename(relative))) return;
       for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
       return;
     }
@@ -169,7 +173,7 @@ function exportRequiredRuntimeDependencies(bundleRoot: string): void {
     const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
     for (const dependency of [...resolved.values()].sort((a, b) => a.lockPath.localeCompare(b.lockPath))) {
       const stagedRelative = dependency.lockPath.replace(/^node_modules\//, "");
-      copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, stagedRelative));
+      copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, packSafeRuntimePath(stagedRelative)));
     }
     const resolveRecordedEdges = (lockPath: string): Array<{ name: string; path: string }> => {
       const lockedDependencies = (packageLock.packages![lockPath]!["dependencies"] as Record<string, unknown> | undefined) ?? {};
@@ -196,12 +200,13 @@ function exportRequiredRuntimeDependencies(bundleRoot: string): void {
         .sort((a, b) => a.lockPath.localeCompare(b.lockPath))
         .map(({ name, version, lockPath, integrity }) => ({
           path: lockPath.replace(/^node_modules\//, ""),
+          storage_path: packSafeRuntimePath(lockPath.replace(/^node_modules\//, "")),
           lock_path: lockPath,
           name,
           version,
           integrity,
           dependencies: resolveRecordedEdges(lockPath),
-          files: runtimePackageFiles(path.join(stagingRoot, lockPath.replace(/^node_modules\//, ""))),
+          files: runtimePackageFiles(path.join(stagingRoot, packSafeRuntimePath(lockPath.replace(/^node_modules\//, "")))),
         })),
     }, null, 2)}\n`);
   } finally {

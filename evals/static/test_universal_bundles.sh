@@ -7,17 +7,61 @@ REPRO_FIRST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-a.XXXXXX"
 REPRO_SECOND_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-b.XXXXXX")"
 NESTED_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-fixture.XXXXXX")"
 NESTED_DIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-dist.XXXXXX")"
+NESTED_PACK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-pack-root.XXXXXX")"
+NESTED_PACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-pack.XXXXXX")"
+NESTED_INSTALL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-install.XXXXXX")"
 REPRO_DIFF_FILE="${TMPDIR:-/tmp}/universal-bundle-reproducibility.diff"
 pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$NESTED_FIXTURE_DIR" "$NESTED_DIST_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$NESTED_FIXTURE_DIR" "$NESTED_DIST_DIR" "$NESTED_PACK_ROOT" "$NESTED_PACK_DIR" "$NESTED_INSTALL_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
 }
 trap cleanup EXIT
 
 _pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
 _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
+
+verify_nested_packed_install() {
+  mkdir -p "$NESTED_PACK_ROOT/dist/codex/build"
+  cp -R "$NESTED_DIST_DIR/codex/build/runtime-node-modules" "$NESTED_PACK_ROOT/dist/codex/build/"
+  cp "$NESTED_DIST_DIR/codex/build/runtime-dependencies.json" "$NESTED_PACK_ROOT/dist/codex/build/"
+  node - "$NESTED_PACK_ROOT/package.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ name: "nested-runtime-pack-fixture", version: "1.0.0", private: true }, null, 2)}\n`);
+NODE
+  npm pack --json --pack-destination "$NESTED_PACK_DIR" "$NESTED_PACK_ROOT" >/dev/null
+  local tarball
+  tarball="$(find "$NESTED_PACK_DIR" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+  [[ -n "$tarball" ]]
+  tar -tzf "$tarball" | grep -Fq 'package/dist/codex/build/runtime-node-modules/root-b/__flow_agents_node_modules__/shared/package.json'
+  if tar -tzf "$tarball" | grep -Fq 'package/dist/codex/build/runtime-node-modules/root-b/node_modules/shared/package.json'; then
+    return 1
+  fi
+  tar -xzf "$tarball" -C "$NESTED_INSTALL_DIR"
+  node - "$NESTED_INSTALL_DIR/package/dist/codex/build" "$NESTED_INSTALL_DIR/project/node_modules" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { createRequire } = require("node:module");
+const [buildRoot, destinationRoot] = process.argv.slice(2);
+const closure = JSON.parse(fs.readFileSync(path.join(buildRoot, "runtime-dependencies.json"), "utf8"));
+for (const item of closure.packages) {
+  for (const file of item.files) {
+    const source = path.join(buildRoot, "runtime-node-modules", item.storage_path, file.path);
+    const destination = path.join(destinationRoot, item.path, file.path);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+  }
+}
+const fromA = createRequire(path.join(destinationRoot, "root-a", "index.js"));
+const fromB = createRequire(path.join(destinationRoot, "root-b", "index.js"));
+const sharedA = JSON.parse(fs.readFileSync(fromA.resolve("shared/package.json"), "utf8"));
+const sharedB = JSON.parse(fs.readFileSync(fromB.resolve("shared/package.json"), "utf8"));
+if (sharedA.version !== "1.0.0" || sharedB.version !== "2.0.0") {
+  throw new Error(`packed nested resolution mismatch: root-a=${sharedA.version}, root-b=${sharedB.version}`);
+}
+NODE
+}
 
 echo "=== Layer 1B: Universal Bundle Validation ==="
 echo ""
@@ -92,11 +136,17 @@ const expected = ["root-a@1.0.0", "root-b@1.0.0", "root-b/node_modules/shared@2.
 if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error(`nested topology mismatch: ${JSON.stringify(paths)}`);
 const rootB = closure.packages.find((item) => item.path === "root-b");
 if (rootB.dependencies[0]?.path !== "root-b/node_modules/shared") throw new Error("nested dependency edge was flattened");
+const nestedShared = closure.packages.find((item) => item.path === "root-b/node_modules/shared");
+if (nestedShared.storage_path !== "root-b/__flow_agents_node_modules__/shared") throw new Error("nested dependency storage path is not pack-safe");
 const rootA = closure.packages.find((item) => item.path === "root-a");
 if (rootA.dependencies[0]?.path !== "shared") throw new Error("hoisted dependency edge was not preserved");
 NODE
   then
-    _pass "lockfile closure preserves nested duplicate-version topology"
+    if verify_nested_packed_install; then
+      _pass "packed closure installs and resolves nested duplicate-version topology"
+    else
+      _fail "pack-safe nested duplicate-version topology was not preserved through installation"
+    fi
   else
     _fail "lockfile closure flattened or omitted nested duplicate-version topology"
   fi
@@ -188,6 +238,7 @@ for (const [dependencyPath, item] of packageByPath) {
     path: resolveLocked(dependencyPath, name),
   }));
   if (!lockEntry || item.lock_path !== `node_modules/${dependencyPath}` || item.version !== lockEntry.version
+      || item.storage_path !== dependencyPath.split("/node_modules/").join("/__flow_agents_node_modules__/")
       || item.integrity !== lockEntry.integrity || JSON.stringify(item.dependencies) !== JSON.stringify(expectedEdges)
       || !Array.isArray(item.files) || item.files.length === 0) {
     throw new Error(`Codex runtime dependency ${dependencyPath} is not version/integrity/file bound to package-lock.json`);

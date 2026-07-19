@@ -115,12 +115,13 @@ const expectedFiles = new Set();
 for (const item of closure.packages) {
   if (!item || typeof item !== "object" || typeof item.path !== "string"
       || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:\/node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(item.path)
+      || item.storage_path !== item.path.split("/node_modules/").join("/__flow_agents_node_modules__/")
       || item.lock_path !== `node_modules/${item.path}` || typeof item.name !== "string"
       || typeof item.version !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)
       || !Array.isArray(item.dependencies) || !Array.isArray(item.files) || packageByPath.has(item.path)) {
     throw new Error("runtime dependency closure contains an invalid or duplicate package record");
   }
-  const packageRoot = path.join(stagingRoot, item.path);
+  const packageRoot = path.join(stagingRoot, item.storage_path);
   const packageManifest = JSON.parse(readRegular(path.join(packageRoot, "package.json")).toString("utf8"));
   if (packageManifest.name !== item.name || packageManifest.version !== item.version) {
     throw new Error(`runtime dependency identity mismatch for ${item.path}`);
@@ -144,7 +145,7 @@ for (const item of closure.packages) {
   if (JSON.stringify(observedFiles) !== JSON.stringify(item.files)) {
     throw new Error(`runtime dependency file coverage or digest mismatch for ${item.path}`);
   }
-  for (const file of observedFiles) expectedFiles.add(`${item.path}/${file.path}`);
+  for (const file of observedFiles) expectedFiles.add(`${item.storage_path}/${file.path}`);
   packageByPath.set(item.path, { manifest: packageManifest, record: item });
 }
 const expectedRootNames = Object.keys(packageJson.dependencies ?? {}).sort();
@@ -403,7 +404,23 @@ done
 # into build/node_modules so Node's normal resolution works after installation.
 if [[ -d "$BUNDLE_SOURCE/build/runtime-node-modules" ]]; then
   mkdir -p "$FA_OWNED_OVERLAY/build/node_modules"
-  rsync -a "$BUNDLE_SOURCE/build/runtime-node-modules/" "$FA_OWNED_OVERLAY/build/node_modules/"
+  node - "$BUNDLE_SOURCE/build/runtime-node-modules" "$BUNDLE_SOURCE/build/runtime-dependencies.json" "$FA_OWNED_OVERLAY/build/node_modules" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [stagingRoot, manifestFile, destinationRoot] = process.argv.slice(2);
+const closure = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+for (const item of closure.packages) {
+  for (const file of item.files) {
+    const source = path.join(stagingRoot, item.storage_path, file.path);
+    const destination = path.join(destinationRoot, item.path, file.path);
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`unsafe runtime closure source: ${item.storage_path}/${file.path}`);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+    fs.chmodSync(destination, stat.mode & 0o777);
+  }
+}
+NODE
 fi
 
 # Portable skills use Codex's universal catalog, independently of CODEX_HOME.
