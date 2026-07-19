@@ -158,7 +158,14 @@ function selectExactChange(records: GithubListRecord[], request: ChangeProviderR
 async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
   const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`]);
   const record = parseProviderRecord(parseProviderJson(output, "provider record output"), request);
-  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor, observedAt: dependencies.now() });
+  const finalCapability = await checkGithubCapability({
+    role: "ChangeProvider", kind: "github", repository: request.repository,
+    capabilities: ["change.create", "change.observe"], executor: "gh-cli",
+  }, dependencies);
+  if (finalCapability.provider_actor !== providerActor) {
+    throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed during provider observation");
+  }
+  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor: finalCapability.provider_actor, observedAt: dependencies.now() });
 }
 
 function createArgv(request: ChangeProviderRequest): string[] {
