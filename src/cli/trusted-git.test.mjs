@@ -29,10 +29,11 @@ test("trusted Git resolution ignores ambient repository and configuration contro
   try {
     process.env.GIT_DIR = path.join(foreign, ".git");
     process.env.GIT_WORK_TREE = foreign;
+    process.env.Git_Common_Dir = path.join(foreign, ".git");
     process.env.GIT_CONFIG_GLOBAL = path.join(fixture, "attacker-config");
     assert.equal(resolveTrustedLocalGitCommit(target, "main"), targetSha);
   } finally {
-    for (const key of Object.keys(process.env)) if (key.startsWith("GIT_")) delete process.env[key];
+    for (const key of Object.keys(process.env)) if (key.toUpperCase().startsWith("GIT_")) delete process.env[key];
     Object.assign(process.env, prior);
     fs.rmSync(fixture, { recursive: true, force: true });
   }

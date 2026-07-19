@@ -98,12 +98,23 @@ function assertCode(error, code) {
 
 test("GitHub adapter checks authentication and repository capability, recovers exactly one PR, then re-observes it", async () => {
   const fake = fakeExecutor([...prefix(), [listRecord()], providerRecord(), ...finalPrefix()]);
-  const result = await provider(fake).createOrRecover(request());
+  process.env.Git_Dir = "/foreign/repository/.git";
+  process.env.git_work_tree = "/foreign/repository";
+  process.env.Gh_Host = "attacker.invalid";
+  let result;
+  try {
+    result = await provider(fake).createOrRecover(request());
+  } finally {
+    delete process.env.Git_Dir;
+    delete process.env.git_work_tree;
+    delete process.env.Gh_Host;
+  }
 
   assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "token"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"]]);
   assert.equal(fake.calls.every((call) => call.file === "gh"), true);
   assert.equal(fake.calls.every((call) => call.options.maxOutputBytes === 256 * 1024), true);
   assert.equal(fake.calls.slice(1).every((call) => call.options.env.GH_TOKEN === TOKEN && call.options.env.GITHUB_TOKEN === undefined), true);
+  assert.equal(fake.calls.slice(1).every((call) => Object.keys(call.options.env).every((key) => !key.toUpperCase().startsWith("GIT_") && key.toUpperCase() !== "GH_HOST")), true);
   assert.equal(fake.calls.some((call) => call.argv.includes("--head") && call.argv.includes("agent/change-provider-604-v2")), true);
   assert.equal(result.change_ref.number, 610);
   assert.equal(result.assignment_actor, "codex:session:Kontour");

@@ -80,14 +80,16 @@ async function bindGithubAuthentication(dependencies: GithubExecutionDependencie
   if (!token || /[\0\r\n]/u.test(token) || Buffer.byteLength(token, "utf8") > 16 * 1024) {
     throw new ChangeProviderError("provider_auth_failed", "configured ChangeProvider authentication failed");
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, GH_TOKEN: token };
-  delete env.GITHUB_TOKEN;
-  for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
-  delete env.GH_HOST;
-  delete env.GH_REPO;
-  delete env.GH_ENTERPRISE_TOKEN;
-  delete env.GITHUB_ENTERPRISE_TOKEN;
-  if (process.platform !== "win32") env.PATH = "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+  const env: NodeJS.ProcessEnv = {};
+  const blockedKeys = new Set(["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_REPO", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]);
+  for (const [key, value] of Object.entries(process.env)) {
+    const normalizedKey = key.toUpperCase();
+    if (!normalizedKey.startsWith("GIT_") && !blockedKeys.has(normalizedKey) && normalizedKey !== "PATH" && value !== undefined) env[key] = value;
+  }
+  env.GH_TOKEN = token;
+  env.PATH = process.platform === "win32"
+    ? "C:\\Program Files\\GitHub CLI;C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows"
+    : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
   return Object.freeze({
     ...dependencies,
     // Pin every subsequent gh invocation to the same credential. The token is
