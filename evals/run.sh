@@ -259,10 +259,6 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_conflict_injection.sh" || result=1
   echo ""
-  bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
-  echo ""
-  bash "$EVAL_DIR/integration/test_exemption_usage_review.sh" || result=1
-  echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_session_resume_roundtrip.sh" || result=1

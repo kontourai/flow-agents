@@ -86,14 +86,12 @@ CHECKS=(
   "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
-  "Veritas governance kit integration|bash evals/integration/test_veritas_governance_kit.sh"
   "Builder step producers integration|bash evals/integration/test_builder_step_producers.sh"
   "Builder canonical Flow run integration|bash evals/integration/test_builder_entry_enforcement.sh"
   "Codex hook resolution integration|bash evals/integration/test_codex_hook_resolution.sh"
   "Critique supersession roundtrip integration|bash evals/integration/test_critique_supersession_roundtrip.sh"
   "Dual emit flow step integration|bash evals/integration/test_dual_emit_flow_step.sh"
   "Evidence capture hook integration|bash evals/integration/test_evidence_capture_hook.sh"
-  "Exemption usage review integration|bash evals/integration/test_exemption_usage_review.sh"
   "FlowDefinition session history preservation integration|bash evals/integration/test_flowdef_session_history_preservation.sh"
   "Gate review inquiry records integration|bash evals/integration/test_gate_review_inquiry_records.sh"
   "Install merge integration|bash evals/integration/test_install_merge.sh"
@@ -109,7 +107,6 @@ CHECKS=(
   "Trust reconcile trailer diagnostic integration|bash evals/integration/test_trust_reconcile_trailer_diagnostic.sh"
   "Validate artifacts portability integration|bash evals/integration/test_validate_artifacts_portability.sh"
   "Verify CLI integration|bash evals/integration/test_verify_cli.sh"
-  "Veritas governance adapter integration|bash evals/integration/test_veritas_governance_adapter.sh"
   "Workspace settings integration|bash evals/integration/test_workspace_settings.sh"
   "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
@@ -202,7 +199,6 @@ LANE_RUNTIME_AND_KIT=(
   "Learning review proposals integration"
   "Utterance check integration"
   "Pull work provider integration"
-  "Veritas governance kit integration"
   "Anti-gaming and trust suite"
 )
 
@@ -213,7 +209,6 @@ LANE_INTEGRATION_COVERAGE=(
   "Critique supersession roundtrip integration"
   "Dual emit flow step integration"
   "Evidence capture hook integration"
-  "Exemption usage review integration"
   "FlowDefinition session history preservation integration"
   "Gate review inquiry records integration"
   "Install merge integration"
@@ -229,7 +224,6 @@ LANE_INTEGRATION_COVERAGE=(
   "Trust reconcile trailer diagnostic integration"
   "Validate artifacts portability integration"
   "Verify CLI integration"
-  "Veritas governance adapter integration"
   "Workspace settings integration"
 )
 
@@ -433,7 +427,7 @@ finalize_results() {
   ensure_expected_results
   record_skip "Live GitHub mutation checks" "Skipped by default; publish-change/live provider mutation checks require an explicit maintainer-run lane."
   record_skip "LLM acceptance evals" "Skipped by default; invoke acceptance or LLM eval lanes separately with explicit opt-in flags."
-  record_skip "Veritas governance provider evidence" "Skipped unless a governance adapter is configured; evidence-gate must record NOT_VERIFIED when required evidence is unavailable."
+  record_skip "External governance provider evidence" "Skipped unless an external governance provider is configured; evidence-gate must record NOT_VERIFIED when required evidence is unavailable."
 
   while IFS=$'\t' read -r id label status command log; do
     case "$status" in

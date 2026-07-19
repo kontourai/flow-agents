@@ -11,7 +11,7 @@ title: Engine and Kits
 
 The engine is what you build on. Kits are what you build with.
 
-> **Flow Agents is not the Builder Kit.** Builder is one kit on the engine. So is Knowledge. So are the agentless Release-Evidence and Veritas-Governance kits — proof that the engine runs solutions shipping no agent at all. The engine gives no kit special runtime privilege; "official" is a marketplace label, not engine authority.
+> **Flow Agents is not the Builder Kit.** Builder and Knowledge are kits on the engine. The external Veritas Governance Kit proves the same contract works when a first-party solution is maintained and released from another repository. The engine gives no kit special runtime privilege; "official" is a marketplace label, not engine authority.
 
 ## The engine
 
@@ -19,7 +19,7 @@ The engine does not encode one product workflow. It supplies the common substrat
 
 Concrete engine pieces in this repository include:
 
-- **FlowDefinition interpretation and gates** — kit manifests point at `.flow.json` definitions, and Flow Agents validates and activates those definitions for runtime use. The Kit Authoring Guide shows a minimal Flow Definition with steps, gates, and required evidence, while `kits/builder/kit.json`, `kits/knowledge/kit.json`, `kits/release-evidence/kit.json`, and `kits/veritas-governance/kit.json` show different real kit shapes.
+- **FlowDefinition interpretation and gates** — kit manifests point at `.flow.json` definitions, and Flow Agents validates and activates those definitions for runtime use. The Kit Authoring Guide shows a minimal Flow Definition with steps, gates, and required evidence, while the built-in examples and the Git-installable Veritas repository demonstrate different real kit shapes.
 - **Runtime and harness adapters** — Flow Agents compiles the same canonical policy classes to host surfaces such as Claude Code, Codex, Kiro, opencode, pi, and framework adapters. The Runtime Hook Surface spec defines the runtime-neutral vocabulary.
 - **SDK, evidence, and trust primitives** — workflow sidecars, trust bundles, evidence records, command capture, and CI reconciliation give gates something inspectable to evaluate instead of relying on chat memory.
 - **Kit validation framework** — `kit.json` is validated as a Flow Kit container, then Flow Agents validates extension fields such as `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies`, `workflow_triggers`, and `hook_influence_expectations`.
@@ -30,16 +30,16 @@ The important boundary: the engine owns the generic process machinery, not the d
 
 A kit is a declared bundle. The catalog names available kits; each kit's manifest declares its own assets.
 
-Today `kits/catalog.json` registers four built-in examples:
+Today `kits/catalog.json` registers three built-in examples, while product kits may live in their owning repositories:
 
 | Kit | Manifest | What it proves |
 | --- | --- | --- |
 | Builder Kit | `kits/builder/kit.json` | A full agent-facing delivery kit with shape/build/publish-learn flows, many skills, a dependency on Knowledge, and structured `workflow_triggers`. |
 | Knowledge Kit | `kits/knowledge/kit.json` | A durable knowledge-store kit with many Flow Definitions, one agent skill, docs, adapters, providers, evals, and its own `workflow_triggers`. |
 | Release Evidence Kit | `kits/release-evidence/kit.json` | A minimal flows-only kit for agentless gate evaluation in CI. It has no skills and is not a Builder workflow. |
-| Veritas Governance Kit | `kits/veritas-governance/kit.json` | An agentless governance kit that wraps `veritas readiness` evidence as trust.bundle claims without reimplementing Veritas standards evaluation. |
+| Veritas Governance Kit | `https://github.com/kontourai/veritas` | An external first-party kit installed from Git. It consumes the canonical Veritas readiness bundle without moving governance semantics into this engine. |
 
-Those examples are deliberately different. Builder is not the product. Builder is one kit on the engine. Knowledge is another. Release Evidence and Veritas Governance prove the engine can run useful kits that are not conversational coding workflows at all.
+Those examples are deliberately different. Builder is not the engine. Builder and Knowledge are bundled solutions; Release Evidence is a minimal built-in proof; Veritas Governance is independently owned and distributed through the same public Git-install path available to every external kit.
 
 ## Manifest and catalog model
 
@@ -114,8 +114,7 @@ Both edges are now enforced executably: veritas-side by `check-no-flow-agents-de
 declares no flow-agents dependency) and here by [`scripts/check-layer-boundary.mjs`](../scripts/check-layer-boundary.mjs)
 (no kit imports the veritas engine as a library). See veritas's
 [Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md)
-for the canonical engine-vs-kit capability inventory that the Veritas Governance Kit row above
-builds on.
+for the canonical engine-vs-kit capability inventory maintained with that external kit.
 
 ## Related docs
 
