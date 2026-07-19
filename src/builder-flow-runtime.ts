@@ -216,6 +216,10 @@ async function completePublishChangeOperation(
   });
   const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    const trustedHeadSha = resolveTrustedLocalGitCommit(context.projectRoot, issued.head_ref);
+    if (trustedHeadSha !== issued.head_sha.toLowerCase()) {
+      throw new BuilderBuildRunInputError("publish-change.action.head_sha", "does not match the trusted local head ref during commit");
+    }
     const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
     if (recovery) return recovery;
     const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));

@@ -2492,8 +2492,9 @@ test("Flow completion authenticates the exact issued publish-change observation 
     schema_version: "1.0",
     defaults: { provider: { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe"], executor: "gh-cli" } },
   });
+  initializePublishChangeGitRepository(session.projectRoot);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
-    title: "Open the authenticated transaction", body: "Provider observation fixture.", base_ref: "main", head_ref: "agent/publish-change", head_sha: "a".repeat(40),
+    title: "Open the authenticated transaction", body: "Provider observation fixture.", base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
   } });
   const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
   const beforeProjection = snapshotProjectionTargets(session);
@@ -2568,9 +2569,10 @@ async function preparePublishChangeTransaction(slug) {
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
   await advanceSessionToPrOpen(session);
+  initializePublishChangeGitRepository(session.projectRoot);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
     title: "Authenticated transaction fixture", body: "Provider observation fixture.",
-    base_ref: "main", head_ref: "agent/publish-change", head_sha: "a".repeat(40),
+    base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
   } });
   return { session, ambient, action };
 }
@@ -2685,6 +2687,22 @@ test("simultaneous publish-change recovery serializes commit without duplicate a
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+test("publish-change rebinds the trusted local head under the Flow commit lock", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-commit-ref-rebind");
+  const complete = createPublishChangeOperationCompleter((request) => {
+    fs.writeFileSync(path.join(session.projectRoot, "README.md"), "head moved while provider observation was in flight\n");
+    execFileSync("git", ["add", "README.md"], { cwd: session.projectRoot });
+    execFileSync("git", ["commit", "-m", "move head during observation"], { cwd: session.projectRoot, stdio: "ignore" });
+    return publishChangeObservation(request);
+  });
+  await assert.rejects(
+    () => complete({ sessionDir: session.sessionDir, action }),
+    /does not match the trusted local head ref during commit/,
+  );
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
 test("provider failures cannot leak hostile output into publish-change artifacts or diagnostics", async () => {
   const secret = "SENTINEL_PROVIDER_SECRET_604";
   const session = makeSession("publish-change-secret-boundary");
@@ -2774,8 +2792,9 @@ test("in-process publish-change composition recovers through an injected GitHub 
   const settings = readJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json")).projects[0].provider;
   const provider = createGithubChangeProvider(settings, action.provider.configuration_id, {
     executable: fake.path,
-    executor: async (file, argv) => {
-      const invoked = spawnSync(file, argv, { encoding: "utf8" });
+    executor: async (file, argv, options) => {
+      if (argv[0] === "auth" && argv[1] === "token") return { stdout: "gho_fixture_token_604\n" };
+      const invoked = spawnSync(file, argv, { encoding: "utf8", env: options.env });
       if (invoked.status !== 0) throw new Error("in-process fixture adapter failed");
       return { stdout: invoked.stdout };
     },

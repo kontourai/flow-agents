@@ -21,7 +21,7 @@ export type ArgvExecutionResult = Readonly<{ stdout: string }>;
 export type ArgvExecutor = (
   executable: string,
   argv: readonly string[],
-  options: Readonly<{ timeoutMs: number; maxOutputBytes: number }>,
+  options: Readonly<{ timeoutMs: number; maxOutputBytes: number; env?: NodeJS.ProcessEnv }>,
 ) => Promise<ArgvExecutionResult>;
 
 export type GithubChangeProviderDependencies = Readonly<{
@@ -33,7 +33,7 @@ export type GithubChangeProviderDependencies = Readonly<{
 }>;
 
 type TrustedExecutable = Readonly<{ candidate: string; path: string; device: number; inode: number; size: number; mtimeMs: number; mode: number }>;
-type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null }>;
+type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null; env?: NodeJS.ProcessEnv }>;
 type GithubListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; title: string; body: string; isDraft: boolean }>;
 type GithubProviderRecord = Readonly<{ id: unknown; number: unknown; url: unknown; state: unknown; baseRefName: unknown; headRefName: unknown; headRefOid: unknown; title: unknown; body: unknown; isDraft: unknown }>;
 
@@ -61,16 +61,32 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
   const normalizedConfigurationId = validateConfigurationId(configurationId);
   return Object.freeze({
     kind: "github" as const,
-    checkCapability: () => checkGithubCapability(provider, execution),
+    checkCapability: async () => checkGithubCapability(provider, await bindGithubAuthentication(execution)),
     createOrRecover: async (requestInput: ChangeProviderRequest) => {
       const request = parseChangeProviderRequest(requestInput);
       assertRequestMatchesProvider(request, provider, normalizedConfigurationId);
       // The capability check authenticates the configured gh identity, while
       // the result remains bound to the Flow assignment actor in `request`.
       // This lets the Flow-owned completer reject a transferred assignment.
-      const capability = await checkGithubCapability(provider, execution);
-      return createOrRecoverGithubChange(request, execution, capability.provider_actor);
+      const authenticatedExecution = await bindGithubAuthentication(execution);
+      const capability = await checkGithubCapability(provider, authenticatedExecution);
+      return createOrRecoverGithubChange(request, authenticatedExecution, capability.provider_actor);
     },
+  });
+}
+
+async function bindGithubAuthentication(dependencies: GithubExecutionDependencies): Promise<GithubExecutionDependencies> {
+  const token = (await invoke(dependencies, ["auth", "token", "--hostname", "github.com"], "provider_auth_failed")).trim();
+  if (!token || /[\0\r\n]/u.test(token) || Buffer.byteLength(token, "utf8") > 16 * 1024) {
+    throw new ChangeProviderError("provider_auth_failed", "configured ChangeProvider authentication failed");
+  }
+  const env: NodeJS.ProcessEnv = { ...process.env, GH_TOKEN: token };
+  delete env.GITHUB_TOKEN;
+  return Object.freeze({
+    ...dependencies,
+    // Pin every subsequent gh invocation to the same credential. The token is
+    // process-local, never copied into argv, errors, results, or artifacts.
+    env,
   });
 }
 
@@ -187,7 +203,7 @@ function repoSlug(value: Pick<ChangeProviderRequest, "repository"> | ChangeProvi
 async function invoke(dependencies: GithubExecutionDependencies, argv: readonly string[], failureCode: "provider_auth_failed" | "provider_failure" = "provider_failure"): Promise<string> {
   try {
     if (dependencies.trustedExecutable) revalidateTrustedGithubExecutable(dependencies.trustedExecutable);
-    const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), { timeoutMs: EXECUTION_TIMEOUT_MS, maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES });
+    const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), { timeoutMs: EXECUTION_TIMEOUT_MS, maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES, ...(dependencies.env ? { env: dependencies.env } : {}) });
     if (!result || typeof result.stdout !== "string") malformed("provider executor returned an invalid result");
     if (Buffer.byteLength(result.stdout, "utf8") > MAX_PROVIDER_OUTPUT_BYTES) {
       throw new ChangeProviderError("oversized_provider_output", "provider output exceeded the configured size limit");
@@ -327,7 +343,21 @@ function trustedExecutableIdentity(candidate: string): TrustedExecutable {
   if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o111) === 0)) {
     throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable is unavailable");
   }
+  assertSecureSystemPath(resolved, stat);
   return Object.freeze({ candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode });
+}
+
+function assertSecureSystemPath(resolved: string, stat: fs.Stats): void {
+  if (process.platform === "win32") return;
+  if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("untrusted executable ownership");
+  let directory = path.dirname(resolved);
+  while (true) {
+    const directoryStat = fs.statSync(directory);
+    if (!directoryStat.isDirectory() || directoryStat.uid !== 0 || (directoryStat.mode & 0o022) !== 0) throw new Error("untrusted executable parent");
+    const parent = path.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
 }
 
 function revalidateTrustedGithubExecutable(identity: TrustedExecutable): void {
@@ -355,6 +385,7 @@ const execFileArgv: ArgvExecutor = (executable, argv, options) => new Promise((r
     maxBuffer: options.maxOutputBytes,
     shell: false,
     windowsHide: true,
+    env: options.env,
   }, (error, stdout) => {
     if (error) reject(error);
     else resolve({ stdout });
