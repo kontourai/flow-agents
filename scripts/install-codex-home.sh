@@ -131,7 +131,7 @@ for (const item of closure.packages) {
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${item.path}/${relative}`);
     if (stat.isDirectory()) {
-      if (relative && ["node_modules", "__flow_agents_node_modules__"].includes(path.basename(relative))) return;
+      if (relative && (path.basename(relative) === "node_modules" || path.basename(relative).toLowerCase() === "__flow_agents_node_modules__")) return;
       for (const entry of fs.readdirSync(absolute).sort()) visitPackage(path.join(absolute, entry), path.join(relative, entry));
       return;
     }

@@ -168,6 +168,18 @@ else
   _fail "packed-storage marker collision failed without the reserved-directory diagnostic"
 fi
 
+rm -rf "$NESTED_FIXTURE_DIR/node_modules/root-a/__flow_agents_node_modules__" "$COLLISION_DIST_DIR"
+mkdir -p "$NESTED_FIXTURE_DIR/node_modules/root-a/__FLOW_AGENTS_NODE_MODULES__/injected"
+printf '%s\n' 'mixed-case collision payload' >"$NESTED_FIXTURE_DIR/node_modules/root-a/__FLOW_AGENTS_NODE_MODULES__/injected/payload.txt"
+if (cd "$ROOT_DIR" && FLOW_AGENTS_TEST_MODE=1 FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT="$NESTED_FIXTURE_DIR" \
+    FLOW_AGENTS_DIST_DIR="$COLLISION_DIST_DIR" npm run build:bundles >"$COLLISION_LOG" 2>&1); then
+  _fail "mixed-case dependency-owned reserved packed-storage directory was accepted"
+elif grep -Fq "reserved packed-storage directory '__flow_agents_node_modules__'" "$COLLISION_LOG"; then
+  _pass "packed-storage marker collision is rejected with filesystem-portable case folding"
+else
+  _fail "mixed-case packed-storage collision failed without the reserved-directory diagnostic"
+fi
+
 echo ""
 echo "--- Bundle Layout ---"
 for dir in "$DIST_DIR/kiro" "$DIST_DIR/claude-code" "$DIST_DIR/codex" "$DIST_DIR/opencode" "$DIST_DIR/pi"; do

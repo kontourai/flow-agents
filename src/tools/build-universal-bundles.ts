@@ -26,6 +26,10 @@ let skillCollisionDiagnostic: string | null = null;
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
 const PACKED_NODE_MODULES_MARKER = "__flow_agents_node_modules__";
 
+function isPackedNodeModulesMarker(value: string): boolean {
+  return value.toLowerCase() === PACKED_NODE_MODULES_MARKER;
+}
+
 type RuntimeDependency = {
   name: string;
   version: string;
@@ -100,7 +104,7 @@ function copyRuntimePackageTree(source: string, destination: string): void {
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
     if (stat.isDirectory()) {
-      if (relative && path.basename(relative) === PACKED_NODE_MODULES_MARKER) {
+      if (relative && isPackedNodeModulesMarker(path.basename(relative))) {
         throw new Error(`runtime dependency contains reserved packed-storage directory '${PACKED_NODE_MODULES_MARKER}': ${absolute}`);
       }
       if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
@@ -123,7 +127,7 @@ function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256:
     const stat = fs.lstatSync(absolute);
     if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
     if (stat.isDirectory()) {
-      if (relative && ["node_modules", PACKED_NODE_MODULES_MARKER, ".git"].includes(path.basename(relative))) return;
+      if (relative && (["node_modules", ".git"].includes(path.basename(relative)) || isPackedNodeModulesMarker(path.basename(relative)))) return;
       for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
       return;
     }
