@@ -710,7 +710,7 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
-    await assertVerifiedTestsTrust(bundle.claims, projectRoot);
+    await assertVerifiedTestsTrust(relevant, projectRoot);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -739,15 +739,20 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-async function assertVerifiedTestsTrust(claims: unknown[], projectRoot: string): Promise<void> {
-  const testClaims = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string): Promise<void> {
+  const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
     && isRecord(claim.metadata)
     && isRecord(claim.metadata.gate_claim)
     && claim.metadata.gate_claim.expectation_id === "tests-evidence");
   if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
-  const liveCritiques = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+  // A route-back starts a new gate visit and therefore a new critique generation. Historical
+  // reviewer slices remain in the bundle and manifest for audit, but only critiques acquired
+  // during this visit describe the implementation snapshot currently being verified. Within a
+  // visit every live reviewer slice still participates, so changing reviewers cannot bury a
+  // disputed finding.
+  const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
     && typeof claim.metadata.superseded_by !== "string");
@@ -763,7 +768,7 @@ async function assertVerifiedTestsTrust(claims: unknown[], projectRoot: string):
     await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
     assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
   }));
-  const criteria = claims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
+  const criteria = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
   if (criteria.length === 0 || criteria.some((claim) => {
     const criterion = isRecord(claim.metadata.criterion) ? claim.metadata.criterion : null;
     return claim.value !== "pass" || !criterion || !Array.isArray(criterion.evidence_refs) || criterion.evidence_refs.length === 0;
