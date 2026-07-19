@@ -7,6 +7,23 @@ import { syncBuiltinESMExports } from "node:module";
 
 import { withSubjectLock } from "../../build/src/cli/assignment-provider.js";
 
+test("async subject locks remain owned through settlement and release for both outcomes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-async-lifetime-"));
+  const subject = "async-lifetime";
+  const lockDir = path.join(root, "assignment", ".async-lifetime.lockdir");
+  let resolve;
+  const pending = withSubjectLock(root, subject, () => new Promise((done) => { resolve = done; }));
+  assert.equal(fs.existsSync(lockDir), true, "the lock remains held while the Promise is pending");
+  resolve("done");
+  await pending;
+  assert.equal(fs.existsSync(lockDir), false, "the lock releases after resolution");
+
+  const rejected = withSubjectLock(root, subject, () => Promise.reject(new Error("fixture rejection")));
+  assert.equal(fs.existsSync(lockDir), true, "the lock remains held until rejection settles");
+  await assert.rejects(rejected, /fixture rejection/);
+  assert.equal(fs.existsSync(lockDir), false, "the lock releases after rejection");
+});
+
 test("a displaced lock owner cannot heartbeat or release a replacement lock", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-aba-"));
   const subject = "lock-aba";

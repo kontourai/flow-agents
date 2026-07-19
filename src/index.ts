@@ -271,6 +271,21 @@ export {
   gateActionProgressSnapshot,
   withGateActionPriorProgress,
 } from "./builder-gate-action-envelope.js";
+
+export {
+  CHANGE_PROVIDER_CAPABILITIES,
+  PUBLISH_CHANGE_OPERATION,
+  PUBLISH_CHANGE_OPERATION_PROTOCOL,
+  publishChangeOperationProtocol,
+  resolveChangeProviderSupport,
+} from "./cli/public-contracts.js";
+export type {
+  ChangeProviderCapability,
+  ChangeProviderSettings,
+  ChangeProviderSupport,
+  PublishChangeActionBinding,
+  PublishChangeOperationProtocol,
+} from "./cli/public-contracts.js";
 export type {
   BuilderGateActionEnvelopeInput,
   GateActionArtifactBinding,

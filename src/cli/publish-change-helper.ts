@@ -1,8 +1,14 @@
 import * as fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { parseArgs, flagString } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
+import { createGithubChangeProvider } from "./github-change-provider.js";
+import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
+import type { ChangeProviderRequest } from "./change-provider.js";
+import type { ChangeProviderSettings } from "./public-contracts.js";
+import { createPublishChangeOperationCompleter, issuePublishChangeOperation } from "../builder-flow-runtime.js";
 
 const CLOSING_KEYWORD_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?<refs>(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+)(?:\s*(?:,|and)\s*(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+))*)/gi;
 const GITHUB_REF_RE = /(?<url>https:\/\/github\.com\/(?<url_owner>[^/\s)]+)\/(?<url_repo>[^/\s)]+)\/(?:issues|pull)\/(?<url_number>\d+))|(?:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+))?#(?<number>\d+)/g;
@@ -126,14 +132,113 @@ function reconcile(argv: string[]): number {
   return mismatches.length ? 4 : 0;
 }
 
-export function main(argv = process.argv.slice(2)): number {
+const EXECUTE_FLAGS = new Set(["session-dir", "title", "body", "head-ref", "base-ref", "draft"]);
+
+function execute(argv: string[]): Promise<number> {
+  return executeConfiguredChange(argv).then(
+    (result) => {
+      console.log(JSON.stringify({
+        operation: "publish-change",
+        action_id: result.action.action_id,
+        change_ref: result.observation.change_ref,
+        attached: result.attached,
+        current_step: result.run.state.current_step,
+      }, null, 2));
+      return 0;
+    },
+    (error) => {
+      // Provider adapter errors deliberately contain classifications only; do
+      // not surface arbitrary gh output, which can contain authentication data.
+      console.error(`publish-change: ${(error as Error).message}`);
+      return 1;
+    },
+  );
+}
+
+async function executeConfiguredChange(argv: string[]) {
+  const args = parseArgs(argv);
+  if (args.positionals.length !== 0) throw new Error("publish-change execute accepts only named flags");
+  for (const key of Object.keys(args.flags)) {
+    if (!EXECUTE_FLAGS.has(key)) throw new Error(`publish-change execute does not support --${key}`);
+    if (Array.isArray(args.flags[key])) throw new Error(`publish-change execute accepts --${key} at most once`);
+  }
+  const sessionDir = requiredString(args.flags, "session-dir");
+  const title = requiredString(args.flags, "title");
+  const body = requiredString(args.flags, "body", true);
+  const headRef = requiredGitRef(requiredString(args.flags, "head-ref"), "head-ref");
+  const baseRef = requiredGitRef(requiredString(args.flags, "base-ref"), "base-ref");
+  if (args.flags.draft !== undefined && args.flags.draft !== true) throw new Error("publish-change execute --draft is a flag and takes no value");
+  const projectRoot = projectRootForSession(sessionDir);
+  const headSha = resolveImmutableHeadSha(projectRoot, headRef);
+
+  // Issuance re-derives the canonical gate visit, repository, assignment actor,
+  // and secret-free provider configuration identity under the subject lock.
+  const action = await issuePublishChangeOperation({
+    sessionDir,
+    intent: { title, body, base_ref: baseRef, head_ref: headRef, head_sha: headSha, ...(args.flags.draft === true ? { draft: true } : {}) },
+  });
+  const effective = resolveEffectiveChangeProviderSettings(
+    projectRoot,
+    path.join(projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
+    throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
+  }
+  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
+  const complete = createPublishChangeOperationCompleter(async (issued) => {
+    const { action_id: _actionId, ...request } = issued;
+    return provider.createOrRecover(request as ChangeProviderRequest);
+  });
+  return complete({ sessionDir, action });
+}
+
+function requiredString(flags: ReturnType<typeof parseArgs>["flags"], name: string, allowEmpty = false): string {
+  const value = flagString(flags, name);
+  if (typeof value !== "string" || (!allowEmpty && value.length === 0) || Buffer.byteLength(value, "utf8") > (name === "body" ? 65_536 : name === "title" ? 512 : 4_096)) {
+    throw new Error(`publish-change execute requires a bounded --${name}`);
+  }
+  return value;
+}
+
+function requiredGitRef(value: string, name: string): string {
+  if (value.length > 255 || value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.includes("..") || value.includes("@{") || /[~^:?*[\\\s\x00-\x1f\x7f]/u.test(value)) {
+    throw new Error(`publish-change execute --${name} is not a valid git ref`);
+  }
+  return value;
+}
+
+function projectRootForSession(sessionDir: string): string {
+  const resolved = path.resolve(sessionDir);
+  const artifactRoot = path.dirname(resolved);
+  const kontouraiRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
+    throw new Error("publish-change execute --session-dir must be .kontourai/flow-agents/<slug>");
+  }
+  return path.dirname(kontouraiRoot);
+}
+
+function resolveImmutableHeadSha(projectRoot: string, headRef: string): string {
+  try {
+    const sha = execFileSync("git", ["-C", projectRoot, "rev-parse", "--verify", `${headRef}^{commit}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim().toLowerCase();
+    if (!/^[0-9a-f]{40,64}$/u.test(sha)) throw new Error("not an immutable commit SHA");
+    return sha;
+  } catch {
+    throw new Error("publish-change execute could not resolve --head-ref to an immutable local commit");
+  }
+}
+
+export function main(argv = process.argv.slice(2)): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
+    if (command === "execute") return execute(rest);
     if (command === "render") return render(rest);
     if (command === "validate-closing-refs") return validateClosingRefs(rest);
     if (command === "evaluate-provider-checks") return evaluateProviderChecks(rest);
     if (command === "reconcile-final-state") return reconcile(rest);
-    console.error("usage: publish-change-helper <render|validate-closing-refs|evaluate-provider-checks|reconcile-final-state>");
+    console.error("usage: publish-change <execute|render|validate-closing-refs|evaluate-provider-checks|reconcile-final-state>");
     return 2;
   } catch (error) {
     console.error(`publish-change-helper: ${(error as Error).message}`);
@@ -146,4 +251,8 @@ export function main(argv = process.argv.slice(2)): number {
 // entry-point guard fires correctly when the module is loaded directly as a script.
 const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
 const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
-if (_selfRealPath === _argv1RealPath) { process.exitCode = main(); }
+if (_selfRealPath === _argv1RealPath) {
+  const result = main();
+  if (typeof result === "number") process.exitCode = result;
+  else result.then((code) => { process.exitCode = code; });
+}

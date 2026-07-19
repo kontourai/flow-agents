@@ -53,9 +53,7 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   if (value.flow.definition_version !== authority.definition_version) {
     throw new Error("continuation snapshot gate-action definition version does not match installed Builder authority");
   }
-  if (!isDeepStrictEqual(value.stop_condition.external_capability, authority.external_capability)) {
-    throw new Error("continuation snapshot gate-action external capability does not match installed Builder authority");
-  }
+  validateExternalCapability(value);
   const declaredSkillIds = value.action.skills.map((skill) => skill.id);
   const declaredOperations = value.action.operations;
   if (!sameUniqueStrings(declaredSkillIds) || !sameUniqueStrings(declaredOperations) || !sameUniqueStrings(value.action.declared_evidence)) {
@@ -68,7 +66,10 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
     }
   }
   const mutationInterfaces = validateMutations(value, sessionArgument, packageIdentity);
-  if (!isDeepStrictEqual(value.public_interfaces.mutations, authority.mutations)) {
+  if (!isDeepStrictEqual(
+    value.public_interfaces.mutations.filter((mutation) => mutation.interface !== "operation"),
+    authority.mutations.filter((mutation) => mutation.interface !== "operation"),
+  )) {
     throw new Error("continuation snapshot gate-action mutations do not match installed Builder authority");
   }
   const operationMutations = new Set(value.public_interfaces.mutations.flatMap((mutation) => mutation.interface === "operation" ? [mutation.operation] : []));
@@ -184,9 +185,14 @@ function validateMutations(
       }
     } else if (mutation.interface === "operation") {
       const expected = PUBLIC_OPERATION_CONTRACTS[mutation.operation as keyof typeof PUBLIC_OPERATION_CONTRACTS];
-      if (!hasExactKeys(mutation, ["expectation_id", "interface", "operation", "protocol", "completion"])
-        || !expected || !value.action.operations.includes(mutation.operation) || !isDeepStrictEqual(mutation.protocol, expected)
-        || !isDeepStrictEqual(mutation.completion, { status: "external_verification_required", executable_by_flow_agents: false, gate_evidence_interface: null })) {
+      if (!hasExactKeys(mutation, ["expectation_id", "interface", "operation", "protocol", "binding", "completion"])
+        || !expected || !value.action.operations.includes(mutation.operation) || !canonicalOperationProtocol(mutation.protocol, expected)
+        || !validOperationBinding(mutation.binding, value.flow)
+        || !isDeepStrictEqual(mutation.completion, {
+          status: mutation.protocol.availability.status === "configured" ? "configured_provider_execution_required" : "external_verification_required",
+          executable_by_flow_agents: mutation.protocol.availability.status === "configured",
+          gate_evidence_interface: null,
+        })) {
         throw new Error("continuation snapshot gate-action operation mutation is not canonical");
       }
     } else {
@@ -197,6 +203,22 @@ function validateMutations(
     throw new Error("continuation snapshot gate-action mutations do not match declared evidence");
   }
   return interfaces;
+}
+
+function canonicalOperationProtocol(actual: unknown, expected: unknown): boolean {
+  if (!actual || typeof actual !== "object" || !expected || typeof expected !== "object") return false;
+  const actualRecord = structuredClone(actual) as Record<string, unknown>;
+  const expectedRecord = structuredClone(expected) as Record<string, unknown>;
+  const availability = actualRecord.availability;
+  if (!availability || typeof availability !== "object" || Array.isArray(availability)) return false;
+  const configured = (availability as Record<string, unknown>).status === "configured";
+  if (configured) {
+    const configuredAvailability = availability as Record<string, unknown>;
+    if (configuredAvailability.configuration_status !== "configured" || configuredAvailability.executable_by_flow_agents !== true
+      || !Array.isArray(configuredAvailability.command) || !isDeepStrictEqual(configuredAvailability.command, ["publish-change", "execute", "--session-dir", "<session-dir>"])) return false;
+  }
+  actualRecord.availability = expectedRecord.availability;
+  return isDeepStrictEqual(actualRecord, expectedRecord);
 }
 
 function isPackageIdentity(value: unknown): value is { name: "@kontourai/flow-agents"; version: string } {
@@ -267,15 +289,6 @@ function validateFixedEnvelopeShape(value: GateActionEnvelope): void {
   const allowedStopKeys = ["kind", "scope", "required", "sequence", "after", "synchronize_canonical_flow", "adapter_evidence_is_gate_evidence"];
   if (value.stop_condition.external_capability !== undefined) allowedStopKeys.push("external_capability");
   if (!hasExactKeys(value.stop_condition, allowedStopKeys)) throw new Error("continuation snapshot gate-action stop condition is malformed");
-  if (value.stop_condition.external_capability !== undefined) {
-    const capability = value.stop_condition.external_capability;
-    const protocol = PUBLIC_OPERATION_CONTRACTS[capability.operation as keyof typeof PUBLIC_OPERATION_CONTRACTS];
-    if (!hasExactKeys(capability, ["status", "operation", "capability", "completion"])
-      || capability.status !== "waiting" || capability.completion !== "external_verification_required"
-      || !protocol || !value.action.operations.includes(capability.operation) || capability.capability !== protocol.capability) {
-      throw new Error("continuation snapshot gate-action external capability is malformed");
-    }
-  }
   const progressKeys = ["canonical_evidence", "observed_artifacts"];
   if (value.progress.prior_turn !== undefined) progressKeys.push("prior_turn");
   if (!hasExactKeys(value.progress, progressKeys)
@@ -284,6 +297,32 @@ function validateFixedEnvelopeShape(value: GateActionEnvelope): void {
     throw new Error("continuation snapshot gate-action progress is malformed");
   }
   if (value.progress.prior_turn !== undefined) validatePriorProgress(value.progress.prior_turn);
+}
+
+function validOperationBinding(value: unknown, flow: GateActionEnvelope["flow"]): boolean {
+  if (!value || typeof value !== "object" || !hasExactKeys(value, ["run_id", "definition_id", "definition_version", "step_id", "gate_ids", "gate_visit_id"])) return false;
+  const binding = value as Record<string, unknown>;
+  return binding.run_id === flow.run_id && binding.definition_id === flow.definition_id
+    && binding.definition_version === flow.definition_version && binding.step_id === flow.current_step
+    && isDeepStrictEqual(binding.gate_ids, flow.gate_ids)
+    && typeof binding.gate_visit_id === "string" && /^[a-f0-9]{64}$/.test(binding.gate_visit_id);
+}
+
+function validateExternalCapability(value: GateActionEnvelope): void {
+  const capability = value.stop_condition.external_capability;
+  const operation = value.public_interfaces.mutations.find((mutation) => mutation.interface === "operation");
+  if (!operation) {
+    // The canonical mutation/action parity checks report a removed operation
+    // with their established, more specific error below.
+    return;
+  }
+  const configured = operation.protocol.availability.status === "configured";
+  if (configured && capability !== undefined) throw new Error("continuation snapshot gate-action configured operation cannot report an external capability gap");
+  if (!configured && (!capability || !hasExactKeys(capability, ["status", "operation", "capability", "completion"])
+    || capability.status !== "waiting" || capability.operation !== operation.operation
+    || capability.capability !== operation.protocol.capability || capability.completion !== "external_verification_required")) {
+    throw new Error("continuation snapshot gate-action external capability does not match installed Builder authority");
+  }
 }
 
 function sameUniqueGateIds(value: unknown): value is string[] {

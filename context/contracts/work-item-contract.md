@@ -73,6 +73,38 @@ If a legacy work item lacks `planned_base_sha`, pickup Probe should record the g
 
 `publish-change` is the provider-neutral step between clean local evidence and release readiness. It publishes the verified diff to a `ChangeProvider`, records the provider result, and collects provider checks without making any one provider's terms core workflow vocabulary.
 
+### Authenticated ChangeProvider completion
+
+For a Builder `pull-request-opened` gate, a generic publish result is descriptive evidence, not
+completion authority. The only completion path is the configured public operation
+`flow-agents publish-change execute --session-dir <session-dir>`. It accepts bounded title, body,
+base ref, head ref, and optional draft intent, and derives repository, immutable head SHA, current
+assignment actor, canonical run/definition/step, and current gate-visit identity from Flow state.
+
+ChangeProvider configuration is explicit and secret-free: project
+`context/settings/change-provider-settings.json` overrides global
+`$HOME/.config/flow-agents/change-provider-settings.json` in this order: global defaults, matching
+global project entry, project defaults, matching project entry. A configured provider must declare
+the `ChangeProvider` role and compatible create/observe capabilities. Absent configuration remains
+`external_capability_required`; malformed or incompatible configuration remains unavailable with
+its reason. Neither state may expose an executable completion claim or be rewritten as a completed
+provider change.
+
+An authenticated provider observation is bounded to the operation binding, provider kind,
+configuration id and adapter, repository, provider record id/number/HTTPS URL, open state,
+base/head refs and immutable SHA, actor, and observation time. Flow must reacquire its subject
+lock before persistence and revalidate assignment ownership, active gate visit, request binding,
+and effective configuration. It writes only `publish-change.result.json`, attaches only
+`pull-request-opened`, requires that canonical evaluation to advance exactly one step, and projects
+the resulting state.
+
+Caller-authored result JSON, generic evidence, and private/package-internal writers have no
+completion authority. Authentication data and provider diagnostics must not be persisted in
+configuration, artifacts, trust bundles, logs, or snapshots. A retry after provider or transport
+failure must recover an exact matching open change before attempting another create; ambiguity,
+wrong repository/base/head/SHA/intent, stale/closed records, or multiple matches fail without
+creating or selecting a duplicate.
+
 ### References
 
 Use typed references instead of provider-specific nouns in core artifacts:

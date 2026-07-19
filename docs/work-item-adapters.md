@@ -31,6 +31,30 @@ A provider can implement more than one role. GitHub Issues maps to `WorkItemProv
 
 If a provider is unavailable, record `not_verified` unless the workflow explicitly selected a low-risk no-provider path.
 
+### Authenticated operation boundary
+
+The Builder `pull-request-opened` gate is completed through the provider-neutral public operation,
+not by writing a generic `PublishChangeResult`. When effective ChangeProvider settings are
+configured, status exposes `flow-agents publish-change execute --session-dir <session-dir>` with
+bounded title, body, base ref, head ref, and optional draft inputs. Settings are deep-merged in
+ascending precedence: global defaults, matching global project entry, project defaults, then the
+matching project entry in `context/settings/change-provider-settings.json`; the global file is
+`$HOME/.config/flow-agents/change-provider-settings.json`. Unconfigured or incompatible settings stay
+`external_capability_required` and expose no executable completion path.
+
+The command derives repository, immutable head SHA, assignment actor, canonical run, and current
+gate visit. The adapter returns a bounded, authenticated observation containing provider identity
+and adapter, repository, provider record id/number/HTTPS URL, open state, base/head refs and SHA,
+actor, and observation time. Flow rechecks the assignment, gate visit, request binding, and provider
+configuration under its subject lock; it then persists only `publish-change.result.json`, records
+only `pull-request-opened`, requires Flow to advance exactly one canonical step, and projects the result.
+
+Caller-authored JSON, generic continuation evidence, and package-private writers are not adapter
+results and cannot advance the gate. Authentication material and raw provider diagnostics must not
+be placed in settings, result artifacts, evidence, logs, or snapshots. Provider failures remain
+failures: callers correct the condition and retry the public operation; they do not bypass it with
+a local result file.
+
 ## Planning Base Drift
 
 When a work item is shaped for the backlog, record the target ref and commit SHA that informed the plan, usually current `main`. Provider adapters should preserve that as `planned_base_ref`, `planned_base_sha`, `planned_at`, and `planning_artifact_ref` when possible.
@@ -50,6 +74,13 @@ For GitHub, `publish-change` usually means:
 - include issue closing references, workflow evidence, verification summary, and artifact links
 - ask GitHub which issue references it recognizes
 - collect pull request checks, required reviews, mergeability, and status checks
+
+The shipped GitHub adapter uses direct `gh` argv behind the `ChangeProvider` interface. It
+authenticates, finds an exact open pull request by configured repository/base/head/SHA and
+title/body/draft intent, or creates one only when none exists; it then re-observes the canonical
+record. An ambiguous create failure triggers one recovery query before failure is returned.
+Multiple matches, a closed/stale/wrong record, malformed output, unavailable `gh`, or failed
+authentication must not select a record or create a duplicate.
 
 GitHub-specific words belong in adapter sections and examples. The shared workflow result should still be expressed as `change_ref`, `closing_reference_check`, `provider_checks`, and `evidence_refs`.
 

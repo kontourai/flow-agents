@@ -68,37 +68,162 @@ export const WORKFLOW_CRITIQUE_PARAMETERS = [
 
 export const PUBLISH_CHANGE_OPERATION = "publish-change" as const;
 
+/** Provider-neutral capabilities required to create and authenticate a change record. */
+export const CHANGE_PROVIDER_CAPABILITIES = ["change.create", "change.observe"] as const;
+export type ChangeProviderCapability = (typeof CHANGE_PROVIDER_CAPABILITIES)[number];
+
+export type ChangeProviderSettings = {
+  role: "ChangeProvider";
+  kind: "github";
+  repository: { owner: string; name: string; url?: string };
+  capabilities: ChangeProviderCapability[];
+  executor: "gh-cli";
+};
+
+export type ChangeProviderSupport =
+  | { status: "unconfigured"; reason: "change_provider_not_configured" }
+  | { status: "unsupported"; reason: string }
+  | { status: "configured"; provider: ChangeProviderSettings };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function boundedString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength;
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
+/**
+ * This deliberately accepts configuration only. Authentication is delegated to
+ * the adapter process and must never be represented in settings or artifacts.
+ */
+export function resolveChangeProviderSupport(value: unknown): ChangeProviderSupport {
+  if (value === undefined || value === null) return { status: "unconfigured", reason: "change_provider_not_configured" };
+  if (!isRecord(value)) return { status: "unsupported", reason: "change_provider_must_be_an_object" };
+  if (value.role !== "ChangeProvider") return { status: "unsupported", reason: "change_provider_role_must_be_ChangeProvider" };
+  if (value.kind !== "github") return { status: "unsupported", reason: "unsupported_change_provider_kind" };
+  if (value.executor !== "gh-cli") return { status: "unsupported", reason: "unsupported_change_provider_executor" };
+  if (!hasOnlyKeys(value, ["role", "kind", "repository", "capabilities", "executor"]) || !isRecord(value.repository)
+    || !hasOnlyKeys(value.repository, ["owner", "name", "url"]) || !boundedString(value.repository.owner, 255) || !boundedString(value.repository.name, 255)
+    || (value.repository.url !== undefined && !boundedString(value.repository.url, 8_192))) {
+    return { status: "unsupported", reason: "change_provider_repository_is_invalid" };
+  }
+  const capabilities = value.capabilities;
+  if (!Array.isArray(capabilities)
+    || capabilities.some((capability) => !(CHANGE_PROVIDER_CAPABILITIES as readonly string[]).includes(String(capability)))
+    || CHANGE_PROVIDER_CAPABILITIES.some((capability) => !capabilities.includes(capability))) {
+    return { status: "unsupported", reason: "change_provider_capabilities_are_incomplete" };
+  }
+  return { status: "configured", provider: structuredClone(value) as ChangeProviderSettings };
+}
+
+export type PublishChangeActionBinding = {
+  run_id: string;
+  definition_id: string;
+  definition_version: string;
+  step_id: string;
+  gate_ids: string[];
+  gate_visit_id: string;
+};
+
+const PUBLISH_CHANGE_PARAMETERS = [
+  { name: "session_dir", flag: "--session-dir", required: true, type: "string", max_length: 4_096 },
+  { name: "title", flag: "--title", required: true, type: "string", max_length: 512 },
+  { name: "body", flag: "--body", required: true, type: "string", max_length: 65_536 },
+  { name: "head_ref", flag: "--head-ref", required: true, type: "string", max_length: 255 },
+  { name: "base_ref", flag: "--base-ref", required: true, type: "string", max_length: 255 },
+  { name: "draft", flag: "--draft", required: false, type: "boolean" },
+] as const;
+
 export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
   schema_version: "1.0",
   operation: PUBLISH_CHANGE_OPERATION,
   kind: "provider_capability",
-  capability: "pull_request.create",
-  parameters: [
-    { name: "title", required: true, type: "string", max_length: 512 },
-    { name: "body", required: true, type: "string", max_length: 65_536 },
-    { name: "head_ref", required: true, type: "string", max_length: 255 },
-    { name: "base_ref", required: true, type: "string", max_length: 255 },
-    { name: "draft", required: false, type: "boolean" },
-  ],
-  result: {
-    required: ["provider", "repository", "number", "url", "head_ref", "base_ref"],
+  capability: "change.create",
+  parameters: PUBLISH_CHANGE_PARAMETERS,
+  request: {
+    required: ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider"],
     properties: {
-      provider: { type: "string", max_length: 128 },
-      repository: { type: "string", max_length: 1_024 },
-      number: { type: "integer", minimum: 1 },
-      url: { type: "string", max_length: 8_192 },
-      head_ref: { type: "string", max_length: 255 },
+      schema_version: { const: "1.0" },
+      operation: { const: PUBLISH_CHANGE_OPERATION },
+      binding: { required: ["run_id", "definition_id", "definition_version", "step_id", "gate_ids", "gate_visit_id"] },
+      repository: { required: ["owner", "name"] },
       base_ref: { type: "string", max_length: 255 },
+      head_ref: { type: "string", max_length: 255 },
+      head_sha: { type: "string", pattern: "^[0-9a-f]{40,64}$" },
+      intent: { required: ["title", "body"] },
+      actor: { type: "string", max_length: 512 },
+      provider: { required: ["kind", "configuration_id"] },
+    },
+  },
+  result: {
+    max_bytes: 65_536,
+    required: ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"],
+    properties: {
+      schema_version: { const: "1.0" },
+      operation: { const: PUBLISH_CHANGE_OPERATION },
+      binding: { required: ["run_id", "definition_id", "definition_version", "step_id", "gate_ids", "gate_visit_id"] },
+      provider: { required: ["kind", "configuration_id", "adapter"] },
+      repository: { required: ["owner", "name"] },
+      change_ref: {
+        required: ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"],
+        properties: {
+          provider_record_id: { type: "string", max_length: 1_024 },
+          number: { type: "integer", minimum: 1 },
+          url: { type: "string", max_length: 8_192 },
+          state: { const: "open" },
+          base_ref: { type: "string", max_length: 255 },
+          head_ref: { type: "string", max_length: 255 },
+          head_sha: { type: "string", pattern: "^[0-9a-f]{40,64}$" },
+        },
+      },
+      actor: { type: "string", max_length: 512 },
+      observed_at: { type: "string", format: "date-time", max_length: 64 },
     },
     url_protocols: ["https:"],
     persist_as: "publish-change.result.json",
   },
   availability: {
     status: "external_capability_required",
+    configuration_status: "unconfigured",
     executable_by_flow_agents: false,
     completion_verification: "authenticated_change_provider_required",
   },
 } as const;
+
+export type PublishChangeOperationProtocol = typeof PUBLISH_CHANGE_OPERATION_PROTOCOL | ReturnType<typeof configuredPublishChangeOperationProtocol> | ReturnType<typeof unsupportedPublishChangeOperationProtocol>;
+
+function configuredPublishChangeOperationProtocol(provider: ChangeProviderSettings) {
+  return {
+    ...PUBLISH_CHANGE_OPERATION_PROTOCOL,
+    availability: {
+      status: "configured",
+      configuration_status: "configured",
+      executable_by_flow_agents: true,
+      command: ["publish-change", "execute", "--session-dir", "<session-dir>"],
+      completion_verification: "authenticated_change_provider_required",
+      provider: { kind: provider.kind, repository: structuredClone(provider.repository) },
+    },
+  } as const;
+}
+
+function unsupportedPublishChangeOperationProtocol(reason: string) {
+  return {
+    ...PUBLISH_CHANGE_OPERATION_PROTOCOL,
+    availability: { ...PUBLISH_CHANGE_OPERATION_PROTOCOL.availability, configuration_status: "unsupported", reason },
+  } as const;
+}
+
+export function publishChangeOperationProtocol(changeProvider?: unknown): PublishChangeOperationProtocol {
+  const support = resolveChangeProviderSupport(changeProvider);
+  if (support.status === "configured") return configuredPublishChangeOperationProtocol(support.provider);
+  if (support.status === "unsupported") return unsupportedPublishChangeOperationProtocol(support.reason);
+  return structuredClone(PUBLISH_CHANGE_OPERATION_PROTOCOL);
+}
 
 export const NARRATIVE_PROMOTE_OPERATION = "narrative.promote" as const;
 
@@ -132,5 +257,9 @@ export const PUBLIC_OPERATION_CONTRACTS = {
   [PUBLISH_CHANGE_OPERATION]: PUBLISH_CHANGE_OPERATION_PROTOCOL,
   [NARRATIVE_PROMOTE_OPERATION]: NARRATIVE_PROMOTE_OPERATION_PROTOCOL,
 } as const;
+
+export function publicOperationContracts(changeProvider?: unknown): Record<typeof PUBLISH_CHANGE_OPERATION, PublishChangeOperationProtocol> {
+  return { [PUBLISH_CHANGE_OPERATION]: publishChangeOperationProtocol(changeProvider) };
+}
 
 export const PUBLIC_OPERATION_IDS = new Set<string>(Object.keys(PUBLIC_OPERATION_CONTRACTS));

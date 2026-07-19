@@ -189,6 +189,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration
 
+      - name: Publish-change operation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check publish-change-operation-integration
+
       - name: Workflow sidecar writer integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workflow-sidecar-writer-integration

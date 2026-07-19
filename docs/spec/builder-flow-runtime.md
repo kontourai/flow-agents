@@ -204,18 +204,41 @@ opening the target without following symlinks and for confirming that the final
 path remains inside the active session. The envelope declares authority and
 identity; it does not make an arbitrary adapter filesystem write atomic.
 
-`publish-change` is a provider-capability protocol, not a claim that the local
-`flow-agents publish-change` helper opens a pull request. Its envelope binds the
-exact `pull_request.create` capability, bounded structured inputs, the required
-provider result, and the dedicated session-relative
-`publish-change.result.json` artifact. No authenticated ChangeProvider executor
-ships in this issue, so the operation is explicitly unavailable locally and has
-an `external_verification_required` completion state. It exposes no
-`record_completion` mutation, a self-authored result cannot satisfy
-`pull-request-opened`, and the projection waits instead of scheduling repeated
-adapter turns. The protocol remains the future provider contract. The local
-publish-change helper only renders and validates publish artifacts and provider
-checks; it is not the provider action executor.
+`publish-change` is an authenticated, provider-neutral operation. Its envelope binds
+the `change.create` capability, bounded command inputs, the canonical run and current
+gate visit, the required provider result, and the dedicated session-relative
+`publish-change.result.json` artifact. When the effective ChangeProvider is configured,
+the envelope projects the exact executable argv `flow-agents publish-change execute
+--session-dir <session-dir>` plus typed title/body/base/head/draft parameters. When it
+is absent or incompatible, the envelope remains `external_capability_required` with an
+`external_verification_required` wait state and no executable completion claim.
+
+The public command derives repository, immutable head SHA, assignment actor, provider
+configuration identity, run identity, and gate-visit identity under the Flow subject lock.
+It invokes the configured ChangeProvider outside that lock as necessary, then the
+Flow-owned completion transaction reacquires the lock and re-reads canonical state.
+It rejects any assignment transfer, gate movement, replay, configuration change, or
+request/result mismatch before persisting the bounded result. Only an authenticated,
+fresh provider observation can write `publish-change.result.json`; it contains the
+binding, provider configuration/adapter, repository, provider record id/number/HTTPS
+URL, open state, base/head refs and immutable SHA, actor, and observation timestamp.
+
+Flow attaches exactly the `pull-request-opened` evidence for that issued operation,
+requires it to advance the bound gate exactly one canonical step, and projects the result. It does not treat generic
+driver evidence, caller-authored JSON, arbitrary expectation ids, or package-private
+writers as completion authority. The transaction uses no-follow bounded file handling
+and removes its temporary evidence after evaluation. Adapter authentication data and
+provider diagnostics are not persisted in session files, trust bundles, diagnostics,
+logs, or snapshots.
+
+GitHub is the first adapter, not Flow vocabulary: it uses direct `gh` argv (never a
+shell) to authenticate, create, list, and re-observe pull requests. Before creating it
+recovers one exact open record matching repository, base, head ref, immutable SHA, title,
+body, and draft state. After an ambiguous create failure it performs the same recovery
+query before reporting failure, so retry does not blindly duplicate a pull request.
+Multiple exact matches, a closed/stale/wrong record, malformed output, unavailable
+provider, or failed authentication leaves the canonical gate unresolved and requires
+the public operation to be retried only after the underlying condition is corrected.
 
 `flow_step_actions` must explicitly declare `artifacts`, `artifact_bindings`,
 `expectation_ids`, `expectation_bindings`, and `implementation_allowed`, including

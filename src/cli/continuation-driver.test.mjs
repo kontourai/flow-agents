@@ -312,9 +312,14 @@ test("gate-action envelope pins executable workflow interfaces and package ident
   missingOperationMutation.gate_action_envelope.public_interfaces.mutations = [];
   assert.throws(() => validateSnapshot(missingOperationMutation), /mutations do not match declared evidence/);
 
-  const missingCapability = envelopeSnapshot("pr-open");
-  delete missingCapability.gate_action_envelope.stop_condition.external_capability;
-  assert.throws(() => validateSnapshot(missingCapability), /external capability does not match installed Builder authority/);
+  const configuredOperation = envelopeSnapshot("pr-open");
+  const publishChange = configuredOperation.gate_action_envelope.public_interfaces.mutations
+    .find((entry) => entry.interface === "operation" && entry.operation === "publish-change");
+  assert.deepEqual(publishChange.protocol.availability.command, ["publish-change", "execute", "--session-dir", "<session-dir>"]);
+  configuredOperation.gate_action_envelope.stop_condition.external_capability = {
+    status: "waiting", operation: "publish-change", capability: "change.create", completion: "external_verification_required",
+  };
+  assert.throws(() => validateSnapshot(configuredOperation), /configured operation cannot report an external capability gap/);
 });
 
 function terminalProgressSnapshot(status, { step = "learn", evidence = [], artifacts = [] } = {}) {
