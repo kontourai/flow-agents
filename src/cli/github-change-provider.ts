@@ -91,7 +91,12 @@ async function bindGithubAuthentication(dependencies: GithubExecutionDependencie
     PATH: process.platform === "win32"
       ? "C:\\Program Files\\GitHub CLI;C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows"
       : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-    ...(process.platform === "win32" ? { USERPROFILE: trustedHome, SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
+    ...(process.platform === "win32" ? {
+      USERPROFILE: trustedHome,
+      APPDATA: path.win32.join(trustedHome, "AppData", "Roaming"),
+      SystemRoot: "C:\\Windows",
+      WINDIR: "C:\\Windows",
+    } : {}),
   };
   const token = (await invoke({ ...dependencies, env: bootstrapEnv }, ["auth", "token", "--hostname", "github.com"], "provider_auth_failed")).trim();
   if (!token || /[\0\r\n]/u.test(token) || Buffer.byteLength(token, "utf8") > 16 * 1024) {
