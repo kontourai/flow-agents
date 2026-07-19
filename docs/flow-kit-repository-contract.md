@@ -207,7 +207,7 @@ Flow Agents must not duplicate Flow gate semantics, trusted-producer rules, rout
 
 ## Scope
 
-This contract and install surface are local repository validation, local runtime bookkeeping, and Codex-local Flow Definition activation only. Remote install is a non-goal: Flow Agents does not install remote kits, fetch git repositories, split npm packages, select adapter packages, invoke the full Builder Kit provider graph, or implement Claude, Kiro, framework, API, or provider adapters.
+This contract covers local and Git-backed repository installation, local runtime bookkeeping, and Codex-local Flow Definition activation. Git sources are shallow-cloned only during an explicit `kit install`; activation never fetches repositories or executes setup code from the kit. Flow Agents does not split npm packages, select adapter packages, invoke the full Builder Kit provider graph, or implement Claude, Kiro, framework, API, or provider adapters.
 
 ## Common Failures
 
