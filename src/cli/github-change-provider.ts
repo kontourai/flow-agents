@@ -82,6 +82,12 @@ async function bindGithubAuthentication(dependencies: GithubExecutionDependencie
   }
   const env: NodeJS.ProcessEnv = { ...process.env, GH_TOKEN: token };
   delete env.GITHUB_TOKEN;
+  for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
+  delete env.GH_HOST;
+  delete env.GH_REPO;
+  delete env.GH_ENTERPRISE_TOKEN;
+  delete env.GITHUB_ENTERPRISE_TOKEN;
+  if (process.platform !== "win32") env.PATH = "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
   return Object.freeze({
     ...dependencies,
     // Pin every subsequent gh invocation to the same credential. The token is
@@ -353,7 +359,8 @@ function assertSecureSystemPath(resolved: string, stat: fs.Stats): void {
   let directory = path.dirname(resolved);
   while (true) {
     const directoryStat = fs.statSync(directory);
-    if (!directoryStat.isDirectory() || directoryStat.uid !== 0 || (directoryStat.mode & 0o022) !== 0) throw new Error("untrusted executable parent");
+    const writableWithoutStickyOwnership = (directoryStat.mode & 0o022) !== 0 && (directoryStat.mode & 0o1000) === 0;
+    if (!directoryStat.isDirectory() || directoryStat.uid !== 0 || writableWithoutStickyOwnership) throw new Error("untrusted executable parent");
     const parent = path.dirname(directory);
     if (parent === directory) break;
     directory = parent;
