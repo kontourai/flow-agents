@@ -22,7 +22,7 @@ const input = (body) => ({
     capabilities: ["change.create", "change.observe"],
     executor: "gh-cli",
   },
-  actor: "codex:test",
+  assignment_actor: "codex:test",
   intent: {
     title: "feat(runtime): authorize bounded retry epochs",
     body,

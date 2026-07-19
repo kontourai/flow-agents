@@ -146,7 +146,7 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
   capability: "change.create",
   parameters: PUBLISH_CHANGE_PARAMETERS,
   request: {
-    required: ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider"],
+    required: ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "assignment_actor", "provider"],
     properties: {
       schema_version: { const: "1.0" },
       operation: { const: PUBLISH_CHANGE_OPERATION },
@@ -156,13 +156,13 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
       head_ref: { type: "string", max_length: 255 },
       head_sha: { type: "string", pattern: "^[0-9a-f]{40,64}$" },
       intent: { required: ["title", "body"] },
-      actor: { type: "string", max_length: 512 },
+      assignment_actor: { type: "string", max_length: 512 },
       provider: { required: ["kind", "configuration_id"] },
     },
   },
   result: {
     max_bytes: 65_536,
-    required: ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"],
+    required: ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "assignment_actor", "provider_actor", "observed_at"],
     properties: {
       schema_version: { const: "1.0" },
       operation: { const: PUBLISH_CHANGE_OPERATION },
@@ -181,7 +181,8 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
           head_sha: { type: "string", pattern: "^[0-9a-f]{40,64}$" },
         },
       },
-      actor: { type: "string", max_length: 512 },
+      assignment_actor: { type: "string", max_length: 512 },
+      provider_actor: { type: "string", max_length: 512 },
       observed_at: { type: "string", format: "date-time", max_length: 64 },
     },
     url_protocols: ["https:"],

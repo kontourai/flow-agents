@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   assertRequestMatchesProvider,
   buildChangeProviderResult,
@@ -23,12 +25,15 @@ export type ArgvExecutor = (
 ) => Promise<ArgvExecutionResult>;
 
 export type GithubChangeProviderDependencies = Readonly<{
+  /** Explicit in-process test seam; production uses execFileArgv. */
   executor?: ArgvExecutor;
+  /** Explicit in-process test seam; production resolves a trusted absolute executable. */
   executable?: string;
   now?: () => string;
 }>;
 
-type GithubExecutionDependencies = Required<GithubChangeProviderDependencies>;
+type TrustedExecutable = Readonly<{ candidate: string; path: string; device: number; inode: number; size: number; mtimeMs: number; mode: number }>;
+type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null }>;
 type GithubListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; title: string; body: string; isDraft: boolean }>;
 type GithubProviderRecord = Readonly<{ id: unknown; number: unknown; url: unknown; state: unknown; baseRefName: unknown; headRefName: unknown; headRefOid: unknown; title: unknown; body: unknown; isDraft: unknown }>;
 
@@ -41,10 +46,16 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
   if (settings.kind !== "github" || settings.executor !== "gh-cli") {
     throw new ChangeProviderError("invalid_request", "GitHub ChangeProvider requires github gh-cli settings");
   }
+  const injectedExecutor = dependencies.executor !== undefined;
+  if (!injectedExecutor && dependencies.executable !== undefined) {
+    throw new ChangeProviderError("invalid_request", "ChangeProvider executable overrides require an injected executor");
+  }
+  const trustedExecutable = injectedExecutor ? null : resolveTrustedGithubExecutableIdentity();
   const execution: GithubExecutionDependencies = {
     executor: dependencies.executor ?? execFileArgv,
-    executable: validateExecutable(dependencies.executable ?? "gh"),
+    executable: injectedExecutor ? validateExecutable(dependencies.executable ?? "gh") : trustedExecutable!.path,
     now: dependencies.now ?? (() => new Date().toISOString()),
+    trustedExecutable,
   };
   const provider: ChangeProviderSettings = { ...settings, repository: { ...settings.repository }, capabilities: [...settings.capabilities] };
   const normalizedConfigurationId = validateConfigurationId(configurationId);
@@ -57,8 +68,8 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
       // The capability check authenticates the configured gh identity, while
       // the result remains bound to the Flow assignment actor in `request`.
       // This lets the Flow-owned completer reject a transferred assignment.
-      await checkGithubCapability(provider, execution);
-      return createOrRecoverGithubChange(request, execution);
+      const capability = await checkGithubCapability(provider, execution);
+      return createOrRecoverGithubChange(request, execution, capability.provider_actor);
     },
   });
 }
@@ -74,13 +85,13 @@ async function checkGithubCapability(settings: ChangeProviderSettings, dependenc
   if (repo.full_name !== repoSlug(settings)) {
     throw new ChangeProviderError("provider_observation_mismatch", "configured repository observation did not match provider settings");
   }
-  return Object.freeze({ actor });
+  return Object.freeze({ provider_actor: actor });
 }
 
-async function createOrRecoverGithubChange(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies): Promise<ChangeProviderResult> {
+async function createOrRecoverGithubChange(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
   const before = await listMatchingChanges(request, dependencies);
   const existing = selectExactChange(before, request);
-  if (existing) return observeExactChange(request, existing.number, dependencies);
+  if (existing) return observeExactChange(request, existing.number, dependencies, providerActor);
 
   try {
     // gh pr create returns a human URL. Do not parse or retain it; all trusted
@@ -90,20 +101,20 @@ async function createOrRecoverGithubChange(request: ChangeProviderRequest, depen
     if (!(error instanceof ChangeProviderError) || error.code === "invalid_request") throw error;
     // A timeout or transport error can occur after GitHub created the PR.
     // Re-query once before surfacing failure, never retrying create blindly.
-    return recoverAfterAmbiguousCreate(request, dependencies, error);
+    return recoverAfterAmbiguousCreate(request, dependencies, providerActor, error);
   }
 
   const after = await listMatchingChanges(request, dependencies);
   const created = selectExactChange(after, request);
   if (!created) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return the expected published change after creation");
-  return observeExactChange(request, created.number, dependencies);
+  return observeExactChange(request, created.number, dependencies, providerActor);
 }
 
-async function recoverAfterAmbiguousCreate(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, originalError: ChangeProviderError): Promise<ChangeProviderResult> {
+async function recoverAfterAmbiguousCreate(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, providerActor: string, originalError: ChangeProviderError): Promise<ChangeProviderResult> {
   try {
     const after = await listMatchingChanges(request, dependencies);
     const recovered = selectExactChange(after, request);
-    if (recovered) return observeExactChange(request, recovered.number, dependencies);
+    if (recovered) return observeExactChange(request, recovered.number, dependencies, providerActor);
   } catch (recoveryError) {
     if (recoveryError instanceof ChangeProviderError && (recoveryError.code === "ambiguous_provider_change" || recoveryError.code === "provider_observation_mismatch" || recoveryError.code === "malformed_provider_output" || recoveryError.code === "oversized_provider_output")) {
       throw recoveryError;
@@ -144,10 +155,10 @@ function selectExactChange(records: GithubListRecord[], request: ChangeProviderR
   return candidate;
 }
 
-async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies): Promise<ChangeProviderResult> {
+async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
   const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`]);
   const record = parseProviderRecord(parseProviderJson(output, "provider record output"), request);
-  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, actor: request.actor, observedAt: dependencies.now() });
+  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor, observedAt: dependencies.now() });
 }
 
 function createArgv(request: ChangeProviderRequest): string[] {
@@ -168,6 +179,7 @@ function repoSlug(value: Pick<ChangeProviderRequest, "repository"> | ChangeProvi
 
 async function invoke(dependencies: GithubExecutionDependencies, argv: readonly string[], failureCode: "provider_auth_failed" | "provider_failure" = "provider_failure"): Promise<string> {
   try {
+    if (dependencies.trustedExecutable) revalidateTrustedGithubExecutable(dependencies.trustedExecutable);
     const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), { timeoutMs: EXECUTION_TIMEOUT_MS, maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES });
     if (!result || typeof result.stdout !== "string") malformed("provider executor returned an invalid result");
     if (Buffer.byteLength(result.stdout, "utf8") > MAX_PROVIDER_OUTPUT_BYTES) {
@@ -275,6 +287,47 @@ function providerPositiveInteger(value: unknown, label: string): number {
 function validateExecutable(value: string): string {
   if (!value || value !== value.trim() || /[\0\r\n]/u.test(value)) throw new ChangeProviderError("invalid_request", "configured ChangeProvider executable is invalid");
   return value;
+}
+
+const TRUSTED_GITHUB_EXECUTABLES = process.platform === "darwin"
+  ? ["/run/current-system/sw/bin/gh", "/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+  : process.platform === "win32"
+    ? ["C:\\Program Files\\GitHub CLI\\gh.exe"]
+    : ["/run/current-system/sw/bin/gh", "/usr/bin/gh", "/usr/local/bin/gh"];
+
+/** Production never searches PATH: a repository-local shim cannot authenticate Flow. */
+export function resolveTrustedGithubExecutable(): string {
+  return resolveTrustedGithubExecutableIdentity().path;
+}
+
+function resolveTrustedGithubExecutableIdentity(): TrustedExecutable {
+  for (const candidate of TRUSTED_GITHUB_EXECUTABLES) {
+    try {
+      return trustedExecutableIdentity(candidate);
+    } catch {
+      // Try the next fixed system location. Every candidate is independently verified.
+    }
+  }
+  throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable is unavailable");
+}
+
+function trustedExecutableIdentity(candidate: string): TrustedExecutable {
+  const resolved = fs.realpathSync(candidate);
+  if (!path.isAbsolute(resolved) || !TRUSTED_GITHUB_EXECUTABLES.includes(candidate)) {
+    throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable is unavailable");
+  }
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o111) === 0)) {
+    throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable is unavailable");
+  }
+  return Object.freeze({ candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode });
+}
+
+function revalidateTrustedGithubExecutable(identity: TrustedExecutable): void {
+  const current = trustedExecutableIdentity(identity.candidate);
+  if (current.device !== identity.device || current.inode !== identity.inode || current.size !== identity.size || current.mtimeMs !== identity.mtimeMs || current.mode !== identity.mode) {
+    throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable changed during provider operation");
+  }
 }
 
 function validateConfigurationId(value: string): string {

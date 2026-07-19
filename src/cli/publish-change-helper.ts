@@ -4,11 +4,7 @@ import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { parseArgs, flagString } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
-import { createGithubChangeProvider } from "./github-change-provider.js";
-import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
-import type { ChangeProviderRequest } from "./change-provider.js";
-import type { ChangeProviderSettings } from "./public-contracts.js";
-import { createPublishChangeOperationCompleter, issuePublishChangeOperation } from "../builder-flow-runtime.js";
+import { executePublishChangeOperation, type CompletePublishChangeOperationResult } from "../builder-flow-runtime.js";
 
 const CLOSING_KEYWORD_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?<refs>(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+)(?:\s*(?:,|and)\s*(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+))*)/gi;
 const GITHUB_REF_RE = /(?<url>https:\/\/github\.com\/(?<url_owner>[^/\s)]+)\/(?<url_repo>[^/\s)]+)\/(?:issues|pull)\/(?<url_number>\d+))|(?:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+))?#(?<number>\d+)/g;
@@ -155,7 +151,7 @@ function execute(argv: string[]): Promise<number> {
   );
 }
 
-async function executeConfiguredChange(argv: string[]) {
+async function executeConfiguredChange(argv: string[]): Promise<CompletePublishChangeOperationResult> {
   const args = parseArgs(argv);
   if (args.positionals.length !== 0) throw new Error("publish-change execute accepts only named flags");
   for (const key of Object.keys(args.flags)) {
@@ -170,26 +166,10 @@ async function executeConfiguredChange(argv: string[]) {
   if (args.flags.draft !== undefined && args.flags.draft !== true) throw new Error("publish-change execute --draft is a flag and takes no value");
   const projectRoot = projectRootForSession(sessionDir);
   const headSha = resolveImmutableHeadSha(projectRoot, headRef);
-
-  // Issuance re-derives the canonical gate visit, repository, assignment actor,
-  // and secret-free provider configuration identity under the subject lock.
-  const action = await issuePublishChangeOperation({
+  return await executePublishChangeOperation({
     sessionDir,
     intent: { title, body, base_ref: baseRef, head_ref: headRef, head_sha: headSha, ...(args.flags.draft === true ? { draft: true } : {}) },
   });
-  const effective = resolveEffectiveChangeProviderSettings(
-    projectRoot,
-    path.join(projectRoot, "context", "settings", "change-provider-settings.json"),
-  );
-  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
-    throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
-  }
-  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
-  const complete = createPublishChangeOperationCompleter(async (issued) => {
-    const { action_id: _actionId, ...request } = issued;
-    return provider.createOrRecover(request as ChangeProviderRequest);
-  });
-  return complete({ sessionDir, action });
 }
 
 function requiredString(flags: ReturnType<typeof parseArgs>["flags"], name: string, allowEmpty = false): string {

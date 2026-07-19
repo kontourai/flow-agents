@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
@@ -34,4 +36,25 @@ test("effective ChangeProvider settings report configured, absent, malformed, an
   assert.equal(hostileJson.status, "unsupported");
   assert.match(hostileJson.reason, /change_provider/);
   assert.equal(hostile.stdout.includes("must-not-be-persisted"), false);
+});
+
+test("effective ChangeProvider settings default to the consumer repository context path", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-change-provider-consumer-"));
+  try {
+    fs.writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ repository: "https://github.com/consumer/example.git" }));
+    const settings = path.join(consumer, "context", "settings", "change-provider-settings.json");
+    fs.mkdirSync(path.dirname(settings), { recursive: true });
+    fs.writeFileSync(settings, JSON.stringify({
+      schema_version: "1.0",
+      defaults: { provider: { role: "ChangeProvider", kind: "github", repository: { owner: "consumer", name: "example" }, capabilities: ["change.create", "change.observe"], executor: "gh-cli" } },
+    }));
+    const result = spawnSync(process.execPath, [cli, "effective-change-provider-settings", "--repo-path", consumer, "--global-settings", absent, "--json"], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.status, "configured");
+    assert.equal(value.provider.repository.owner, "consumer");
+    assert.equal(value.provider.repository.name, "example");
+  } finally {
+    fs.rmSync(consumer, { recursive: true, force: true });
+  }
 });
