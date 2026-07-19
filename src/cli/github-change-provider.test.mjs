@@ -26,7 +26,7 @@ function request(overrides = {}) {
     head_ref: "agent/change-provider-604-v2",
     head_sha: SHA,
     intent: { title: "Authenticated ChangeProvider", body: "Closes #604", draft: false },
-    actor: "codex:session:Kontour",
+    assignment_actor: "codex:session:Kontour",
     provider: { kind: "github", configuration_id: "settings-sha256" },
   };
   return {
@@ -100,7 +100,9 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   assert.equal(fake.calls.every((call) => call.options.maxOutputBytes === 256 * 1024), true);
   assert.equal(fake.calls.some((call) => call.argv.includes("--head") && call.argv.includes("agent/change-provider-604-v2")), true);
   assert.equal(result.change_ref.number, 610);
-  assert.equal(result.actor, "codex:session:Kontour");
+  assert.equal(result.assignment_actor, "codex:session:Kontour");
+  assert.equal(result.provider_actor, "briananderson1222");
+  assert.notEqual(result.assignment_actor, result.provider_actor);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
 });
 

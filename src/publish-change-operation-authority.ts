@@ -22,7 +22,7 @@ export type PublishChangeRequest = {
   head_ref: string;
   head_sha: string;
   intent: { title: string; body: string; draft?: boolean };
-  actor: string;
+  assignment_actor: string;
   provider: { kind: "github"; configuration_id: string };
 };
 
@@ -45,7 +45,8 @@ export type AuthenticatedPublishChangeObservation = {
     head_ref: string;
     head_sha: string;
   };
-  actor: string;
+  assignment_actor: string;
+  provider_actor: string;
   observed_at: string;
 };
 
@@ -105,12 +106,12 @@ export function publishChangeProviderConfigurationId(provider: ChangeProviderSet
 export function issuePublishChangeAction(input: {
   binding: PublishChangeActionBinding;
   provider: ChangeProviderSettings;
-  actor: string;
+  assignment_actor: string;
   intent: PublishChangeIntent;
 }): IssuedPublishChangeAction {
   const canonicalBinding = binding(input.binding);
   const configuredRepository = repository(input.provider.repository);
-  const actor = bounded(input.actor, 512, "actor");
+  const assignmentActor = bounded(input.assignment_actor, 512, "assignment_actor");
   const request: PublishChangeRequest = {
     schema_version: "1.0",
     operation: "publish-change",
@@ -124,7 +125,7 @@ export function issuePublishChangeAction(input: {
       body: bounded(input.intent.body, MAX_BODY, "intent.body", true),
       ...(input.intent.draft === undefined ? {} : typeof input.intent.draft === "boolean" ? { draft: input.intent.draft } : fail("intent.draft", "must be a boolean")),
     },
-    actor,
+    assignment_actor: assignmentActor,
     provider: { kind: input.provider.kind, configuration_id: publishChangeProviderConfigurationId(input.provider) },
   };
   if (!/^[a-f0-9]{40,64}$/.test(request.head_sha)) fail("head_sha", "must be an immutable lowercase commit SHA");
@@ -134,7 +135,7 @@ export function issuePublishChangeAction(input: {
 export function assertIssuedPublishChangeAction(value: unknown): IssuedPublishChangeAction {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("action", "must be an object");
   const action = value as Record<string, unknown>;
-  const keys = ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider", "action_id"];
+  const keys = ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "assignment_actor", "provider", "action_id"];
   if (Object.keys(action).length !== keys.length || !keys.every((key) => key in action)) fail("action", "has an unexpected shape");
   if (action.schema_version !== "1.0" || action.operation !== "publish-change") fail("action", "has an unsupported protocol");
   if (!action.intent || typeof action.intent !== "object" || Array.isArray(action.intent)
@@ -163,7 +164,7 @@ export function assertIssuedPublishChangeAction(value: unknown): IssuedPublishCh
       body: bounded((action.intent as Record<string, unknown>).body, MAX_BODY, "action.intent.body", true),
       ...((action.intent as Record<string, unknown>).draft === undefined ? {} : typeof (action.intent as Record<string, unknown>).draft === "boolean" ? { draft: (action.intent as Record<string, unknown>).draft as boolean } : fail("action.intent.draft", "must be a boolean")),
     },
-    actor: bounded(action.actor, 512, "action.actor"),
+    assignment_actor: bounded(action.assignment_actor, 512, "action.assignment_actor"),
     provider: { kind: "github", configuration_id: configurationId },
   };
   const actionId = bounded(action.action_id, 64, "action.action_id");
@@ -174,12 +175,13 @@ export function assertIssuedPublishChangeAction(value: unknown): IssuedPublishCh
 export function assertAuthenticatedPublishChangeObservation(action: IssuedPublishChangeAction, value: unknown): AuthenticatedPublishChangeObservation {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("provider observation", "must be an object returned by the authenticated provider adapter");
   const observation = value as Record<string, unknown>;
-  const keys = ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"];
+  const keys = ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "assignment_actor", "provider_actor", "observed_at"];
   if (Object.keys(observation).length !== keys.length || !keys.every((key) => key in observation)) fail("provider observation", "has an unexpected shape");
   if (observation.schema_version !== "1.0" || observation.operation !== "publish-change") fail("provider observation", "has an unsupported protocol");
   if (!isDeepStrictEqual(binding(observation.binding), action.binding)) fail("provider observation.binding", "does not match the issued action");
   if (!isDeepStrictEqual(repository(observation.repository), action.repository)) fail("provider observation.repository", "does not match the issued action");
-  if (bounded(observation.actor, 512, "provider observation.actor") !== action.actor) fail("provider observation.actor", "does not match the issued action");
+  if (bounded(observation.assignment_actor, 512, "provider observation.assignment_actor") !== action.assignment_actor) fail("provider observation.assignment_actor", "does not match the issued action");
+  const providerActor = bounded(observation.provider_actor, 512, "provider observation.provider_actor");
   if (!observation.provider || typeof observation.provider !== "object" || Array.isArray(observation.provider)) fail("provider observation.provider", "must be an object");
   const provider = observation.provider as Record<string, unknown>;
   if (Object.keys(provider).length !== 3 || provider.kind !== action.provider.kind || bounded(provider.configuration_id, 64, "provider observation.provider.configuration_id") !== action.provider.configuration_id) fail("provider observation.provider", "does not match the issued action");
@@ -196,6 +198,6 @@ export function assertAuthenticatedPublishChangeObservation(action: IssuedPublis
   if (!Number.isFinite(Date.parse(observedAt))) fail("provider observation.observed_at", "must be an ISO timestamp");
   return {
     schema_version: "1.0", operation: "publish-change", binding: structuredClone(action.binding), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter }, repository: structuredClone(action.repository),
-    change_ref: { provider_record_id: bounded(change.provider_record_id, MAX_ID, "provider observation.change_ref.provider_record_id"), number: change.number as number, url, state: change.state, base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha }, actor: action.actor, observed_at: observedAt,
+    change_ref: { provider_record_id: bounded(change.provider_record_id, MAX_ID, "provider observation.change_ref.provider_record_id"), number: change.number as number, url, state: change.state, base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha }, assignment_actor: action.assignment_actor, provider_actor: providerActor, observed_at: observedAt,
   };
 }

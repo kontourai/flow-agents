@@ -221,7 +221,8 @@ It rejects any assignment transfer, gate movement, replay, configuration change,
 request/result mismatch before persisting the bounded result. Only an authenticated,
 fresh provider observation can write `publish-change.result.json`; it contains the
 binding, provider configuration/adapter, repository, provider record id/number/HTTPS
-URL, normalized published state (`open` or `merged`), base/head refs and immutable SHA, actor, and observation timestamp.
+URL, normalized published state (`open` or `merged`), base/head refs and immutable SHA, the bound `assignment_actor`,
+the authenticated GitHub `provider_actor`, and observation timestamp.
 
 Flow attaches exactly the `pull-request-opened` evidence for that issued operation,
 requires it to advance the bound gate exactly one canonical step, and projects the result. It does not treat generic
@@ -231,8 +232,9 @@ and removes its temporary evidence after evaluation. Adapter authentication data
 provider diagnostics are not persisted in session files, trust bundles, diagnostics,
 logs, or snapshots.
 
-GitHub is the first adapter, not Flow vocabulary: it uses direct `gh` argv (never a
-shell) to authenticate, create, list, and re-observe pull requests. Before creating it
+GitHub is the first adapter, not Flow vocabulary: it uses a fixed, trusted absolute `gh`
+executable and direct argv (never a shell or caller-controlled `PATH`) to authenticate, create,
+list, and re-observe pull requests. Before creating it
 recovers one exact published record matching repository, base, head ref, immutable SHA, title,
 body, and draft state. Open records cover the normal path; merged records cover reconciliation
 after provider work completed ahead of the local run. After an ambiguous create failure it performs the same recovery

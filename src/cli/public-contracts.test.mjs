@@ -14,9 +14,9 @@ const provider = {
   executor: "gh-cli",
 };
 
-test("publish-change contract binds canonical request and observed immutable change result without result import", () => {
-  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.request.required, ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider"]);
-  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"]);
+test("publish-change contract binds assignment and authenticated provider actors separately without result import", () => {
+  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.request.required, ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "assignment_actor", "provider"]);
+  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "assignment_actor", "provider_actor", "observed_at"]);
   assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.properties.change_ref.required, ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"]);
   assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.result.properties.change_ref.properties.state.enum, ["open", "merged"]);
   assert.equal(PUBLISH_CHANGE_OPERATION_PROTOCOL.parameters.some((parameter) => parameter.flag === "--result-json"), false);

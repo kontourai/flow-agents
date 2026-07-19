@@ -58,18 +58,11 @@ function findProject(settings: SettingsDocument | null, repo: Repo): Record<stri
   }) as Record<string, unknown> | undefined) ?? null;
 }
 
-function defaultProjectSettingsPath(): string {
-  let cursor = path.dirname(fileURLToPath(import.meta.url));
-  while (true) {
-    const candidate = path.join(cursor, PROJECT_SETTINGS_RELATIVE_PATH);
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(cursor);
-    if (parent === cursor) return path.resolve(PROJECT_SETTINGS_RELATIVE_PATH);
-    cursor = parent;
-  }
+function defaultProjectSettingsPath(repoPath: string): string {
+  return path.join(path.resolve(repoPath), PROJECT_SETTINGS_RELATIVE_PATH);
 }
 
-export function resolveEffectiveChangeProviderSettings(repoPath: string, projectSettings = defaultProjectSettingsPath(), globalSettings = path.join(os.homedir(), ".config", "flow-agents", "change-provider-settings.json")): Record<string, unknown> {
+export function resolveEffectiveChangeProviderSettings(repoPath: string, projectSettings = defaultProjectSettingsPath(repoPath), globalSettings = path.join(os.homedir(), ".config", "flow-agents", "change-provider-settings.json")): Record<string, unknown> {
   const repo = currentRepo(repoPath);
   const projectDoc = loadSettings(projectSettings);
   const globalDoc = loadSettings(globalSettings);
@@ -86,9 +79,10 @@ export function resolveEffectiveChangeProviderSettings(repoPath: string, project
 export function main(argv = process.argv.slice(2)): number {
   const args = parseArgs(argv);
   try {
+    const repoPath = path.resolve(flagString(args.flags, "repo-path", ".") ?? ".");
     const result = resolveEffectiveChangeProviderSettings(
-      path.resolve(flagString(args.flags, "repo-path", ".") ?? "."),
-      path.resolve(flagString(args.flags, "project-settings", defaultProjectSettingsPath()) ?? ""),
+      repoPath,
+      path.resolve(flagString(args.flags, "project-settings", defaultProjectSettingsPath(repoPath)) ?? ""),
       path.resolve(flagString(args.flags, "global-settings", path.join(os.homedir(), ".config", "flow-agents", "change-provider-settings.json")) ?? ""),
     );
     if (flagBool(args.flags, "json")) console.log(JSON.stringify(result, null, 2));

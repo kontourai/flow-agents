@@ -82,7 +82,7 @@ base ref, head ref, and optional draft intent, and derives repository, immutable
 assignment actor, canonical run/definition/step, and current gate-visit identity from Flow state.
 
 ChangeProvider configuration is explicit and secret-free: project
-`context/settings/change-provider-settings.json` overrides global
+`<repo-path>/context/settings/change-provider-settings.json` overrides global
 `$HOME/.config/flow-agents/change-provider-settings.json` in this order: global defaults, matching
 global project entry, project defaults, matching project entry. A configured provider must declare
 the `ChangeProvider` role and compatible create/observe capabilities. Absent configuration remains
@@ -93,7 +93,8 @@ provider change.
 An authenticated provider observation is bounded to the operation binding, provider kind,
 configuration id and adapter, repository, provider record id/number/HTTPS URL, normalized
 published state (`open` or `merged`),
-base/head refs and immutable SHA, actor, and observation time. Flow must reacquire its subject
+base/head refs and immutable SHA, the bound `assignment_actor`, the authenticated provider's
+`provider_actor`, and observation time. Flow must reacquire its subject
 lock before persistence and revalidate assignment ownership, active gate visit, request binding,
 and effective configuration. It writes only `publish-change.result.json`, attaches only
 `pull-request-opened`, requires that canonical evaluation to advance exactly one step, and projects

@@ -24,7 +24,8 @@ export type ChangeProviderRequest = Readonly<{
   head_ref: string;
   head_sha: string;
   intent: Readonly<{ title: string; body: string; draft?: boolean }>;
-  actor: string;
+  /** Flow assignment holder bound to the issued action. */
+  assignment_actor: string;
   provider: Readonly<{ kind: "github"; configuration_id: string }>;
 }>;
 
@@ -43,11 +44,14 @@ export type ChangeProviderResult = Readonly<{
     head_ref: string;
     head_sha: string;
   }>;
-  actor: string;
+  /** Flow assignment holder bound to the issued action. */
+  assignment_actor: string;
+  /** Actual authenticated provider identity that performed the observation. */
+  provider_actor: string;
   observed_at: string;
 }>;
 
-export type ChangeProviderCapability = Readonly<{ actor: string }>;
+export type ChangeProviderCapability = Readonly<{ provider_actor: string }>;
 
 export interface ChangeProvider {
   readonly kind: ChangeProviderSettings["kind"];
@@ -81,7 +85,7 @@ export class ChangeProviderError extends Error {
 
 export function parseChangeProviderRequest(value: unknown): ChangeProviderRequest {
   const root = plainObject(value, "request");
-  exactKeys(root, ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "actor", "provider"], "request");
+  exactKeys(root, ["schema_version", "operation", "binding", "repository", "base_ref", "head_ref", "head_sha", "intent", "assignment_actor", "provider"], "request");
   if (root.schema_version !== CHANGE_PROVIDER_REQUEST_SCHEMA_VERSION) invalid("request.schema_version must be 1.0");
   if (root.operation !== "publish-change") invalid("request.operation must be publish-change");
 
@@ -134,7 +138,7 @@ export function parseChangeProviderRequest(value: unknown): ChangeProviderReques
     head_ref: gitRef(root.head_ref, "request.head_ref"),
     head_sha: gitSha(root.head_sha, "request.head_sha"),
     intent,
-    actor: boundedString(root.actor, "request.actor", MAX_ACTOR_BYTES),
+    assignment_actor: boundedString(root.assignment_actor, "request.assignment_actor", MAX_ACTOR_BYTES),
     provider,
   });
 }
@@ -153,7 +157,7 @@ export function buildChangeProviderResult(input: {
     title: unknown; body: unknown; isDraft: unknown;
   };
   adapter: "github-gh-cli";
-  actor: unknown;
+  providerActor: unknown;
   observedAt: string;
 }): ChangeProviderResult {
   const { request, providerRecord } = input;
@@ -184,7 +188,8 @@ export function buildChangeProviderResult(input: {
     provider: immutable({ kind: "github" as const, configuration_id: request.provider.configuration_id, adapter: input.adapter }),
     repository: immutable({ ...request.repository }),
     change_ref: immutable({ provider_record_id: recordId, number, url, state: state as "open" | "merged", base_ref: baseRef, head_ref: headRef, head_sha: headSha }),
-    actor: boundedProviderString(input.actor, "authenticated provider actor", MAX_ACTOR_BYTES),
+    assignment_actor: request.assignment_actor,
+    provider_actor: boundedProviderString(input.providerActor, "authenticated provider actor", MAX_ACTOR_BYTES),
     observed_at: observedAt,
   });
 }

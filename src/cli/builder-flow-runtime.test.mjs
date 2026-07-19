@@ -12,8 +12,6 @@ import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
-  createPublishChangeOperationCompleter,
-  issuePublishChangeOperation,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
@@ -32,6 +30,7 @@ import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, reso
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
+import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
@@ -65,6 +64,21 @@ syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
+const runtimeTestSeams = await loadRuntimeTestSeams();
+const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
+const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
+
+async function loadRuntimeTestSeams() {
+  const source = new URL("../../build/src/builder-flow-runtime.js", import.meta.url);
+  const transient = new URL(`../../build/src/.builder-flow-runtime.test-seam-${process.pid}-${Date.now()}.mjs`, import.meta.url);
+  const instrumented = `${fs.readFileSync(source, "utf8")}\nexport { issuePublishChangeOperation, completePublishChangeOperation };\n`;
+  fs.writeFileSync(transient, instrumented, { flag: "wx" });
+  try {
+    return await import(`${transient.href}?test-seam=${Date.now()}`);
+  } finally {
+    fs.unlinkSync(transient);
+  }
+}
 const AMBIENT_IDENTITY_ENV_KEYS = [
   "FLOW_AGENTS_ACTOR",
   "CODEX_THREAD_ID",
@@ -2351,7 +2365,7 @@ test("publish-change reports an external capability gap and self-authored result
   }]);
   assert.equal(publish.operation, "publish-change");
   assert.equal(publish.protocol.capability, "change.create");
-  assert.deepEqual(publish.protocol.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "actor", "observed_at"]);
+  assert.deepEqual(publish.protocol.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "assignment_actor", "provider_actor", "observed_at"]);
   assert.deepEqual(publish.protocol.result.properties.change_ref.required, ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"]);
   assert.deepEqual(publish.protocol.result.url_protocols, ["https:"]);
   assert.equal(publish.protocol.result.persist_as, "publish-change.result.json");
@@ -2487,7 +2501,7 @@ test("Flow completion authenticates the exact issued publish-change observation 
       schema_version: "1.0", operation: "publish-change", binding: action.binding,
       provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: "fixture" }, repository: action.repository,
       change_ref: { provider_record_id: "PR_kwDOfixture", number: 604, url: "https://example.test/kontourai/flow-agents/pull/604", state: "open", base_ref: "main", head_ref: "agent/publish-change", head_sha: "b".repeat(40) },
-      actor: ambient.actorKey, observed_at: new Date().toISOString(),
+      assignment_actor: ambient.actorKey, provider_actor: "fixture-github-login", observed_at: new Date().toISOString(),
     }));
   await assert.rejects(
     () => rejectObservation({ sessionDir: session.sessionDir, action }),
@@ -2499,20 +2513,23 @@ test("Flow completion authenticates the exact issued publish-change observation 
 
   const transactionLock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
   const complete = createPublishChangeOperationCompleter(async (request) => {
-    assert.equal(fs.existsSync(transactionLock), true, "the completion lock remains held while the async provider observation starts");
+    assert.equal(fs.existsSync(transactionLock), false, "provider observation starts without retaining the subject lock");
     await Promise.resolve();
-    assert.equal(fs.existsSync(transactionLock), true, "the completion lock remains held until the async provider observation settles");
+    assert.equal(fs.existsSync(transactionLock), false, "provider observation settles outside the subject lock");
     return {
     schema_version: "1.0", operation: "publish-change", binding: request.binding,
     provider: { kind: "github", configuration_id: request.provider.configuration_id, adapter: "fixture" }, repository: request.repository,
     change_ref: { provider_record_id: "PR_kwDOfixture", number: 604, url: "https://example.test/kontourai/flow-agents/pull/604", state: "open", base_ref: request.base_ref, head_ref: request.head_ref, head_sha: request.head_sha },
-    actor: request.actor, observed_at: new Date().toISOString(),
+    assignment_actor: request.assignment_actor, provider_actor: "fixture-github-login", observed_at: new Date().toISOString(),
     };
   });
   const completed = await complete({ sessionDir: session.sessionDir, action });
   assert.notEqual(completed.run.state.current_step, "pr-open");
   const result = readJson(path.join(session.sessionDir, "publish-change.result.json"));
   assert.equal(result.operation_action_id, action.action_id);
+  assert.equal(result.assignment_actor, ambient.actorKey);
+  assert.equal(result.provider_actor, "fixture-github-login");
+  assert.notEqual(result.assignment_actor, result.provider_actor);
   assert.deepEqual(completed.run.manifest.evidence.filter((entry) => entry.expectation_ids?.includes("pull-request-opened")).map((entry) => entry.expectation_ids), [["pull-request-opened"]]);
   const projectedBeforeRecovery = snapshotFile(path.join(session.sessionDir, "state.json"));
   fs.writeFileSync(path.join(session.sessionDir, "state.json"), Buffer.from(beforeProjection.state, "base64"));
@@ -2531,7 +2548,7 @@ function publishChangeObservation(action, state = "open") {
       url: "https://example.test/kontourai/flow-agents/pull/604", state,
       base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha,
     },
-    actor: action.actor, observed_at: new Date().toISOString(),
+    assignment_actor: action.assignment_actor, provider_actor: "fixture-github-login", observed_at: new Date().toISOString(),
   };
 }
 
@@ -2643,18 +2660,28 @@ test("stale publish-change actions fail before provider execution or canonical m
   });
 });
 
-test("same publish-change action cannot attach twice on retry", async () => {
+test("simultaneous publish-change recovery serializes commit without duplicate attachment", async () => {
   const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-concurrent-completion");
   let observations = 0;
-  const complete = createPublishChangeOperationCompleter((request) => {
+  let releaseBarrier;
+  const barrier = new Promise((resolve) => { releaseBarrier = resolve; });
+  const arrivals = [];
+  const complete = createPublishChangeOperationCompleter(async (request) => {
     observations += 1;
+    arrivals.push(observations);
+    if (arrivals.length === 2) releaseBarrier();
+    await barrier;
+    const transactionLock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
+    assert.equal(fs.existsSync(transactionLock), false, "concurrent provider I/O must occur outside the subject lock");
     return publishChangeObservation(request);
   });
-  const first = await complete({ sessionDir: session.sessionDir, action });
-  const second = await complete({ sessionDir: session.sessionDir, action });
-  assert.deepEqual([first.attached, second.attached], [true, false]);
+  const results = await Promise.all([
+    complete({ sessionDir: session.sessionDir, action }),
+    complete({ sessionDir: session.sessionDir, action }),
+  ]);
+  assert.deepEqual(results.map((result) => result.attached).sort(), [false, true]);
   assert.equal(observations, 2, "each retry re-observes, but only one completion may attach");
-  assert.equal(second.run.manifest.evidence.filter((entry) => entry.expectation_ids?.includes("pull-request-opened")).length, 1);
+  assert.equal(results[1].run.manifest.evidence.filter((entry) => entry.expectation_ids?.includes("pull-request-opened")).length, 1);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
@@ -2665,24 +2692,26 @@ test("provider failures cannot leak hostile output into publish-change artifacts
   configurePublishChangeProvider(session.projectRoot);
   await advanceSessionToPrOpen(session);
   initializePublishChangeGitRepository(session.projectRoot);
-  const bin = path.join(session.projectRoot, "failing-fake-bin");
-  fs.mkdirSync(bin, { recursive: true });
-  fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' '${secret}' >&2\nexit 42\n`, { mode: 0o755 });
-  const previousPath = process.env.PATH;
   const diagnostics = [];
   const previousConsoleError = console.error;
-  process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
   console.error = (...args) => diagnostics.push(args.map(String).join(" "));
   try {
-    const rc = await publishChangeMain([
-      "execute", "--session-dir", session.sessionDir,
-      "--title", "Secret boundary fixture", "--body", "Provider failure must remain private.",
-      "--base-ref", "main", "--head-ref", "agent/publish-change",
-    ]);
-    assert.equal(rc, 1);
+    const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+      title: "Secret boundary fixture", body: "Provider failure must remain private.",
+      base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+    } });
+    const settings = readJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json")).projects[0].provider;
+    const provider = createGithubChangeProvider(settings, action.provider.configuration_id, {
+      executor: async () => { throw new Error(`provider stderr ${secret}`); },
+      executable: "in-process-test-gh",
+    });
+    const complete = createPublishChangeOperationCompleter(async (issued) => {
+      const { action_id: _actionId, ...request } = issued;
+      return await provider.createOrRecover(request);
+    });
+    await assert.rejects(() => complete({ sessionDir: session.sessionDir, action }), /configured ChangeProvider authentication failed/);
   } finally {
     console.error = previousConsoleError;
-    process.env.PATH = previousPath;
   }
   const secretBytes = Buffer.from(secret).toString("base64");
   assert.equal(diagnostics.join("\n").includes(secret), false);
@@ -2726,10 +2755,10 @@ function installRecoveringFakeGh(projectRoot, body) {
   const list = JSON.stringify([{ id: "PR_fixture", number: 604, state: "OPEN", baseRefName: "main", headRefName: "agent/publish-change", headRefOid: execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim(), title: "Composed provider recovery", body, isDraft: false }]);
   const record = JSON.stringify({ node_id: "PR_fixture", number: 604, html_url: "https://github.com/kontourai/flow-agents/pull/604", state: "OPEN", title: "Composed provider recovery", body, draft: false, base: { ref: "main", repo: { full_name: "kontourai/flow-agents" } }, head: { ref: "agent/publish-change", sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim() } });
   fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"${log}\"\ncase \"$1:$2\" in\n  auth:status) printf 'authenticated\\n' ;;\n  api:user) printf '%s\\n' '${JSON.stringify({ login: "fixture-user" })}' ;;\n  api:repos/kontourai/flow-agents) printf '%s\\n' '${JSON.stringify({ full_name: "kontourai/flow-agents" })}' ;;\n  pr:list) printf '%s\\n' '${list}' ;;\n  api:repos/kontourai/flow-agents/pulls/604) printf '%s\\n' '${record}' ;;\n  *) exit 91 ;;\nesac\n`, { mode: 0o755 });
-  return { bin, log };
+  return { bin, path: path.join(bin, "gh"), log };
 }
 
-test("public publish-change execute composes configured recovery through fake gh without a caller result", async () => {
+test("in-process publish-change composition recovers through an injected GitHub adapter without a caller result", async () => {
   const session = makeSession("publish-change-composed");
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
@@ -2738,25 +2767,72 @@ test("public publish-change execute composes configured recovery through fake gh
   const body = "Recovered through the configured adapter.";
   const fake = installRecoveringFakeGh(session.projectRoot, body);
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${fake.bin}${path.delimiter}${previousPath}`;
-  try {
-    const rc = await publishChangeMain([
-      "execute", "--session-dir", session.sessionDir,
-      "--title", "Composed provider recovery", "--body", body,
-      "--base-ref", "main", "--head-ref", "agent/publish-change",
-    ]);
-    assert.equal(rc, 0);
-  } finally {
-    process.env.PATH = previousPath;
-  }
+  const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Composed provider recovery", body,
+    base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  const settings = readJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json")).projects[0].provider;
+  const provider = createGithubChangeProvider(settings, action.provider.configuration_id, {
+    executable: fake.path,
+    executor: async (file, argv) => {
+      const invoked = spawnSync(file, argv, { encoding: "utf8" });
+      if (invoked.status !== 0) throw new Error("in-process fixture adapter failed");
+      return { stdout: invoked.stdout };
+    },
+  });
+  const complete = createPublishChangeOperationCompleter(async (issued) => {
+    const { action_id: _actionId, ...request } = issued;
+    return await provider.createOrRecover(request);
+  });
+  await complete({ sessionDir: session.sessionDir, action });
   const result = readJson(path.join(session.sessionDir, "publish-change.result.json"));
   assert.equal(result.change_ref.provider_record_id, "PR_fixture");
-  assert.equal(result.actor, ambient.actorKey);
+  assert.equal(result.assignment_actor, ambient.actorKey);
+  assert.equal(result.provider_actor, "fixture-user");
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
   assert.equal(fs.readFileSync(fake.log, "utf8").includes("pr create"), false);
   assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), true);
   assert.notDeepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), before, "only the Flow-owned operation may advance canonical state");
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("public publish-change ignores a PATH-prepended gh shim and cannot advance Flow", async () => {
+  const session = makeSession("publish-change-public-path-shim");
+  const ambient = claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  await advanceSessionToPrOpen(session);
+  initializePublishChangeGitRepository(session.projectRoot);
+  const shimDirectory = path.join(session.projectRoot, "public-path-shim");
+  const shimLog = path.join(session.projectRoot, "public-path-shim.log");
+  fs.mkdirSync(shimDirectory, { recursive: true });
+  fs.writeFileSync(path.join(shimDirectory, "gh"), `#!/bin/sh\nprintf 'shim invoked\\n' >> '${shimLog}'\nexit 0\n`, { mode: 0o755 });
+  const before = snapshotTree(runDir(session.slug, session.projectRoot));
+  const previousPath = process.env.PATH;
+  const previousGhConfigDir = process.env.GH_CONFIG_DIR;
+  const previousGhToken = process.env.GH_TOKEN;
+  const previousGithubToken = process.env.GITHUB_TOKEN;
+  const emptyGhConfig = path.join(session.projectRoot, "empty-gh-config");
+  fs.mkdirSync(emptyGhConfig, { recursive: true });
+  process.env.PATH = `${shimDirectory}${path.delimiter}${previousPath}`;
+  process.env.GH_CONFIG_DIR = emptyGhConfig;
+  delete process.env.GH_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  try {
+    const rc = await publishChangeMain([
+      "execute", "--session-dir", session.sessionDir,
+      "--title", "Must not use PATH shim", "--body", "The trusted CLI fails closed without authentication.",
+      "--base-ref", "main", "--head-ref", "agent/publish-change",
+    ]);
+    assert.equal(rc, 1);
+  } finally {
+    process.env.PATH = previousPath;
+    if (previousGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR; else process.env.GH_CONFIG_DIR = previousGhConfigDir;
+    if (previousGhToken === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = previousGhToken;
+    if (previousGithubToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = previousGithubToken;
+  }
+  assert.equal(fs.existsSync(shimLog), false, "public CLI must not execute a caller-controlled PATH shim");
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), before);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 

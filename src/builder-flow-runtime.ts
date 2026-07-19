@@ -21,6 +21,9 @@ import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verif
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
+import type { ChangeProviderRequest } from "./cli/change-provider.js";
+import type { ChangeProviderSettings } from "./cli/public-contracts.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 import {
   assertAuthenticatedPublishChangeObservation,
@@ -70,7 +73,7 @@ export interface BuilderFlowSessionResult {
   attached: boolean;
 }
 
-export interface IssuePublishChangeOperationInput extends BuilderFlowSessionInput {
+export interface ExecutePublishChangeOperationInput extends BuilderFlowSessionInput {
   intent: PublishChangeIntent;
 }
 
@@ -167,25 +170,32 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
  * action from canonical state and effective configuration; no public workflow
  * writer or caller-provided result is involved.
  */
-export async function issuePublishChangeOperation(input: IssuePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
+async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLock(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
 }
 
 /**
- * Flow-owned completion transaction. Provider adapters get an issued request,
- * but only this function can turn its authenticated re-observation into the
- * exact `pull-request-opened` claim and canonical Flow transition.
+ * The sole production publish-change mutation surface. The caller supplies
+ * intent, never an adapter or a provider-shaped observation. Configuration and
+ * authenticated provider identity are resolved inside the operation.
  */
-/**
- * Product composition injects a configured authenticated adapter once. The
- * returned closure is deliberately not part of the public CLI/package contract:
- * callers cannot submit a result object or choose an observer per completion.
- */
-export function createPublishChangeOperationCompleter(
-  observe: (request: IssuedPublishChangeAction) => AuthenticatedPublishChangeObservation | Promise<AuthenticatedPublishChangeObservation>,
-): (input: CompletePublishChangeOperationInput) => Promise<CompletePublishChangeOperationResult> {
-  return async (input: CompletePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> => await completePublishChangeOperation(input, observe);
+export async function executePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> {
+  resolveTrustedGithubExecutable();
+  const action = await issuePublishChangeOperation(input);
+  const context = resolveSessionContext(input.sessionDir);
+  const effective = resolveEffectiveChangeProviderSettings(
+    context.projectRoot,
+    path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
+    throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
+  }
+  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
+  return await completePublishChangeOperation({ sessionDir: input.sessionDir, action }, async (issued) => {
+    const { action_id: _actionId, ...request } = issued;
+    return await provider.createOrRecover(request as ChangeProviderRequest);
+  });
 }
 
 async function completePublishChangeOperation(
@@ -194,73 +204,102 @@ async function completePublishChangeOperation(
 ): Promise<CompletePublishChangeOperationResult> {
   const context = resolveSessionContext(input.sessionDir);
   const issued = assertIssuedPublishChangeAction(input.action);
+  // Validate before invoking a mutating provider, but never retain the subject
+  // lock across network I/O. The commit phase revalidates after observation.
+  await withSubjectLock(context.artifactRoot, context.slug, async () => {
+    await assertPublishChangeActionCurrentOrRecoverable(context, issued);
+  });
+  const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
   return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-    let current: IssuedPublishChangeAction;
-    try {
-      current = await currentPublishChangeAction(context, {
-        title: issued.intent.title,
-        body: issued.intent.body,
-        ...(issued.intent.draft === undefined ? {} : { draft: issued.intent.draft }),
-        base_ref: issued.base_ref,
-        head_ref: issued.head_ref,
-        head_sha: issued.head_sha,
-      });
-    } catch (error) {
-      // A stale action must not reach a provider that could create a change.
-      // The sole exception is a persisted receipt from this operation: after a
-      // crash, the Flow gate has already advanced, so re-observation is needed
-      // to authenticate that exact recovery without recreating the change.
-      if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) throw error;
-      const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
-      const recovered = await recoverCommittedPublishChange(context, issued, observation);
-      if (recovered) return recovered;
-      throw error;
-    }
+    const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
+    if (recovery) return recovery;
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
     if (!isDeepStrictEqual(current, issued)) {
       throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
     }
-
-    // Re-observe every executable attempt. A persisted local result is only a
-    // crash-recovery receipt; it never substitutes for provider authentication.
-    const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
-
     const persisted = persistPublishChangeResult(context, issued, observation);
-    const evidenceFile = await writePublishChangeEvidence(context, issued, observation, persisted.sha256);
-    let run: BuilderFlowRunResult;
-    try {
-      run = await evaluateBuilderFlowRun({
-        cwd: context.projectRoot,
-        runId: context.slug,
-        evidence: {
-          gate: issued.binding.gate_ids[0]!,
-          file: path.relative(context.projectRoot, evidenceFile.file),
-          expectedSha256: evidenceFile.sha256,
-          expectationIds: ["pull-request-opened"],
-          producer: "publish-change-operation-authority",
-          authorityTrace: issued.action_id,
-        },
-      });
-    } finally {
-      removeTemporaryFile(evidenceFile.file);
+    const run = await advancePublishChangeGate(context, issued, observation, persisted.sha256);
+    return projectCompletedPublishChange(context, issued, observation, run);
+  });
+}
+
+/** Reject stale actions before they can reach a mutating provider. */
+async function assertPublishChangeActionCurrentOrRecoverable(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+): Promise<void> {
+  try {
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
+    if (!isDeepStrictEqual(current, issued)) {
+      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
     }
+    return;
+  } catch (error) {
+    if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) throw error;
+  }
+}
+
+async function recoverPublishChangeIfCommitted(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): Promise<CompletePublishChangeOperationResult | null> {
+  if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) return null;
+  return await recoverCommittedPublishChange(context, issued, observation);
+}
+
+function publishChangeIntentFromAction(action: IssuedPublishChangeAction): PublishChangeIntent {
+  return {
+    title: action.intent.title,
+    body: action.intent.body,
+    ...(action.intent.draft === undefined ? {} : { draft: action.intent.draft }),
+    base_ref: action.base_ref,
+    head_ref: action.head_ref,
+    head_sha: action.head_sha,
+  };
+}
+
+/** Phase 3: attach exactly the operation-bound claim and require gate advance. */
+async function advancePublishChangeGate(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  resultSha256: string,
+): Promise<BuilderFlowRunResult> {
+  const evidenceFile = await writePublishChangeEvidence(context, issued, observation, resultSha256);
+  try {
+    const run = await evaluateBuilderFlowRun({
+      cwd: context.projectRoot,
+      runId: context.slug,
+      evidence: {
+        gate: issued.binding.gate_ids[0]!,
+        file: path.relative(context.projectRoot, evidenceFile.file),
+        expectedSha256: evidenceFile.sha256,
+        expectationIds: ["pull-request-opened"],
+        producer: "publish-change-operation-authority",
+        authorityTrace: issued.action_id,
+      },
+    });
     if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
       throw new BuilderBuildRunInputError("publish-change", "authenticated provider observation did not advance the bound Flow gate");
     }
-    const sidecarSnapshot = readSidecarSnapshot(context);
-    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
-    writeProjection(context, projection, sidecarSnapshot.raw, "publish-change completion");
-    return {
-      sessionDir: context.sessionDir,
-      projectRoot: context.projectRoot,
-      run,
-      projection,
-      gateActionEnvelope,
-      progressSnapshot,
-      attached: true,
-      action: issued,
-      observation,
-    };
-  });
+    return run;
+  } finally {
+    removeTemporaryFile(evidenceFile.file);
+  }
+}
+
+/** Phase 4: project only a successfully advanced canonical Flow run. */
+function projectCompletedPublishChange(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  run: BuilderFlowRunResult,
+): CompletePublishChangeOperationResult {
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "publish-change completion");
+  return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection, gateActionEnvelope, progressSnapshot, attached: true, action, observation };
 }
 
 async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
@@ -633,7 +672,7 @@ async function currentPublishChangeAction(context: SessionContext, intent: Publi
   if (!assignment.record || assignment.record.status !== "claimed" || (assignment.record.actor_key ?? assignment.assignee) !== actor.actorKey) {
     throw new BuilderBuildRunInputError("publish-change.assignment", "is no longer held by the current actor");
   }
-  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, actor: actor.actorKey, intent });
+  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, assignment_actor: actor.actorKey, intent });
 }
 
 function persistPublishChangeResult(
@@ -740,8 +779,8 @@ async function writePublishChangeEvidence(
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: timestamp,
     _producer: "publish-change-operation-authority",
-    _recorded_by: action.actor,
-    artifact_refs: [{ kind: "provider", url: observation.change_ref.url, summary: `Authenticated ${observation.provider.kind} observation`, sha256: resultSha256 }],
+    _recorded_by: action.assignment_actor,
+    artifact_refs: [{ kind: "provider", url: observation.change_ref.url, summary: `Authenticated ${observation.provider.kind} observation by ${observation.provider_actor}`, sha256: resultSha256 }],
   };
   const bundle = await buildTrustBundle(
     context.slug,
@@ -751,7 +790,7 @@ async function writePublishChangeEvidence(
     [],
     [],
     context.artifactRoot,
-    action.actor,
+    action.assignment_actor,
     { flowId: action.binding.definition_id, stepId: action.binding.step_id },
   );
   if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
