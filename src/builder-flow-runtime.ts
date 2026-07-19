@@ -20,6 +20,16 @@ export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+import {
+  assertAuthenticatedPublishChangeObservation,
+  assertIssuedPublishChangeAction,
+  issuePublishChangeAction,
+  type AuthenticatedPublishChangeObservation,
+  type IssuedPublishChangeAction,
+  type PublishChangeIntent,
+} from "./publish-change-operation-authority.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
@@ -58,6 +68,23 @@ export interface BuilderFlowSessionResult {
   /** Canonical progress observation, retained even when terminal runs emit no action envelope. */
   progressSnapshot: GateActionProgressSnapshot;
   attached: boolean;
+}
+
+export interface IssuePublishChangeOperationInput extends BuilderFlowSessionInput {
+  intent: PublishChangeIntent;
+}
+
+export interface CompletePublishChangeOperationInput extends BuilderFlowSessionInput {
+  /**
+   * An action previously derived by issuePublishChangeOperation. This is not a
+   * caller-authored result: the transaction re-derives it under the subject lock.
+   */
+  action: IssuedPublishChangeAction;
+}
+
+export interface CompletePublishChangeOperationResult extends BuilderFlowSessionResult {
+  action: IssuedPublishChangeAction;
+  observation: AuthenticatedPublishChangeObservation;
 }
 
 type SessionContext = {
@@ -133,6 +160,124 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
   });
   assertRunSubjectBinding(run, subject);
   return syncAndProject(context, run, sidecarSnapshot);
+}
+
+/**
+ * Private operation issuance seam for the Wave 3 command. It derives the full
+ * action from canonical state and effective configuration; no public workflow
+ * writer or caller-provided result is involved.
+ */
+export async function issuePublishChangeOperation(input: IssuePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
+}
+
+/**
+ * Flow-owned completion transaction. Provider adapters get an issued request,
+ * but only this function can turn its authenticated re-observation into the
+ * exact `pull-request-opened` claim and canonical Flow transition.
+ */
+/**
+ * Product composition injects a configured authenticated adapter once. The
+ * returned closure is deliberately not part of the public CLI/package contract:
+ * callers cannot submit a result object or choose an observer per completion.
+ */
+export function createPublishChangeOperationCompleter(
+  observe: (request: IssuedPublishChangeAction) => AuthenticatedPublishChangeObservation | Promise<AuthenticatedPublishChangeObservation>,
+): (input: CompletePublishChangeOperationInput) => Promise<CompletePublishChangeOperationResult> {
+  return async (input: CompletePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> => await completePublishChangeOperation(input, observe);
+}
+
+async function completePublishChangeOperation(
+  input: CompletePublishChangeOperationInput,
+  observe: (request: IssuedPublishChangeAction) => AuthenticatedPublishChangeObservation | Promise<AuthenticatedPublishChangeObservation>,
+): Promise<CompletePublishChangeOperationResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const issued = assertIssuedPublishChangeAction(input.action);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+    let current: IssuedPublishChangeAction;
+    try {
+      current = await currentPublishChangeAction(context, {
+        title: issued.intent.title,
+        body: issued.intent.body,
+        ...(issued.intent.draft === undefined ? {} : { draft: issued.intent.draft }),
+        base_ref: issued.base_ref,
+        head_ref: issued.head_ref,
+        head_sha: issued.head_sha,
+      });
+    } catch (error) {
+      // A stale action must not reach a provider that could create a change.
+      // The sole exception is a persisted receipt from this operation: after a
+      // crash, the Flow gate has already advanced, so re-observation is needed
+      // to authenticate that exact recovery without recreating the change.
+      if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) throw error;
+      const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
+      const recovered = await recoverCommittedPublishChange(context, issued, observation);
+      if (recovered) return recovered;
+      throw error;
+    }
+    if (!isDeepStrictEqual(current, issued)) {
+      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
+    }
+
+    // Re-observe every executable attempt. A persisted local result is only a
+    // crash-recovery receipt; it never substitutes for provider authentication.
+    const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
+
+    const persisted = persistPublishChangeResult(context, issued, observation);
+    const evidenceFile = await writePublishChangeEvidence(context, issued, observation, persisted.sha256);
+    let run: BuilderFlowRunResult;
+    try {
+      run = await evaluateBuilderFlowRun({
+        cwd: context.projectRoot,
+        runId: context.slug,
+        evidence: {
+          gate: issued.binding.gate_ids[0]!,
+          file: path.relative(context.projectRoot, evidenceFile.file),
+          expectedSha256: evidenceFile.sha256,
+          expectationIds: ["pull-request-opened"],
+          producer: "publish-change-operation-authority",
+          authorityTrace: issued.action_id,
+        },
+      });
+    } finally {
+      removeTemporaryFile(evidenceFile.file);
+    }
+    if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
+      throw new BuilderBuildRunInputError("publish-change", "authenticated provider observation did not advance the bound Flow gate");
+    }
+    const sidecarSnapshot = readSidecarSnapshot(context);
+    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
+    writeProjection(context, projection, sidecarSnapshot.raw, "publish-change completion");
+    return {
+      sessionDir: context.sessionDir,
+      projectRoot: context.projectRoot,
+      run,
+      projection,
+      gateActionEnvelope,
+      progressSnapshot,
+      attached: true,
+      action: issued,
+      observation,
+    };
+  });
+}
+
+async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
+  const bytes = readPublishChangeResultBytes(context);
+  if (!bytes) return false;
+  try {
+    const persisted = JSON.parse(bytes.toString("utf8")) as AnyRecord;
+    if (persisted.operation_action_id !== action.action_id) return false;
+  } catch {
+    return false;
+  }
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+    && entry.producer === "publish-change-operation-authority"
+    && entry.authority_trace === action.action_id
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
+    && entry.expectation_ids[0] === "pull-request-opened");
 }
 
 export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -461,6 +606,178 @@ function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): vo
     && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
     && run.state.params.subject !== subject) {
     throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
+  }
+}
+
+async function currentPublishChangeAction(context: SessionContext, intent: PublishChangeIntent): Promise<IssuedPublishChangeAction> {
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  assertRunSubjectBinding(run, subject);
+  const gates = openGatesForResult(run);
+  if (run.state.status !== "active" || gates.length !== 1) throw new BuilderBuildRunInputError("publish-change", "requires exactly one active canonical gate");
+  const envelope = deriveBuilderGateActionEnvelope({ sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, definition: JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")) as AnyRecord });
+  const operation = envelope.public_interfaces.mutations.find((mutation): mutation is Extract<GateActionEnvelope["public_interfaces"]["mutations"][number], { interface: "operation" }> => mutation.interface === "operation" && mutation.operation === "publish-change");
+  if (!operation || operation.expectation_id !== "pull-request-opened" || operation.protocol.availability.status !== "configured") {
+    throw new BuilderBuildRunInputError("publish-change", "requires the configured canonical publish-change operation at pull-request-opened");
+  }
+  const effective = resolveEffectiveChangeProviderSettings(
+    context.projectRoot,
+    path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
+    throw new BuilderBuildRunInputError("publish-change.provider", "is not configured for this project");
+  }
+  const assignment = readLocalAssignmentStatus(context.artifactRoot, context.slug);
+  const actor = resolveCurrentAssignmentActor();
+  if (!assignment.record || assignment.record.status !== "claimed" || (assignment.record.actor_key ?? assignment.assignee) !== actor.actorKey) {
+    throw new BuilderBuildRunInputError("publish-change.assignment", "is no longer held by the current actor");
+  }
+  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, actor: actor.actorKey, intent });
+}
+
+function persistPublishChangeResult(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): { file: string; sha256: string } {
+  const file = path.join(context.sessionDir, "publish-change.result.json");
+  const payload = Buffer.from(`${JSON.stringify({ ...observation, operation_action_id: action.action_id }, null, 2)}\n`);
+  if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
+  const existing = readPublishChangeResultBytes(context);
+  if (existing) {
+    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
+      throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
+    }
+    return { file, sha256: createHash("sha256").update(existing).digest("hex") };
+  }
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, payload);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertSafeFile(file, context.sessionDir, "publish-change.result.json");
+  return { file, sha256: createHash("sha256").update(payload).digest("hex") };
+}
+
+function readPublishChangeResultBytes(context: SessionContext): Buffer | null {
+  const result = path.join(context.sessionDir, "publish-change.result.json");
+  if (!pathExistsNoFollow(result)) return null;
+  assertSafeFile(result, context.sessionDir, "publish-change.result.json");
+  const descriptor = fs.openSync(result, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) throw new BuilderBuildRunInputError("publish-change.result", "must be a regular file");
+    if (stat.size > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
+    return fs.readFileSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+/** A retry must re-observe the provider, but observation timestamps naturally differ. */
+function sameObservedPublishChangeResult(existing: Buffer, current: Buffer, actionId: string): boolean {
+  try {
+    const left = JSON.parse(existing.toString("utf8")) as AnyRecord;
+    const right = JSON.parse(current.toString("utf8")) as AnyRecord;
+    if (left.operation_action_id !== actionId || right.operation_action_id !== actionId) return false;
+    delete left.observed_at;
+    delete right.observed_at;
+    return isDeepStrictEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
+async function recoverCommittedPublishChange(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): Promise<CompletePublishChangeOperationResult | null> {
+  const bytes = readPublishChangeResultBytes(context);
+  if (!bytes) return null;
+  const currentBytes = Buffer.from(`${JSON.stringify({ ...observation, operation_action_id: action.action_id }, null, 2)}\n`);
+  if (!sameObservedPublishChangeResult(bytes, currentBytes, action.action_id)) return null;
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  const attached = manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
+    && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
+    && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
+      && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed open provider record ${observation.change_ref.provider_record_id}`));
+  if (!attached) return null;
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "publish-change recovery projection");
+  return {
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    projection,
+    gateActionEnvelope,
+    progressSnapshot,
+    attached: false,
+    action,
+    observation,
+  };
+}
+
+async function writePublishChangeEvidence(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  resultSha256: string,
+): Promise<{ file: string; sha256: string }> {
+  const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
+  const timestamp = observation.observed_at;
+  const check = {
+    id: `publish-change-${action.action_id}`,
+    kind: "external",
+    status: "pass",
+    summary: `Authenticated publish-change operation ${action.action_id} observed open provider record ${observation.change_ref.provider_record_id}`,
+    _gate_claim_expectation_id: "pull-request-opened",
+    _gate_claim_identity_version: 2,
+    _gate_claim_recorded_at: timestamp,
+    _producer: "publish-change-operation-authority",
+    _recorded_by: action.actor,
+    artifact_refs: [{ kind: "provider", url: observation.change_ref.url, summary: `Authenticated ${observation.provider.kind} observation`, sha256: resultSha256 }],
+  };
+  const bundle = await buildTrustBundle(
+    context.slug,
+    timestamp,
+    [check],
+    [],
+    [],
+    [],
+    context.artifactRoot,
+    action.actor,
+    { flowId: action.binding.definition_id, stepId: action.binding.step_id },
+  );
+  if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
+  const validation = await validateTrustBundle(bundle);
+  if (validation.available && !validation.valid) throw new BuilderBuildRunInputError("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
+  const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
+  if (bytes.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change", "operation-bound evidence exceeds the 65,536 byte bound");
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertSafeFile(file, context.sessionDir, "publish-change temporary evidence");
+  return { file, sha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
+function removeTemporaryFile(file: string): void {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new BuilderBuildRunInputError("publish-change temporary evidence", "was replaced before cleanup");
+    fs.unlinkSync(file);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return;
+    throw error;
   }
 }
 

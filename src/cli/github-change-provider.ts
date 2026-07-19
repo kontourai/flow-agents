@@ -1,0 +1,302 @@
+import { execFile } from "node:child_process";
+import {
+  assertRequestMatchesProvider,
+  buildChangeProviderResult,
+  ChangeProviderError,
+  parseChangeProviderRequest,
+  type ChangeProvider,
+  type ChangeProviderCapability,
+  type ChangeProviderRequest,
+  type ChangeProviderResult,
+} from "./change-provider.js";
+import type { ChangeProviderSettings } from "./public-contracts.js";
+
+const ADAPTER_ID = "github-gh-cli" as const;
+const MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024;
+const EXECUTION_TIMEOUT_MS = 30_000;
+
+export type ArgvExecutionResult = Readonly<{ stdout: string }>;
+export type ArgvExecutor = (
+  executable: string,
+  argv: readonly string[],
+  options: Readonly<{ timeoutMs: number; maxOutputBytes: number }>,
+) => Promise<ArgvExecutionResult>;
+
+export type GithubChangeProviderDependencies = Readonly<{
+  executor?: ArgvExecutor;
+  executable?: string;
+  now?: () => string;
+}>;
+
+type GithubExecutionDependencies = Required<GithubChangeProviderDependencies>;
+type GithubListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; title: string; body: string; isDraft: boolean }>;
+type GithubProviderRecord = Readonly<{ id: unknown; number: unknown; url: unknown; state: unknown; baseRefName: unknown; headRefName: unknown; headRefOid: unknown; title: unknown; body: unknown; isDraft: unknown }>;
+
+/**
+ * Product-owned GitHub implementation. It only returns a verified provider
+ * result: canonical Flow mutation is intentionally owned by the Wave 2B
+ * transaction, never by this adapter.
+ */
+export function createGithubChangeProvider(settings: ChangeProviderSettings, configurationId: string, dependencies: GithubChangeProviderDependencies = {}): ChangeProvider {
+  if (settings.kind !== "github" || settings.executor !== "gh-cli") {
+    throw new ChangeProviderError("invalid_request", "GitHub ChangeProvider requires github gh-cli settings");
+  }
+  const execution: GithubExecutionDependencies = {
+    executor: dependencies.executor ?? execFileArgv,
+    executable: validateExecutable(dependencies.executable ?? "gh"),
+    now: dependencies.now ?? (() => new Date().toISOString()),
+  };
+  const provider: ChangeProviderSettings = { ...settings, repository: { ...settings.repository }, capabilities: [...settings.capabilities] };
+  const normalizedConfigurationId = validateConfigurationId(configurationId);
+  return Object.freeze({
+    kind: "github" as const,
+    checkCapability: () => checkGithubCapability(provider, execution),
+    createOrRecover: async (requestInput: ChangeProviderRequest) => {
+      const request = parseChangeProviderRequest(requestInput);
+      assertRequestMatchesProvider(request, provider, normalizedConfigurationId);
+      // The capability check authenticates the configured gh identity, while
+      // the result remains bound to the Flow assignment actor in `request`.
+      // This lets the Flow-owned completer reject a transferred assignment.
+      await checkGithubCapability(provider, execution);
+      return createOrRecoverGithubChange(request, execution);
+    },
+  });
+}
+
+async function checkGithubCapability(settings: ChangeProviderSettings, dependencies: GithubExecutionDependencies): Promise<ChangeProviderCapability> {
+  // `auth status` asserts an authenticated gh session, while the two JSON APIs
+  // bind that session to a usable actor and the configured repository. Neither
+  // command output is exposed outside this module.
+  await invoke(dependencies, ["auth", "status", "--hostname", "github.com"], "provider_auth_failed");
+  const user = plainObject(parseProviderJson(await invoke(dependencies, ["api", "user"], "provider_auth_failed"), "authenticated actor"), "authenticated actor");
+  const actor = providerString(user.login, "authenticated actor login", 512);
+  const repo = plainObject(parseProviderJson(await invoke(dependencies, ["api", `repos/${repoSlug(settings)}`]), "configured repository"), "configured repository");
+  if (repo.full_name !== repoSlug(settings)) {
+    throw new ChangeProviderError("provider_observation_mismatch", "configured repository observation did not match provider settings");
+  }
+  return Object.freeze({ actor });
+}
+
+async function createOrRecoverGithubChange(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies): Promise<ChangeProviderResult> {
+  const before = await listMatchingChanges(request, dependencies);
+  const existing = selectExactChange(before, request);
+  if (existing) return observeExactChange(request, existing.number, dependencies);
+
+  try {
+    // gh pr create returns a human URL. Do not parse or retain it; all trusted
+    // provider data comes from the bounded JSON re-observation below.
+    await invoke(dependencies, createArgv(request));
+  } catch (error) {
+    if (!(error instanceof ChangeProviderError) || error.code === "invalid_request") throw error;
+    // A timeout or transport error can occur after GitHub created the PR.
+    // Re-query once before surfacing failure, never retrying create blindly.
+    return recoverAfterAmbiguousCreate(request, dependencies, error);
+  }
+
+  const after = await listMatchingChanges(request, dependencies);
+  const created = selectExactChange(after, request);
+  if (!created) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return the expected open change after creation");
+  return observeExactChange(request, created.number, dependencies);
+}
+
+async function recoverAfterAmbiguousCreate(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, originalError: ChangeProviderError): Promise<ChangeProviderResult> {
+  try {
+    const after = await listMatchingChanges(request, dependencies);
+    const recovered = selectExactChange(after, request);
+    if (recovered) return observeExactChange(request, recovered.number, dependencies);
+  } catch (recoveryError) {
+    if (recoveryError instanceof ChangeProviderError && (recoveryError.code === "ambiguous_provider_change" || recoveryError.code === "provider_observation_mismatch" || recoveryError.code === "malformed_provider_output" || recoveryError.code === "oversized_provider_output")) {
+      throw recoveryError;
+    }
+  }
+  throw originalError;
+}
+
+async function listMatchingChanges(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies): Promise<GithubListRecord[]> {
+  const output = await invoke(dependencies, [
+    "pr", "list",
+    "--repo", repoSlug(request),
+    "--state", "open",
+    "--head", request.head_ref,
+    "--base", request.base_ref,
+    "--limit", "100",
+    "--json", "id,number,state,baseRefName,headRefName,headRefOid,title,body,isDraft",
+  ]);
+  const value = parseProviderJson(output, "provider list output");
+  if (!Array.isArray(value) || value.length > 100) malformed("provider list output must be an array of at most 100 entries");
+  return value.map((entry, index) => parseListRecord(entry, index));
+}
+
+function selectExactChange(records: GithubListRecord[], request: ChangeProviderRequest): GithubListRecord | null {
+  const sameRefs = records.filter((record) => record.baseRefName === request.base_ref && record.headRefName === request.head_ref);
+  if (sameRefs.some((record) => record.state.toLowerCase() !== "open")) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider listed a non-open change for the canonical request");
+  }
+  const stale = sameRefs.filter((record) => record.headRefOid.toLowerCase() !== request.head_sha);
+  if (stale.length) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider change head SHA does not match the canonical request");
+  }
+  if (sameRefs.length > 1) throw new ChangeProviderError("ambiguous_provider_change", "provider returned more than one exact open change");
+  const candidate = sameRefs[0] ?? null;
+  if (candidate && !matchesIntent(candidate, request)) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider change intent does not match the canonical request");
+  }
+  return candidate;
+}
+
+async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies): Promise<ChangeProviderResult> {
+  const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`]);
+  const record = parseProviderRecord(parseProviderJson(output, "provider record output"), request);
+  return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, actor: request.actor, observedAt: dependencies.now() });
+}
+
+function createArgv(request: ChangeProviderRequest): string[] {
+  return [
+    "pr", "create",
+    "--repo", repoSlug(request),
+    "--title", request.intent.title,
+    "--body", request.intent.body,
+    "--head", request.head_ref,
+    "--base", request.base_ref,
+    ...(request.intent.draft ? ["--draft"] : []),
+  ];
+}
+
+function repoSlug(value: Pick<ChangeProviderRequest, "repository"> | ChangeProviderSettings): string {
+  return `${value.repository.owner}/${value.repository.name}`;
+}
+
+async function invoke(dependencies: GithubExecutionDependencies, argv: readonly string[], failureCode: "provider_auth_failed" | "provider_failure" = "provider_failure"): Promise<string> {
+  try {
+    const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), { timeoutMs: EXECUTION_TIMEOUT_MS, maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES });
+    if (!result || typeof result.stdout !== "string") malformed("provider executor returned an invalid result");
+    if (Buffer.byteLength(result.stdout, "utf8") > MAX_PROVIDER_OUTPUT_BYTES) {
+      throw new ChangeProviderError("oversized_provider_output", "provider output exceeded the configured size limit");
+    }
+    return result.stdout;
+  } catch (error) {
+    if (error instanceof ChangeProviderError) throw error;
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      throw new ChangeProviderError("provider_unavailable", "configured ChangeProvider executable is unavailable");
+    }
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+      throw new ChangeProviderError("oversized_provider_output", "provider output exceeded the configured size limit");
+    }
+    // Never copy error text/stdout/stderr: gh diagnostics may contain tokens.
+    throw new ChangeProviderError(failureCode, failureCode === "provider_auth_failed" ? "configured ChangeProvider authentication failed" : "configured ChangeProvider execution failed");
+  }
+}
+
+function parseProviderJson(output: string, label: string): unknown {
+  try {
+    return JSON.parse(output) as unknown;
+  } catch {
+    malformed(`${label} is not valid JSON`);
+  }
+}
+
+function parseListRecord(value: unknown, index: number): GithubListRecord {
+  const record = plainObject(value, `provider list entry ${index}`);
+  return Object.freeze({
+    id: providerString(record.id, `provider list entry ${index} id`, 1_024),
+    number: providerPositiveInteger(record.number, `provider list entry ${index} number`),
+    state: providerString(record.state, `provider list entry ${index} state`, 16),
+    baseRefName: providerRef(record.baseRefName, `provider list entry ${index} base ref`),
+    headRefName: providerRef(record.headRefName, `provider list entry ${index} head ref`),
+    headRefOid: providerSha(record.headRefOid, `provider list entry ${index} head SHA`),
+    title: providerString(record.title, `provider list entry ${index} title`, 512),
+    body: providerString(record.body, `provider list entry ${index} body`, 65_536, true),
+    isDraft: providerBoolean(record.isDraft, `provider list entry ${index} draft`),
+  });
+}
+
+function parseProviderRecord(value: unknown, request: ChangeProviderRequest): GithubProviderRecord {
+  const record = plainObject(value, "provider record output");
+  const base = plainObject(record.base, "provider record base");
+  const baseRepo = plainObject(base.repo, "provider record base repository");
+  const head = plainObject(record.head, "provider record head");
+  if (baseRepo.full_name !== repoSlug(request)) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider record repository does not match the canonical request");
+  }
+  return Object.freeze({
+    id: record.node_id,
+    number: record.number,
+    url: record.html_url,
+    state: record.state,
+    baseRefName: base.ref,
+    headRefName: head.ref,
+    headRefOid: head.sha,
+    title: record.title,
+    body: record.body,
+    isDraft: record.draft,
+  });
+}
+
+function plainObject(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) malformed(`${label} must be a plain object`);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) malformed(`${label} must be a plain object`);
+  return value as Record<string, unknown>;
+}
+
+function providerString(value: unknown, label: string, maxBytes: number, allowEmpty = false): string {
+  if (typeof value !== "string" || (!allowEmpty && (value.length === 0 || value !== value.trim())) || /[\0\r]/u.test(value) || Buffer.byteLength(value, "utf8") > maxBytes) malformed(`${label} is invalid`);
+  return value;
+}
+
+function providerBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") malformed(`${label} is invalid`);
+  return value;
+}
+
+function matchesIntent(record: Pick<GithubListRecord, "title" | "body" | "isDraft">, request: ChangeProviderRequest): boolean {
+  return record.title === request.intent.title
+    && record.body === request.intent.body
+    && record.isDraft === Boolean(request.intent.draft);
+}
+
+function providerRef(value: unknown, label: string): string {
+  const ref = providerString(value, label, 255);
+  if (ref.startsWith("-") || ref.startsWith("/") || ref.endsWith("/") || ref.includes("..") || ref.includes("@{") || /[~^:?*[\\\s\x00-\x1f\x7f]/u.test(ref)) malformed(`${label} is invalid`);
+  return ref;
+}
+
+function providerSha(value: unknown, label: string): string {
+  const sha = providerString(value, label, 64).toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/u.test(sha)) malformed(`${label} is invalid`);
+  return sha;
+}
+
+function providerPositiveInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) malformed(`${label} is invalid`);
+  return Number(value);
+}
+
+function validateExecutable(value: string): string {
+  if (!value || value !== value.trim() || /[\0\r\n]/u.test(value)) throw new ChangeProviderError("invalid_request", "configured ChangeProvider executable is invalid");
+  return value;
+}
+
+function validateConfigurationId(value: string): string {
+  if (!value || value !== value.trim() || /[\0\r\n]/u.test(value) || Buffer.byteLength(value, "utf8") > 1_024) {
+    throw new ChangeProviderError("invalid_request", "ChangeProvider configuration id is invalid");
+  }
+  return value;
+}
+
+function malformed(message: string): never {
+  throw new ChangeProviderError("malformed_provider_output", message);
+}
+
+const execFileArgv: ArgvExecutor = (executable, argv, options) => new Promise((resolve, reject) => {
+  execFile(executable, [...argv], {
+    encoding: "utf8",
+    timeout: options.timeoutMs,
+    maxBuffer: options.maxOutputBytes,
+    shell: false,
+    windowsHide: true,
+  }, (error, stdout) => {
+    if (error) reject(error);
+    else resolve({ stdout });
+  });
+});

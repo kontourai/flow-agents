@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "defaults": {
+    "provider": {
+      "role": "ChangeProvider",
+      "kind": "github",
+      "repository": { "owner": "kontourai", "name": "flow-agents" },
+      "capabilities": ["change.create", "change.observe"],
+      "executor": "gh-cli"
+    }
+  }
+}

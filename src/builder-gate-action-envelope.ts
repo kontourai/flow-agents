@@ -7,9 +7,13 @@ import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepE
 import {
   EVIDENCE_REF_JSON_SCHEMA,
   PUBLIC_OPERATION_CONTRACTS,
+  publicOperationContracts,
+  type PublishChangeActionBinding,
+  type PublishChangeOperationProtocol,
   WORKFLOW_CRITIQUE_PARAMETERS,
   WORKFLOW_EVIDENCE_PARAMETERS,
 } from "./cli/public-contracts.js";
+import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import { flowAgentsPackageRoot } from "./lib/package-version.js";
 
@@ -79,10 +83,11 @@ export type GateActionPublicMutation =
       expectation_id: string;
       interface: "operation";
       operation: string;
-      protocol: (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS];
+      protocol: PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS];
+      binding: PublishChangeActionBinding;
       completion: {
-        status: "external_verification_required";
-        executable_by_flow_agents: false;
+        status: "external_verification_required" | "configured_provider_execution_required";
+        executable_by_flow_agents: boolean;
         gate_evidence_interface: null;
       };
     };
@@ -293,7 +298,13 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
     gate_id: gateId,
     requirements,
     action: actionEnvelope,
-    mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion)),
+    mutations: action.expectation_bindings.map((binding) => publicMutation(
+      binding,
+      sessionArgument,
+      packageVersion,
+      operationContractsForProject(packageRoot),
+      authorityOperationBinding(runId, definitionId, definition.version as string, currentStep, gateId),
+    )),
     artifact_bindings: artifactBindings,
     ...(protocol?.availability.status === "external_capability_required" ? {
       external_capability: {
@@ -379,6 +390,7 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
   const requiredArtifacts = action.artifact_bindings
     .filter((binding) => !isControlArtifact(binding.artifact) && binding.expectation_ids.some((id) => unresolvedRequired.includes(id)))
     .map((binding) => artifactTarget(binding.artifact, sessionDir, sessionArgument, action));
+  const operationContracts = operationContractsForProject(input.projectRoot);
   const envelope: GateActionEnvelope = {
     schema_version: "3.0",
     flow: {
@@ -398,9 +410,9 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
         argv: ["workflow", "status", "--session-dir", sessionArgument, "--json"],
       },
       schemas: { evidence_ref_json: structuredClone(EVIDENCE_REF_JSON_SCHEMA) },
-      mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion)),
+      mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion, operationContracts, operationBinding(input, gates))),
     },
-    stop_condition: envelopeStopCondition(input, gates, action, requiredArtifacts, unresolvedRequired),
+    stop_condition: envelopeStopCondition(input, gates, action, requiredArtifacts, unresolvedRequired, operationContracts),
     progress: {
       canonical_evidence: canonicalEvidence(input.run.manifest),
       observed_artifacts: observeBuilderArtifactsForProgress(sessionDir, actions.flatMap((entry) => entry.artifacts)),
@@ -432,9 +444,10 @@ function envelopeStopCondition(
   action: KitFlowStepActionEntry,
   artifactRefs: GateActionArtifactTarget[],
   unresolvedEvidenceIds: string[],
+  operationContracts: Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]>,
 ): GateActionEnvelope["stop_condition"] {
   const operation = action.operations[0];
-  const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const protocol = operation ? operationContracts[operation] : undefined;
   return {
     kind: "one_turn",
     scope: { run_id: input.run.runId, current_step: input.run.state.current_step, gate_ids: gates.map((gate) => gate.id), current_gate_only: true },
@@ -470,19 +483,28 @@ export function withGateActionPriorProgress(envelope: GateActionEnvelope, priorT
   return copy;
 }
 
-function publicMutation(binding: KitFlowStepExpectationBinding, sessionArgument: string, packageVersion: string): GateActionPublicMutation {
+function publicMutation(
+  binding: KitFlowStepExpectationBinding,
+  sessionArgument: string,
+  packageVersion: string,
+  operationContracts: Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]>,
+  operationBindingValue?: PublishChangeActionBinding,
+): GateActionPublicMutation {
   if (binding.interface === "operation") {
     const operation = binding.operation!;
-    const protocol = PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS];
+    const protocol = operationContracts[operation];
     if (!protocol) throw new Error(`Builder gate-action operation '${operation}' has no canonical public protocol`);
+    if (!operationBindingValue) throw new Error(`Builder gate-action operation '${operation}' requires canonical run and gate-visit binding`);
+    const configured = protocol.availability.status === "configured";
     return {
       expectation_id: binding.expectation_id,
       interface: "operation",
       operation,
       protocol: structuredClone(protocol),
+      binding: structuredClone(operationBindingValue),
       completion: {
-        status: "external_verification_required",
-        executable_by_flow_agents: false,
+        status: configured ? "configured_provider_execution_required" : "external_verification_required",
+        executable_by_flow_agents: configured,
         gate_evidence_interface: null,
       },
     };
@@ -498,6 +520,49 @@ function publicMutation(binding: KitFlowStepExpectationBinding, sessionArgument:
     };
   }
   return workflowEvidenceMutation(binding.expectation_id, sessionArgument, packageVersion);
+}
+
+function operationContractsForProject(projectRoot: string): Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]> {
+  const resolved = resolveEffectiveChangeProviderSettings(
+    projectRoot,
+    path.join(projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  const provider = resolved.status === "configured" ? resolved.provider : resolved.status === "unsupported" ? {} : undefined;
+  return { ...PUBLIC_OPERATION_CONTRACTS, ...publicOperationContracts(provider) };
+}
+
+function operationBinding(input: BuilderGateActionEnvelopeInput, gates: Array<FlowGate & { id: string }>): PublishChangeActionBinding {
+  const enteredAt = currentGateVisitIdentity(input.run.state, input.run.state.current_step);
+  const gateIds = gates.map((gate) => gate.id);
+  const source = [input.run.runId, input.run.definitionId, input.run.definitionVersion, input.run.state.current_step, ...gateIds, enteredAt].join("\n");
+  return {
+    run_id: input.run.runId,
+    definition_id: input.run.definitionId,
+    definition_version: input.run.definitionVersion,
+    step_id: input.run.state.current_step,
+    gate_ids: gateIds,
+    gate_visit_id: createHash("sha256").update(source).digest("hex"),
+  };
+}
+
+function authorityOperationBinding(runId: string, definitionId: string, definitionVersion: string, stepId: string, gateId: string): PublishChangeActionBinding {
+  return {
+    run_id: runId,
+    definition_id: definitionId,
+    definition_version: definitionVersion,
+    step_id: stepId,
+    gate_ids: [gateId],
+    gate_visit_id: "0".repeat(64),
+  };
+}
+
+function currentGateVisitIdentity(state: FlowRunState, step: string): string {
+  const transitions = Array.isArray(state.transitions) ? state.transitions : [];
+  for (const transition of [...transitions].reverse()) {
+    if (transition?.to_step === step && typeof transition.at === "string" && transition.at.length > 0) return transition.at;
+  }
+  if (typeof state.updated_at === "string" && state.updated_at.length > 0) return state.updated_at;
+  throw new Error("Builder gate-action operation requires a canonical current gate visit timestamp");
 }
 
 function workflowEvidenceMutation(expectationId: string, sessionArgument: string, packageVersion: string): GateActionWorkflowMutation {
