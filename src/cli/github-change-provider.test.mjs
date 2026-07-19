@@ -104,6 +104,8 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   process.env.Gh_Host = "attacker.invalid";
   process.env.GH_CONFIG_DIR = "/attacker/gh-config";
   process.env.http_unix_socket = "/attacker/provider.sock";
+  process.env.DYLD_INSERT_LIBRARIES = "/attacker/inject.dylib";
+  process.env.HTTPS_PROXY = "https://attacker.invalid";
   let result;
   try {
     result = await provider(fake).createOrRecover(request());
@@ -113,6 +115,8 @@ test("GitHub adapter checks authentication and repository capability, recovers e
     delete process.env.Gh_Host;
     delete process.env.GH_CONFIG_DIR;
     delete process.env.http_unix_socket;
+    delete process.env.DYLD_INSERT_LIBRARIES;
+    delete process.env.HTTPS_PROXY;
   }
 
   assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "token"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"]]);
@@ -122,6 +126,8 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   assert.equal(fake.calls.slice(1).every((call) => Object.keys(call.options.env).every((key) => !key.toUpperCase().startsWith("GIT_") && key.toUpperCase() !== "GH_HOST")), true);
   const isolatedConfigDir = fake.calls[1].options.env.GH_CONFIG_DIR;
   assert.equal(fake.calls.slice(1).every((call) => call.options.env.GH_CONFIG_DIR === isolatedConfigDir && call.options.env.http_unix_socket === undefined), true);
+  assert.equal(fake.calls.every((call) => call.options.env.DYLD_INSERT_LIBRARIES === undefined && call.options.env.HTTPS_PROXY === undefined), true);
+  assert.equal(typeof fake.calls[0].options.env.HOME, "string");
   assert.equal(fs.existsSync(isolatedConfigDir), false);
   assert.equal(fake.calls.some((call) => call.argv.includes("--head") && call.argv.includes("agent/change-provider-604-v2")), true);
   assert.equal(result.change_ref.number, 610);

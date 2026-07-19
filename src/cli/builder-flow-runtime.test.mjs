@@ -2564,6 +2564,26 @@ test("Flow completion accepts a terminal merged observation as proof the bound c
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+test("committed publish-change recovery rejects timestamp-tampered result bytes before provider execution", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-committed-result-tamper");
+  const complete = createPublishChangeOperationCompleter((request) => publishChangeObservation(request));
+  await complete({ sessionDir: session.sessionDir, action });
+  const resultFile = path.join(session.sessionDir, "publish-change.result.json");
+  const tampered = readJson(resultFile);
+  tampered.observed_at = "2000-01-01T00:00:00.000Z";
+  writeJson(resultFile, tampered);
+  let observations = 0;
+  await assert.rejects(
+    () => createPublishChangeOperationCompleter((request) => {
+      observations += 1;
+      return publishChangeObservation(request);
+    })({ sessionDir: session.sessionDir, action }),
+    /requires the configured canonical publish-change operation at pull-request-opened/,
+  );
+  assert.equal(observations, 0);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
 async function preparePublishChangeTransaction(slug) {
   const session = makeSession(slug);
   const ambient = claimAmbientSessionAssignment(session);
@@ -2618,19 +2638,17 @@ test("publish-change rejects symlinked and forged persisted results before canon
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 
-  await t.test("timestamp-only forgery cannot retain caller-authored result bytes", async () => {
+  await t.test("an uncommitted timestamp-only receipt is replaced by the fresh authenticated observation", async () => {
     const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-timestamp-forgery");
     const observation = publishChangeObservation(action);
     writeJson(path.join(session.sessionDir, "publish-change.result.json"), {
       ...observation, observed_at: "2000-01-01T00:00:00.000Z", operation_action_id: action.action_id,
     });
-    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
-    const beforeProjection = snapshotProjectionTargets(session);
-    await assert.rejects(
-      () => createPublishChangeOperationCompleter(() => observation)({ sessionDir: session.sessionDir, action }),
-      /already exists with different authenticated operation bytes/,
-    );
-    assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
+    const completed = await createPublishChangeOperationCompleter(() => observation)({ sessionDir: session.sessionDir, action });
+    const persisted = readJson(path.join(session.sessionDir, "publish-change.result.json"));
+    assert.equal(persisted.observed_at, observation.observed_at);
+    assert.notEqual(persisted.observed_at, "2000-01-01T00:00:00.000Z");
+    assert.notEqual(completed.run.state.current_step, "pr-open");
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 });

@@ -320,12 +320,14 @@ async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext,
   } catch {
     return false;
   }
+  const resultDigest = createHash("sha256").update(bytes).digest("hex");
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority"
     && entry.authority_trace === action.action_id
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
-    && entry.expectation_ids[0] === "pull-request-opened");
+    && entry.expectation_ids[0] === "pull-request-opened"
+    && publishChangeEvidenceCarriesDigest(entry, resultDigest));
 }
 
 export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -694,10 +696,28 @@ function persistPublishChangeResult(
   if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
   const existing = readPublishChangeResultBytes(context);
   if (existing) {
-    if (!existing.equals(payload)) {
+    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
       throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
     }
-    return { file, sha256: createHash("sha256").update(existing).digest("hex") };
+    if (existing.equals(payload)) return { file, sha256: createHash("sha256").update(existing).digest("hex") };
+    // An interrupted attempt may have fsynced a valid observation before Flow
+    // committed its evidence. Never retain those unauthenticated local bytes:
+    // atomically replace them with this attempt's fresh provider observation.
+    const temporary = path.join(context.sessionDir, `.publish-change.result-${randomBytes(16).toString("hex")}.tmp`);
+    const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    try {
+      fs.writeFileSync(descriptor, payload);
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    try {
+      fs.renameSync(temporary, file);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+    assertSafeFile(file, context.sessionDir, "publish-change.result.json");
+    return { file, sha256: createHash("sha256").update(payload).digest("hex") };
   }
   const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
@@ -739,6 +759,17 @@ function sameObservedPublishChangeResult(existing: Buffer, current: Buffer, acti
   }
 }
 
+function publishChangeEvidenceCarriesDigest(entry: AnyRecord, digest: string): boolean {
+  if (!isRecord(entry.bundle) || !Array.isArray(entry.bundle.claims)) return false;
+  return entry.bundle.claims.some((claim: unknown) => {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || !Array.isArray(claim.metadata.artifact_refs)) return false;
+    return claim.metadata.artifact_refs.some((ref: unknown) => isRecord(ref)
+      && ref.kind === "provider"
+      && typeof ref.sha256 === "string"
+      && ref.sha256.toLowerCase() === digest);
+  });
+}
+
 async function recoverCommittedPublishChange(
   context: SessionContext,
   action: IssuedPublishChangeAction,
@@ -746,12 +777,14 @@ async function recoverCommittedPublishChange(
 ): Promise<CompletePublishChangeOperationResult | null> {
   const bytes = readPublishChangeResultBytes(context);
   if (!bytes) return null;
+  const resultDigest = createHash("sha256").update(bytes).digest("hex");
   const currentBytes = Buffer.from(`${JSON.stringify({ ...observation, operation_action_id: action.action_id }, null, 2)}\n`);
   if (!sameObservedPublishChangeResult(bytes, currentBytes, action.action_id)) return null;
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   const attached = manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
     && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
+    && publishChangeEvidenceCarriesDigest(entry, resultDigest)
     && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
       && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`));
   if (!attached) return null;

@@ -85,7 +85,15 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
 }
 
 async function bindGithubAuthentication(dependencies: GithubExecutionDependencies): Promise<GithubExecutionDependencies> {
-  const token = (await invoke(dependencies, ["auth", "token", "--hostname", "github.com"], "provider_auth_failed")).trim();
+  const trustedHome = os.userInfo().homedir;
+  const bootstrapEnv: NodeJS.ProcessEnv = {
+    HOME: trustedHome,
+    PATH: process.platform === "win32"
+      ? "C:\\Program Files\\GitHub CLI;C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows"
+      : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ...(process.platform === "win32" ? { USERPROFILE: trustedHome, SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
+  };
+  const token = (await invoke({ ...dependencies, env: bootstrapEnv }, ["auth", "token", "--hostname", "github.com"], "provider_auth_failed")).trim();
   if (!token || /[\0\r\n]/u.test(token) || Buffer.byteLength(token, "utf8") > 16 * 1024) {
     throw new ChangeProviderError("provider_auth_failed", "configured ChangeProvider authentication failed");
   }
