@@ -1,10 +1,10 @@
-import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
+import { execTrustedGitSync } from "../lib/trusted-git.js";
 import { resolveChangeProviderSupport } from "./public-contracts.js";
 
 const PROJECT_SETTINGS_RELATIVE_PATH = path.join("context", "settings", "change-provider-settings.json");
@@ -26,7 +26,7 @@ function repoFromText(text: string): Repo | null {
 
 function currentRepo(repoPath: string): Repo | null {
   try {
-    const remote = childProcess.execFileSync("git", ["-C", repoPath, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const remote = String(execTrustedGitSync(repoPath, ["remote", "get-url", "origin"], "utf8"));
     const repo = repoFromText(remote);
     if (repo) return repo;
   } catch {}

@@ -24,6 +24,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
+import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 import {
   assertAuthenticatedPublishChangeObservation,
@@ -182,8 +183,12 @@ async function issuePublishChangeOperation(input: ExecutePublishChangeOperationI
  */
 export async function executePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> {
   resolveTrustedGithubExecutable();
-  const action = await issuePublishChangeOperation(input);
   const context = resolveSessionContext(input.sessionDir);
+  const trustedHeadSha = resolveTrustedLocalGitCommit(context.projectRoot, input.intent.head_ref);
+  if (trustedHeadSha !== input.intent.head_sha.toLowerCase()) {
+    throw new BuilderBuildRunInputError("publish-change.intent.head_sha", "does not match the trusted local head ref");
+  }
+  const action = await issuePublishChangeOperation(input);
   const effective = resolveEffectiveChangeProviderSettings(
     context.projectRoot,
     path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),

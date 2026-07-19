@@ -2804,8 +2804,10 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
   initializePublishChangeGitRepository(session.projectRoot);
   const shimDirectory = path.join(session.projectRoot, "public-path-shim");
   const shimLog = path.join(session.projectRoot, "public-path-shim.log");
+  const gitShimLog = path.join(session.projectRoot, "public-path-git-shim.log");
   fs.mkdirSync(shimDirectory, { recursive: true });
   fs.writeFileSync(path.join(shimDirectory, "gh"), `#!/bin/sh\nprintf 'shim invoked\\n' >> '${shimLog}'\nexit 0\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(shimDirectory, "git"), `#!/bin/sh\nprintf 'git shim invoked\\n' >> '${gitShimLog}'\nprintf '%s\\n' '${"f".repeat(40)}'\n`, { mode: 0o755 });
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
   const previousPath = process.env.PATH;
   const previousGhConfigDir = process.env.GH_CONFIG_DIR;
@@ -2831,6 +2833,7 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
     if (previousGithubToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = previousGithubToken;
   }
   assert.equal(fs.existsSync(shimLog), false, "public CLI must not execute a caller-controlled PATH shim");
+  assert.equal(fs.existsSync(gitShimLog), false, "public CLI must not execute a caller-controlled git PATH shim to derive its head SHA");
   assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), before);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
