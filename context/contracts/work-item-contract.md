@@ -103,6 +103,11 @@ and effective configuration. It writes only `publish-change.result.json`, attach
 `pull-request-opened`, requires that canonical evaluation to advance exactly one step, and projects
 the resulting state.
 
+The general Builder runtime may compose the public operation and canonical Flow projection, but
+ChangeProvider receipt persistence/recovery, operation-bound evidence, trusted-head rebinding,
+and completion projection coordination belong to the dedicated publish-change runtime boundary.
+This prevents provider durability from becoming a general lifecycle responsibility.
+
 Caller-authored result JSON, generic evidence, and private/package-internal writers have no
 completion authority. Authentication data and provider diagnostics must not be persisted in
 configuration, artifacts, trust bundles, logs, or snapshots. A retry after provider or transport

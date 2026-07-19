@@ -2232,6 +2232,38 @@ test("provider failures cannot leak hostile output into publish-change artifacts
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+test("publish-change settings diagnostics never persist or echo hostile schema values", async () => {
+  const secret = "SENTINEL_SETTINGS_SECRET_604";
+  const session = makeSession("publish-change-settings-secret-boundary");
+  const ambient = claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  await advanceSessionToPrOpen(session);
+  initializePublishChangeGitRepository(session.projectRoot);
+  const settingsFile = path.join(session.projectRoot, "context", "settings", "change-provider-settings.json");
+  const originalSettings = fs.readFileSync(settingsFile, "utf8");
+  writeJson(settingsFile, {
+    schema_version: secret,
+    token: secret,
+  });
+  const diagnostics = [];
+  const previousConsoleError = console.error;
+  console.error = (...args) => diagnostics.push(args.map(String).join(" "));
+  try {
+    const rc = await publishChangeMain([
+      "execute", "--session-dir", session.sessionDir,
+      "--title", "Malformed settings must stay private", "--body", "No setting content may leave the settings reader.",
+      "--base-ref", "main", "--head-ref", "agent/publish-change",
+    ]);
+    assert.equal(rc, 1);
+  } finally {
+    console.error = previousConsoleError;
+  }
+  assert.equal(diagnostics.join("\n").includes(secret), false, "publish-change helper diagnostics must not echo settings content");
+  assert.equal(JSON.stringify([snapshotTree(session.sessionDir), snapshotTree(runDir(session.slug, session.projectRoot))]).includes(secret), false, "settings content must not enter session or trust artifacts");
+  fs.writeFileSync(settingsFile, originalSettings);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
 function initializePublishChangeGitRepository(projectRoot) {
   fs.writeFileSync(path.join(projectRoot, "README.md"), "publish-change fixture\n");
   execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -2316,7 +2348,7 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
   const gitShimLog = path.join(session.projectRoot, "public-path-git-shim.log");
   fs.mkdirSync(shimDirectory, { recursive: true });
   fs.writeFileSync(path.join(shimDirectory, "gh"), `#!/bin/sh\nprintf 'shim invoked\\n' >> '${shimLog}'\nexit 0\n`, { mode: 0o755 });
-  fs.writeFileSync(path.join(shimDirectory, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${gitShimLog}'\nprintf '%s\\n' '${"f".repeat(40)}'\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(shimDirectory, "git"), `#!/bin/sh\nprintf 'git shim invoked\\n' >> '${gitShimLog}'\nprintf '%s\\n' '${"f".repeat(40)}'\n`, { mode: 0o755 });
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
   const previousPath = process.env.PATH;
   const previousGhConfigDir = process.env.GH_CONFIG_DIR;
@@ -2342,7 +2374,7 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
     if (previousGithubToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = previousGithubToken;
   }
   assert.equal(fs.existsSync(shimLog), false, "public CLI must not execute a caller-controlled PATH shim");
-  assert.equal(fs.existsSync(gitShimLog) && fs.readFileSync(gitShimLog, "utf8").includes("rev-parse --verify"), false, "public CLI must not execute a caller-controlled git PATH shim to derive its head SHA");
+  assert.equal(fs.existsSync(gitShimLog), false, "public CLI must never execute a caller-controlled git PATH shim");
   assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), before);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });

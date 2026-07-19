@@ -28,7 +28,8 @@ test("effective ChangeProvider settings report configured, absent, malformed, an
 
   const malformed = run(path.join(fixtures, "malformed.json"));
   assert.equal(malformed.status, 1);
-  assert.match(malformed.stderr, /unsupported schema_version/);
+  assert.match(malformed.stderr, /unsupported ChangeProvider settings schema/);
+  assert.equal(`${malformed.stdout}${malformed.stderr}`.includes("9.9"), false, "settings diagnostics must not echo hostile schema values");
 
   const hostile = run(path.join(fixtures, "hostile-secret.json"));
   assert.equal(hostile.status, 2, hostile.stderr);
@@ -36,6 +37,22 @@ test("effective ChangeProvider settings report configured, absent, malformed, an
   assert.equal(hostileJson.status, "unsupported");
   assert.match(hostileJson.reason, /change_provider/);
   assert.equal(hostile.stdout.includes("must-not-be-persisted"), false);
+});
+
+test("malformed settings never echo hostile values through publish-change diagnostics", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-publish-change-hostile-settings-"));
+  const sentinel = "SENTINEL_SETTINGS_SECRET_604";
+  try {
+    fs.writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ repository: "https://github.com/consumer/example.git" }));
+    const settings = path.join(consumer, "context", "settings", "change-provider-settings.json");
+    fs.mkdirSync(path.dirname(settings), { recursive: true });
+    fs.writeFileSync(settings, `{ "schema_version": "${sentinel}", "token": "${sentinel}" }`);
+    const result = spawnSync(process.execPath, [cli, "publish-change", "execute", "--session-dir", path.join(consumer, ".kontourai", "flow-agents", "missing"), "--title", "x", "--body", "x", "--base-ref", "main", "--head-ref", "main"], { cwd: consumer, encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.equal(`${result.stdout}${result.stderr}`.includes(sentinel), false, "stdout/stderr must not disclose malformed setting content");
+  } finally {
+    fs.rmSync(consumer, { recursive: true, force: true });
+  }
 });
 
 test("effective ChangeProvider settings default to the consumer repository context path", () => {

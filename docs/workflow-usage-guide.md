@@ -577,6 +577,10 @@ observation; an identity change fails closed. Credentials and provider diagnosti
 trust bundles, logs, or snapshots. A real provider mutation remains separate from local test
 proof; do not report a live recovery as complete without its provider and canonical-run evidence.
 
+The general Builder session runtime delegates the publish-specific receipt, recovery, evidence,
+trusted-head rebinding, and projection coordination to its dedicated publish-change runtime. This
+keeps ordinary lifecycle and projection responsibilities separate from ChangeProvider durability.
+
 Example prompt:
 
 ```text

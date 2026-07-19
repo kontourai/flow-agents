@@ -236,6 +236,12 @@ and removes its temporary evidence after evaluation. Adapter authentication data
 provider diagnostics are not persisted in session files, trust bundles, diagnostics,
 logs, or snapshots.
 
+The legacy Builder session runtime is only the public wrapper and canonical Flow/projection
+composition point. `publish-change-operation` coordinates issuance, provider I/O outside the
+subject lock, and the locked commit; `publish-change-runtime` owns bounded receipt persistence,
+recovery, temporary trust-evidence creation, trusted-head rebinding, and completed-run projection.
+This keeps ChangeProvider-specific durability out of the general lifecycle runtime.
+
 GitHub is the first adapter, not Flow vocabulary: it uses a fixed, trusted absolute `gh`
 executable and direct argv (never a shell or caller-controlled `PATH`) to authenticate, create,
 list, and re-observe pull requests. Before creating it

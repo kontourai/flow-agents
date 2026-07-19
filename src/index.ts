@@ -257,6 +257,7 @@ export type {
 export {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
+  executePublishChangeOperation,
   pauseBuilderFlowSession,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
@@ -264,7 +265,7 @@ export {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "./builder-flow-runtime.js";
-export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
+export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult, CompletePublishChangeOperationResult, ExecutePublishChangeOperationInput } from "./builder-flow-runtime.js";
 
 export {
   deriveBuilderGateActionEnvelope,

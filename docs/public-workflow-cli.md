@@ -269,6 +269,11 @@ active gate visit, exact request binding, and effective provider configuration; 
 only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
 and projects the resulting state.
 
+The general Builder runtime is intentionally only a public wrapper and Flow/projection composition
+point. The dedicated publish-change runtime owns receipt persistence and recovery, temporary
+evidence, the locked trusted-head rebind, and completed-run projection; it does not add those
+provider responsibilities to the broader lifecycle runtime.
+
 A caller-authored `publish-change.result.json`, generic adapter JSON/evidence, or a package
 internal/private writer cannot complete this gate. Provider/authentication failures leave the
 gate unresolved; retry the public operation after correcting the provider condition, relying on

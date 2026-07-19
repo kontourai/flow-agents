@@ -1,10 +1,10 @@
-import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
+import { execTrustedGitSync } from "../lib/trusted-git.js";
 import { resolveChangeProviderSupport } from "./public-contracts.js";
 
 const PROJECT_SETTINGS_RELATIVE_PATH = path.join("context", "settings", "change-provider-settings.json");
@@ -14,8 +14,15 @@ type SettingsDocument = Record<string, unknown>;
 
 function loadSettings(file: string): SettingsDocument | null {
   if (!fs.existsSync(file)) return null;
-  const data = readJson(file) as SettingsDocument;
-  if (data.schema_version !== "1.0") throw new Error(`${file}: unsupported schema_version ${String(data.schema_version)}; regenerate settings with flow-agents configuration guidance`);
+  let data: SettingsDocument;
+  try {
+    data = readJson(file) as SettingsDocument;
+  } catch {
+    // Settings are user-controlled and can contain credentials. Keep the path
+    // actionable while never forwarding parser snippets or file values.
+    throw new Error(`${file}: could not read ChangeProvider settings; regenerate settings with flow-agents configuration guidance`);
+  }
+  if (data.schema_version !== "1.0") throw new Error(`${file}: unsupported ChangeProvider settings schema; regenerate settings with flow-agents configuration guidance`);
   return data;
 }
 
@@ -26,7 +33,7 @@ function repoFromText(text: string): Repo | null {
 
 function currentRepo(repoPath: string): Repo | null {
   try {
-    const remote = childProcess.execFileSync("git", ["-C", repoPath, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const remote = String(execTrustedGitSync(repoPath, ["remote", "get-url", "origin"], "utf8"));
     const repo = repoFromText(remote);
     if (repo) return repo;
   } catch {}
