@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.2.1](https://github.com/kontourai/flow-agents/compare/v4.2.0...v4.2.1) (2026-07-19)
+
+
+### Fixes
+
+* correlate Codex command results exactly ([#710](https://github.com/kontourai/flow-agents/issues/710)) ([089aca3](https://github.com/kontourai/flow-agents/commit/089aca32ecc41d637d770ae4b1b447956de0dc3f))
+* restore clean npm installs ([#707](https://github.com/kontourai/flow-agents/issues/707)) ([2096acd](https://github.com/kontourai/flow-agents/commit/2096acddb6bf48db5dcad2a24f744b5b72022e73))
+* scope critique freshness to gate visits ([#724](https://github.com/kontourai/flow-agents/issues/724)) ([d2dc723](https://github.com/kontourai/flow-agents/commit/d2dc723b73f27fa24e94604492dbb1fffc82af1d))
+
 ## [4.2.0](https://github.com/kontourai/flow-agents/compare/v4.1.0...v4.2.0) (2026-07-18)
 
 
