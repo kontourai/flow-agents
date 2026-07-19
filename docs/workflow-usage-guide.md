@@ -558,9 +558,11 @@ If status is `external_capability_required` (unconfigured) or reports an incompa
 do not claim completion or synthesize a result file: record the external gap and resolve the
 configuration/provider condition. For a configured GitHub adapter, `gh` authentication and the
 exact repository/base/head/SHA/title/body/draft match are verified before Flow records the result.
-The adapter recovers one matching open pull request before creation and after an ambiguous create
-failure, so a retry is a recovery attempt rather than permission to create a duplicate. Auth,
-provider, ambiguity, stale/closed-record, or wrong-intent failures leave the gate unresolved.
+The adapter recovers one matching published pull request before creation and after an ambiguous
+create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
+Open records support the normal path; merged records support reconciliation after provider work
+completed ahead of the local run. Auth, provider, ambiguity, stale/closed-but-unmerged-record, or
+wrong-intent failures leave the gate unresolved.
 
 Only the authenticated Flow-owned transaction writes the bounded
 `publish-change.result.json`, revalidates the assignment, gate visit, and configuration under the

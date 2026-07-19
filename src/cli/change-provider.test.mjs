@@ -59,7 +59,7 @@ test("ChangeProvider accepts only a bounded canonical request and freezes it", (
   assert.throws(() => parseChangeProviderRequest(request({ head_ref: "--injected" })), (error) => assertCode(error, "invalid_request"));
 });
 
-test("ChangeProvider result records a bounded immutable observation and rejects mismatches", () => {
+test("ChangeProvider result records bounded immutable open and merged observations and rejects unpublished states", () => {
   const parsed = parseChangeProviderRequest(request());
   const result = buildChangeProviderResult({
     request: parsed,
@@ -84,6 +84,15 @@ test("ChangeProvider result records a bounded immutable observation and rejects 
   assert.equal(result.actor, "briananderson1222");
   assert.equal(Object.isFrozen(result), true);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
+
+  const merged = buildChangeProviderResult({
+    request: parsed,
+    providerRecord: { id: "PR_kwDOexample", number: 610, url: "https://github.com/kontourai/flow-agents/pull/610", state: "merged", baseRefName: "main", headRefName: "agent/change-provider-604-v2", headRefOid: SHA, title: "Authenticated ChangeProvider", body: "Closes #604", isDraft: false },
+    adapter: "github-gh-cli",
+    actor: "briananderson1222",
+    observedAt: "2026-07-19T01:00:00.000Z",
+  });
+  assert.equal(merged.change_ref.state, "merged");
 
   assert.throws(() => buildChangeProviderResult({
     request: parsed,

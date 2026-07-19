@@ -175,7 +175,7 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
           provider_record_id: { type: "string", max_length: 1_024 },
           number: { type: "integer", minimum: 1 },
           url: { type: "string", max_length: 8_192 },
-          state: { const: "open" },
+          state: { enum: ["open", "merged"] },
           base_ref: { type: "string", max_length: 255 },
           head_ref: { type: "string", max_length: 255 },
           head_sha: { type: "string", pattern: "^[0-9a-f]{40,64}$" },

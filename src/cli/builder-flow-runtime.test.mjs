@@ -2491,7 +2491,7 @@ test("Flow completion authenticates the exact issued publish-change observation 
     }));
   await assert.rejects(
     () => rejectObservation({ sessionDir: session.sessionDir, action }),
-    /does not match the issued base\/head\/open-state binding/,
+    /does not match the issued base\/head\/published-state binding/,
   );
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
@@ -2522,18 +2522,29 @@ test("Flow completion authenticates the exact issued publish-change observation 
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
-function publishChangeObservation(action) {
+function publishChangeObservation(action, state = "open") {
   return {
     schema_version: "1.0", operation: "publish-change", binding: action.binding,
     provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: "fixture" }, repository: action.repository,
     change_ref: {
       provider_record_id: "PR_kwDOfixture", number: 604,
-      url: "https://example.test/kontourai/flow-agents/pull/604", state: "open",
+      url: "https://example.test/kontourai/flow-agents/pull/604", state,
       base_ref: action.base_ref, head_ref: action.head_ref, head_sha: action.head_sha,
     },
     actor: action.actor, observed_at: new Date().toISOString(),
   };
 }
+
+test("Flow completion accepts a terminal merged observation as proof the bound change was published", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-merged-recovery");
+  const complete = createPublishChangeOperationCompleter((request) => publishChangeObservation(request, "merged"));
+  const completed = await complete({ sessionDir: session.sessionDir, action });
+
+  assert.notEqual(completed.run.state.current_step, "pr-open");
+  assert.equal(readJson(path.join(session.sessionDir, "publish-change.result.json")).change_ref.state, "merged");
+  assert.equal(completed.run.manifest.evidence.filter((entry) => entry.expectation_ids?.includes("pull-request-opened")).length, 1);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
 
 async function preparePublishChangeTransaction(slug) {
   const session = makeSession(slug);

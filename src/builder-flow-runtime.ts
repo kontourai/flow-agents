@@ -705,7 +705,7 @@ async function recoverCommittedPublishChange(
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
     && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
     && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
-      && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed open provider record ${observation.change_ref.provider_record_id}`));
+      && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`));
   if (!attached) return null;
   const sidecarSnapshot = readSidecarSnapshot(context);
   const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
@@ -735,7 +735,7 @@ async function writePublishChangeEvidence(
     id: `publish-change-${action.action_id}`,
     kind: "external",
     status: "pass",
-    summary: `Authenticated publish-change operation ${action.action_id} observed open provider record ${observation.change_ref.provider_record_id}`,
+    summary: `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`,
     _gate_claim_expectation_id: "pull-request-opened",
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: timestamp,

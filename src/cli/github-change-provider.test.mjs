@@ -49,6 +49,7 @@ function providerRecord(overrides = {}) {
     number: 610,
     html_url: "https://github.com/kontourai/flow-agents/pull/610",
     state: "OPEN",
+    merged: false,
     title: "Authenticated ChangeProvider",
     body: "Closes #604",
     draft: false,
@@ -101,6 +102,16 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   assert.equal(result.change_ref.number, 610);
   assert.equal(result.actor, "codex:session:Kontour");
   assert.equal(JSON.stringify(result).includes(SECRET), false);
+});
+
+test("GitHub adapter truthfully recovers a matching merged PR without creating a duplicate", async () => {
+  const fake = fakeExecutor([...prefix(), [listRecord({ state: "MERGED" })], providerRecord({ state: "CLOSED", merged: true })]);
+  const result = await provider(fake).createOrRecover(request());
+
+  assert.equal(result.change_ref.state, "merged");
+  assert.equal(fake.calls.filter((call) => call.argv[0] === "pr" && call.argv[1] === "create").length, 0);
+  const list = fake.calls.find((call) => call.argv[0] === "pr" && call.argv[1] === "list");
+  assert.deepEqual(list.argv.slice(list.argv.indexOf("--state"), list.argv.indexOf("--state") + 2), ["--state", "all"]);
 });
 
 test("GitHub adapter creates once with direct argv and verifies through a fresh bounded observation", async () => {

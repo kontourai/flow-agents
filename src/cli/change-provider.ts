@@ -38,7 +38,7 @@ export type ChangeProviderResult = Readonly<{
     provider_record_id: string;
     number: number;
     url: string;
-    state: "open";
+    state: "open" | "merged";
     base_ref: string;
     head_ref: string;
     head_sha: string;
@@ -164,7 +164,7 @@ export function buildChangeProviderResult(input: {
   const baseRef = gitRefFromProvider(providerRecord.baseRefName, "provider record base ref");
   const headRef = gitRefFromProvider(providerRecord.headRefName, "provider record head ref");
   const headSha = gitShaFromProvider(providerRecord.headRefOid, "provider record head SHA");
-  if (state !== "open" || baseRef !== request.base_ref || headRef !== request.head_ref || headSha !== request.head_sha) {
+  if ((state !== "open" && state !== "merged") || baseRef !== request.base_ref || headRef !== request.head_ref || headSha !== request.head_sha) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical request");
   }
   const title = boundedProviderString(providerRecord.title, "provider record title", MAX_TITLE_BYTES);
@@ -183,7 +183,7 @@ export function buildChangeProviderResult(input: {
     binding: immutable({ ...request.binding, gate_ids: immutable([...request.binding.gate_ids]) }),
     provider: immutable({ kind: "github" as const, configuration_id: request.provider.configuration_id, adapter: input.adapter }),
     repository: immutable({ ...request.repository }),
-    change_ref: immutable({ provider_record_id: recordId, number, url, state: "open" as const, base_ref: baseRef, head_ref: headRef, head_sha: headSha }),
+    change_ref: immutable({ provider_record_id: recordId, number, url, state: state as "open" | "merged", base_ref: baseRef, head_ref: headRef, head_sha: headSha }),
     actor: boundedProviderString(input.actor, "authenticated provider actor", MAX_ACTOR_BYTES),
     observed_at: observedAt,
   });

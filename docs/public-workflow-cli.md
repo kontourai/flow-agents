@@ -307,18 +307,20 @@ the authenticated `gh` environment, never in these settings. An absent configura
 with its compatibility reason. Neither state exposes an executable completion claim, and both
 must remain an explicit external capability/verification gap rather than a successful publish.
 
-For a configured provider, the GitHub adapter authenticates with `gh`, queries open pull
+For a configured provider, the GitHub adapter authenticates with `gh`, queries pull
 requests by configured repository, base ref, head ref, and immutable head SHA, and verifies the
 title, body, and draft intent before returning a result. It creates only when no exact match
 exists. If creation has an ambiguous failure (for example, a timeout after GitHub accepted it),
-it queries again and recovers exactly one matching open pull request; multiple candidates,
-wrong repository/base/head/SHA/intent, a closed record, malformed output, or an unauthenticated
-provider fail rather than selecting or creating another record.
+it queries again and recovers exactly one matching published pull request. An exact open record
+supports the normal path; an exact merged record supports truthful reconciliation when provider
+work completed before the local workflow caught up. Multiple candidates, wrong
+repository/base/head/SHA/intent, a closed-but-unmerged record, malformed output, or an
+unauthenticated provider fail rather than selecting or creating another record.
 
 The durable result is bounded to 65,536 bytes and is written only by the Flow-owned completion
 transaction as `publish-change.result.json`. It records the bound run/definition/step/gate visit,
-provider kind/configuration/adapter, repository, provider record id and number, HTTPS URL, open
-state, base ref, head ref and SHA, actor, and observation time. Title, body, and draft are
+provider kind/configuration/adapter, repository, provider record id and number, HTTPS URL, normalized
+published state (`open` or `merged`), base ref, head ref and SHA, actor, and observation time. Title, body, and draft are
 authenticated request intent rather than free-form result fields. Before persistence, Flow
 reacquires the subject lock and revalidates assignment ownership, active gate visit, exact request
 binding, and effective provider configuration; it then re-observes the provider record, attaches

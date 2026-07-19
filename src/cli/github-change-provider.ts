@@ -95,7 +95,7 @@ async function createOrRecoverGithubChange(request: ChangeProviderRequest, depen
 
   const after = await listMatchingChanges(request, dependencies);
   const created = selectExactChange(after, request);
-  if (!created) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return the expected open change after creation");
+  if (!created) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return the expected published change after creation");
   return observeExactChange(request, created.number, dependencies);
 }
 
@@ -116,7 +116,7 @@ async function listMatchingChanges(request: ChangeProviderRequest, dependencies:
   const output = await invoke(dependencies, [
     "pr", "list",
     "--repo", repoSlug(request),
-    "--state", "open",
+    "--state", "all",
     "--head", request.head_ref,
     "--base", request.base_ref,
     "--limit", "100",
@@ -129,14 +129,14 @@ async function listMatchingChanges(request: ChangeProviderRequest, dependencies:
 
 function selectExactChange(records: GithubListRecord[], request: ChangeProviderRequest): GithubListRecord | null {
   const sameRefs = records.filter((record) => record.baseRefName === request.base_ref && record.headRefName === request.head_ref);
-  if (sameRefs.some((record) => record.state.toLowerCase() !== "open")) {
-    throw new ChangeProviderError("provider_observation_mismatch", "provider listed a non-open change for the canonical request");
+  if (sameRefs.some((record) => !["open", "merged"].includes(record.state.toLowerCase()))) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider listed an unpublished change state for the canonical request");
   }
   const stale = sameRefs.filter((record) => record.headRefOid.toLowerCase() !== request.head_sha);
   if (stale.length) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider change head SHA does not match the canonical request");
   }
-  if (sameRefs.length > 1) throw new ChangeProviderError("ambiguous_provider_change", "provider returned more than one exact open change");
+  if (sameRefs.length > 1) throw new ChangeProviderError("ambiguous_provider_change", "provider returned more than one exact published change");
   const candidate = sameRefs[0] ?? null;
   if (candidate && !matchesIntent(candidate, request)) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider change intent does not match the canonical request");
@@ -222,7 +222,7 @@ function parseProviderRecord(value: unknown, request: ChangeProviderRequest): Gi
     id: record.node_id,
     number: record.number,
     url: record.html_url,
-    state: record.state,
+    state: record.merged === true ? "merged" : record.state,
     baseRefName: base.ref,
     headRefName: head.ref,
     headRefOid: head.sha,

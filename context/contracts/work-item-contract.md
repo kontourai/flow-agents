@@ -91,7 +91,8 @@ its reason. Neither state may expose an executable completion claim or be rewrit
 provider change.
 
 An authenticated provider observation is bounded to the operation binding, provider kind,
-configuration id and adapter, repository, provider record id/number/HTTPS URL, open state,
+configuration id and adapter, repository, provider record id/number/HTTPS URL, normalized
+published state (`open` or `merged`),
 base/head refs and immutable SHA, actor, and observation time. Flow must reacquire its subject
 lock before persistence and revalidate assignment ownership, active gate visit, request binding,
 and effective configuration. It writes only `publish-change.result.json`, attaches only
@@ -101,8 +102,9 @@ the resulting state.
 Caller-authored result JSON, generic evidence, and private/package-internal writers have no
 completion authority. Authentication data and provider diagnostics must not be persisted in
 configuration, artifacts, trust bundles, logs, or snapshots. A retry after provider or transport
-failure must recover an exact matching open change before attempting another create; ambiguity,
-wrong repository/base/head/SHA/intent, stale/closed records, or multiple matches fail without
+failure must recover an exact matching published change before attempting another create. An exact
+merged record is valid when reconciling provider work that completed before the local run caught up;
+ambiguity, wrong repository/base/head/SHA/intent, stale or closed-but-unmerged records, or multiple matches fail without
 creating or selecting a duplicate.
 
 ### References
