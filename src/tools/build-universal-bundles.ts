@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import crypto from "node:crypto";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
@@ -41,45 +43,51 @@ function portablePath(value: string): string {
   return value.split(path.sep).join("/");
 }
 
-function resolveRuntimeDependency(
+function resolveLockedDependencyPath(
   packageName: string,
-  declaringPackageJson: string,
+  declaringLockPath: string,
   lockPackages: Record<string, Record<string, unknown>>,
-): RuntimeDependency {
+): string {
   if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(packageName)) {
     throw new Error(`unsafe runtime dependency package name: ${packageName}`);
   }
-  let current = path.dirname(declaringPackageJson);
-  const repositoryRoot = fs.realpathSync(root);
-  while (true) {
-    const packageRoot = path.join(current, "node_modules", ...packageName.split("/"));
-    const packageJson = path.join(packageRoot, "package.json");
-    if (fs.existsSync(packageJson)) {
-      const realPackageRoot = fs.realpathSync(packageRoot);
-      if (realPackageRoot !== repositoryRoot && !realPackageRoot.startsWith(`${repositoryRoot}${path.sep}`)) {
-        throw new Error(`runtime dependency resolved outside the repository: ${packageName} at ${realPackageRoot}`);
-      }
-      const lockPath = portablePath(path.relative(root, packageRoot));
-      if (!lockPath.startsWith("node_modules/")) throw new Error(`unsafe runtime dependency lock path: ${lockPath}`);
-      const lockEntry = lockPackages[lockPath];
-      if (!lockEntry) throw new Error(`runtime dependency ${packageName} is absent from package-lock.json at ${lockPath}`);
-      const parsed = loadJson<Record<string, unknown>>(packageJson);
-      if (parsed["name"] !== packageName) throw new Error(`runtime dependency identity mismatch at ${packageJson}`);
-      const version = parsed["version"];
-      if (typeof version !== "string" || !version) throw new Error(`runtime dependency ${packageName} has no version`);
-      if (lockEntry["version"] !== version) {
-        throw new Error(`runtime dependency ${packageName}@${version} does not match package-lock.json ${String(lockEntry["version"] ?? "missing")} at ${lockPath}`);
-      }
-      const integrity = lockEntry["integrity"];
-      if (typeof integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) {
-        throw new Error(`runtime dependency ${packageName}@${version} has no sha512 integrity in package-lock.json at ${lockPath}`);
-      }
-      return { name: packageName, version, lockPath, integrity, packageRoot, packageJson };
-    }
-    if (fs.realpathSync(current) === repositoryRoot) break;
-    current = path.dirname(current);
+  let current = declaringLockPath;
+  for (;;) {
+    const candidate = current ? `${current}/node_modules/${packageName}` : `node_modules/${packageName}`;
+    if (lockPackages[candidate]) return candidate;
+    const marker = current.lastIndexOf("/node_modules/");
+    if (marker < 0) break;
+    current = current.slice(0, marker);
   }
-  throw new Error(`could not resolve runtime dependency ${packageName} from ${declaringPackageJson}`);
+  const rootCandidate = `node_modules/${packageName}`;
+  if (lockPackages[rootCandidate]) return rootCandidate;
+  throw new Error(`package-lock.json cannot resolve runtime dependency ${packageName} from ${declaringLockPath || "root"}`);
+}
+
+function materializeRuntimeDependencyRoot(): { root: string; cleanup: () => void; method: string } {
+  const fixture = process.env["FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT"];
+  if (fixture) {
+    if (process.env["FLOW_AGENTS_TEST_MODE"] !== "1") {
+      throw new Error("FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT requires FLOW_AGENTS_TEST_MODE=1");
+    }
+    return { root: path.resolve(fixture), cleanup: () => undefined, method: "test-fixture" };
+  }
+  const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-runtime-closure."));
+  fs.copyFileSync(path.join(root, "package.json"), path.join(isolatedRoot, "package.json"));
+  fs.copyFileSync(path.join(root, "package-lock.json"), path.join(isolatedRoot, "package-lock.json"));
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const result = spawnSync(npm, [
+    "ci", "--omit=dev", "--omit=optional", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline",
+  ], { cwd: isolatedRoot, encoding: "utf8", stdio: "pipe" });
+  if (result.status !== 0) {
+    fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    throw new Error(`isolated runtime dependency npm ci failed: ${(result.stderr || result.stdout || "unknown error").trim()}`);
+  }
+  return {
+    root: isolatedRoot,
+    cleanup: () => fs.rmSync(isolatedRoot, { recursive: true, force: true }),
+    method: "npm-ci-omit-dev-optional-ignore-scripts",
+  };
 }
 
 function copyRuntimePackageTree(source: string, destination: string): void {
@@ -122,52 +130,83 @@ function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256:
 }
 
 function exportRequiredRuntimeDependencies(bundleRoot: string): void {
-  const rootPackageJson = path.join(root, "package.json");
-  const rootPackage = loadJson<Record<string, unknown>>(rootPackageJson);
-  const packageLock = loadJson<PackageLock>(path.join(root, "package-lock.json"));
-  if (packageLock.lockfileVersion !== 3 || !packageLock.packages || typeof packageLock.packages !== "object") {
-    throw new Error("required runtime closure requires package-lock.json lockfileVersion 3 with a packages map");
-  }
-  const seeds = Object.keys((rootPackage["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort();
-  const pending = seeds.map((name) => ({ name, declaringPackageJson: rootPackageJson }));
-  const resolved = new Map<string, RuntimeDependency>();
-
-  while (pending.length > 0) {
-    const next = pending.shift()!;
-    const dependency = resolveRuntimeDependency(next.name, next.declaringPackageJson, packageLock.packages);
-    if (resolved.has(dependency.lockPath)) continue;
-    resolved.set(dependency.lockPath, dependency);
-    const manifest = loadJson<Record<string, unknown>>(dependency.packageJson);
-    for (const name of Object.keys((manifest["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort()) {
-      pending.push({ name, declaringPackageJson: dependency.packageJson });
+  const materialized = materializeRuntimeDependencyRoot();
+  try {
+    const rootPackage = loadJson<Record<string, unknown>>(path.join(materialized.root, "package.json"));
+    const packageLock = loadJson<PackageLock>(path.join(materialized.root, "package-lock.json"));
+    if (packageLock.lockfileVersion !== 3 || !packageLock.packages || typeof packageLock.packages !== "object") {
+      throw new Error("required runtime closure requires package-lock.json lockfileVersion 3 with a packages map");
     }
-  }
+    const lockRoot = packageLock.packages[""] ?? {};
+    const rootDependencies = (rootPackage["dependencies"] as Record<string, unknown> | undefined) ?? {};
+    if (JSON.stringify(rootDependencies) !== JSON.stringify((lockRoot["dependencies"] as Record<string, unknown> | undefined) ?? {})) {
+      throw new Error("package.json dependencies do not exactly match package-lock.json root dependencies");
+    }
+    const pending = Object.keys(rootDependencies).sort().map((name) => ({ name, declaringLockPath: "" }));
+    const resolved = new Map<string, RuntimeDependency>();
 
-  const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
-  for (const dependency of [...resolved.values()].sort((a, b) => a.lockPath.localeCompare(b.lockPath))) {
-    const stagedRelative = dependency.lockPath.replace(/^node_modules\//, "");
-    copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, stagedRelative));
-  }
-  writeText(path.join(bundleRoot, "build", "runtime-dependencies.json"), `${JSON.stringify({
-    schema_version: "2.0",
-    source: "package-lock.json#packages",
-    policy: {
-      roots: "package.dependencies",
-      transitive: "dependencies",
-      optional_dependencies: "excluded",
-      peer_dependencies: "excluded",
-    },
-    packages: [...resolved.values()]
-      .sort((a, b) => a.lockPath.localeCompare(b.lockPath))
-      .map(({ name, version, lockPath, integrity }) => ({
-        path: lockPath.replace(/^node_modules\//, ""),
-        lock_path: lockPath,
+    while (pending.length > 0) {
+      const next = pending.shift()!;
+      const lockPath = resolveLockedDependencyPath(next.name, next.declaringLockPath, packageLock.packages);
+      if (resolved.has(lockPath)) continue;
+      const lockEntry = packageLock.packages[lockPath]!;
+      const packageRoot = path.join(materialized.root, ...lockPath.split("/"));
+      const packageJson = path.join(packageRoot, "package.json");
+      const installedManifest = loadJson<Record<string, unknown>>(packageJson);
+      const version = installedManifest["version"];
+      if (installedManifest["name"] !== next.name || typeof version !== "string" || lockEntry["version"] !== version) {
+        throw new Error(`isolated runtime dependency identity does not match package-lock.json at ${lockPath}`);
+      }
+      const integrity = lockEntry["integrity"];
+      if (typeof integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) {
+        throw new Error(`runtime dependency ${next.name}@${version} has no sha512 integrity in package-lock.json at ${lockPath}`);
+      }
+      resolved.set(lockPath, { name: next.name, version, lockPath, integrity, packageRoot, packageJson });
+      const lockedDependencies = (lockEntry["dependencies"] as Record<string, unknown> | undefined) ?? {};
+      for (const name of Object.keys(lockedDependencies).sort()) pending.push({ name, declaringLockPath: lockPath });
+    }
+
+    const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
+    for (const dependency of [...resolved.values()].sort((a, b) => a.lockPath.localeCompare(b.lockPath))) {
+      const stagedRelative = dependency.lockPath.replace(/^node_modules\//, "");
+      copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, stagedRelative));
+    }
+    const resolveRecordedEdges = (lockPath: string): Array<{ name: string; path: string }> => {
+      const lockedDependencies = (packageLock.packages![lockPath]!["dependencies"] as Record<string, unknown> | undefined) ?? {};
+      return Object.keys(lockedDependencies).sort().map((name) => ({
         name,
-        version,
-        integrity,
-        files: runtimePackageFiles(path.join(stagingRoot, lockPath.replace(/^node_modules\//, ""))),
+        path: resolveLockedDependencyPath(name, lockPath, packageLock.packages!).replace(/^node_modules\//, ""),
+      }));
+    };
+    writeText(path.join(bundleRoot, "build", "runtime-dependencies.json"), `${JSON.stringify({
+      schema_version: "2.0",
+      source: "package-lock.json#packages",
+      materialization: materialized.method,
+      policy: {
+        roots: "package.dependencies",
+        transitive: "dependencies",
+        optional_dependencies: "excluded",
+        peer_dependencies: "excluded",
+      },
+      root_dependencies: Object.keys(rootDependencies).sort().map((name) => ({
+        name,
+        path: resolveLockedDependencyPath(name, "", packageLock.packages!).replace(/^node_modules\//, ""),
       })),
-  }, null, 2)}\n`);
+      packages: [...resolved.values()]
+        .sort((a, b) => a.lockPath.localeCompare(b.lockPath))
+        .map(({ name, version, lockPath, integrity }) => ({
+          path: lockPath.replace(/^node_modules\//, ""),
+          lock_path: lockPath,
+          name,
+          version,
+          integrity,
+          dependencies: resolveRecordedEdges(lockPath),
+          files: runtimePackageFiles(path.join(stagingRoot, lockPath.replace(/^node_modules\//, ""))),
+        })),
+    }, null, 2)}\n`);
+  } finally {
+    materialized.cleanup();
+  }
 }
 
 /**

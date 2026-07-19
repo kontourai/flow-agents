@@ -100,7 +100,9 @@ if (bundlePackage.name !== packageJson.name || bundlePackage.version !== package
   throw new Error("dist/codex/build/package.json does not match the package name and version");
 }
 const closure = JSON.parse(readRegular(path.join(snapshot, "build/runtime-dependencies.json")).toString("utf8"));
-if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages" || !Array.isArray(closure.packages)) {
+if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages"
+    || closure.materialization !== "npm-ci-omit-dev-optional-ignore-scripts"
+    || !Array.isArray(closure.root_dependencies) || !Array.isArray(closure.packages)) {
   throw new Error("runtime dependency closure manifest is missing its lockfile-bound schema");
 }
 if (closure.policy?.roots !== "package.dependencies" || closure.policy?.transitive !== "dependencies"
@@ -115,7 +117,7 @@ for (const item of closure.packages) {
       || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:\/node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(item.path)
       || item.lock_path !== `node_modules/${item.path}` || typeof item.name !== "string"
       || typeof item.version !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)
-      || !Array.isArray(item.files) || packageByPath.has(item.path)) {
+      || !Array.isArray(item.dependencies) || !Array.isArray(item.files) || packageByPath.has(item.path)) {
     throw new Error("runtime dependency closure contains an invalid or duplicate package record");
   }
   const packageRoot = path.join(stagingRoot, item.path);
@@ -143,28 +145,41 @@ for (const item of closure.packages) {
     throw new Error(`runtime dependency file coverage or digest mismatch for ${item.path}`);
   }
   for (const file of observedFiles) expectedFiles.add(`${item.path}/${file.path}`);
-  packageByPath.set(item.path, packageManifest);
+  packageByPath.set(item.path, { manifest: packageManifest, record: item });
 }
-for (const name of Object.keys(packageJson.dependencies ?? {})) {
-  if (!packageByPath.has(name)) throw new Error(`required root dependency is absent from the closure: ${name}`);
+const expectedRootNames = Object.keys(packageJson.dependencies ?? {}).sort();
+if (closure.root_dependencies.length !== expectedRootNames.length) {
+  throw new Error("runtime dependency closure root set does not match package dependencies");
 }
-function resolveManifestDependency(fromPath, name) {
-  let current = fromPath;
-  for (;;) {
-    const candidate = current ? `${current}/node_modules/${name}` : name;
-    if (packageByPath.has(candidate)) return candidate;
-    const marker = current.lastIndexOf("/node_modules/");
-    if (marker < 0) return packageByPath.has(name) ? name : null;
-    current = current.slice(0, marker);
+const rootPaths = [];
+for (let index = 0; index < closure.root_dependencies.length; index += 1) {
+  const edge = closure.root_dependencies[index];
+  if (!edge || edge.name !== expectedRootNames[index] || typeof edge.path !== "string" || !packageByPath.has(edge.path)) {
+    throw new Error("runtime dependency closure contains an invalid root edge");
   }
+  rootPaths.push(edge.path);
 }
-for (const [packagePath, packageManifest] of packageByPath) {
-  for (const name of Object.keys(packageManifest.dependencies ?? {})) {
-    if (!resolveManifestDependency(packagePath, name)) {
-      throw new Error(`runtime dependency closure omits ${name} required by ${packagePath}`);
+for (const [packagePath, value] of packageByPath) {
+  const manifestDependencyNames = Object.keys(value.manifest.dependencies ?? {}).sort();
+  const edgeNames = value.record.dependencies.map((edge) => edge?.name);
+  if (JSON.stringify(edgeNames) !== JSON.stringify(manifestDependencyNames)) {
+    throw new Error(`runtime dependency lock edges do not match the materialized manifest for ${packagePath}`);
+  }
+  for (const edge of value.record.dependencies) {
+    if (!edge || typeof edge.name !== "string" || typeof edge.path !== "string" || !packageByPath.has(edge.path)) {
+      throw new Error(`runtime dependency closure contains an invalid edge from ${packagePath}`);
     }
   }
 }
+const reachable = new Set();
+const pendingPaths = [...rootPaths];
+while (pendingPaths.length) {
+  const packagePath = pendingPaths.shift();
+  if (reachable.has(packagePath)) continue;
+  reachable.add(packagePath);
+  for (const edge of packageByPath.get(packagePath).record.dependencies) pendingPaths.push(edge.path);
+}
+if (reachable.size !== packageByPath.size) throw new Error("runtime dependency closure contains unreachable package records");
 const observedStagedFiles = new Set();
 function visitStaging(absolute, relative) {
   const stat = fs.lstatSync(absolute);

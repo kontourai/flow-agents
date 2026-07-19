@@ -5,12 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 REPRO_FIRST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-a.XXXXXX")"
 REPRO_SECOND_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-b.XXXXXX")"
+NESTED_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-fixture.XXXXXX")"
+NESTED_DIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-runtime-nested-dist.XXXXXX")"
 REPRO_DIFF_FILE="${TMPDIR:-/tmp}/universal-bundle-reproducibility.diff"
 pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$NESTED_FIXTURE_DIR" "$NESTED_DIST_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
 }
 trap cleanup EXIT
 
@@ -53,6 +55,53 @@ if (cd "$ROOT_DIR" && npm run typecheck >/tmp/bundle-builder-typecheck.txt 2>&1)
   _pass "bundle builder typechecks"
 else
   _fail "bundle builder does not typecheck"
+fi
+
+if node - "$NESTED_FIXTURE_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const packages = {
+  "root-a": { version: "1.0.0", dependencies: { shared: "1.0.0" } },
+  "root-b": { version: "1.0.0", dependencies: { shared: "2.0.0" } },
+  "shared": { version: "1.0.0", dependencies: {} },
+  "root-b/node_modules/shared": { name: "shared", version: "2.0.0", dependencies: {} },
+};
+const rootDependencies = { "root-a": "1.0.0", "root-b": "1.0.0" };
+fs.writeFileSync(path.join(root, "package.json"), `${JSON.stringify({ name: "nested-runtime-fixture", version: "1.0.0", dependencies: rootDependencies }, null, 2)}\n`);
+const lockPackages = { "": { name: "nested-runtime-fixture", version: "1.0.0", dependencies: rootDependencies } };
+for (const [packagePath, spec] of Object.entries(packages)) {
+  const name = spec.name ?? packagePath.split("/").at(-1);
+  const lockPath = `node_modules/${packagePath}`;
+  lockPackages[lockPath] = { version: spec.version, integrity: "sha512-QUFBQQ==", dependencies: spec.dependencies };
+  const directory = path.join(root, lockPath);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "package.json"), `${JSON.stringify({ name, version: spec.version, dependencies: spec.dependencies }, null, 2)}\n`);
+  fs.writeFileSync(path.join(directory, "index.js"), `module.exports = ${JSON.stringify(spec.version)};\n`);
+}
+fs.writeFileSync(path.join(root, "package-lock.json"), `${JSON.stringify({ name: "nested-runtime-fixture", version: "1.0.0", lockfileVersion: 3, requires: true, packages: lockPackages }, null, 2)}\n`);
+NODE
+then
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_TEST_MODE=1 FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT="$NESTED_FIXTURE_DIR" \
+      FLOW_AGENTS_DIST_DIR="$NESTED_DIST_DIR" npm run build:bundles >/dev/null) \
+    && node - "$NESTED_DIST_DIR/codex/build/runtime-dependencies.json" <<'NODE'
+const fs = require("node:fs");
+const closure = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const paths = closure.packages.map((item) => `${item.path}@${item.version}`);
+const expected = ["root-a@1.0.0", "root-b@1.0.0", "root-b/node_modules/shared@2.0.0", "shared@1.0.0"];
+if (JSON.stringify(paths) !== JSON.stringify(expected)) throw new Error(`nested topology mismatch: ${JSON.stringify(paths)}`);
+const rootB = closure.packages.find((item) => item.path === "root-b");
+if (rootB.dependencies[0]?.path !== "root-b/node_modules/shared") throw new Error("nested dependency edge was flattened");
+const rootA = closure.packages.find((item) => item.path === "root-a");
+if (rootA.dependencies[0]?.path !== "shared") throw new Error("hoisted dependency edge was not preserved");
+NODE
+  then
+    _pass "lockfile closure preserves nested duplicate-version topology"
+  else
+    _fail "lockfile closure flattened or omitted nested duplicate-version topology"
+  fi
+else
+  _fail "nested duplicate-version fixture could not be created"
 fi
 
 echo ""
@@ -100,6 +149,7 @@ for (const runtime of ["base", "kiro", "claude-code", "opencode", "pi"]) {
 }
 const closure = JSON.parse(fs.readFileSync(path.join(dist, "codex", "build", "runtime-dependencies.json"), "utf8"));
 if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages"
+    || closure.materialization !== "npm-ci-omit-dev-optional-ignore-scripts"
     || closure.policy?.roots !== "package.dependencies" || closure.policy?.transitive !== "dependencies"
     || closure.policy?.optional_dependencies !== "excluded" || closure.policy?.peer_dependencies !== "excluded") {
   throw new Error("Codex required runtime closure policy is not explicit and lockfile-bound");
@@ -123,8 +173,8 @@ while (pending.length) {
   if (!dependencyPath) throw new Error(`package-lock.json cannot resolve ${name} from ${fromPath || "root"}`);
   if (expected.has(dependencyPath)) continue;
   expected.add(dependencyPath);
-  const dependencyManifest = JSON.parse(fs.readFileSync(path.join(dist, "codex", "build", "runtime-node-modules", dependencyPath, "package.json"), "utf8"));
-  for (const child of Object.keys(dependencyManifest.dependencies ?? {}).sort()) {
+  const lockEntry = lock.packages[`node_modules/${dependencyPath}`];
+  for (const child of Object.keys(lockEntry.dependencies ?? {}).sort()) {
     pending.push({ fromPath: dependencyPath, name: child });
   }
 }
@@ -133,10 +183,19 @@ if (expected.size !== packageByPath.size || [...expected].some((dependencyPath) 
 }
 for (const [dependencyPath, item] of packageByPath) {
   const lockEntry = lock.packages[`node_modules/${dependencyPath}`];
+  const expectedEdges = Object.keys(lockEntry?.dependencies ?? {}).sort().map((name) => ({
+    name,
+    path: resolveLocked(dependencyPath, name),
+  }));
   if (!lockEntry || item.lock_path !== `node_modules/${dependencyPath}` || item.version !== lockEntry.version
-      || item.integrity !== lockEntry.integrity || !Array.isArray(item.files) || item.files.length === 0) {
+      || item.integrity !== lockEntry.integrity || JSON.stringify(item.dependencies) !== JSON.stringify(expectedEdges)
+      || !Array.isArray(item.files) || item.files.length === 0) {
     throw new Error(`Codex runtime dependency ${dependencyPath} is not version/integrity/file bound to package-lock.json`);
   }
+}
+const expectedRootEdges = Object.keys(source.dependencies ?? {}).sort().map((name) => ({ name, path: resolveLocked("", name) }));
+if (JSON.stringify(closure.root_dependencies) !== JSON.stringify(expectedRootEdges)) {
+  throw new Error("Codex runtime dependency root edges do not match package-lock.json");
 }
 NODE
 then
