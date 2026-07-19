@@ -840,9 +840,9 @@ test("public workflow evidence accepts only live signed turn authority after ord
     "--adapter-command-file", commandFile,
     "--context-policy", "fresh",
     "--max-turns", "2",
-    // This adapter recursively launches several signed CLI operations plus a Stop hook.
-    // Five seconds flakes under concurrent CI load and can kill the adapter before its
-    // authority report is atomically written, obscuring the actual assertion.
+    // This adapter intentionally performs several nested CLI and Stop-hook
+    // subprocesses. Keep the timeout bounded while allowing the same contract
+    // test to run alongside the provider/security suites on slower CI workers.
     "--turn-timeout-ms", "30000",
     "--barrier-wait-ms", "0",
     "--json",
