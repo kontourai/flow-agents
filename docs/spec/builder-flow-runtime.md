@@ -355,8 +355,12 @@ bytes and the signed completion bind a runtime digest. For critique resolution, 
 uses the staged, exact Flow trust-attachment reducer to attach the authoritative post-resolution
 bundle and synchronize the canonical Flow manifest, state, and reports. Flow attachment semantics
 therefore remain Flow-owned; the coordinator owns only locked CAS and writes described by the
-reducer. Package JavaScript validates the signed completion's immutable structural bindings
-read-only and never turns the response into a package-side mutation. The coordinator also invokes
+reducer. The coordinator writes its signed completion as the separate session-relative
+`lifecycle-authority.completion.json` receipt and its append-only authorization events in
+`lifecycle-authority.resolution-events.json`, while both the session trust bundle and the
+Flow-attached bundle remain schema-valid Hachure bundles. Package JavaScript reads the pinned,
+root-owned Ed25519 public verification key and cryptographically validates that receipt's immutable
+bindings read-only; it never turns the response into a package-side mutation. The coordinator also invokes
 Flow's canonical cancellation transition, then releases the exact bound local assignment; archival
 requires a canceled or completed canonical Flow run and atomically relocates only the session to
 `.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains

@@ -8,6 +8,15 @@ const record = (value) => typeof value === "object" && value !== null && !Array.
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : record(value) ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
 export const coordinatorRuntimeSha256 = () => crypto.createHash("sha256").update(fs.readFileSync(fileURLToPath(import.meta.url))).digest("hex");
 export const bundleDigest = (bundle) => crypto.createHash("sha256").update(JSON.stringify(bundle)).digest("hex");
+function critiqueResolutionResultCoreDigest(prior, resolving, edge) {
+  return crypto.createHash("sha256").update(canonical({
+    prior_record_id: prior.critique_record_id,
+    prior_record_hash: prior.critique_record_hash,
+    resolving_record_id: resolving.critique_record_id,
+    resolving_record_hash: resolving.critique_record_hash,
+    edge,
+  })).digest("hex");
+}
 function exact(value, fields, label) {
   if (!record(value) || canonical(Object.keys(value).sort()) !== canonical([...fields].sort())) throw new Error(`${label} contains unexpected or missing fields`);
 }
@@ -31,8 +40,8 @@ export function resolveCritiqueTransition(input) {
   const priorMetadata = prior.metadata;
   const resolvingMetadata = resolving.metadata;
   if (priorMetadata.superseded_by) throw new Error("prior critique is already superseded");
-  if (!["fail", "not_verified"].includes(priorMetadata.verdict)) throw new Error("prior critique must be failing or not verified");
-  if (resolvingMetadata.verdict !== "pass" || resolvingMetadata.claim_status !== "verified") throw new Error("resolving critique must be a verified pass");
+  if (!["fail", "not_verified"].includes(prior.value)) throw new Error("prior critique must be failing or not verified");
+  if (resolving.value !== "pass" || resolving.status !== "verified") throw new Error("resolving critique must be a verified pass");
   if (!priorMetadata.reviewer || priorMetadata.reviewer === resolvingMetadata.reviewer || authorization.expected_resolver !== resolvingMetadata.reviewer) throw new Error("resolution requires the distinct signed resolving reviewer");
   const lanes = failedLaneIds(priorMetadata);
   const findings = openFindingIds(priorMetadata);
@@ -44,9 +53,26 @@ export function resolveCritiqueTransition(input) {
   const authorizationSha256 = crypto.createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
   const eventId = `critique-resolution:${authorizationSha256}`;
   const priorEvents = Array.isArray(input.bundle.critique_resolution_events) ? input.bundle.critique_resolution_events : [];
-  const resolution = { resolved_by: resolvingMetadata.reviewer, resolved_at: authorization.requested_at, resolution_event_id: eventId, authorization_sha256: authorizationSha256, resolved_lane_ids: lanes, resolved_finding_ids: findings };
+  const resolution = {
+    schema_version: "1.0", kind: "cross-reviewer", prior_record_id: input.prior_record_id,
+    resolving_record_id: input.resolving_record_id, resolver: resolvingMetadata.reviewer,
+    resolved_lane_ids: lanes, resolved_finding_ids: findings, resolved_at: authorization.requested_at,
+    authorization_sha256: authorizationSha256, resolution_event_id: eventId,
+  };
   const claims = input.bundle.claims.map((claim) => claim === prior ? { ...claim, status: "superseded", metadata: { ...priorMetadata, superseded_by: input.resolving_record_id, critique_resolution: resolution } } : claim);
-  const unsignedEvent = { schema_version: "1.0", event_id: eventId, sequence: priorEvents.length + 1, predecessor_hash: priorEvents.at(-1)?.event_hash ?? "0".repeat(64), operation: "resolve-critique", run_id: authorization.run_id, subject: authorization.subject, prior_record_id: input.prior_record_id, resolving_record_id: input.resolving_record_id, resolver: resolvingMetadata.reviewer, authorization_sha256: authorizationSha256, signed_authorization: authorization };
+  const unsignedEvent = {
+    schema_version: "1.0", event_id: eventId, sequence: priorEvents.length + 1,
+    predecessor_hash: priorEvents.at(-1)?.event_hash ?? "0".repeat(64), operation: "resolve-critique",
+    run_id: authorization.run_id, subject: authorization.subject,
+    preimage_bundle_sha256: authorization.prior_bundle_sha256,
+    prior_record_id: input.prior_record_id, prior_record_hash: priorMetadata.critique_record_hash,
+    resolving_record_id: input.resolving_record_id, resolving_record_hash: resolvingMetadata.critique_record_hash,
+    resolver: resolvingMetadata.reviewer, authorization_sha256: authorizationSha256,
+    authorization_key_id: authorization.signature.key_id, authorization_nonce: authorization.nonce,
+    edge: resolution,
+    resulting_core_sha256: critiqueResolutionResultCoreDigest(priorMetadata, resolvingMetadata, resolution),
+    signed_authorization: authorization,
+  };
   const event = { ...unsignedEvent, event_hash: crypto.createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex") };
   return { ...input.bundle, claims, critique_resolution_events: [...priorEvents, event] };
 }

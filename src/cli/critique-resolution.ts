@@ -82,7 +82,7 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
-export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string): { valid: boolean; errors: string[]; live: AnyRecord[] } {
+export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, externalCompletionVerified = false): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   const errors: string[] = [];
   if (records.length === 0) return { valid: false, errors: ["critique graph has no records"], live: [] };
@@ -176,7 +176,7 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
     } else {
       const authorizationSha256 = createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex");
       if (authorizationSha256 !== event.authorization_sha256) errors.push("critique resolution signed authorization does not match its event");
-      errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+      if (!externalCompletionVerified) errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
     }
     if (expectedSubject && event.subject !== expectedSubject) errors.push("critique resolution event has a mismatched workflow subject");
     const eventPrior = byId.get(String(event.prior_record_id));

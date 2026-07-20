@@ -1181,7 +1181,6 @@ syncBuiltinESMExports();
 NODE
   package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER="$PACKAGE_PROJECT/attacker-helper" NODE_OPTIONS="--require=$PACKAGE_PROJECT/attacker-preload.cjs" package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
   && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');

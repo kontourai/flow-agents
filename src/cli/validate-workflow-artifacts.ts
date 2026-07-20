@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { captureReviewWorkspaceSnapshot } from "../builder-flow-runtime.js";
+import { verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 
 type Issue = { path: string; message: string };
 
@@ -482,7 +483,19 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const stateResult = readJson(path.join(dir, "state.json"));
           const state = stateResult.value;
           const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
-          const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [], projectRootForSession(dir));
+          const authorityEvents = readJson(path.join(dir, "lifecycle-authority.resolution-events.json")).value;
+          const resolutionEvents = Array.isArray(authorityEvents?.events)
+            ? authorityEvents.events
+            : Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [];
+          let externalCompletionVerified = false;
+          const completion = readJson(path.join(dir, "lifecycle-authority.completion.json")).value;
+          try {
+            const verified = verifyLifecycleAuthorityCompletion(completion);
+            externalCompletionVerified = verified.action === "resolve-critique" && verified.run_id === path.basename(dir);
+          } catch {
+            // A cross-reviewer edge remains NOT_VERIFIED without a root-signed completion.
+          }
+          const graph = validateCritiqueResolutionGraph(claims, subject, resolutionEvents, projectRootForSession(dir), externalCompletionVerified);
           if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
           const projectRoot = projectRootForSession(dir);
           if (!projectRoot) {

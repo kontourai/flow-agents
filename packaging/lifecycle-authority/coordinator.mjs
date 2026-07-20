@@ -73,12 +73,13 @@ function verifyAuthorization(file) {
   if (!record(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || /PRIVATE KEY/.test(key.public_key_pem)) throw new Error("authorization key is not trusted");
   const { signature, ...unsigned } = authorization;
   if (signature.algorithm !== "ed25519" || typeof signature.value !== "string" || !crypto.verify(null, Buffer.from(JSON.stringify(unsigned)), crypto.createPublicKey(key.public_key_pem), Buffer.from(signature.value, "base64"))) throw new Error("authorization signature is invalid");
+  if (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at)) throw new Error("authorization is expired");
   return authorization;
 }
-function atomicWrite(file, bytes) {
+function atomicWrite(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temporary, bytes, { mode: 0o600, flag: "wx" });
+  fs.writeFileSync(temporary, bytes, { mode, flag: "wx" });
   fs.renameSync(temporary, file);
   const descriptor = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
@@ -150,10 +151,10 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   const evidenceFile = path.join(files.root, storedPath);
   fs.mkdirSync(path.dirname(evidenceFile), { recursive: true, mode: 0o700 });
   if (!fs.readFileSync(files.definition).equals(definitionBytes) || !fs.readFileSync(files.state).equals(stateBytes) || !fs.readFileSync(files.manifest).equals(manifestBytes)) throw new Error("canonical Flow preimage changed during lifecycle trust synchronization");
-  atomicWrite(evidenceFile, bundleBytes);
+  atomicWrite(evidenceFile, bundleBytes, 0o644);
   for (const artifact of reduced.write.artifacts) {
     const destination = path.join(files.root, artifact.path);
-    atomicWrite(destination, typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`);
+    atomicWrite(destination, typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`, 0o644);
   }
   return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId };
 }
@@ -179,14 +180,14 @@ function releaseAssignment(paths, authorization) {
   }
   const at = new Date().toISOString();
   const released = { ...current, status: "released", audit_trail: [...(Array.isArray(current.audit_trail) ? current.audit_trail : []), { at, transition: "release", from_actor: current.actor, to_actor: authorization.assignment_actor, reason: authorization.request.reason }] };
-  atomicWrite(file, `${JSON.stringify(released, null, 2)}\n`);
+  atomicWrite(file, `${JSON.stringify(released, null, 2)}\n`, 0o644);
   return true;
 }
 async function cancelCanonicalFlow(paths, authorization) {
   const { flow } = await loadPinnedFlowReducer();
   const run = await flow.loadRun(paths.runId, paths.projectRoot);
   assertAuthorizationBinding(paths, authorization, run);
-  const result = await flow.cancelRun(paths.runId, { cwd: paths.projectRoot, request: authorization.request });
+  const result = await flow.cancelRun(paths.runId, { cwd: paths.projectRoot, ...authorization.request });
   const assignmentReleased = releaseAssignment(paths, authorization);
   return { result_core_sha256: sha256({ state: result.state, assignment_released: assignmentReleased }), assignmentReleased };
 }
@@ -200,7 +201,7 @@ async function archiveCanonicalSession(paths, authorization) {
     const stat = fs.lstatSync(archiveRoot);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("workflow archive root must be a real directory");
   } else {
-    fs.mkdirSync(archiveRoot, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(archiveRoot, { recursive: true, mode: 0o755 });
   }
   const destination = path.join(archiveRoot, paths.runId);
   if (fs.existsSync(destination)) throw new Error("workflow archive destination already exists");
@@ -224,7 +225,10 @@ async function processOperation(envelope) {
   if (authorization.operation !== envelope.action || authorization.run_id !== paths.runId) throw new Error("authorization does not bind the requested operation and run");
   const completionFile = path.join(STATE_ROOT, "completions", `${envelope.request_sha256}.json`);
   return withDurableLock(envelope.request_sha256, async () => {
-    if (fs.existsSync(completionFile)) return { completionRecord: JSON.parse(protectedRegularFile(completionFile, "completion record").toString("utf8")), replayed: true };
+    if (fs.existsSync(completionFile)) {
+      const applied = JSON.parse(protectedRegularFile(completionFile, "completion record").toString("utf8"));
+      return { completionRecord: completion(envelope, paths, "replayed", applied.result_core_sha256), replayed: true };
+    }
     if (envelope.action === "resolve-critique") {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
@@ -233,11 +237,17 @@ async function processOperation(envelope) {
       const reduced = resolveCritiqueTransition({ bundle: before, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id });
       const resultCoreSha256 = sha256(reduced);
       const completionRecord = completion(envelope, paths, "applied", resultCoreSha256);
-      const finalAfter = { ...reduced, lifecycle_authority_completion: completionRecord };
-      await synchronizeCanonicalFlow(paths, finalAfter, envelope);
+      // Coordinator receipts and append-only resolution authorizations live
+      // beside, never inside, the upstream Hachure trust bundle.
+      const sessionBundle = { ...reduced };
+      const resolutionEvents = Array.isArray(sessionBundle.critique_resolution_events) ? sessionBundle.critique_resolution_events : [];
+      delete sessionBundle.critique_resolution_events;
+      await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
       // Recheck the exact preimage immediately before the atomic replace.
       if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
-      atomicWrite(bundleFile, `${JSON.stringify(finalAfter, null, 2)}\n`);
+      atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
+      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json"), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events: resolutionEvents }, null, 2)}\n`, 0o644);
+      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
       atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
       return { completionRecord, replayed: false };
     }
