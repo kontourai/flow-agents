@@ -1651,6 +1651,14 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
 
   const authorizationFile = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey);
   const validAuthorization = readJson(authorizationFile);
+  const registryFile = path.join(session.projectRoot, ".flow-agents", "lifecycle-authority-keys.json");
+  const validRegistry = readJson(registryFile);
+  writeJson(registryFile, { schema_version: "1.0", keys: [{ ...validRegistry.keys[0], private_key_pem: "forbidden" }] });
+  await assert.rejects(workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
+    "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
+  ]), /unsupported field private_key_pem/);
+  writeJson(registryFile, validRegistry);
   writeJson(authorizationFile, { ...validAuthorization, signature: { ...validAuthorization.signature, value: Buffer.alloc(64).toString("base64") } });
   await assert.rejects(workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,

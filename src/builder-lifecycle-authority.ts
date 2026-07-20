@@ -238,6 +238,16 @@ function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authori
   const registry = readRegularJson(keysFile, "lifecycle authority key registry", true);
   assertExactKeys(registry, ["schema_version", "keys"], "key registry");
   if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
+  const seenKeyIds = new Set<string>();
+  for (const candidate of registry.keys) {
+    if (!isRecord(candidate)) throw new Error("lifecycle authority key registry entries must be objects");
+    assertExactKeys(candidate, ["id", "algorithm", "public_key_pem"], "key registry entry");
+    const id = boundedText(candidate.id, "key registry entry.id", 256);
+    if (seenKeyIds.has(id)) throw new Error(`lifecycle authority key registry contains duplicate key id ${id}`);
+    seenKeyIds.add(id);
+    if (candidate.algorithm !== "ed25519" || typeof candidate.public_key_pem !== "string" || !candidate.public_key_pem.includes("BEGIN PUBLIC KEY")
+      || /PRIVATE KEY/.test(candidate.public_key_pem)) throw new Error(`lifecycle authority key ${id} must contain only an Ed25519 public key`);
+  }
   const key = registry.keys.find((candidate) => isRecord(candidate) && candidate.id === authorization.signature.key_id);
   if (!isRecord(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || key.public_key_pem.trim().length === 0) {
     throw new Error(`lifecycle authorization key ${authorization.signature.key_id} is not trusted`);

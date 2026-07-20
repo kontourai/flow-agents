@@ -113,6 +113,12 @@ the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
 
+The registry is a tracked, provider-neutral trust-root contract containing
+Ed25519 public keys only. Each repository owns its registry; do not copy keys
+from another project or place private key material in it. Missing, malformed,
+duplicate, shadowed, or private-key-bearing entries fail closed. An empty
+registry intentionally authorizes no lifecycle or critique-resolution signer.
+
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the
 workspace, later in the writer-issued predecessor hash chain, and cover every
