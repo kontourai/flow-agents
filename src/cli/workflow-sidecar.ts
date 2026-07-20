@@ -3812,7 +3812,15 @@ async function regenerateCritiqueChain(p: ReturnType<typeof parseArgs>): Promise
   const workItemRefs = Array.isArray(state.work_item_refs) ? state.work_item_refs : [];
   const subject = workItemRefs.length === 1 && hasNonEmptyString(workItemRefs[0]) ? String(workItemRefs[0]) : undefined;
   const graph = validateCritiqueResolutionGraph(Array.isArray(candidate.claims) ? candidate.claims : [], subject, [], canonicalProjectRootForSession(dir));
-  if (!graph.valid) die(`regenerate-critique-chain rejected invalid candidate graph: ${graph.errors.join("; ")}`);
+  // Regeneration establishes structural chain integrity; it must not manufacture a clean review.
+  // A legacy live FAIL remains intentionally unresolved until an ordinary later critique and
+  // authenticated resolution edge address it. Permit only those policy-state diagnostics here.
+  const unresolvedPolicyErrors = new Set([
+    "critique graph requires a current verified PASS",
+    "critique graph has unresolved live critique records",
+  ]);
+  const blockingGraphErrors = graph.errors.filter((error) => !unresolvedPolicyErrors.has(error));
+  if (blockingGraphErrors.length) die(`regenerate-critique-chain rejected invalid candidate graph: ${blockingGraphErrors.join("; ")}`);
   assertBundleWritten(await writeTrustBundle(dir, slug, regeneratedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, []));
   return 0;
 }

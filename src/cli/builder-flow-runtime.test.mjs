@@ -273,6 +273,46 @@ test("public critique-chain regeneration rejects ambiguous legacy supersession b
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
 });
 
+test("public critique-chain regeneration anchors an unresolved FAIL so later review can proceed", async () => {
+  const session = makeSession("unresolved-fail-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const failing = asPreChainCritique(verifiedTestsPrerequisites(session)[0], "legacy-unresolved-fail");
+  failing.claim.value = "fail";
+  failing.claim.status = "disputed";
+  failing.claim.metadata.lanes = [{ id: "code-review", status: "fail" }];
+  failing.claim.metadata.findings = [{ id: "legacy-defect", severity: "high", status: "open", description: "Requires a later repair review." }];
+  failing.event.status = "disputed";
+  writeBundle(session.sessionDir, [failing]);
+
+  assert.equal(await workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]), 0);
+
+  let bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  let critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const unresolved = validateCritiqueResolutionGraph(critiques, SUBJECT, [], session.projectRoot);
+  assert.deepEqual(unresolved.errors.sort(), [
+    "critique graph has unresolved live critique records",
+    "critique graph requires a current verified PASS",
+  ].sort());
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const lane = JSON.stringify({
+    id: "code-review",
+    status: "pass",
+    summary: "Later repair review passed.",
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "later-repair-review", "--reviewer", "later-independent-reviewer", "--verdict", "pass",
+    "--summary", "Later review can append to the regenerated writer chain.",
+    "--artifact-ref", delivery, "--lane-json", lane,
+  ]);
+  bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.deepEqual(critiques.map((claim) => claim.metadata.critique_sequence), [1, 2]);
+  assert.equal(critiques[1].metadata.critique_predecessor_hash, critiques[0].metadata.critique_record_hash);
+});
+
 test("a partially populated critique chain fails closed instead of being re-stamped", () => {
   const claim = {
     id: "claim-partial-chain",
