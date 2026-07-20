@@ -24,7 +24,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 import {
   assertAuthenticatedPublishChangeObservation,
