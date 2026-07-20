@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { createExtractionTaskSpec, createInMemoryPreparedArtifactStore, extract, resolvePreparedArtifact, serializePortableExtractionResult, toPortablePreparedArtifactState } from "@kontourai/traverse";
 import { buildSemanticReviewWork, createObserveExtractDiff } from "@kontourai/lookout";
 import { importExtractionEnvelope } from "@kontourai/survey";
@@ -88,7 +89,7 @@ export async function runReviewedGroundingReference(options = {}) {
       semanticKinds: semanticReview.value.items.map((item) => item.metadata.producer["lookout.kontourai.io/semantic-transition"].semanticKind),
       importName: imported.record.metadata.name, reviewItemName: reviewItem.metadata.name, reviewDecisionName: reviewDecision.metadata.name },
     action: { beforeReview, afterReview, drifted }, failures: { missingEvidence: beforeReview.gaps, tamperedPreparedContent: tamperedImport.record.status },
-    ...(options.liveTelemetry ? { liveTelemetry: validateLiveTelemetry(options.liveTelemetry) } : {}) };
+    ...(options.liveProviderModule ? { liveTelemetry: await observeLiveProvider(options.liveProviderModule) } : {}) };
 }
 
 async function pinnedRevisions() {
@@ -112,12 +113,26 @@ function expectObservation(result) { if (!result.ok) throw new Error(`${result.e
 function claimTarget() { return { subjectType: "public-record", subjectId: "17", facet: "record.status", claimType: "record.field", fieldOrBehavior: "status", impactLevel: "medium" }; }
 function groundingPolicy() { return { id: "policy.publish-public-record", action: "publish-public-record", requiredClaimIds: ["claim.public-record-17.status"],
   requireExactLocator: true, requirePreparedArtifact: true, requireAcceptedReview: true, requireValidatedStructure: true, requireCurrentSource: true }; }
-function validateLiveTelemetry(value) { const strings = ["provider", "model", "taskDigest", "fixtureRevision"];
-  if (value === null || typeof value !== "object" || strings.some((key) => typeof value[key] !== "string" || value[key] === "")
-    || !Number.isFinite(value.usageTokens) || !Number.isFinite(value.latencyMs)) throw new Error("Live telemetry is incomplete.");
-  return { provider: value.provider, model: value.model, taskDigest: value.taskDigest, usageTokens: value.usageTokens,
-    latencyMs: value.latencyMs, fixtureRevision: value.fixtureRevision }; }
-async function main() { const flag = process.argv.indexOf("--live-telemetry");
-  const liveTelemetry = flag === -1 ? undefined : JSON.parse(await readFile(process.argv[flag + 1], "utf8"));
-  process.stdout.write(`${JSON.stringify(await runReviewedGroundingReference({ liveTelemetry }), null, 2)}\n`); }
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });
+async function observeLiveProvider(modulePath) {
+  const loaded = await import(pathToFileURL(resolve(modulePath)).href);
+  const provider = loaded.default ?? loaded.provider;
+  if (!provider || typeof provider.extract !== "function" || typeof provider.name !== "string" || provider.name === "") {
+    throw new Error("Live provider module must export a named extraction provider.");
+  }
+  const started = performance.now();
+  const result = await extract({ content: contents.get("snapshot:record-17:v2"), contentType: "text", sourceRef: source.url,
+    targetSchema: source.targetSchema, taskSpec, provider });
+  const latencyMs = Math.max(0, performance.now() - started);
+  const model = result.raw?.model;
+  const usageTokens = result.raw?.tokensUsed;
+  if (typeof model !== "string" || model === "" || !Number.isFinite(usageTokens) || usageTokens < 0) {
+    throw new Error("Live provider result must report model and non-negative token usage.");
+  }
+  return { provider: provider.name, model, taskDigest: taskSpec.digest, usageTokens, latencyMs,
+    fixtureRevision: "reviewed-grounding-fixture/v1" };
+}
+async function main() { const flag = process.argv.indexOf("--live-provider-module");
+  const liveProviderModule = flag === -1 ? undefined : process.argv[flag + 1];
+  if (flag !== -1 && !liveProviderModule) throw new Error("--live-provider-module requires a module path.");
+  process.stdout.write(`${JSON.stringify(await runReviewedGroundingReference({ liveProviderModule }), null, 2)}\n`); }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });
