@@ -31,6 +31,8 @@ import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { completePublishChangeOperation as completePublishChangeTransaction } from "../../build/src/publish-change-operation.js";
+import { createPublishChangeRuntimeDependencies } from "../../build/src/publish-change-runtime.js";
 import { trustedGitEnvironment } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
@@ -2187,6 +2189,107 @@ test("publish-change rejects an artifact-parent swap after provider I/O before a
     fs.renameSync(externalArtifactRoot, originalArtifactRoot);
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   }
+});
+
+test("publish-change rejects session ancestry swaps after in-lock checks and awaited commit work", async (t) => {
+  async function withSwappedSession(slug, run) {
+    const { session, ambient, action } = await preparePublishChangeTransaction(slug);
+    const externalSession = path.join(session.projectRoot, "external-session");
+    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+    let externalBefore;
+    const context = { sessionDir: session.sessionDir, artifactRoot: session.artifactRoot, projectRoot: session.projectRoot, slug: session.slug };
+    const assertStableContext = () => {
+      if (fs.lstatSync(session.sessionDir).isSymbolicLink()) throw new Error("session ancestry changed during publish-change operation");
+    };
+    const swapSession = () => {
+      fs.renameSync(session.sessionDir, externalSession);
+      fs.symlinkSync(externalSession, session.sessionDir, "dir");
+      externalBefore = snapshotTree(externalSession);
+    };
+    try {
+      await run({ session, action, context, assertStableContext, swapSession, externalSession });
+      assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow, "the replacement session must not advance canonical Flow");
+      assert.deepEqual(snapshotTree(externalSession), externalBefore, "no receipt, evidence, or projection write may reach the replacement session after its swap");
+    } finally {
+      if (fs.lstatSync(session.sessionDir).isSymbolicLink()) fs.unlinkSync(session.sessionDir);
+      if (fs.existsSync(externalSession)) fs.renameSync(externalSession, session.sessionDir);
+      await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+    }
+  }
+
+  function dependencies(context, action, assertStableContext, overrides = {}) {
+    return {
+      resolveSessionContext: () => context,
+      assertStableContext,
+      currentAction: async () => action,
+      assertTrustedHead: () => {},
+      readCommittedReceipt: async () => null,
+      recoverCommitted: async () => null,
+      persistResult: () => ({ sha256: "a".repeat(64) }),
+      advanceGate: async () => ({}),
+      projectCompleted: () => ({ projected: true }),
+      operationStaleError: () => new Error("stale publish-change action"),
+      ...overrides,
+    };
+  }
+
+  await t.test("an awaited current-action cannot redirect the receipt write", async () => {
+    await withSwappedSession("publish-change-current-action-session-swap", async ({ session, action, context, assertStableContext, swapSession }) => {
+      let observations = 0;
+      await assert.rejects(
+        () => completePublishChangeTransaction({ sessionDir: session.sessionDir, action }, async (request) => {
+          observations += 1;
+          return publishChangeObservation(request);
+        }, dependencies(context, action, assertStableContext, {
+          currentAction: async () => { await Promise.resolve(); swapSession(); return action; },
+          persistResult: () => { throw new Error("receipt write must not run after an ancestry swap"); },
+        })),
+        /session ancestry changed during publish-change operation/,
+      );
+      assert.equal(observations, 0, "the initial in-lock action refresh rejects before provider I/O");
+    });
+  });
+
+  await t.test("an awaited gate advance cannot redirect projection or evidence cleanup", async () => {
+    await withSwappedSession("publish-change-advance-session-swap", async ({ session, action, context, assertStableContext, swapSession }) => {
+      let projected = false;
+      await assert.rejects(
+        () => completePublishChangeTransaction({ sessionDir: session.sessionDir, action }, async (request) => publishChangeObservation(request), dependencies(context, action, assertStableContext, {
+          persistResult: () => {
+            fs.writeFileSync(path.join(context.sessionDir, "publish-change.result.json"), "receipt before swap\n");
+            return { sha256: "a".repeat(64) };
+          },
+          advanceGate: async () => { await Promise.resolve(); swapSession(); return {}; },
+          projectCompleted: () => { projected = true; fs.writeFileSync(path.join(context.sessionDir, "projection-after-swap.json"), "unsafe\n"); return {}; },
+        })),
+        /session ancestry changed during publish-change operation/,
+      );
+      assert.equal(projected, false, "projection must not run after an awaited gate advance swaps session ancestry");
+    });
+  });
+
+  await t.test("the real evidence writer cannot clean up through a session swapped during evaluation", async () => {
+    await withSwappedSession("publish-change-real-evidence-session-swap", async ({ session, action, context, assertStableContext, swapSession }) => {
+      const runtime = createPublishChangeRuntimeDependencies({
+        loadRun: async () => ({}),
+        manifestEvidence: () => [],
+        evaluateEvidence: async () => { await Promise.resolve(); swapSession(); return {}; },
+        assertAdvanced: () => {},
+        project: () => ({ projected: true }),
+        assertSafeFile: () => {},
+        assertStableContext,
+        pathExistsNoFollow: (file) => fs.existsSync(file),
+        error: (field, message) => new Error(`${field}: ${message}`),
+      });
+      await assert.rejects(
+        () => completePublishChangeTransaction({ sessionDir: session.sessionDir, action }, async (request) => publishChangeObservation(request), dependencies(context, action, assertStableContext, {
+          advanceGate: runtime.advanceGate,
+          projectCompleted: () => { throw new Error("projection must not run after a session ancestry swap"); },
+        })),
+        /session ancestry changed during publish-change operation/,
+      );
+    });
+  });
 });
 
 test("stale publish-change actions fail before provider execution or canonical mutation", async (t) => {

@@ -574,7 +574,8 @@ wrong-intent failures leave the gate unresolved.
 
 Only the authenticated Flow-owned transaction writes the bounded
 `publish-change.result.json`, revalidates the trusted local head ref/SHA, assignment, gate visit, and configuration under the
-subject lock, satisfies only `pull-request-opened`, and requires Flow to advance exactly one
+subject lock, and rechecks captured project/session ancestry after every awaited commit operation
+immediately before it mutates a receipt, temporary evidence, cleanup, or projection. It satisfies only `pull-request-opened`, and requires Flow to advance exactly one
 canonical step. Generic driver
 JSON/evidence, caller-authored result files, and package-internal writers cannot substitute for
 that transaction. The receipt separately preserves the bound `assignment_actor` and actual

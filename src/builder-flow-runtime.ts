@@ -186,14 +186,23 @@ function publishChangeFacade() {
     assertSubject: assertRunSubjectBinding,
     openGates: openGatesForResult,
     manifestEvidence: (run) => manifestEvidence(run.manifest),
-    evaluateEvidence: async (context, action, evidence) => await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug, evidence: {
-      gate: action.binding.gate_ids[0]!, file: path.relative(context.projectRoot, evidence.file), expectedSha256: evidence.sha256,
-      expectationIds: ["pull-request-opened"], producer: "publish-change-operation-authority", authorityTrace: action.action_id,
-    } }),
+    evaluateEvidence: async (context, action, evidence) => {
+      // This is the last boundary before canonical Flow consumes the evidence
+      // path. The operation layer also checks after the await returns, but that
+      // cannot protect a replacement made before this adapter hands off.
+      assertStableSessionContext(context);
+      return await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug, evidence: {
+        gate: action.binding.gate_ids[0]!, file: path.relative(context.projectRoot, evidence.file), expectedSha256: evidence.sha256,
+        expectationIds: ["pull-request-opened"], producer: "publish-change-operation-authority", authorityTrace: action.action_id,
+      } });
+    },
     assertAdvanced: (run, action) => {
       if (run.state.current_step === action.binding.step_id && run.state.status === "active") throw new BuilderBuildRunInputError("publish-change", "authenticated provider observation did not advance the bound Flow gate");
     },
-    project: projectPublishChange,
+    project: (context, action, observation, run, attached, operation) => {
+      assertStableSessionContext(context);
+      return projectPublishChange(context, action, observation, run, attached, operation);
+    },
     assertSafeFile,
     assertStableContext: assertStableSessionContext,
     pathExistsNoFollow,

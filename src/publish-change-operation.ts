@@ -90,6 +90,7 @@ export async function completePublishChangeOperation<Result, Run>(
     return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
       dependencies.assertStableContext(context);
       const recovered = await dependencies.recoverCommitted(context, issued, committed);
+      dependencies.assertStableContext(context);
       if (!recovered) throw dependencies.operationStaleError();
       return recovered;
     });
@@ -104,23 +105,29 @@ export async function completePublishChangeOperation<Result, Run>(
     // record back to the currently trusted local ref while Flow owns commit.
     dependencies.assertTrustedHead(context, issued);
     const recoveryReceipt = await dependencies.readCommittedReceipt(context, issued);
+    dependencies.assertStableContext(context);
     if (recoveryReceipt) {
       const recovery = await dependencies.recoverCommitted(context, issued, recoveryReceipt);
+      dependencies.assertStableContext(context);
       if (!recovery) throw dependencies.operationStaleError();
       return recovery;
     }
     const current = await dependencies.currentAction(context, intentFromAction(issued));
+    dependencies.assertStableContext(context);
     if (!isDeepStrictEqual(current, issued)) throw dependencies.operationStaleError();
     const persisted = dependencies.persistResult(context, issued, observation);
     const run = await dependencies.advanceGate(context, issued, observation, persisted.sha256);
+    dependencies.assertStableContext(context);
     return dependencies.projectCompleted(context, issued, observation, run);
   });
 }
 
 async function committedReceiptOrCurrent<Result, Run>(context: SessionContext, issued: IssuedPublishChangeAction, dependencies: PublishChangeOperationDependencies<Result, Run>): Promise<AuthenticatedPublishChangeObservation | null> {
   const committed = await dependencies.readCommittedReceipt(context, issued);
+  dependencies.assertStableContext(context);
   if (committed) return committed;
   const current = await dependencies.currentAction(context, intentFromAction(issued));
+  dependencies.assertStableContext(context);
   if (!isDeepStrictEqual(current, issued)) throw dependencies.operationStaleError();
   return null;
 }

@@ -16,7 +16,7 @@ flow_agents_build_ts
 # redaction, retry single attachment, trusted-head commit rebinding, and
 # isolated pull-request-opened attachment before the adapter matrix runs.
 node --test \
-  --test-name-pattern='configured ChangeProvider projects|Flow completion authenticates|Flow completion accepts a terminal merged|publish-change rejects symlinked|artifact-parent swap|stale publish-change actions|simultaneous publish-change recovery|publish-change rebinds the trusted local head under the Flow commit lock|provider failures cannot leak|in-process publish-change composition|public publish-change ignores' \
+  --test-name-pattern='configured ChangeProvider projects|Flow completion authenticates|Flow completion accepts a terminal merged|publish-change rejects symlinked|artifact-parent swap|session ancestry swaps|stale publish-change actions|simultaneous publish-change recovery|publish-change rebinds the trusted local head under the Flow commit lock|provider failures cannot leak|in-process publish-change composition|public publish-change ignores' \
   src/cli/builder-flow-runtime.test.mjs
 
 # Adapter coverage supplies the deterministic fake-provider matrix: exact argv,

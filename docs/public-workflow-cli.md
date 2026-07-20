@@ -276,7 +276,9 @@ canonical manifest claim references that receipt's exact SHA-256 digest.
 The GitHub home/config root is derived from the validated operating-system account record, never
 from caller-provided `HOME`, `GH_CONFIG_DIR`, or XDG routing. If a manifest-bound receipt already
 committed Flow but projection crashed, recovery reuses those exact receipt bytes without another
-provider request.
+provider request. The completion transaction also revalidates captured session ancestry after
+each awaited commit dependency before receipt, evidence, cleanup, or projection mutation, so a
+directory replacement cannot redirect a late write.
 
 The general Builder runtime is intentionally only a public wrapper and Flow/projection composition
 point. The dedicated publish-change runtime owns receipt persistence and recovery, temporary

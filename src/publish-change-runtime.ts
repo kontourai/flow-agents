@@ -194,6 +194,7 @@ async function readCommittedReceipt<Result, Run>(context: PublishChangeRuntimeCo
   if (persisted.operation_action_id !== action.action_id) return null;
   const resultSha256 = createHash("sha256").update(bytes).digest("hex");
   const run = await dependencies.loadRun(context);
+  dependencies.assertStableContext(context);
   const manifestBound = dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority" && entry.authority_trace === action.action_id
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
@@ -207,6 +208,7 @@ async function recoverCommitted<Result, Run>(context: PublishChangeRuntimeContex
   const bytes = readResult(context, dependencies);
   if (!bytes || !bytes.equals(payloadFor(action, observation))) return null;
   const run = await dependencies.loadRun(context);
+  dependencies.assertStableContext(context);
   const attached = dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
     && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
@@ -235,18 +237,25 @@ function manifestReferencesResultDigest(entry: AnyRecord, resultSha256: string):
 
 async function advanceGate<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, resultSha256: string, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<Run> {
   const evidence = await writeEvidence(context, action, observation, resultSha256, dependencies);
+  dependencies.assertStableContext(context);
   try {
     const run = await dependencies.evaluateEvidence(context, action, evidence);
+    dependencies.assertStableContext(context);
     dependencies.assertAdvanced(run, action);
     return run;
-  } finally { removeTemporaryFile(evidence.file, dependencies); }
+  } finally {
+    dependencies.assertStableContext(context);
+    removeTemporaryFile(evidence.file, dependencies);
+  }
 }
 
 async function writeEvidence<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, resultSha256: string, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<{ file: string; sha256: string }> {
   const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
   const bundle = await buildOperationTrustBundle(context, action, observation, resultSha256);
+  dependencies.assertStableContext(context);
   if (!bundle) throw dependencies.error("publish-change", "could not build the required operation-bound trust bundle");
   const validation = await validateTrustBundle(bundle);
+  dependencies.assertStableContext(context);
   if (validation.available && !validation.valid) throw dependencies.error("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
   const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
   if (bytes.byteLength > 65_536) throw dependencies.error("publish-change", "operation-bound evidence exceeds the 65,536 byte bound");

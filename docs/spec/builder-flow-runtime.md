@@ -223,8 +223,9 @@ Trusted Git discards caller-provided `GIT_*` routing/configuration, disables sys
 and requires a trusted executable and path ancestry. Session resolution rejects symlinked or
 non-directory `.kontourai`, `flow-agents`, and session ancestors before any runtime read or write.
 It records direct directory device/inode/type/realpath identities for the project, `.kontourai`,
-artifact root, and session, then revalidates them after unlocked provider I/O before a lock,
-receipt, evidence, or projection can write.
+artifact root, and session, then revalidates them after unlocked provider I/O and after every
+awaited commit dependency immediately before a lock, receipt, evidence, cleanup, or projection
+can write. A replacement detected at either boundary aborts without redirecting a mutation.
 It rejects any assignment transfer, gate movement, replay, configuration change, or
 request/result mismatch before persisting the bounded result. Only an authenticated,
 fresh provider observation can write `publish-change.result.json`; it contains the
