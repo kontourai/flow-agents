@@ -981,15 +981,7 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
-  const currentGateClaimsForTrust = bundle.claims.filter((claim: unknown): claim is AnyRecord => {
-    if (!isRecord(claim) || !claimIsCurrent(claim)) return false;
-    return expectations.some((expectation) => {
-      const candidate = expectation.bundle_claim;
-      return candidate
-        && candidate.claimType === claim.claimType
-        && (!candidate.subjectType || candidate.subjectType === claim.subjectType);
-    });
-  });
+  const currentGateClaimsForTrust = mergeGateClaimsWithCritiqueHistory(relevant, bundle.claims, claimIsCurrent);
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
@@ -1026,6 +1018,21 @@ async function bundleGateEvidence(
     await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+export function mergeGateClaimsWithCritiqueHistory(
+  relevant: AnyRecord[],
+  bundleClaims: unknown[],
+  claimIsCurrent: (claim: AnyRecord) => boolean,
+): AnyRecord[] {
+  const merged = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim) || !claimIsCurrent(claim)) continue;
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (metadata?.origin !== "critique") continue;
+    merged.set(String(claim.id), claim);
+  }
+  return [...merged.values()];
 }
 
 function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {

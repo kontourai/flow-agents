@@ -12,6 +12,7 @@ import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
+  mergeGateClaimsWithCritiqueHistory,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
@@ -45,6 +46,17 @@ const TEST_AUTHORITY_REGISTRY = { schema_version: "1.0", keys: [{ id: AUTHORITY_
 const TEST_AUTHORITY_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-os-authority-"))), "authority.json");
 fs.writeFileSync(TEST_AUTHORITY_FILE, `${JSON.stringify(TEST_AUTHORITY_REGISTRY)}\n`, { mode: 0o444 });
 const realExecFileSync = childProcess.execFileSync;
+
+test("verification trust restores critique history without restoring superseded test evidence", () => {
+  const liveTests = { id: "tests-live", claimType: "builder.verify.tests", metadata: { origin: "check" } };
+  const supersededTests = { id: "tests-old", claimType: "builder.verify.tests", metadata: { origin: "check", superseded_by: "tests-live" } };
+  const critiqueCurrent = { id: "critique-live", claimType: "workflow.critique.review", metadata: { origin: "critique" } };
+  const critiquePredecessor = { id: "critique-old", claimType: "workflow.critique.review", metadata: { origin: "critique", superseded_by: "critique-live" } };
+  assert.deepEqual(
+    mergeGateClaimsWithCritiqueHistory([liveTests, critiqueCurrent], [supersededTests, liveTests, critiquePredecessor, critiqueCurrent], () => true).map((claim) => claim.id),
+    ["tests-live", "critique-live", "critique-old"],
+  );
+});
 childProcess.execFileSync = ((file, args, options) => {
   if (Array.isArray(args) && String(args[0]).endsWith("lifecycle-authority-verifier.js")) {
     if (process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY !== TEST_AUTHORITY_FILE) return realExecFileSync(file, args, options);
