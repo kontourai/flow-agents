@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { authorizationDigest, validateCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 
 type AnyRecord = Record<string, any>;
@@ -174,23 +173,11 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
     if (!referencedEventIds.has(String(event.event_id))) errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
     if (event.operation !== "resolve-critique" || !projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") {
       errors.push("critique resolution event requires a verifiable signed authorization");
-    } else try {
-      const eventPrior = byId.get(String(event.prior_record_id));
-      const eventResolving = byId.get(String(event.resolving_record_id));
-      if (!eventPrior || !eventResolving) throw new Error("event records are missing");
-      const authorization = validateCritiqueResolutionAuthorization(event.signed_authorization, {
-        projectRoot, runId: String(event.run_id), subject: String(event.subject),
-        priorBundleSha256: String(event.preimage_bundle_sha256), priorRecordId: String(event.prior_record_id), priorRecordHash: String(event.prior_record_hash),
-        resolvingRecordId: String(event.resolving_record_id), resolvingRecordHash: String(event.resolving_record_hash),
-        resolvedLaneIds: Array.isArray(event.edge?.resolved_lane_ids) ? event.edge.resolved_lane_ids : [],
-        resolvedFindingIds: Array.isArray(event.edge?.resolved_finding_ids) ? event.edge.resolved_finding_ids : [],
-        priorSnapshotSha256: String(eventPrior.review_target?.workspace_snapshot?.digest),
-        resolvingSnapshotSha256: String(eventResolving.review_target?.workspace_snapshot?.digest),
-        priorHeadSha: String(eventPrior.review_target?.workspace_snapshot?.head_sha ?? "none"),
-        resolvingHeadSha: String(eventResolving.review_target?.workspace_snapshot?.head_sha ?? "none"), allowExpired: true,
-      });
-      if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
-    } catch { errors.push("critique resolution signed authorization is invalid"); }
+    } else {
+      const authorizationSha256 = createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex");
+      if (authorizationSha256 !== event.authorization_sha256) errors.push("critique resolution signed authorization does not match its event");
+      errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    }
     if (expectedSubject && event.subject !== expectedSubject) errors.push("critique resolution event has a mismatched workflow subject");
     const eventPrior = byId.get(String(event.prior_record_id));
     const eventResolving = byId.get(String(event.resolving_record_id));

@@ -463,7 +463,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
   const authorizationFile = flagString(parsed.flags, "authorization-file");
   if (!authorizationFile) throw new Error("workflow resolve-critique requires a signed --authorization-file <path>");
   const { projectRoot } = readBoundSession(sessionDir);
-  const report = invokeExternalLifecycleAuthority({ action: "resolve-critique", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: flagString(parsed.flags, "prior-record-id")!, resolving_record_id: flagString(parsed.flags, "resolving-record-id")! }) as JsonRecord;
+  const report = invokeExternalLifecycleAuthority({ action: "resolve-critique", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: flagString(parsed.flags, "prior-record-id")!, resolving_record_id: flagString(parsed.flags, "resolving-record-id")! });
   if (json) console.log(JSON.stringify(report));
   else console.log(report.operation_status === "replayed" ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
   return 0;

@@ -5,9 +5,10 @@ import { execFileSync } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
-const ACTIONS = new Set(["verify-authorization", "cancel", "archive", "resolve-critique"]);
+const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
+export interface ExternalLifecycleMutationResult { run_id: string; operation_status: "applied" | "replayed" }
 type JsonRecord = Record<string, unknown>;
 
 function record(value: unknown): value is JsonRecord { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -55,22 +56,15 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   if (parsed.request_sha256 !== requestSha256) throw new Error("lifecycle authority helper response request digest is invalid");
   if (parsed.status !== "accepted") throw new Error("lifecycle authority helper rejected the request");
   if (!record(parsed.result)) throw new Error("lifecycle authority helper response result must be an object");
-  if (action === "verify-authorization") {
-    exact(parsed.result, ["verified"], "lifecycle authority verification result");
-    if (parsed.result.verified !== true) throw new Error("lifecycle authority helper did not verify the authorization");
-  } else {
-    exact(parsed.result, ["run_id", "operation_status"], "lifecycle authority mutation result");
-    if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
-  }
+  exact(parsed.result, ["run_id", "operation_status"], "lifecycle authority mutation result");
+  if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
   return parsed.result;
 }
 
 /** The external helper owns validation, locking, replay/CAS, and every write. */
-export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): JsonRecord {
+export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
   if (!ACTIONS.has(request.action)) throw new Error("unsupported lifecycle authority action");
-  const fields = request.action === "verify-authorization"
-    ? ["action", "project_root", "payload", "signature"]
-    : request.action === "resolve-critique"
+  const fields = request.action === "resolve-critique"
       ? ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"]
       : ["action", "project_root", "session_dir", "authorization_file"];
   exact(request as JsonRecord, fields, "lifecycle authority request");
@@ -86,5 +80,8 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");
   }
-  return validateLifecycleAuthorityResponse(output, request.action, requestSha256);
+  const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
+  const expectedRunId = request.action === "resolve-critique" ? path.basename(String(request.session_dir)) : path.basename(String(request.session_dir));
+  if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
+  return result;
 }

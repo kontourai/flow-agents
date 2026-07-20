@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { invokeExternalLifecycleAuthority } from "./external-lifecycle-authority.js";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
 
@@ -206,8 +205,8 @@ export function authorizationDigest(authorization: SignedBuilderAuthorization): 
 }
 
 function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
-  const { signature: _signature, ...unsigned } = authorization;
-  invokeExternalLifecycleAuthority({ action: "verify-authorization", project_root: projectRoot, payload: payload(unsigned as Omit<T, "signature">), signature: authorization.signature });
+  void authorization; void projectRoot; void payload;
+  throw new Error("lifecycle authorization is NOT_VERIFIED by package-side validation; the external authority must own the complete transition");
 }
 
 function readRegularJson(fileInput: string, label: string, requireProtected = false): JsonRecord {

@@ -121,34 +121,30 @@ export async function main(argv: string[]): Promise<number> {
     console.error(USAGE);
     return 64;
   }
+  if (action === "cancel" || action === "archive") {
+    const receipt = action === "cancel"
+      ? await cancelBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! })
+      : await archiveBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! });
+    console.log(JSON.stringify(receipt));
+    return 0;
+  }
   const result = action === "recover"
         ? await recoverBuilderFlowSession({ sessionDir })
         : action === "pause"
           ? await pauseBuilderFlowSession({ sessionDir, reason: reason! })
           : action === "resume"
             ? await resumeBuilderFlowSession({ sessionDir, reason: reason! })
-            : action === "cancel"
-              ? await cancelBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! })
-              : action === "release-assignment"
+            : action === "release-assignment"
                 ? await releaseBuilderFlowAssignment({ sessionDir, reason: reason! })
-                : await archiveBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! });
-  if (action === "cancel" || action === "archive") {
-    console.log(JSON.stringify(result));
-    return 0;
-  }
+                : await recoverBuilderFlowSession({ sessionDir });
   console.log(JSON.stringify({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,
     current_step: result.run.state.current_step,
     status: result.run.state.status,
     attached: result.attached,
-    ...(action === "cancel" ? {
+    ...(action === "release-assignment" ? {
       assignment_released: "assignmentReleased" in result ? result.assignmentReleased : false,
-      idempotent: "idempotent" in result ? result.idempotent : false,
-    } : action === "release-assignment" ? {
-      assignment_released: "assignmentReleased" in result ? result.assignmentReleased : false,
-    } : action === "archive" ? {
-      archive_dir: "archiveDir" in result ? result.archiveDir : null,
     } : {}),
     next_action: result.projection.next_action,
   }));

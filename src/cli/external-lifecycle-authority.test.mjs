@@ -40,9 +40,8 @@ test("lifecycle authority response rejects extra fields and malformed results", 
   assert.throws(() => validateLifecycleAuthorityResponse(output({ status: "rejected" }), action, digest), /rejected/);
 });
 
-test("bundle verification requires an exact verified response", () => {
+test("package-side bundle validation cannot turn a helper response into authorization", () => {
   const verifyBase = { ...valid, action: "verify-authorization", result: { verified: true } };
-  assert.deepEqual(validateLifecycleAuthorityResponse(`${JSON.stringify(verifyBase)}\n`, "verify-authorization", digest), { verified: true });
-  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...verifyBase, result: {} })}\n`, "verify-authorization", digest), /unexpected or missing fields/);
-  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...verifyBase, result: { verified: false } })}\n`, "verify-authorization", digest), /did not verify/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify(verifyBase)}\n`, "verify-authorization", digest), /mutation result/);
+  assert.throws(() => invokeExternalLifecycleAuthority({ action: "verify-authorization", project_root: "/tmp/project", payload: "forged", signature: {} }), /unsupported lifecycle authority action/);
 });

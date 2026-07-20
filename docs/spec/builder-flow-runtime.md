@@ -313,8 +313,9 @@ provisioned protocol-v1 helper pinned at
 identity or select another root-owned executable. The helper and every
 path component must be OS-owned, outside the project/package/worktree, and non-writable by the
 runtime user, group, and world. The external helper owns verification, locking, nonce replay
-protection, compare-and-swap, and all persistent writes; package JavaScript never enacts a mutation
-from a helper return value. Flow Agents ships no helper, keys, or deployment-specific configuration.
+protection, compare-and-swap, critique edge/history persistence, canonical evidence attachment, Flow
+synchronization, and all other authoritative writes; package JavaScript never enacts a mutation from
+a helper return value. Flow Agents ships no helper, keys, or deployment-specific configuration.
 Missing or untrusted helpers fail closed.
 
 The wire contract is one canonical JSON request line and exactly one JSON response line. Both bind
@@ -324,6 +325,9 @@ multiple output records, and malformed JSON fail closed. The helper independentl
 constrains all received paths, derives root relationships itself, and never treats caller-provided
 paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
 `NOT_VERIFIED` in ordinary checkout CI until the administrator-owned reference helper is provisioned.
+Package-side replay/graph validation does not call a live `verify-authorization` action. Without an
+immutable helper-produced attestation and pinned public verification contract it reports the
+external resolution `NOT_VERIFIED`, and that verdict cannot unlock evidence attachment or Flow sync.
 Reference implementation, provisioning, and positive platform conformance are tracked in issue #744.
 
 Runtime or harness adapters hold the private key and capture the signed record from a

@@ -16,7 +16,7 @@ import {
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { execTrustedGitSync } from "./lib/trusted-git.js";
-import { invokeExternalLifecycleAuthority } from "./external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import {
@@ -182,9 +182,9 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
   return changeBuilderFlowSessionLifecycle(input, "resume");
 }
 
-export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
+export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as unknown as BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean };
+  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
 }
 
 export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
@@ -299,9 +299,9 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
   });
 }
 
-export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
+export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as unknown as BuilderFlowSessionResult & { archiveDir: string };
+  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
 }
 
 async function changeBuilderFlowSessionLifecycle(

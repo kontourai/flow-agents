@@ -113,7 +113,8 @@ Administrators provision protocol v1 at the immutable path
 executable. The helper must be outside the project, package, and worktree, OS-owned, executable, and
 non-writable by the runtime user, group, or world through every path component. Platforms without
 a supported ownership adapter fail closed. The helper—not package JavaScript—owns signature and
-registry verification, locking, nonce replay protection, preimage CAS, and the atomic mutation.
+registry verification, locking, nonce replay protection, preimage CAS, atomic bundle/history writes,
+canonical evidence attachment, and any Flow synchronization for the authorized transition.
 The authorization binds
 the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
@@ -125,6 +126,10 @@ match the request. Empty, multi-line, malformed, or extended responses fail clos
 independently reject unknown fields/actions, canonicalize and constrain every received path, derive
 the run/project/artifact roots rather than trusting claimed relationships, and perform mutation only
 after its own locked precondition and compare-and-swap checks.
+Package-side graph validation never invokes a live verification subprocess and never treats a helper
+response as authorization. Until a future immutable attestation verification contract exists, it
+reports externally resolved history as `NOT_VERIFIED`; the helper must complete the authoritative
+transition itself.
 
 The helper and its provider-neutral key registry are deployed and configured by runtime
 administrators outside source control. Flow Agents ships neither helper configuration nor keys.

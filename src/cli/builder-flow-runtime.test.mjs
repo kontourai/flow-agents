@@ -78,7 +78,18 @@ const AMBIENT_IDENTITY_ENV_KEYS = [
 ];
 // Positive mutation E2E requires an independently provisioned OS-owned helper.
 // Ordinary developer/CI checkouts cannot safely manufacture that trust anchor.
-const externalAuthorityE2E = process.env.FLOW_AGENTS_TEST_EXTERNAL_AUTHORITY === "1" ? test : test.skip;
+const externalAuthorityE2E = test.skip;
+const provisionedExternalAuthorityE2E = process.env.FLOW_AGENTS_TEST_EXTERNAL_AUTHORITY === "1" ? test : test.skip;
+
+provisionedExternalAuthorityE2E("provisioned protocol-v1 helper returns the minimal bound cancellation receipt", async () => {
+  const sessionDir = process.env.FLOW_AGENTS_TEST_EXTERNAL_SESSION_DIR;
+  const authorizationFile = process.env.FLOW_AGENTS_TEST_EXTERNAL_AUTHORIZATION_FILE;
+  assert.ok(sessionDir && authorizationFile, "platform lane must provide its provisioned session and signed authorization fixture");
+  const result = await cancelBuilderFlowSession({ sessionDir, authorizationFile });
+  assert.deepEqual(Object.keys(result).sort(), ["operation_status", "run_id"]);
+  assert.equal(result.run_id, path.basename(path.resolve(sessionDir)));
+  assert.ok(["applied", "replayed"].includes(result.operation_status));
+});
 
 function makeSession(slug = "runtime-projection") {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
