@@ -7,7 +7,12 @@ export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
-export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
+export function lifecycleAuthorityCompletionVerificationKeyPath(platform: string): string {
+  return platform === "darwin"
+    ? "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem"
+    : "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
+}
+export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = lifecycleAuthorityCompletionVerificationKeyPath(process.platform);
 const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
@@ -32,7 +37,7 @@ export interface LifecycleAuthorityHelperHost {
   lstatSync(file: string): { isSymbolicLink(): boolean; isFile(): boolean; uid: number; mode: number };
   accessSync(file: string, mode: number): void;
   openSync(file: string, flags: number): number;
-  fstatSync(descriptor: number): { isFile(): boolean; uid: number; mode: number };
+  fstatSync(descriptor: number): { isFile(): boolean; uid: number; mode: number; size?: number };
   closeSync(descriptor: number): void;
 }
 
@@ -95,23 +100,35 @@ export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
   return value;
 }
 
-function trustedCompletionVerificationKey() {
-  if (process.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
-  const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
+export function validateLifecycleAuthorityCompletionKeyInstallation(
+  keyFile: string,
+  host: LifecycleAuthorityHelperHost = lifecycleAuthorityHelperHost,
+): number {
+  if (host.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
   let cursor = path.parse(keyFile).root;
   for (const component of keyFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, component);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
+    let stat: ReturnType<LifecycleAuthorityHelperHost["lstatSync"]>;
+    try { stat = host.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
     if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
     if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
-    try { fs.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
+    try { host.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
     catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
   }
-  const descriptor = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const descriptor = host.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");
+    const stat = host.fstatSync(descriptor);
+    if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || typeof stat.size !== "number" || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");
+    return descriptor;
+  } catch (error) {
+    host.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function trustedCompletionVerificationKey() {
+  const descriptor = validateLifecycleAuthorityCompletionKeyInstallation(LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH);
+  try {
     const key = createPublicKey(fs.readFileSync(descriptor));
     if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") throw new Error("pinned lifecycle authority completion verification key must be an Ed25519 public key");
     return key;

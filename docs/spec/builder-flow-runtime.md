@@ -384,6 +384,15 @@ administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
+The coordinator's logical configuration root remains `/etc/kontourai/...` on every Unix host.
+Package-side completion verification selects the equivalent platform-canonical pinned path before
+performing its component checks: Darwin uses `/private/etc/kontourai/...` because the operating
+system defines `/etc` as a symlink to `/private/etc`, while other supported Unix platforms use
+`/etc/kontourai/...` directly. This mapping is fixed in package code, not configurable by a caller.
+Every component below the selected canonical root must still be root-owned, non-writable by the
+runtime user, group, and world, and free of symlinks. The key is opened with `O_NOFOLLOW`, validated
+as a bounded protected regular file, and read from that same descriptor before Ed25519 verification.
+
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
 a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
