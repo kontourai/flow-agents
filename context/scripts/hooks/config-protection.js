@@ -441,16 +441,50 @@ function checkCommandForBypass(command) {
  */
 // #379: the delivery/ arms carry an optional (?:[^/]+\/)? segment so redirects/tee to the
 // per-session path delivery/<slug>/trust.bundle (+ checkpoint) are caught, not just the flat path.
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+// #783 review F1: the protected shapes split into TWO classes with different scoping rules.
+// GLOBAL arms — shell profiles, .claude settings, lifecycle authority keys — are kill switches
+// with NO legitimate fixture use anywhere; a shape match alone blocks, exactly as before root
+// scoping existed. ARTIFACT arms — sidecar/delivery files — are scoped to declared artifact
+// roots so scratch-dir test fixtures stay authorable.
+const REDIRECT_GLOBAL_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/;
+const REDIRECT_ARTIFACT_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+
+function matchesRedirectGlobal(token) {
+  if (!token || typeof token !== 'string') return false;
+  return REDIRECT_GLOBAL_RE.test(token.replace(/\\/g, '/'));
+}
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
- * a protected kill-switch path.
+ * a protected kill-switch path of either class. Retained for compatibility.
  */
 function matchesRedirectProtected(token) {
   if (!token || typeof token !== 'string') return false;
   const norm = token.replace(/\\/g, '/');
-  return REDIRECT_PROTECTED_RE.test(norm);
+  return REDIRECT_GLOBAL_RE.test(norm) || REDIRECT_ARTIFACT_RE.test(norm);
+}
+
+/**
+ * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
+ * the shell resolves later relative paths against a cwd we did not model. Fail closed:
+ * commands that change directory get NO root-scoping relief on artifact-shaped targets.
+ */
+function commandChangesDirectory(command) {
+  return /(^|[;&|(]|\s)(cd|pushd|popd)(\s|$)/.test(String(command || ''));
+}
+
+/**
+ * Shared #783 decision for one redirect/tee/cp target token: GLOBAL shapes block on match
+ * alone; ARTIFACT shapes block unless provably outside every declared root (with the
+ * cd-in-command fail-closed guard).
+ */
+function protectedTargetBlocks(token, cwd, command) {
+  if (!token || typeof token !== 'string') return false;
+  const norm = token.replace(/\\/g, '/');
+  if (REDIRECT_GLOBAL_RE.test(norm)) return true;
+  if (!REDIRECT_ARTIFACT_RE.test(norm)) return false;
+  if (commandChangesDirectory(command)) return true;
+  return isCandidateWithinDeclaredRoots(token, cwd);
 }
 
 /**
@@ -481,7 +515,7 @@ function checkRedirectToProtected(command, cwd) {
       // Redirect operators: > and >>
       if ((t === '>' || t === '>>') && i + 1 < tokens.length) {
         const target = tokens[i + 1];
-        if (matchesRedirectProtected(target) && isCandidateWithinDeclaredRoots(target, cwd)) {
+        if (protectedTargetBlocks(target, cwd, command)) {
           return `shell redirect (${t}) to ${target}`;
         }
       }
@@ -495,7 +529,7 @@ function checkRedirectToProtected(command, cwd) {
           if (!pastDashDash && arg === '--') { pastDashDash = true; continue; }
           if (!pastDashDash && arg.startsWith('-')) continue; // skip tee flags (-a, --append, etc.)
           // Check every positional arg — no early break (tee writes to all of them).
-          if (matchesRedirectProtected(arg) && isCandidateWithinDeclaredRoots(arg, cwd)) return `tee to ${arg}`;
+          if (protectedTargetBlocks(arg, cwd, command)) return `tee to ${arg}`;
         }
       }
     }
@@ -559,6 +593,12 @@ const INTERPRETER_PROTECTED_TOKENS = [
   'delivery/trust.bundle', 'delivery/trust.checkpoint.json',
 ];
 
+// #783 review F1: tokens in this set are GLOBAL kill switches — blocked on segment match
+// alone, never root-scoped (see protectedTargetBlocks for the same split on redirect targets).
+const INTERPRETER_GLOBAL_TOKENS = new Set([
+  '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile', '.claude/settings.json',
+]);
+
 /**
  * checkInterpreterWriteToProtected(command, cwd): detect interpreter invocations
  * (see INTERPRETER_WRITE_RE) in segments that also contain a
@@ -589,9 +629,14 @@ function checkInterpreterWriteToProtected(command, cwd) {
     const interpMatch = INTERPRETER_WRITE_RE.exec(seg);
     if (!interpMatch) continue;
 
-    // Check for protected-path token literal in the same segment.
+    // Check for protected-path token literal in the same segment. #783 review F1: GLOBAL
+    // kill-switch tokens (shell profiles, .claude settings) block on the segment match alone —
+    // they have no fixture use and must not receive root-scoping relief. Artifact tokens go
+    // through the fail-closed resolver (bare basenames stay ambiguous → blocked; the
+    // cd-in-command guard applies as everywhere else).
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
-      if (seg.includes(token) && isCandidateWithinDeclaredRoots(token, cwd)) {
+      if (!seg.includes(token)) continue;
+      if (INTERPRETER_GLOBAL_TOKENS.has(token) || commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(token, cwd)) {
         return `${interpMatch[0].trim()} with protected path token "${token}"`;
       }
     }
@@ -652,7 +697,7 @@ function checkCopyMoveToProtected(command, cwd) {
     if (positional.length === 0) continue;
 
     const dest = positional[positional.length - 1];
-    if (matchesDeliveryProtected(dest) && isCandidateWithinDeclaredRoots(dest, cwd)) {
+    if (matchesDeliveryProtected(dest) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(dest, cwd))) {
       return `${cmd} to ${dest} (delivery-protected path)`;
     }
   }

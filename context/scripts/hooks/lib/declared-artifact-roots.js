@@ -81,6 +81,31 @@ function walkForGitMarker(startDir) {
   }
 }
 
+/**
+ * Canonicalize a path that may not exist yet: realpath the deepest EXISTING ancestor (resolving
+ * symlinks and platform aliases like macOS /var -> /private/var), then re-append the
+ * not-yet-existing remainder. Never throws; falls back to path.resolve on any error, which is
+ * safe because containment then degrades to the lexical comparison we had before -- combined
+ * with the fail-closed git-tree check below, degradation cannot ALLOW something canonicalization
+ * would have blocked inside a declared root whose spelling matches lexically.
+ */
+function canonicalize(p) {
+  try {
+    let dir = path.resolve(p);
+    const pending = [];
+    const root = path.parse(dir).root;
+    for (let depth = 0; depth < 64 && !fs.existsSync(dir); depth++) {
+      if (dir === root) break;
+      pending.unshift(path.basename(dir));
+      dir = path.dirname(dir);
+    }
+    const real = fs.realpathSync(dir);
+    return pending.length ? path.join(real, ...pending) : real;
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 function configuredWorkspaceRoots() {
   const raw = String(process.env[WORKSPACE_ROOTS_ENV] || '');
   if (!raw.trim()) return [];
@@ -129,8 +154,11 @@ function declaredArtifactRoots(cwd) {
 
   const roots = [];
   if (!ambiguous) {
-    for (const root of repoRoots) roots.push(...subRootsFor(root));
-    for (const extra of configuredWorkspaceRoots()) roots.push(...subRootsFor(extra));
+    // Canonicalize every base root (symlinks, macOS /var aliases) so containment compares
+    // canonical forms on both sides -- a root declared as /var/... must protect a candidate
+    // spelled /private/var/... and vice versa.
+    for (const root of repoRoots) roots.push(...subRootsFor(canonicalize(root)));
+    for (const extra of configuredWorkspaceRoots()) roots.push(...subRootsFor(canonicalize(extra)));
   }
 
   return { roots: [...new Set(roots)], ambiguous, repoRoots: [...repoRoots] };
@@ -148,7 +176,9 @@ function declaredArtifactRoots(cwd) {
  */
 function resolveCandidatePath(token, cwd) {
   if (typeof token !== 'string' || token.length === 0) return { path: null, ambiguous: true };
-  if (/\$\(|`|\$\{/.test(token)) return { path: null, ambiguous: true };
+  // Any shell expansion -- $(cmd), backticks, ${VAR}, or bare $VAR -- means we cannot know
+  // where the write lands. Fail closed.
+  if (/\$\(|`|\$\{|\$[A-Za-z_]/.test(token)) return { path: null, ambiguous: true };
 
   let expanded = token;
   if (expanded === '~' || expanded.startsWith('~/')) {
@@ -187,7 +217,14 @@ function isCandidateWithinDeclaredRoots(candidateToken, cwd) {
   if (!candidateToken) return true; // no isolable candidate -- fail closed
   const resolved = resolveCandidatePath(candidateToken, cwd);
   if (resolved.ambiguous || resolved.path === null) return true;
-  return isWithinAnyRoot(resolved.path, roots);
+  const canonical = canonicalize(resolved.path);
+  if (isWithinAnyRoot(canonical, roots)) return true;
+  // Fail closed for ANY git working tree: a flow-artifact-shaped path inside somebody's
+  // checkout (a sibling worktree, another agent's lane) is never a legitimate fixture target,
+  // even though that checkout is not among THIS cwd's declared roots. Scratch/temp dirs are
+  // not git trees, so the sanctioned fixture path is unaffected.
+  if (walkForGitMarker(path.dirname(canonical)) !== null) return true;
+  return false;
 }
 
 module.exports = {
