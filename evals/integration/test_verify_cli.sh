@@ -219,6 +219,21 @@ else
   _fail "ACTION-PATH: a trust-verify action.yml script ref does not resolve (wrong ../ depth?)"
 fi
 
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const hasInput=/missing-bundle-policy:\s*[\s\S]*?default: "required"/.test(action);
+  const passesPolicy=/--missing-bundle-policy "\$MISSING_BUNDLE_POLICY"/.test(action);
+  const cannotSuppressFailure=!/FAIL_ON_DIVERGENCE/.test(action)
+    && !/divergence detected \(fail-on-divergence=false/.test(action)
+    && /Deprecated compatibility input/.test(action);
+  process.exit(hasInput && passesPolicy && cannotSuppressFailure ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-POLICY: missing-bundle policy is explicit and no compatibility input can suppress a red anchor"
+else
+  _fail "ACTION-POLICY: trust-verify action can suppress failure or lacks the missing-bundle contract"
+fi
+
 # The action checkout does not arrive with node_modules. Its ESM status-derivation helper
 # resolves @kontourai/surface from the action repository, so the composite action must install
 # the action's own locked runtime dependencies rather than relying on the consumer repo.

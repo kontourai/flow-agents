@@ -73,11 +73,15 @@
  *   --commands <cmd,...> Canonical verify commands. Comma-separated.
  *                        May be specified multiple times (each appended).
  *   --repo-root <path>   Repository root. Default: TRUST_RECONCILE_REPO_ROOT or cwd.
+ *   --missing-bundle-policy <required|advisory>
+ *                        Missing current-bundle behavior. Default: required.
  *
  * Environment fallbacks:
  *   TRUST_RECONCILE_BUNDLE               Path to delivered bundle (same as --bundle).
  *   TRUST_RECONCILE_COMMANDS              Comma- or newline-separated canonical commands.
  *   TRUST_RECONCILE_REPO_ROOT             Repository root.
+ *   TRUST_RECONCILE_MISSING_BUNDLE_POLICY Missing current-bundle behavior; required
+ *                                         (default) or advisory.
  *   TRUST_RECONCILE_COMMAND_TIMEOUT_MS    Timeout (ms) for each canonical/manifest command
  *                                         run (Step 1 fresh-verify + on-demand manifest
  *                                         reconcile). Default: 600000 (10 min).
@@ -270,7 +274,7 @@ function deriveClaimStatuses(bundlePath, repoRoot) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { bundle: null, commands: [], repoRoot: null, manifest: null };
+  const args = { bundle: null, commands: [], repoRoot: null, manifest: null, missingBundlePolicy: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -283,6 +287,8 @@ function parseArgs(argv) {
       args.repoRoot = next; i++;
     } else if (arg === '--manifest' && next) {
       args.manifest = next; i++;
+    } else if (arg === '--missing-bundle-policy' && next) {
+      args.missingBundlePolicy = next; i++;
     }
   }
   return args;
@@ -1014,10 +1020,17 @@ function bundleAttestsThisChange(repoRoot, bundlePath, bundleJson, changeSha) {
  * @param {string|null}   [opts.repoRoot]  - Repo root path. null = TRUST_RECONCILE_REPO_ROOT env or cwd.
  * @returns {number} Exit code: 0 = pass, 1 = fail/divergence.
  */
-function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, manifest = null } = {}) {
+function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, manifest = null, missingBundlePolicy = null } = {}) {
   const resolvedRepoRoot = path.resolve(
     repoRoot || process.env.TRUST_RECONCILE_REPO_ROOT || process.cwd()
   );
+  const resolvedMissingBundlePolicy = (
+    missingBundlePolicy || process.env.TRUST_RECONCILE_MISSING_BUNDLE_POLICY || 'required'
+  ).trim().toLowerCase();
+  if (!['required', 'advisory'].includes(resolvedMissingBundlePolicy)) {
+    process.stderr.write(`[trust-reconcile] FAILED — unsupported missing-bundle policy '${resolvedMissingBundlePolicy}'; expected required or advisory.\n`);
+    return 1;
+  }
 
   // Resolve bundle path: explicit arg > env > auto-discovery > null. The staleness check
   // below (ADR 0022 addendum §2) applies ONLY to the auto-discovered case — an explicit
@@ -1114,6 +1127,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
     process.stdout.write(`[trust-reconcile] bundle: ${bundlePath}\n`);
   } else if (isPostMergeEvent) {
     process.stdout.write('[trust-reconcile] no bundle present — push event (post-merge run): Step 1 still runs; Step 2/delivery-DECLARED enforcement does not apply here (ADR 0022 addendum, part 4)\n');
+  } else if (resolvedMissingBundlePolicy === 'advisory') {
+    process.stdout.write('[trust-reconcile] no bundle present — advisory policy: Step 1 still runs; missing Step 2 evidence will be reported without failing if fresh verification passes\n');
   } else {
     process.stdout.write('[trust-reconcile] no bundle present — bundle-required by default (ADR 0022 §1); Step 1 still runs, then checking delivery/DECLARED for a Step-2 exemption\n');
   }
@@ -1338,6 +1353,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       ? 'inherited bundle does not attest this commit'
       : 'no bundle to reconcile';
     process.stdout.write(`[trust-reconcile] push event: ${detail} — skipping Step 2 (gating happened on the PR run)\n`);
+  } else if (resolvedMissingBundlePolicy === 'advisory') {
+    process.stdout.write('[trust-reconcile] ADVISORY: no current bundle to reconcile — fresh verification passed; Step 2 evidence is missing but does not fail this adoption mode\n');
   } else {
     // Bundle absent (ADR 0022 §1) — either never discovered, or discovered-but-stale and
     // nulled out above. The ONLY exemption is a well-formed, in-scope delivery/DECLARED
@@ -1410,6 +1427,7 @@ function main() {
     commands: args.commands,
     repoRoot: args.repoRoot || null,
     manifest: args.manifest || null,
+    missingBundlePolicy: args.missingBundlePolicy || null,
   }));
 }
 
