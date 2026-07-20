@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
 
 import { ChangeProviderError } from "../../build/src/cli/change-provider.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
@@ -112,8 +115,10 @@ test("GitHub adapter checks authentication and repository capability, recovers e
 });
 
 test("GitHub adapter discards hostile GH/proxy/socket/config environment while preserving supported token authentication", async () => {
-  const saved = Object.fromEntries(["GH_HOST", "GH_CONFIG_DIR", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_NO_UPDATE_NOTIFIER", "SSH_AUTH_SOCK"].map((name) => [name, process.env[name]]));
+  const saved = Object.fromEntries(["HOME", "GH_HOST", "GH_CONFIG_DIR", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_NO_UPDATE_NOTIFIER", "SSH_AUTH_SOCK"].map((name) => [name, process.env[name]]));
+  const hostileHome = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-hostile-home-"));
   Object.assign(process.env, {
+    HOME: hostileHome,
     GH_HOST: "attacker.invalid",
     GH_CONFIG_DIR: "/tmp/attacker-gh-config",
     HTTPS_PROXY: "http://attacker.invalid:8080",
@@ -128,7 +133,10 @@ test("GitHub adapter discards hostile GH/proxy/socket/config environment while p
     await provider(fake).createOrRecover(request());
     for (const call of fake.calls) {
       assert.equal(call.options.env.GH_HOST, "github.com");
+      assert.notEqual(call.options.env.HOME, hostileHome);
+      assert.equal(call.options.env.HOME, fs.realpathSync(os.userInfo({ encoding: "utf8" }).homedir));
       assert.notEqual(call.options.env.GH_CONFIG_DIR, "/tmp/attacker-gh-config");
+      assert.equal(call.options.env.GH_CONFIG_DIR.startsWith(hostileHome), false);
       for (const hostile of ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"]) assert.equal(Object.hasOwn(call.options.env, hostile), false, `${hostile} must not reach gh`);
       assert.equal(call.options.env.GH_TOKEN, "supported-token");
     }

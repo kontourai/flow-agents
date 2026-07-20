@@ -222,6 +222,9 @@ and re-reads canonical state.
 Trusted Git discards caller-provided `GIT_*` routing/configuration, disables system/global config,
 and requires a trusted executable and path ancestry. Session resolution rejects symlinked or
 non-directory `.kontourai`, `flow-agents`, and session ancestors before any runtime read or write.
+It records direct directory device/inode/type/realpath identities for the project, `.kontourai`,
+artifact root, and session, then revalidates them after unlocked provider I/O before a lock,
+receipt, evidence, or projection can write.
 It rejects any assignment transfer, gate movement, replay, configuration change, or
 request/result mismatch before persisting the bounded result. Only an authenticated,
 fresh provider observation can write `publish-change.result.json`; it contains the
@@ -255,6 +258,9 @@ query before reporting failure, so retry does not blindly duplicate a pull reque
 Every `gh` invocation is explicitly pinned to `github.com`; host/config/proxy/socket environment
 overrides are not inherited. Receipt recovery requires byte-identical result bytes and a matching
 manifest provider artifact-reference SHA-256 digest.
+Its HOME/config root comes from the validated OS account record rather than a caller environment
+variable. A committed receipt is checked before re-observation and is the sole recovery input,
+preserving its original observation timestamp.
 Multiple exact matches, a closed-but-unmerged/stale/wrong record, malformed output, unavailable
 provider, or failed authentication leaves the canonical gate unresolved and requires
 the public operation to be retried only after the underlying condition is corrected.

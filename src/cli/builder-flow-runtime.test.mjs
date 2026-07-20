@@ -2028,7 +2028,10 @@ test("Flow completion authenticates the exact issued publish-change observation 
 
   const transactionLock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
   let stableObservation;
+  let providerObservations = 0;
   const complete = createPublishChangeOperationCompleter(async (request) => {
+    providerObservations += 1;
+    if (providerObservations > 1) throw new Error("projection-crash recovery must not re-observe the provider");
     assert.equal(fs.existsSync(transactionLock), false, "provider observation starts without retaining the subject lock");
     await Promise.resolve();
     assert.equal(fs.existsSync(transactionLock), false, "provider observation settles outside the subject lock");
@@ -2052,6 +2055,7 @@ test("Flow completion authenticates the exact issued publish-change observation 
   fs.writeFileSync(path.join(session.sessionDir, "state.json"), Buffer.from(beforeProjection.state, "base64"));
   const recovered = await complete({ sessionDir: session.sessionDir, action });
   assert.equal(recovered.attached, false, "recovery detects the already-attached operation claim");
+  assert.equal(providerObservations, 1, "manifest-bound receipt recovery reuses exact bytes without provider I/O");
   assert.equal(snapshotFile(path.join(session.sessionDir, "state.json")), projectedBeforeRecovery, "recovery restores the Flow-owned projection");
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
@@ -2157,6 +2161,32 @@ test("publish-change rejects symlinked and forged persisted results before canon
     assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
+});
+
+test("publish-change rejects an artifact-parent swap after provider I/O before any external write", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-parent-swap");
+  const originalArtifactRoot = session.artifactRoot;
+  const externalArtifactRoot = path.join(session.projectRoot, "external-flow-agents-root");
+  let externalBefore;
+  const complete = createPublishChangeOperationCompleter((request) => {
+    fs.renameSync(originalArtifactRoot, externalArtifactRoot);
+    fs.symlinkSync(externalArtifactRoot, originalArtifactRoot, "dir");
+    externalBefore = snapshotTree(externalArtifactRoot);
+    return publishChangeObservation(request);
+  });
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  try {
+    await assert.rejects(
+      () => complete({ sessionDir: session.sessionDir, action }),
+      /artifactRoot.*changed during publish-change operation/,
+    );
+    assert.deepEqual(snapshotTree(externalArtifactRoot), externalBefore, "post-I/O rejection must not create a lock, receipt, evidence, or projection through the swapped parent");
+    assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  } finally {
+    fs.unlinkSync(originalArtifactRoot);
+    fs.renameSync(externalArtifactRoot, originalArtifactRoot);
+    await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+  }
 });
 
 test("stale publish-change actions fail before provider execution or canonical mutation", async (t) => {

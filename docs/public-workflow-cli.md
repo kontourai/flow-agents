@@ -273,6 +273,10 @@ Every GitHub invocation is explicitly pinned to `github.com` and the configured 
 an allowlisted environment and a revalidated trusted executable path. Recovery accepts only
 byte-identical result receipts, including their observation timestamp, and only when the matching
 canonical manifest claim references that receipt's exact SHA-256 digest.
+The GitHub home/config root is derived from the validated operating-system account record, never
+from caller-provided `HOME`, `GH_CONFIG_DIR`, or XDG routing. If a manifest-bound receipt already
+committed Flow but projection crashed, recovery reuses those exact receipt bytes without another
+provider request.
 
 The general Builder runtime is intentionally only a public wrapper and Flow/projection composition
 point. The dedicated publish-change runtime owns receipt persistence and recovery, temporary

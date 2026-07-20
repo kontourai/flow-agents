@@ -351,11 +351,12 @@ function trustedExecutableIdentity(candidate: string): TrustedExecutable {
  * into an artifact or an error.
  */
 function githubExecutionEnvironment(): NodeJS.ProcessEnv {
+  const home = trustedAccountHome();
   const env: NodeJS.ProcessEnv = {
     GH_HOST: "github.com",
-    GH_CONFIG_DIR: trustedGithubConfigDirectory(),
+    GH_CONFIG_DIR: trustedGithubConfigDirectory(home),
     PATH: process.env.PATH,
-    HOME: os.homedir(),
+    HOME: home,
     LANG: process.env.LANG,
     LC_ALL: process.env.LC_ALL,
   };
@@ -365,18 +366,45 @@ function githubExecutionEnvironment(): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
 }
 
-function trustedGithubConfigDirectory(): string {
+function trustedGithubConfigDirectory(home: string): string {
   // Match gh's platform default while refusing caller-controlled GH_CONFIG_DIR
   // and XDG overrides.  This preserves `gh auth login` credentials on macOS
   // without permitting a hostile process to choose another configuration root.
   const directory = process.platform === "darwin"
-    ? path.join(os.homedir(), "Library", "Application Support", "gh")
+    ? path.join(home, "Library", "Application Support", "gh")
     : process.platform === "win32"
-      ? path.join(os.homedir(), "AppData", "Local", "gh")
-      : path.join(os.homedir(), ".config", "gh");
+      ? path.join(home, "AppData", "Local", "gh")
+      : path.join(home, ".config", "gh");
   const existing = nearestExistingDirectory(directory);
   assertTrustedPathAncestors(existing, fs.realpathSync(existing));
   return directory;
+}
+
+/**
+ * `os.homedir()` follows HOME on POSIX.  Provider credentials must instead be
+ * rooted in the account database identity, then checked before we pass it to
+ * gh.  This intentionally has no dependency-injection seam: production and
+ * the hostile-environment regression exercise the same OS lookup.
+ */
+function trustedAccountHome(): string {
+  let home: string;
+  try { home = os.userInfo({ encoding: "utf8" }).homedir; } catch {
+    throw new ChangeProviderError("provider_unavailable", "trusted account home directory is unavailable");
+  }
+  if (!path.isAbsolute(home) || home !== home.trim() || /[\0\r\n]/u.test(home)) {
+    throw new ChangeProviderError("provider_unavailable", "trusted account home directory is unavailable");
+  }
+  try {
+    const stat = fs.lstatSync(home);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || !trustedOwner(stat.uid) || (process.platform !== "win32" && (stat.mode & 0o022) !== 0)) {
+      throw new Error("unsafe home");
+    }
+    const resolved = fs.realpathSync(home);
+    assertTrustedPathAncestors(home, resolved);
+    return resolved;
+  } catch {
+    throw new ChangeProviderError("provider_unavailable", "trusted account home directory is unavailable");
+  }
 }
 
 function nearestExistingDirectory(candidate: string): string {

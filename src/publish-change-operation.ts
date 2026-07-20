@@ -39,9 +39,11 @@ type SessionContext = {
  */
 export type PublishChangeOperationDependencies<Result, Run> = {
   resolveSessionContext: (sessionDir: string) => SessionContext;
+  /** Revalidate the captured direct-directory identities before any mutation. */
+  assertStableContext: (context: SessionContext) => void;
   currentAction: (context: SessionContext, intent: PublishChangeIntent) => Promise<IssuedPublishChangeAction>;
   assertTrustedHead: (context: SessionContext, action: IssuedPublishChangeAction) => void;
-  hasCommittedReceipt: (context: SessionContext, action: IssuedPublishChangeAction) => Promise<boolean>;
+  readCommittedReceipt: (context: SessionContext, action: IssuedPublishChangeAction) => Promise<AuthenticatedPublishChangeObservation | null>;
   recoverCommitted: (context: SessionContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation) => Promise<Result | null>;
   persistResult: (context: SessionContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation) => { sha256: string };
   advanceGate: (context: SessionContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, sha256: string) => Promise<Run>;
@@ -80,16 +82,33 @@ export async function completePublishChangeOperation<Result, Run>(
 ): Promise<Result> {
   const context = dependencies.resolveSessionContext(input.sessionDir);
   const issued = assertIssuedPublishChangeAction(input.action);
-  await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
-    await assertCurrentOrRecoverable(context, issued, dependencies);
+  const committed = await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    dependencies.assertStableContext(context);
+    return await committedReceiptOrCurrent(context, issued, dependencies);
   });
+  if (committed) {
+    return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+      dependencies.assertStableContext(context);
+      const recovered = await dependencies.recoverCommitted(context, issued, committed);
+      if (!recovered) throw dependencies.operationStaleError();
+      return recovered;
+    });
+  }
   const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
+  // Do this before attempting to acquire a post-I/O lock: otherwise a renamed
+  // artifact parent could make the lock directory itself an external write.
+  dependencies.assertStableContext(context);
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    dependencies.assertStableContext(context);
     // Provider I/O deliberately happened outside this lock. Bind the observed
     // record back to the currently trusted local ref while Flow owns commit.
     dependencies.assertTrustedHead(context, issued);
-    const recovery = await recoverIfCommitted(context, issued, observation, dependencies);
-    if (recovery) return recovery;
+    const recoveryReceipt = await dependencies.readCommittedReceipt(context, issued);
+    if (recoveryReceipt) {
+      const recovery = await dependencies.recoverCommitted(context, issued, recoveryReceipt);
+      if (!recovery) throw dependencies.operationStaleError();
+      return recovery;
+    }
     const current = await dependencies.currentAction(context, intentFromAction(issued));
     if (!isDeepStrictEqual(current, issued)) throw dependencies.operationStaleError();
     const persisted = dependencies.persistResult(context, issued, observation);
@@ -98,18 +117,12 @@ export async function completePublishChangeOperation<Result, Run>(
   });
 }
 
-async function assertCurrentOrRecoverable<Result, Run>(context: SessionContext, issued: IssuedPublishChangeAction, dependencies: PublishChangeOperationDependencies<Result, Run>): Promise<void> {
-  try {
-    const current = await dependencies.currentAction(context, intentFromAction(issued));
-    if (!isDeepStrictEqual(current, issued)) throw dependencies.operationStaleError();
-  } catch (error) {
-    if (!await dependencies.hasCommittedReceipt(context, issued)) throw error;
-  }
-}
-
-async function recoverIfCommitted<Result, Run>(context: SessionContext, issued: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, dependencies: PublishChangeOperationDependencies<Result, Run>): Promise<Result | null> {
-  if (!await dependencies.hasCommittedReceipt(context, issued)) return null;
-  return await dependencies.recoverCommitted(context, issued, observation);
+async function committedReceiptOrCurrent<Result, Run>(context: SessionContext, issued: IssuedPublishChangeAction, dependencies: PublishChangeOperationDependencies<Result, Run>): Promise<AuthenticatedPublishChangeObservation | null> {
+  const committed = await dependencies.readCommittedReceipt(context, issued);
+  if (committed) return committed;
+  const current = await dependencies.currentAction(context, intentFromAction(issued));
+  if (!isDeepStrictEqual(current, issued)) throw dependencies.operationStaleError();
+  return null;
 }
 
 function intentFromAction(action: IssuedPublishChangeAction): PublishChangeIntent {

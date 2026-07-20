@@ -81,7 +81,11 @@ type SessionContext = {
   slug: string;
   stateFile: string;
   bundleFile: string;
+  ancestry: SessionAncestry;
 };
+
+type DirectoryIdentity = Readonly<{ path: string; realpath: string; device: number; inode: number }>;
+type SessionAncestry = Readonly<{ projectRoot: DirectoryIdentity; kontouraiRoot: DirectoryIdentity; artifactRoot: DirectoryIdentity; sessionDir: DirectoryIdentity }>;
 
 type SidecarSnapshot = {
   state: AnyRecord;
@@ -191,6 +195,7 @@ function publishChangeFacade() {
     },
     project: projectPublishChange,
     assertSafeFile,
+    assertStableContext: assertStableSessionContext,
     pathExistsNoFollow,
     error: (field, message) => new BuilderBuildRunInputError(field, message),
   });
@@ -670,6 +675,7 @@ function resolveSessionContext(sessionDirInput: string): SessionContext {
     slug,
     stateFile,
     bundleFile: path.join(sessionDir, "trust.bundle"),
+    ancestry: captureSessionAncestry(projectRoot, requestedKontouraiRoot, artifactRoot, sessionDir),
   };
 }
 
@@ -685,6 +691,33 @@ function assertArtifactSessionAncestors(projectRoot: string, kontouraiRoot: stri
     const realDirectory = fs.realpathSync(directory);
     if (!pathIsWithin(realDirectory, realProjectRoot)) {
       throw new BuilderBuildRunInputError(field, "must remain within the canonical project root");
+    }
+  }
+}
+
+function captureSessionAncestry(projectRoot: string, kontouraiRoot: string, artifactRoot: string, sessionDir: string): SessionAncestry {
+  return Object.freeze({
+    projectRoot: captureDirectoryIdentity(projectRoot, "project root"),
+    kontouraiRoot: captureDirectoryIdentity(kontouraiRoot, ".kontourai directory"),
+    artifactRoot: captureDirectoryIdentity(artifactRoot, "flow-agents artifact root"),
+    sessionDir: captureDirectoryIdentity(sessionDir, "sessionDir"),
+  });
+}
+
+function captureDirectoryIdentity(directory: string, field: string): DirectoryIdentity {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new BuilderBuildRunInputError(field, "must be a non-symlink directory");
+  return Object.freeze({ path: directory, realpath: fs.realpathSync(directory), device: stat.dev, inode: stat.ino });
+}
+
+function assertStableSessionContext(context: SessionContext): void {
+  for (const [field, identity] of Object.entries(context.ancestry)) {
+    let current: DirectoryIdentity;
+    try { current = captureDirectoryIdentity(identity.path, field); } catch {
+      throw new BuilderBuildRunInputError(field, "changed during publish-change operation");
+    }
+    if (current.realpath !== identity.realpath || current.device !== identity.device || current.inode !== identity.inode) {
+      throw new BuilderBuildRunInputError(field, "changed during publish-change operation");
     }
   }
 }

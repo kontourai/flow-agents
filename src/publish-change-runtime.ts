@@ -12,7 +12,7 @@ import type {
   IssuedPublishChangeAction,
   PublishChangeIntent,
 } from "./publish-change-operation-authority.js";
-import { issuePublishChangeAction } from "./publish-change-operation-authority.js";
+import { assertAuthenticatedPublishChangeObservation, issuePublishChangeAction } from "./publish-change-operation-authority.js";
 import {
   completePublishChangeOperation,
   executePublishChangeOperation,
@@ -37,6 +37,7 @@ export type PublishChangeRuntimeDependencies<Result, Run> = {
   assertAdvanced: (run: Run, action: IssuedPublishChangeAction) => void;
   project: (context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, run: Run, attached: boolean, operation: string) => Result;
   assertSafeFile: (file: string, root: string, field: string) => void;
+  assertStableContext: (context: PublishChangeRuntimeContext) => void;
   pathExistsNoFollow: (file: string) => boolean;
   error: (field: string, message: string) => Error;
 };
@@ -52,6 +53,7 @@ export type PublishChangeFacadeDependencies<Context extends PublishChangeRuntime
   assertAdvanced: (run: Run, action: IssuedPublishChangeAction) => void;
   project: (context: Context, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, run: Run, attached: boolean, operation: string) => Result;
   assertSafeFile: (file: string, root: string, field: string) => void;
+  assertStableContext: (context: Context) => void;
   pathExistsNoFollow: (file: string) => boolean;
   error: (field: string, message: string) => Error;
 };
@@ -74,6 +76,7 @@ export function createPublishChangeFacade<Context extends PublishChangeRuntimeCo
       assertAdvanced: dependencies.assertAdvanced,
       project: (context, action, observation, run, attached, operation) => dependencies.project(context as Context, action, observation, run, attached, operation),
       assertSafeFile: dependencies.assertSafeFile,
+      assertStableContext: (context) => dependencies.assertStableContext(context as Context),
       pathExistsNoFollow: dependencies.pathExistsNoFollow,
       error: dependencies.error,
     }),
@@ -88,10 +91,11 @@ export function createPublishChangeFacade<Context extends PublishChangeRuntimeCo
 
 export function createPublishChangeRuntimeDependencies<Result, Run>(
   dependencies: PublishChangeRuntimeDependencies<Result, Run>,
-): Pick<PublishChangeOperationDependencies<Result, Run>, "assertTrustedHead" | "hasCommittedReceipt" | "recoverCommitted" | "persistResult" | "advanceGate" | "projectCompleted"> {
+): Pick<PublishChangeOperationDependencies<Result, Run>, "assertStableContext" | "assertTrustedHead" | "readCommittedReceipt" | "recoverCommitted" | "persistResult" | "advanceGate" | "projectCompleted"> {
   return {
+    assertStableContext: (context) => dependencies.assertStableContext(context as PublishChangeRuntimeContext),
     assertTrustedHead: (context, action) => assertTrustedHead(context as PublishChangeRuntimeContext, action, dependencies),
-    hasCommittedReceipt: (context, action) => hasCommittedReceipt(context as PublishChangeRuntimeContext, action, dependencies),
+    readCommittedReceipt: (context, action) => readCommittedReceipt(context as PublishChangeRuntimeContext, action, dependencies),
     recoverCommitted: (context, action, observation) => recoverCommitted(context as PublishChangeRuntimeContext, action, observation, dependencies),
     persistResult: (context, action, observation) => persistResult(context as PublishChangeRuntimeContext, action, observation, dependencies),
     advanceGate: (context, action, observation, sha256) => advanceGate(context as PublishChangeRuntimeContext, action, observation, sha256, dependencies),
@@ -182,16 +186,21 @@ function readResult<Result, Run>(context: PublishChangeRuntimeContext, dependenc
   } finally { fs.closeSync(descriptor); }
 }
 
-async function hasCommittedReceipt<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<boolean> {
+async function readCommittedReceipt<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<AuthenticatedPublishChangeObservation | null> {
   const bytes = readResult(context, dependencies);
-  if (!bytes) return false;
-  try { if ((JSON.parse(bytes.toString("utf8")) as AnyRecord).operation_action_id !== action.action_id) return false; } catch { return false; }
+  if (!bytes) return null;
+  let persisted: AnyRecord;
+  try { persisted = JSON.parse(bytes.toString("utf8")) as AnyRecord; } catch { return null; }
+  if (persisted.operation_action_id !== action.action_id) return null;
   const resultSha256 = createHash("sha256").update(bytes).digest("hex");
   const run = await dependencies.loadRun(context);
-  return dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+  const manifestBound = dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority" && entry.authority_trace === action.action_id
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
     && manifestReferencesResultDigest(entry, resultSha256));
+  if (!manifestBound) return null;
+  const { operation_action_id: _operationActionId, ...observation } = persisted;
+  try { return assertAuthenticatedPublishChangeObservation(action, observation); } catch { return null; }
 }
 
 async function recoverCommitted<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<Result | null> {
@@ -203,7 +212,17 @@ async function recoverCommitted<Result, Run>(context: PublishChangeRuntimeContex
     && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
     && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
       && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`));
-  return attached ? dependencies.project(context, action, observation, run, false, "publish-change recovery projection") : null;
+  return attached && manifestReferencesResultDigestForBytes(run, dependencies, action, bytes)
+    ? dependencies.project(context, action, observation, run, false, "publish-change recovery projection")
+    : null;
+}
+
+function manifestReferencesResultDigestForBytes<Result, Run>(run: Run, dependencies: PublishChangeRuntimeDependencies<Result, Run>, action: IssuedPublishChangeAction, bytes: Buffer): boolean {
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  return dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+    && entry.producer === "publish-change-operation-authority" && entry.authority_trace === action.action_id
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
+    && manifestReferencesResultDigest(entry, digest));
 }
 
 function manifestReferencesResultDigest(entry: AnyRecord, resultSha256: string): boolean {

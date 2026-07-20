@@ -563,6 +563,9 @@ repository/base/head/SHA/title/body/draft match are verified before Flow records
 Every invocation is pinned to `github.com` with an allowlisted environment, so caller-provided
 GH host/config/proxy/socket overrides cannot redirect it. Recovery requires byte-identical result
 receipt bytes and the matching manifest SHA-256 provider-artifact reference.
+The authenticated `gh` home/config root comes from the validated operating-system account record,
+not caller `HOME` or configuration routing. A projection-crash recovery uses its already committed
+receipt without re-contacting the provider; a new operation still requires a fresh observation.
 The adapter recovers one matching published pull request before creation and after an ambiguous
 create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
 Open records support the normal path; merged records support reconciliation after provider work
