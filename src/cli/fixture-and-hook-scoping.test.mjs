@@ -253,6 +253,35 @@ test("F4 variant: a symlink hiding the artifact-root spelling from the token sti
   }
 });
 
+test("F1 second-pass variants: case-folded direct-write patterns and cp/mv delivery paths", () => {
+  assert.ok(hook.checkProtectedPathPattern(".KONTOURAI/FLOW-AGENTS/slug/STATE.JSON"));
+  assert.ok(hook.checkProtectedPathPattern([".CLAUDE/", "SETTINGS.LOCAL.JSON"].join("")));
+  const ws = path.join(packageRoot, "DELIVERY", "trust.bundle");
+  assert.ok(hook.checkCopyMoveToProtected(`cp forged.json ${ws}`, packageRoot));
+});
+
+test("F4 second-pass variants: laundered per-actor current and cp/mv destinations block", () => {
+  const scratch = tmpdir();
+  const workspace = path.join(tmpdir(), "ws");
+  const artifactRoot = path.join(workspace, ".kontourai", "flow-agents");
+  const deliveryRoot = path.join(workspace, "delivery");
+  fs.mkdirSync(artifactRoot, { recursive: true });
+  fs.mkdirSync(deliveryRoot, { recursive: true });
+  const hop = path.join(scratch, "hop");
+  const deliveryHop = path.join(scratch, "delivery-hop");
+  fs.symlinkSync(artifactRoot, hop);
+  fs.symlinkSync(deliveryRoot, deliveryHop);
+  const origEnv = process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+  process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
+  try {
+    assert.ok(hook.checkRedirectToProtected(`echo x > ${path.join(hop, "current", "actor.json")}`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`cp forged.json ${path.join(deliveryHop, "trust.bundle")}`, scratch));
+  } finally {
+    if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+    else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
+  }
+});
+
 test("JS/TS twin parity over a shared case table", async () => {
   const tsLib = await import(path.join(packageRoot, "build", "src", "lib", "declared-artifact-roots.js"));
   const jsLib = require_(path.join(packageRoot, "scripts", "hooks", "lib", "declared-artifact-roots.js"));
