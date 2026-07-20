@@ -273,6 +273,48 @@ test("public critique-chain regeneration rejects ambiguous legacy supersession b
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
 });
 
+test("critique graph and regeneration reject a nominal PASS resolver without clean lanes and reviewed artifacts", async () => {
+  const session = makeSession("malformed-pass-critique-resolver");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const capturedAt = Date.now();
+  const prior = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-resolver-prior");
+  prior.claim.value = "fail";
+  prior.claim.status = "disputed";
+  prior.claim.metadata.lanes = [{ id: "security-review", status: "fail" }];
+  prior.claim.metadata.findings = [];
+  const resolving = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "malformed-resolver-current");
+  resolving.claim.metadata.lanes = [{ id: "security-review", status: "fail" }];
+  resolving.claim.metadata.review_target.artifacts = [];
+  appendCritiqueAfter(prior, resolving);
+  prior.claim.metadata.superseded_by = resolving.claim.metadata.critique_record_id;
+  prior.claim.metadata.critique_resolution = {
+    schema_version: "1.0",
+    kind: "same-reviewer-recheck",
+    prior_record_id: prior.claim.metadata.critique_record_id,
+    resolving_record_id: resolving.claim.metadata.critique_record_id,
+    resolver: resolving.claim.metadata.reviewer,
+    resolved_lane_ids: ["security-review"],
+    resolved_finding_ids: [],
+    resolved_at: resolving.claim.metadata.reviewed_at,
+  };
+  const graph = validateCritiqueResolutionGraph([prior.claim, resolving.claim], SUBJECT, [], session.projectRoot);
+  assert.equal(graph.valid, false);
+  assert.ok(graph.errors.includes("critique resolver must be a current verified substantive PASS"));
+
+  const preChainPrior = asPreChainCritique(prior, "pre-chain-prior");
+  const preChainResolving = asPreChainCritique(resolving, "pre-chain-resolving");
+  preChainPrior.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  delete preChainPrior.claim.metadata.critique_resolution;
+  writeBundle(session.sessionDir, [preChainPrior, preChainResolving]);
+  const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /requires one unique later same-reviewer clean recheck/,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+});
+
 test("public critique-chain regeneration anchors an unresolved FAIL so later review can proceed", async () => {
   const session = makeSession("unresolved-fail-critique-chain-regeneration");
   claimAmbientSessionAssignment(session);

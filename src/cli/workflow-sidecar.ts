@@ -31,7 +31,7 @@ import {
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, isSubstantivePassingCritiqueRecord, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 
 type AnyObj = Record<string, any>;
 
@@ -3787,8 +3787,7 @@ async function regenerateCritiqueChain(p: ReturnType<typeof parseArgs>): Promise
     const candidates = critiques.filter((candidate) => candidate !== prior
       && candidate.id === prior.id
       && candidate.reviewer === prior.reviewer
-      && candidate.verdict === "pass"
-      && candidate.claim_status === "verified"
+      && isSubstantivePassingCritiqueRecord(candidate)
       && candidate.critique_sequence > prior.critique_sequence);
     if (candidates.length !== 1) {
       die(`regenerate-critique-chain requires one unique later same-reviewer clean recheck for legacy critique ${String(prior.critique_record_id)}`);

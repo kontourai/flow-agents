@@ -97,6 +97,22 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
+export function isSubstantivePassingCritiqueRecord(record: AnyRecord): boolean {
+  const lanes = Array.isArray(record.lanes) ? record.lanes : [];
+  const findings = Array.isArray(record.findings) ? record.findings : [];
+  const artifacts = Array.isArray(record.review_target?.artifacts) ? record.review_target.artifacts : [];
+  return record.verdict === "pass"
+    && record.claim_status === "verified"
+    && !record.superseded_by
+    && lanes.length > 0
+    && lanes.every((lane: AnyRecord) => lane?.status === "pass" || lane?.verdict === "pass")
+    && !findings.some((finding: AnyRecord) => finding?.status === "open")
+    && artifacts.length > 0
+    && artifacts.every((artifact: AnyRecord) => typeof artifact?.file === "string"
+      && artifact.file.length > 0
+      && HASH_RE.test(String(artifact.sha256)));
+}
+
 type GraphState = {
   records: AnyRecord[]; byId: Map<string, AnyRecord>; byHash: Map<string, AnyRecord>;
   errors: string[]; referencedEventIds: Set<string>; expectedSubject?: string;
@@ -137,7 +153,7 @@ function validateResolution(prior: AnyRecord, state: GraphState): void {
   const resolving = state.byId.get(resolution.resolving_record_id);
   if (!resolving || prior.superseded_by !== resolution.resolving_record_id || resolution.prior_record_id !== prior.critique_record_id) { state.errors.push(`critique record ${String(prior.critique_record_id)} has a missing or mismatched resolver`); return; }
   if (resolving === prior || resolving.critique_sequence <= prior.critique_sequence) state.errors.push("critique resolution graph is circular or not forward ordered");
-  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) state.errors.push("critique resolver must be a current verified PASS");
+  if (!isSubstantivePassingCritiqueRecord(resolving)) state.errors.push("critique resolver must be a current verified substantive PASS");
   if (resolution.resolver !== resolving.reviewer || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer) || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer) || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) state.errors.push("critique resolution actor binding is invalid");
   if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) state.errors.push("critique resolution crosses workflow subjects");
   validateResolutionSnapshots(prior, resolving, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
