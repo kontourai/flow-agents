@@ -32,7 +32,7 @@ install_sudoers_rule() {
   sudoers_stage="$sudoers_file.$$"
   umask 077
   {
-    echo "Defaults!$target env_reset,secure_path=/usr/sbin:/usr/bin:/sbin:/bin"
+    echo "Defaults!$target env_reset,secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     echo "%$operator_group ALL=(root) NOPASSWD: $target \"\""
   } > "$sudoers_stage"
   chown root:wheel "$sudoers_stage" 2>/dev/null || chown root:root "$sudoers_stage"

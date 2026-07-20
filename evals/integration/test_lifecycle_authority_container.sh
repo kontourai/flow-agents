@@ -14,7 +14,12 @@ docker run --rm -v "$ROOT_DIR:/src:ro" node:22-bookworm bash -lc '
   test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
   visudo -cf /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1 >/dev/null
   stat -c "%U %a" /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 | grep -qx "root 755"
-  su -s /bin/bash node -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 </dev/null" 2>&1 | grep -q "exactly one JSON request line"
+  set +e
+  helper_output=$(su -s /bin/bash node -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 </dev/null" 2>&1)
+  helper_status=$?
+  set -e
+  test "$helper_status" -ne 0
+  printf "%s" "$helper_output" | grep -q "exactly one JSON request line"
   if su -s /bin/bash node -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 unexpected </dev/null"; then exit 1; fi
   if su -s /bin/bash nobody -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 </dev/null"; then exit 1; fi
   echo "PASS: root-owned helper, sudoers exact-command rule, and non-root operator boundary"
