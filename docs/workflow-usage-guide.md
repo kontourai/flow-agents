@@ -223,6 +223,12 @@ Use `review-work` after implementation and before verification. Review is critiq
 
 Review checks quality, security triggers, architecture fit, project standards, risky assumptions, and maintainability. In the active `verify` step, `review-work` owns `clean-critique` through public `workflow critique` in `trust.bundle`. A clean review does not prove the feature works; it only says the implementation has no open reviewer findings that block the next gate.
 
+If implementation bytes change after a clean review, that passing critique stays
+in the audit history but no longer authorizes verification of the current
+workspace. Record a new distinct-actor clean critique for the current snapshot.
+Historical open or disputed critiques continue to block; a newer reviewer
+cannot erase them by supplying a clean pass.
+
 Example prompt:
 
 ```text

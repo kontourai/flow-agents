@@ -1074,11 +1074,11 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   // disputed finding.
   const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
-  const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
+  const liveClaimIds = new Set(graph.live.map((record) => record.source_claim_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
-    && liveRecordIds.has(claim.metadata.critique_record_id));
+    && liveClaimIds.has(claim.id));
   if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
   }

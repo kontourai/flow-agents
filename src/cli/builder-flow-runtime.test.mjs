@@ -506,6 +506,15 @@ function appendCritiqueAfter(prior, current) {
   return restampCritiqueClaim(current);
 }
 
+function asPreChainCritique(entry, suffix) {
+  const copy = withIdentitySuffix(entry, suffix);
+  delete copy.claim.metadata.critique_sequence;
+  delete copy.claim.metadata.critique_predecessor_hash;
+  delete copy.claim.metadata.critique_record_hash;
+  delete copy.claim.metadata.critique_record_id;
+  return copy;
+}
+
 function writeBundle(sessionDir, entries) {
   writeJson(path.join(sessionDir, "trust.bundle"), {
     schemaVersion: 5,
@@ -2280,14 +2289,18 @@ test("stale passing critique remains audit history when a current exact-workspac
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const legacy = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "legacy-same-reviewer-pass");
+  legacy.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "stale-other-reviewer-pass");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
-  appendCritiqueAfter(stale, current);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 2).toISOString());
+  const current = asPreChainCritique(currentEntry, "current-pass");
 
   const result = await writeAndSync(session, [
     bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    legacy,
     stale,
     current,
     criterion,
@@ -2306,12 +2319,13 @@ test("stale open critique remains blocking even when a different reviewer suppli
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-open");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.findings = [{ id: "old-open-finding", status: "open", summary: "Must not be buried." }];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
-  appendCritiqueAfter(stale, current);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = asPreChainCritique(currentEntry, "current-after-open");
 
   await assert.rejects(
     () => writeAndSync(session, [
@@ -2334,12 +2348,13 @@ test("malformed stale passing critique remains blocking when a current clean cri
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-stale");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.review_target.workspace_snapshot.files = [];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
-  appendCritiqueAfter(stale, current);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = asPreChainCritique(currentEntry, "current-after-malformed");
 
   await assert.rejects(
     () => writeAndSync(session, [

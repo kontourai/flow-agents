@@ -72,6 +72,14 @@ route-back attempt. Failed evidence may still synchronize immediately when it
 carries a route reason declared by the gate; a disputed report-only critique is
 not itself a routed gate decision and remains pending.
 
+At the verify gate, every live non-passing critique or open finding remains
+blocking, independent of reviewer or workspace age. Substantive passing
+critiques authorize only the implementation workspace they reviewed: an older
+clean pass remains audit history after the workspace changes, while at least
+one distinct-actor clean critique must match the current workspace exactly and
+retain matching reviewed-artifact digests. This current-snapshot selection does
+not supersede another reviewer's record and cannot bury a disputed finding.
+
 Attachments carry the exact expectation ids selected from the current bundle.
 Digest idempotence applies only while an unsuperseded attachment for that gate
 and expectation set remains live. After route-back, claims must be current for
