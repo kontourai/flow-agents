@@ -313,8 +313,8 @@ export type {
 
 // Pure serialization contract used by external lifecycle authorities when
 // signing requests. This does not load, create, or mutate a Flow run.
-export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-export type { BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
+export type { BuilderLifecycleAuthorization, CritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
 
 export {
   CAPABILITIES,

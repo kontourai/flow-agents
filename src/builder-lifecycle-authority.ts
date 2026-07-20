@@ -21,6 +21,63 @@ export interface BuilderLifecycleAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
+export interface CritiqueResolutionAuthorization {
+  schema_version: "1.0";
+  operation: "resolve-critique";
+  run_id: string;
+  subject: string;
+  prior_bundle_sha256: string;
+  prior_record_id: string;
+  prior_record_hash: string;
+  resolving_record_id: string;
+  resolving_record_hash: string;
+  expected_resolver: string;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization;
+
+export function critiqueResolutionAuthorizationPayload(value: Omit<CritiqueResolutionAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedCritiqueResolutionAuthorization(fields: Omit<CritiqueResolutionAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<CritiqueResolutionAuthorization, "signature">; signingPayload: string;
+} {
+  const unsigned = { schema_version: "1.0", operation: "resolve-critique", ...fields } as const;
+  return { unsigned, signingPayload: critiqueResolutionAuthorizationPayload(unsigned) };
+}
+
+export function loadCritiqueResolutionAuthorization(fileInput: string, expected: {
+  projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
+  priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
+  resolvingRecordHash: string; now?: string; allowExpired?: boolean;
+}): CritiqueResolutionAuthorization {
+  const value = readRegularJson(fileInput, "critique resolution authorization", true);
+  const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at", "signature"];
+  assertExactKeys(value, fields, "authorization");
+  if (value.schema_version !== "1.0" || value.operation !== "resolve-critique") throw new Error("critique resolution authorization identity is invalid");
+  const exact: Array<[keyof typeof expected, string]> = [["runId", "run_id"], ["subject", "subject"], ["priorBundleSha256", "prior_bundle_sha256"], ["priorRecordId", "prior_record_id"], ["priorRecordHash", "prior_record_hash"], ["resolvingRecordId", "resolving_record_id"], ["resolvingRecordHash", "resolving_record_hash"]];
+  for (const [expectedKey, field] of exact) if (value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the current resolution preimage`);
+  for (const field of fields.slice(2, 12)) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 256);
+  for (const field of ["prior_bundle_sha256", "prior_record_hash", "resolving_record_hash"]) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`critique resolution authorization ${field} must be a SHA-256 digest`);
+  }
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt) throw new Error("critique resolution authorization expires before it was requested");
+  if (now > expiresAt && !expected.allowExpired) throw new Error("critique resolution authorization is expired");
+  if (requestedAt > now + 5 * 60_000) throw new Error("critique resolution authorization request time is in the future");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(fields.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionAuthorization;
+  verifySignedAuthorization(authorization, lifecycleAuthorityKeysPath(expected.projectRoot), critiqueResolutionAuthorizationPayload);
+  return authorization;
+}
+
 export function lifecycleAuthorityKeysPath(projectRoot: string): string {
   return path.join(durableFlowAgentsRoot(projectRoot), "lifecycle-authority-keys.json");
 }
@@ -114,12 +171,12 @@ export function buildUnsignedLifecycleAuthorization(fields: {
   return { unsigned, signingPayload: builderLifecycleAuthorizationPayload(unsigned) };
 }
 
-export function assertAuthorizationUnused(artifactRoot: string, authorization: BuilderLifecycleAuthorization): void {
+export function assertAuthorizationUnused(artifactRoot: string, authorization: SignedBuilderAuthorization): void {
   if (!readAuthorizationConsumption(artifactRoot, authorization)) return;
   throw new Error("lifecycle authorization nonce has already been consumed");
 }
 
-export function readAuthorizationConsumption(artifactRoot: string, authorization: BuilderLifecycleAuthorization): JsonRecord | null {
+export function readAuthorizationConsumption(artifactRoot: string, authorization: SignedBuilderAuthorization): JsonRecord | null {
   const file = consumedAuthorizationPath(artifactRoot, authorization);
   if (!pathExistsNoFollow(file)) return null;
   const record = readRegularJson(file, "consumed lifecycle authorization record");
@@ -133,7 +190,7 @@ export function readAuthorizationConsumption(artifactRoot: string, authorization
   return record;
 }
 
-export function recordAuthorizationConsumed(artifactRoot: string, authorization: BuilderLifecycleAuthorization, at = new Date().toISOString()): void {
+export function recordAuthorizationConsumed(artifactRoot: string, authorization: SignedBuilderAuthorization, at = new Date().toISOString()): void {
   const file = consumedAuthorizationPath(artifactRoot, authorization);
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true });
@@ -156,16 +213,20 @@ export function recordAuthorizationConsumed(artifactRoot: string, authorization:
   }
 }
 
-function consumedAuthorizationPath(artifactRoot: string, authorization: BuilderLifecycleAuthorization): string {
+function consumedAuthorizationPath(artifactRoot: string, authorization: SignedBuilderAuthorization): string {
   const integrityKey = createHash("sha256").update(authorization.run_id).update("\0").update(authorization.nonce).digest("hex");
   return path.join(artifactRoot, "lifecycle-authority", "consumed", `${integrityKey}.json`);
 }
 
-function authorizationDigest(authorization: BuilderLifecycleAuthorization): string {
+export function authorizationDigest(authorization: SignedBuilderAuthorization): string {
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
 function verifyAuthorizationSignature(authorization: BuilderLifecycleAuthorization, keysFile: string): void {
+  verifySignedAuthorization(authorization, keysFile, builderLifecycleAuthorizationPayload);
+}
+
+function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, keysFile: string, payload: (value: Omit<T, "signature">) => string): void {
   const registry = readRegularJson(keysFile, "lifecycle authority key registry", true);
   assertExactKeys(registry, ["schema_version", "keys"], "key registry");
   if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
@@ -176,7 +237,7 @@ function verifyAuthorizationSignature(authorization: BuilderLifecycleAuthorizati
   const { signature: _signature, ...unsigned } = authorization;
   let verified = false;
   try {
-    verified = verify(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), createPublicKey(key.public_key_pem), Buffer.from(authorization.signature.value, "base64"));
+    verified = verify(null, Buffer.from(payload(unsigned as Omit<T, "signature">)), createPublicKey(key.public_key_pem), Buffer.from(authorization.signature.value, "base64"));
   } catch {
     verified = false;
   }

@@ -711,7 +711,7 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
-    await assertVerifiedTestsTrust(relevant, projectRoot);
+    await assertVerifiedTestsTrust(relevant, projectRoot, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events as AnyRecord[] : []);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -740,7 +740,7 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string): Promise<void> {
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[]): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
@@ -753,7 +753,7 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   // during this visit describe the implementation snapshot currently being verified. Within a
   // visit every live reviewer slice still participates, so changing reviewers cannot bury a
   // disputed finding.
-  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined);
+  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
   const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)

@@ -106,11 +106,12 @@ supplies a trusted delegation credential.
 
 `workflow resolve-critique` closes a historical failing or not-verified review
 without deleting it or borrowing the earlier reviewer's identity. It is only
-available during `builder.build` verification. The caller is authenticated from
-a stable runtime-session or CI identity and must be the reviewer recorded on
-the later passing critique, while remaining distinct from the active
-implementation assignment. Explicit actor overrides and process-ancestry
-fallback identities are rejected for this operation.
+available during `builder.build` verification. It requires an Ed25519-signed
+user/operator authorization trusted by the protected
+`.flow-agents/lifecycle-authority-keys.json` registry. The authorization binds
+the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
+expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
+identity and actor overrides do not authorize this operation.
 
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the
@@ -124,7 +125,8 @@ the policy-defined relationship between the two reviews.
 flow_agents workflow resolve-critique \
   --session-dir .kontourai/flow-agents/example \
   --prior-record-id '<earlier-critique-record-id>' \
-  --resolving-record-id '<later-passing-critique-record-id>'
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  --authorization-file critique-resolution.authorization.json
 ```
 
 The earlier record remains in `trust.bundle` with its original reviewer,
@@ -133,11 +135,11 @@ audit record. Repeating the identical valid request is a no-op. Missing,
 ambiguous, circular, stale, equal-snapshot, wrong-subject, or unauthorized
 requests fail without changing the bundle.
 
-The local sequence and predecessor hashes are tamper-evident workflow records;
-they are not an externally signed append-only ledger. Deployments that require
-cryptographic reviewer delegation or non-repudiation must add a trusted
-provider-neutral identity credential and external anchor rather than treating
-local runtime identity as that stronger assurance.
+The signed authorization is consumed once under the subject lock. Resolution
+also appends a separately hashed event binding the authorization digest and
+exact edge. The local event chain is tamper-evident; deployments requiring
+non-repudiation should additionally retain the signed authorization and anchor
+the resulting state in their provider-neutral durable audit store.
 
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"

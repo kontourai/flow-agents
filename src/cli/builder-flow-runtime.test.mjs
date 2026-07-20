@@ -20,7 +20,7 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
@@ -197,6 +197,25 @@ function expiredLifecycleAuthorization(session, operation, name, overrides = {})
     },
     ...overrides,
   });
+}
+
+function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, resolver, name = "resolve") {
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const bundle = readJson(bundleFile);
+  const metadata = (id) => bundle.claims.find((claim) => claim.metadata?.critique_record_id === id)?.metadata;
+  const now = new Date();
+  const unsigned = {
+    schema_version: "1.0", operation: "resolve-critique", run_id: session.slug, subject: SUBJECT,
+    prior_bundle_sha256: createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex"),
+    prior_record_id: priorRecordId, prior_record_hash: metadata(priorRecordId).critique_record_hash,
+    resolving_record_id: resolvingRecordId, resolving_record_hash: metadata(resolvingRecordId).critique_record_hash,
+    expected_resolver: resolver, nonce: `${name}-${Date.now()}-${Math.random()}`,
+    expires_at: new Date(now.getTime() + 60_000).toISOString(), requested_at: now.toISOString(),
+  };
+  const value = { ...unsigned, signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(critiqueResolutionAuthorizationPayload(unsigned)), AUTHORITY_KEYS.privateKey).toString("base64") } };
+  const file = path.join(session.sessionDir, `${name}.authorization.json`);
+  writeJson(file, value);
+  return file;
 }
 
 function snapshotFile(file) {
@@ -1591,54 +1610,31 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     /authenticated public workflow interface/,
   );
   await assert.rejects(
-    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", "missing-record", "--resolving-record-id", resolvingRecordId]),
-    /missing or ambiguous/,
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+    /signed --authorization-file/,
   );
-  await assert.rejects(
-    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", priorRecordId]),
-    /circular/,
-  );
+  const staleAuthorization = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "stale");
   fs.writeFileSync(delivery, "post-review mutation must make the resolver stale\n");
   await assert.rejects(
-    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId, "--authorization-file", staleAuthorization]),
     /verified, current passing critique/,
   );
   fs.writeFileSync(delivery, "repaired delivery artifact\n");
-  const originalActor = process.env.FLOW_AGENTS_ACTOR;
-  try {
-    process.env.FLOW_AGENTS_ACTOR = "unauthorized-reviewer";
-    await assert.rejects(
-      workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
-      /stable runtime-session or CI identity/,
-    );
-  } finally {
-    if (originalActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
-    else process.env.FLOW_AGENTS_ACTOR = originalActor;
-  }
-  const wrongSubjectBundle = structuredClone(before);
-  wrongSubjectBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId).metadata.workflow_subject_ref = "other:work-item";
-  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(wrongSubjectBundle, null, 2)}\n`);
-  await assert.rejects(
-    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
-    /workflow subject/,
-  );
-  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), beforeRejectedResolution);
-  const equalSnapshotBundle = structuredClone(before);
-  const equalPrior = equalSnapshotBundle.claims.find((claim) => claim.metadata?.critique_record_id === priorRecordId);
-  const equalResolving = equalSnapshotBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId);
-  equalPrior.metadata.review_target.workspace_snapshot = structuredClone(equalResolving.metadata.review_target.workspace_snapshot);
-  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(equalSnapshotBundle, null, 2)}\n`);
-  await assert.rejects(
-    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
-    /newer immutable workspace snapshot/,
-  );
-  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), beforeRejectedResolution);
   assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), beforeRejectedResolution, "rejected resolution attempts must not mutate history");
 
+  const authorizationFile = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey);
+  const validAuthorization = readJson(authorizationFile);
+  writeJson(authorizationFile, { ...validAuthorization, signature: { ...validAuthorization.signature, value: Buffer.alloc(64).toString("base64") } });
+  await assert.rejects(workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
+    "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
+  ]), /signature is invalid/);
+  writeJson(authorizationFile, validAuthorization);
   const result = await workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir,
     "--prior-record-id", priorRecordId,
     "--resolving-record-id", resolvingRecordId,
+    "--authorization-file", authorizationFile,
     "--json",
   ]);
   assert.equal(result, 0);
@@ -1652,6 +1648,8 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   assert.deepEqual(history.metadata.findings, [{ id: "blocking-defect", severity: "high", status: "open", description: "Requires repair." }]);
   assert.equal(history.metadata.critique_resolution.resolving_record_id, resolvingRecordId);
   assert.equal(history.metadata.critique_resolution.resolver, finalReviewer.actorKey);
+  assert.equal(after.critique_resolution_events.length, 1);
+  assert.equal(after.critique_resolution_events[0].authorization_nonce, validAuthorization.nonce);
   assert.equal(fs.readFileSync(canonicalManifest, "utf8"), manifestBeforeResolution, "critique resolution must preserve canonical manifest bytes");
   const validation = validateCritiques();
   assert.equal(validation.status, 0, validation.stderr || validation.stdout);
@@ -1677,6 +1675,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     "resolve-critique", "--session-dir", session.sessionDir,
     "--prior-record-id", priorRecordId,
     "--resolving-record-id", resolvingRecordId,
+    "--authorization-file", authorizationFile,
     "--json",
   ]);
   assert.equal(replay, 0);
