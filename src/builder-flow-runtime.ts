@@ -1025,14 +1025,31 @@ export function mergeGateClaimsWithCritiqueHistory(
   bundleClaims: unknown[],
   claimIsCurrent: (claim: AnyRecord) => boolean,
 ): AnyRecord[] {
-  const merged = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const merged: AnyRecord[] = [];
+  const seen = new Set<string>();
+  const seenCritiques = new Set<string>();
   for (const claim of bundleClaims) {
-    if (!isRecord(claim) || !claimIsCurrent(claim)) continue;
+    if (!isRecord(claim)) continue;
+    const id = String(claim.id);
     const metadata = isRecord(claim.metadata) ? claim.metadata : null;
-    if (metadata?.origin !== "critique") continue;
-    merged.set(String(claim.id), claim);
+    if (claimIsCurrent(claim) && metadata?.origin === "critique") {
+      const recordId = String(metadata.critique_record_id);
+      if (!seenCritiques.has(recordId)) merged.push(claim);
+      seenCritiques.add(recordId);
+      seen.add(id);
+      continue;
+    }
+    const selected = relevantById.get(id) ?? null;
+    if (!selected || seen.has(id)) continue;
+    merged.push(selected);
+    seen.add(id);
   }
-  return [...merged.values()];
+  for (const claim of relevant) {
+    const id = String(claim.id);
+    if (!seen.has(id)) merged.push(claim);
+  }
+  return merged;
 }
 
 function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {

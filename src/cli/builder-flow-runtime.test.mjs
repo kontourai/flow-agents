@@ -50,11 +50,11 @@ const realExecFileSync = childProcess.execFileSync;
 test("verification trust restores critique history without restoring superseded test evidence", () => {
   const liveTests = { id: "tests-live", claimType: "builder.verify.tests", metadata: { origin: "check" } };
   const supersededTests = { id: "tests-old", claimType: "builder.verify.tests", metadata: { origin: "check", superseded_by: "tests-live" } };
-  const critiqueCurrent = { id: "critique-live", claimType: "workflow.critique.review", metadata: { origin: "critique" } };
-  const critiquePredecessor = { id: "critique-old", claimType: "workflow.critique.review", metadata: { origin: "critique", superseded_by: "critique-live" } };
+  const critiqueCurrent = { id: "critique-live", claimType: "workflow.critique.review", metadata: { origin: "critique", critique_record_id: "record-live" } };
+  const critiquePredecessor = { id: "critique-old", claimType: "workflow.critique.review", metadata: { origin: "critique", critique_record_id: "record-old", superseded_by: "record-live" } };
   assert.deepEqual(
     mergeGateClaimsWithCritiqueHistory([liveTests, critiqueCurrent], [supersededTests, liveTests, critiquePredecessor, critiqueCurrent], () => true).map((claim) => claim.id),
-    ["tests-live", "critique-live", "critique-old"],
+    ["tests-live", "critique-old", "critique-live"],
   );
 });
 childProcess.execFileSync = ((file, args, options) => {
