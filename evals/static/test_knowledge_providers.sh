@@ -11,6 +11,10 @@
 #                                                 report+merge proposal, AC3 zero external writes)
 #   - promote/runtime-session.test.js             (#669 residue schema, workflow compatibility,
 #                                                 Claude/Codex cursor semantics, redaction)
+#   - promote/store-target.test.js                (#670 schema-valid personal-store proposals,
+#                                                 provenance, parity, no live-record writes)
+#   - adapters/shared/store-resolve.test.js       (#670 hermetic XDG bootstrap and atomic
+#                                                 MCP-compatible roots registry)
 #   - providers/neo4j/neo4j.test.js              (issue #327 neo4j provider, CI-safe: sync
 #                                                 idempotency AC1, canonical queries AC3, degradation
 #                                                 AC4 — via an injected fake driver, no Docker.
@@ -27,6 +31,8 @@ if node --test \
   kits/knowledge/providers/health/health-pass.test.js \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/promote/runtime-session.test.js \
+  kits/knowledge/promote/store-target.test.js \
+  kits/knowledge/adapters/shared/store-resolve.test.js \
   kits/knowledge/providers/neo4j/neo4j.test.js; then
   echo "  PASS: knowledge store provider conformance + health verbs + promote sub-flow"
 else
