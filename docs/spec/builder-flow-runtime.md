@@ -416,6 +416,15 @@ current lifecycle authority vocabulary also requires agent-owned pause/resume ev
 closest available `operator_request` shape; a distinct canonical runtime authority is tracked in
 Flow issue #118.
 
+Same-reviewer public re-reviews are append-only. Before a passing
+`record-critique` can supersede a same-id, same-reviewer record, its passing
+lanes must cover every failed or not-verified lane and its structured findings
+must resolve every open finding from every eligible record in that recheck
+lineage. An incomplete pass is rejected before the bundle changes. A later
+complete public re-review may repair an older automatic same-reviewer recheck
+edge by retargeting that lineage to the new pass; it preserves each historical
+record and never retargets a signed cross-reviewer edge.
+
 ```text
 flow-agents builder-run pause --session-dir <dir> --reason <text>
 flow-agents builder-run resume --session-dir <dir> --reason <text>

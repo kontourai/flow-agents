@@ -4404,6 +4404,38 @@ export function normalizeFinding(raw: AnyObj, projectRoot = process.cwd()): AnyO
   return raw;
 }
 
+const resolvedFindingStatuses = new Set(["fixed", "accepted", "deferred", "false_positive"]);
+
+function sameReviewerRecheckLineage(prior: AnyObj, resolving: AnyObj): boolean {
+  if (prior.id !== resolving.id || prior.reviewer !== resolving.reviewer) return false;
+  const resolution = prior.critique_resolution;
+  // Re-review recovery may replace only automatic same-reviewer edges. An
+  // independently authorized cross-reviewer resolution remains immutable.
+  return !resolution || (typeof resolution === "object" && !Array.isArray(resolution)
+    && resolution.kind === "same-reviewer-recheck");
+}
+
+function sameReviewerRecheckCoverage(prior: AnyObj, resolving: AnyObj): { lanes: string[]; findings: string[]; complete: boolean } {
+  const lanes = (Array.isArray(prior.lanes) ? prior.lanes : [])
+    .filter((lane: AnyObj) => lane.status !== "pass")
+    .map((lane: AnyObj) => lane.id)
+    .sort();
+  const resolvingLanes = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : [])
+    .map((lane: AnyObj) => [lane.id, lane.status]));
+  const findings = (Array.isArray(prior.findings) ? prior.findings : [])
+    .filter((finding: AnyObj) => finding.status === "open")
+    .map((finding: AnyObj) => finding.id)
+    .sort();
+  const resolvingFindings = new Map((Array.isArray(resolving.findings) ? resolving.findings : [])
+    .map((finding: AnyObj) => [finding.id, finding.status]));
+  return {
+    lanes,
+    findings,
+    complete: lanes.every((id: string) => resolvingLanes.get(id) === "pass")
+      && findings.every((id: string) => resolvedFindingStatuses.has(resolvingFindings.get(id))),
+  };
+}
+
 async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
@@ -4478,17 +4510,22 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // distinction yet — that lands with the runtime actor-identity slice (#287/#290). Same-reviewer-
   // string scoping is the strongest honest enforcement available today and matches the granularity
   // the critique record already has.
+  const sameReviewerLineage = critique.verdict === "pass"
+    ? bundleCritiques.filter((entry: AnyObj) => sameReviewerRecheckLineage(entry, critique))
+    : [];
+  for (const prior of sameReviewerLineage) {
+    if (!sameReviewerRecheckCoverage(prior, critique).complete) {
+      die(`record-critique passing same-reviewer recheck must cover every failed lane and open finding from ${prior.critique_record_id}`);
+    }
+  }
   const _supersedeMarker = critique.critique_record_id;
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
-    const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
-    const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
-    if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
-      const resolvedLaneIds = (Array.isArray(e.lanes) ? e.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
-      const resolvedFindingIds = (Array.isArray(e.findings) ? e.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+    if (sameReviewerLineage.includes(e)) {
+      const coverage = sameReviewerRecheckCoverage(e, critique);
       return { ...e, superseded_by: _supersedeMarker, critique_resolution: {
         schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: e.critique_record_id,
         resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
-        resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
+        resolved_lane_ids: coverage.lanes, resolved_finding_ids: coverage.findings, resolved_at: critique.reviewed_at,
       } };
     }
     return e;

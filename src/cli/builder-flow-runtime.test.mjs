@@ -1846,6 +1846,73 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
   ]);
 });
 
+test("same-reviewer rechecks reject incomplete passes and recover a legacy automatic edge", async () => {
+  const session = makeSession("same-reviewer-critique-recovery");
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const lane = (id, status) => JSON.stringify({
+    id,
+    status,
+    summary: `${id} ${status}.`,
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  const finding = (status) => JSON.stringify({ id: "blocking-defect", severity: "high", status, description: "Requires repair." });
+  const record = (verdict, lanes, findingStatus, timestamp) => workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "repair-review", "--reviewer", "same-reviewer", "--verdict", verdict,
+    "--summary", `Same reviewer ${verdict}.`, "--artifact-ref", delivery,
+    ...lanes.flatMap(([id, status]) => ["--lane-json", lane(id, status)]),
+    "--finding-json", finding(findingStatus), "--timestamp", timestamp,
+  ]);
+
+  await record("fail", [["code-review", "fail"], ["security-review", "not_verified"]], "open", "2026-07-20T10:00:00.000Z");
+  const beforeIncomplete = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
+  await assert.rejects(
+    () => record("pass", [["code-review", "pass"]], "fixed", "2026-07-20T10:01:00.000Z"),
+    /must cover every failed lane and open finding/,
+  );
+  assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), beforeIncomplete, "an incomplete same-reviewer pass must not persist an edge");
+
+  // Simulate the observed pre-fix state: its hash chain is intact, but its
+  // automatic edge points at a pass that omitted a failed lane. Recovery uses
+  // the public writer only; the direct mutation is fixture setup for old data.
+  await record("pass", [["code-review", "pass"], ["security-review", "pass"]], "fixed", "2026-07-20T10:01:00.000Z");
+  const legacyBundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const legacyPass = legacyBundle.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 2);
+  const legacyPrior = legacyBundle.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 1);
+  legacyPass.metadata.lanes = legacyPass.metadata.lanes.filter((entry) => entry.id === "code-review");
+  const legacyRecord = {
+    critique_sequence: legacyPass.metadata.critique_sequence,
+    critique_predecessor_hash: legacyPass.metadata.critique_predecessor_hash,
+    reviewer: legacyPass.metadata.reviewer,
+    reviewed_at: legacyPass.metadata.reviewed_at,
+    verdict: legacyPass.value,
+    summary: legacyPass.fieldOrBehavior,
+    lanes: legacyPass.metadata.lanes,
+    review_target: legacyPass.metadata.review_target,
+    findings: legacyPass.metadata.findings,
+    workflow_subject_ref: legacyPass.metadata.workflow_subject_ref,
+  };
+  legacyPass.metadata.critique_record_hash = critiqueRecordHash(legacyRecord);
+  legacyPass.metadata.critique_record_id = `critique:${legacyPass.metadata.critique_record_hash}`;
+  legacyPrior.metadata.superseded_by = legacyPass.metadata.critique_record_id;
+  legacyPrior.metadata.critique_resolution.resolving_record_id = legacyPass.metadata.critique_record_id;
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(legacyBundle, null, 2)}\n`);
+  assert.equal(validateCritiqueResolutionGraph(legacyBundle.claims, SUBJECT, [], session.projectRoot).valid, false, "legacy incomplete automatic edge must be invalid");
+
+  await record("pass", [["code-review", "pass"], ["security-review", "pass"]], "fixed", "2026-07-20T10:02:00.000Z");
+  const recovered = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const recoveredPass = recovered.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 3);
+  const history = recovered.claims.filter((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence < 3);
+  assert.ok(recoveredPass);
+  assert.deepEqual(history.map((claim) => claim.metadata.critique_resolution.resolving_record_id), [recoveredPass.metadata.critique_record_id, recoveredPass.metadata.critique_record_id]);
+  assert.equal(validateCritiqueResolutionGraph(recovered.claims, SUBJECT, [], session.projectRoot).valid, true, "a corrected public re-review repairs the same-reviewer lineage");
+  const artifactValidation = spawnSync(process.execPath, [
+    path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"),
+    "--require-critique", session.sessionDir,
+  ], { cwd: session.projectRoot, encoding: "utf8" });
+  assert.equal(artifactValidation.status, 0, artifactValidation.stderr);
+});
+
 externalAuthorityE2E("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
   claimSessionAssignment(session);

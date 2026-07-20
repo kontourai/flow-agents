@@ -163,6 +163,14 @@ cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
 
+Same-reviewer public re-reviews are append-only. A passing `workflow critique`
+for the same review id and reviewer is rejected before mutation unless its
+passing lanes cover every failed or not-verified lane and its findings resolve
+every open finding in its eligible recheck lineage. A later complete re-review
+repairs an older automatic same-reviewer-recheck edge by pointing that lineage
+to the new pass. It preserves history and never rewrites a signed
+cross-reviewer resolution.
+
 ## Resolving repaired critique history
 
 `workflow resolve-critique` closes a historical failing or not-verified review
