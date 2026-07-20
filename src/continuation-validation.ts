@@ -41,6 +41,10 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   if (!safeTaskSlug(value.flow.run_id)) throw new Error("continuation snapshot gate-action run id is not a safe task slug");
   if (value.flow.run_id !== snapshot.run_id || value.flow.definition_id !== snapshot.definition_id
     || value.flow.current_step !== snapshot.current_step || value.flow.status !== snapshot.status) throw new Error("continuation snapshot gate-action identity does not match the canonical snapshot");
+  if (snapshot.progress_snapshot && (!isDeepStrictEqual(value.progress.canonical_evidence, snapshot.progress_snapshot.canonical_evidence)
+    || !isDeepStrictEqual(value.progress.observed_artifacts, snapshot.progress_snapshot.observed_artifacts))) {
+    throw new Error("continuation snapshot gate-action progress does not match the canonical progress snapshot");
+  }
   if (!value.stop_condition.scope || value.stop_condition.scope.run_id !== snapshot.run_id
     || value.stop_condition.scope.current_step !== snapshot.current_step || value.stop_condition.scope.current_gate_only !== true
     || !isDeepStrictEqual(value.stop_condition.scope.gate_ids, value.flow.gate_ids)) throw new Error("continuation snapshot gate-action scope does not match the canonical snapshot");

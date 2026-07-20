@@ -1641,14 +1641,15 @@ test("execute plan_gap routes to plan and invalidates the execute action context
   assert.equal(executeEnvelope.flow.current_step, "execute");
   assert.equal(executeEnvelope.action.implementation_allowed, true);
 
-  const routed = await writeAndSync(session, [bundleClaim({
+  const firstVisitRouteEvidence = bundleClaim({
     expectation: "implementation-scope",
     claimType: "builder.execute.scope",
     subjectType: "change",
     status: "fail",
     routeReason: "plan_gap",
     timestamp: new Date().toISOString(),
-  })]);
+  });
+  const routed = await writeAndSync(session, [firstVisitRouteEvidence]);
 
   assert.equal(routed.run.state.current_step, "plan");
   assert.equal(routed.projection.flow_run.route_back_attempt, 1);
@@ -1658,19 +1659,27 @@ test("execute plan_gap routes to plan and invalidates the execute action context
   assert.equal(routed.gateActionEnvelope.action.implementation_allowed, false);
   assert.notDeepEqual(routed.gateActionEnvelope.flow, executeEnvelope.flow, "a stale execute envelope cannot describe the routed plan head");
 
+  const replanned = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
+    expectation: "implementation-plan",
+    claimType: "builder.plan.implementation",
+    subjectType: "artifact",
+    timestamp: new Date().toISOString(),
+  }), "revised-after-plan-gap")]);
+  assert.equal(replanned.run.state.current_step, "execute");
+  assert.equal(replanned.gateActionEnvelope.flow.current_step, "execute");
+  assert.equal(replanned.gateActionEnvelope.action.implementation_allowed, true);
+  assert.notDeepEqual(replanned.gateActionEnvelope.progress, executeEnvelope.progress, "the later execute visit must project fresh canonical progress");
+
   const flowDirectory = runDir(session.slug, session.projectRoot);
   const beforeFlow = snapshotTree(flowDirectory);
   const beforeProjection = snapshotProjectionTargets(session);
-  const stale = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
-    expectation: "implementation-scope",
-    claimType: "builder.execute.scope",
-    subjectType: "change",
-    timestamp: new Date().toISOString(),
-  }), "stale-execute")]);
+  const stale = await writeAndSync(session, [firstVisitRouteEvidence]);
   assert.equal(stale.attached, false);
-  assert.equal(stale.run.state.current_step, "plan");
-  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow, "stale execute evidence cannot mutate the routed run");
-  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection, "stale execute evidence cannot mutate the routed projection");
+  assert.equal(stale.run.state.current_step, "execute");
+  assert.equal(stale.projection.flow_run.route_back_attempt, 1);
+  assert.equal(stale.run.state.transitions.filter((entry) => entry.type === "route_back").length, 1);
+  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow, "first-visit execute evidence cannot mutate the later execute visit");
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection, "first-visit execute evidence cannot mutate the later execute projection");
 });
 
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {

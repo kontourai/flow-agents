@@ -322,6 +322,20 @@ test("gate-action envelope pins executable workflow interfaces and package ident
   assert.throws(() => validateSnapshot(configuredOperation), /configured operation cannot report an external capability gap/);
 });
 
+test("gate-action envelope rejects a stale gate visit after canonical progress changes", () => {
+  const stale = envelopeSnapshot("execute", { evidence: ["plan-gate:old-plan"] });
+  stale.progress_snapshot = {
+    current_step: "execute",
+    canonical_status: "active",
+    canonical_evidence: ["plan-gate:old-plan", "execute-gate:route-back", "plan-gate:revised-plan"],
+    observed_artifacts: [],
+  };
+  assert.throws(() => validateSnapshot(stale), /gate-action progress does not match the canonical progress snapshot/);
+
+  stale.gate_action_envelope.progress.canonical_evidence = [...stale.progress_snapshot.canonical_evidence];
+  assert.doesNotThrow(() => validateSnapshot(stale));
+});
+
 function terminalProgressSnapshot(status, { step = "learn", evidence = [], artifacts = [] } = {}) {
   const value = snapshot(step, status);
   value.progress_snapshot = {

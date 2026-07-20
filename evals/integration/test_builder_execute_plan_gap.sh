@@ -103,11 +103,18 @@ NODE
 [[ "$(find "$PROJECT/.kontourai/flow/runs" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" == "1" ]] || fail 'plan_gap created a replacement run'
 pass 'plan_gap returns the same assigned run to plan with Flow-owned accounting'
 
-BEFORE_STALE="$(snapshot)"
-set +e
-STALE="$(workflow evidence --session-dir "$SESSION" --expectation implementation-scope --status pass --summary 'Stale execute evidence.' --evidence-ref-json "$DELIVER_REF" 2>&1)"
-STALE_RC=$?
-set -e
-AFTER_STALE="$(snapshot)"
-[[ "$STALE_RC" -ne 0 && "$BEFORE_STALE" == "$AFTER_STALE" ]] || fail "stale execute evidence mutated the new plan head: $STALE"
-pass 'stale execute evidence cannot authorize the routed plan head'
+workflow evidence --session-dir "$SESSION" --expectation implementation-plan --status pass \
+  --summary 'The fixture records a revised plan after the explicit correction.' --evidence-ref-json "$PLAN_REF" >/dev/null
+REENTERED="$(workflow status --session-dir "$SESSION" --json)"
+node - "$FLOW_RUN/state.json" "$SESSION/state.json" "$REENTERED" <<'NODE'
+const fs = require('node:fs');
+const [flowFile, sessionFile, output] = process.argv.slice(2);
+const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
+const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+const status = JSON.parse(output);
+if (flow.current_step !== 'execute' || session.flow_run?.current_step !== 'execute' || status.current_step !== 'execute') process.exit(1);
+if ((flow.transitions || []).filter((entry) => entry.type === 'route_back').length !== 1) process.exit(1);
+if (session.flow_run?.route_back_attempt !== 1 || session.flow_run?.route_back_max_attempts !== 3) process.exit(1);
+if (!String(status.next_action?.summary || '').includes('implementation-scope')) process.exit(1);
+NODE
+pass 'the later execute visit requires fresh scope evidence and preserves the first route attempt'
