@@ -219,6 +219,29 @@ else
   _fail "ACTION-PATH: a trust-verify action.yml script ref does not resolve (wrong ../ depth?)"
 fi
 
+# The action checkout does not arrive with node_modules. Its ESM status-derivation helper
+# resolves @kontourai/surface from the action repository, so the composite action must install
+# the action's own locked runtime dependencies rather than relying on the consumer repo.
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const root=process.argv[1];
+  const action=fs.readFileSync(path.join(root,".github/actions/trust-verify/action.yml"),"utf8");
+  const pkg=JSON.parse(fs.readFileSync(path.join(root,"package.json"),"utf8"));
+  const lock=JSON.parse(fs.readFileSync(path.join(root,"package-lock.json"),"utf8"));
+  const installsAtActionRoot=/ACTION_REPO_ROOT="\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\."/.test(action)
+    && /npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
+  const surfaceDeclared=Boolean(pkg.optionalDependencies && pkg.optionalDependencies["@kontourai/surface"]);
+  const surfaceLocked=Boolean(lock.packages && lock.packages["node_modules/@kontourai/surface"]);
+  if(!installsAtActionRoot) console.error("trust-verify action does not install locked runtime dependencies at the action root");
+  if(!surfaceDeclared) console.error("@kontourai/surface is not a declared runtime dependency");
+  if(!surfaceLocked) console.error("@kontourai/surface is absent from package-lock.json");
+  process.exit(installsAtActionRoot && surfaceDeclared && surfaceLocked ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-DEPS: action installs its locked Surface dependency at the action root"
+else
+  _fail "ACTION-DEPS: trust-verify action cannot guarantee Surface is importable"
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────────"
