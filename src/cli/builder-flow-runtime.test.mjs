@@ -5,12 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
 import {
-  archiveBuilderFlowSession as archiveBuilderFlowSessionRaw,
-  cancelBuilderFlowSession as cancelBuilderFlowSessionRaw,
+  archiveBuilderFlowSession,
+  cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
@@ -19,17 +19,16 @@ import {
   resumeBuilderFlowSession,
   startBuilderFlowSession,
   syncBuilderFlowSession,
-  withLifecycleAuthorityTestSource,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, createLifecycleAuthorityTestSource, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
-import { main as builderRunMainRaw } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMainRaw } from "../../build/src/cli/workflow.js";
+import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
@@ -40,11 +39,35 @@ const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-
 const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
-const TEST_AUTHORITY_SOURCE = createLifecycleAuthorityTestSource({ schema_version: "1.0", keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }] });
-const workflowMain = (argv) => workflowMainRaw(argv, TEST_AUTHORITY_SOURCE);
-const cancelBuilderFlowSession = (input) => cancelBuilderFlowSessionRaw(withLifecycleAuthorityTestSource(input, TEST_AUTHORITY_SOURCE));
-const archiveBuilderFlowSession = (input) => archiveBuilderFlowSessionRaw(withLifecycleAuthorityTestSource(input, TEST_AUTHORITY_SOURCE));
-const builderRunMain = (argv) => builderRunMainRaw(argv, TEST_AUTHORITY_SOURCE);
+const TEST_AUTHORITY_REGISTRY = { schema_version: "1.0", keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }] };
+const TEST_AUTHORITY_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-os-authority-"))), "authority.json");
+fs.writeFileSync(TEST_AUTHORITY_FILE, `${JSON.stringify(TEST_AUTHORITY_REGISTRY)}\n`, { mode: 0o444 });
+const authorityPathComponents = new Set(TEST_AUTHORITY_FILE.split(path.sep).reduce((paths, component) => {
+  if (!component) return paths;
+  paths.push(path.join(paths.at(-1) ?? path.parse(TEST_AUTHORITY_FILE).root, component));
+  return paths;
+}, []));
+const originalLstatSync = fs.lstatSync;
+const originalFstatSync = fs.fstatSync;
+const originalAccessSync = fs.accessSync;
+const authorityInode = originalLstatSync(TEST_AUTHORITY_FILE).ino;
+const protectedStat = (stat) => new Proxy(stat, { get(target, property, receiver) { if (property === "uid") return 0; if (property === "mode") return target.mode & ~0o022; return Reflect.get(target, property, receiver); } });
+fs.lstatSync = ((candidate, ...args) => {
+  const stat = originalLstatSync(candidate, ...args);
+  return authorityPathComponents.has(path.resolve(String(candidate))) ? protectedStat(stat) : stat;
+});
+fs.fstatSync = ((descriptor, ...args) => {
+  const stat = originalFstatSync(descriptor, ...args);
+  return stat.ino === authorityInode ? protectedStat(stat) : stat;
+});
+fs.accessSync = ((candidate, mode) => {
+  if (authorityPathComponents.has(path.resolve(String(candidate))) && mode === fs.constants.W_OK) {
+    const error = new Error("test fixture is not writable"); error.code = "EACCES"; throw error;
+  }
+  return originalAccessSync(candidate, mode);
+});
+syncBuiltinESMExports();
+process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const AMBIENT_IDENTITY_ENV_KEYS = [
@@ -1089,7 +1112,7 @@ test("prepareBuilderCancelRequest emits a payload that, signed by the operator k
   const file = path.join(session.projectRoot, "friendly-cancel-e2e.authorization.json");
   writeJson(file, signed);
 
-  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE });
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
   assert.equal(canceled.run.state.status, "canceled");
   assert.equal(canceled.assignmentReleased, true);
   assert.equal(canceled.idempotent, false);
@@ -1135,7 +1158,7 @@ test("a cancel-request payload signed with the WRONG key is rejected (signature 
   };
   const file = path.join(session.projectRoot, "friendly-cancel-badsig.authorization.json");
   writeJson(file, badSigned);
-  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE }), /signature is invalid/);
+  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file }), /signature is invalid/);
 });
 
 test("builder-run cancel-request CLI writes the unsigned authorization and prints signing guidance", async () => {
@@ -1193,7 +1216,7 @@ test("cancel-request signing-payload parity holds for non-ASCII reason/actor (un
   };
   const file = path.join(session.projectRoot, "unicode.authorization.json");
   writeJson(file, signed);
-  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE });
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
   assert.equal(canceled.run.state.status, "canceled");
 });
 
@@ -1209,7 +1232,7 @@ test("prepareBuilderCancelRequest mints from the released assignment once the ru
   };
   const firstFile = path.join(session.projectRoot, "recovery-1.authorization.json");
   writeJson(firstFile, firstSigned);
-  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile, testAuthoritySource: TEST_AUTHORITY_SOURCE });
+  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile });
 
   // Now canceled with a RELEASED assignment: the mint-time fallback matches the
   // redemption gate, so cancel-request still mints (an idempotent-recovery auth).
@@ -1307,7 +1330,6 @@ test("archive retries the exact consumed authorization after an interrupted prep
     runId: session.slug,
     subject: SUBJECT,
     actorKey: ACTOR_KEY,
-    testAuthoritySource: TEST_AUTHORITY_SOURCE,
     now: new Date(Date.parse(rawAuthorization.request.authority.requested_at) + 30_000).toISOString(),
   });
   const preparedState = readJson(path.join(session.sessionDir, "state.json"));
@@ -1661,7 +1683,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   const canonicalManifest = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
   const manifestBeforeResolution = fs.readFileSync(canonicalManifest, "utf8");
   const validateCritiques = (cwd = session.projectRoot) => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd, encoding: "utf8" });
-  const validateResolvedGraph = (bundle) => validateCritiqueResolutionGraph(bundle.claims, SUBJECT, bundle.critique_resolution_events ?? [], session.projectRoot, TEST_AUTHORITY_SOURCE);
+  const validateResolvedGraph = (bundle) => validateCritiqueResolutionGraph(bundle.claims, SUBJECT, bundle.critique_resolution_events ?? [], session.projectRoot);
   const onlyFailBundle = structuredClone(before);
   onlyFailBundle.claims = onlyFailBundle.claims.filter((claim) => claim.metadata?.critique_record_id === priorRecordId || claim.metadata?.origin !== "critique");
   onlyFailBundle.events = onlyFailBundle.events.filter((event) => onlyFailBundle.claims.some((claim) => claim.id === event.claimId));
@@ -1723,7 +1745,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   }), /must be outside the project|must not contain symlinks/);
   const foreignProject = makeSession("foreign-authority-project");
   const foreignRegistry = path.join(foreignProject.projectRoot, "authority.json");
-  writeJson(foreignRegistry, TEST_AUTHORITY_SOURCE.registry);
+  writeJson(foreignRegistry, TEST_AUTHORITY_REGISTRY);
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = foreignRegistry;
   assert.throws(() => loadCritiqueResolutionAuthorization(authorizationFile, {
     projectRoot: session.projectRoot, runId: session.slug, subject: SUBJECT,
@@ -1737,7 +1759,6 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     priorBundleSha256: validAuthorization.prior_bundle_sha256,
     priorRecordId, priorRecordHash: validAuthorization.prior_record_hash,
     resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
-    testAuthoritySource: TEST_AUTHORITY_SOURCE,
   });
   recordAuthorizationConsumed(session.artifactRoot, preparedAuthorization);
   const conflictingNonceAuthorization = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "conflicting-nonce", {
@@ -1881,7 +1902,7 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
   const finalRecordId = migrated.at(-1).critique_record_id;
   const validate = () => {
     const current = readJson(bundleFile);
-    return validateCritiqueResolutionGraph(current.claims, SUBJECT, current.critique_resolution_events ?? [], session.projectRoot, TEST_AUTHORITY_SOURCE);
+    return validateCritiqueResolutionGraph(current.claims, SUBJECT, current.critique_resolution_events ?? [], session.projectRoot);
   };
   assert.equal(validate().valid, false, "unmigrated historical reviews remain fail-closed");
 

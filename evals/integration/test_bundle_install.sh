@@ -990,7 +990,29 @@ if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PAC
   && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
   && [[ -n "$PACKAGE_TARBALL" ]] \
   && npm install --silent --no-audit --no-fund --ignore-scripts --prefix "$PACKAGE_CONSUMER" "$PACKAGE_TARBALL" \
-  && mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
+  && ! rg -n 'createLifecycleAuthorityTestSource|withLifecycleAuthorityTestSource|testAuthoritySource|TEST_AUTHORITY_SOURCES' "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build" \
+  && node --input-type=module - "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src" <<'NODE' &&
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const root = process.argv[2];
+const files = [];
+const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).forEach((entry) => {
+  const absolute = path.join(directory, entry.name);
+  if (entry.isDirectory()) visit(absolute);
+  else if (entry.name.endsWith('.js')) files.push(absolute);
+});
+visit(root);
+for (const file of files.sort()) {
+  // Executable-only entrypoints intentionally run or exit when imported. Their
+  // installed bytes are covered by the scan above and their public behavior is
+  // exercised below; import every library module that exposes an API surface.
+  if (file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js')) continue;
+  const exported = await import(pathToFileURL(file).href);
+  if (Object.keys(exported).some((name) => /test.*authority|authority.*test|inject.*authority/i.test(name))) process.exit(1);
+}
+NODE
+  mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
   && printf 'Selected Work Item: acme/builder#901\n' > "$PACKAGE_SESSION/acme-builder-901--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
     --flow builder.build --work-item acme/builder#901 --assignment-provider local-file --summary "Packed public workflow contract fixture." >/dev/null \
@@ -1131,33 +1153,18 @@ for (const operation of ['cancel', 'archive']) {
   const authorization = { ...unsigned, signature: { algorithm: 'ed25519', key_id: keyId, value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), keys.privateKey).toString('base64') } };
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
-fs.writeFileSync(path.join(project, 'test-authority-source.json'), JSON.stringify({ registry: {
-  schema_version: '1.0', keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }],
-} }));
 NODE
   package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && node --input-type=module - "$PACKAGE_PROJECT" "$PACKAGE_LIFECYCLE_SESSION" "$PACKAGE_CONSUMER" <<'NODE' &&
-import fs from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-const [project, session, consumer] = process.argv.slice(2);
-const runtime = await import(pathToFileURL(path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'builder-flow-runtime.js')).href);
-const authority = await import(pathToFileURL(path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'builder-lifecycle-authority.js')).href);
-const testAuthoritySource = authority.createLifecycleAuthorityTestSource(JSON.parse(fs.readFileSync(path.join(project, 'test-authority-source.json'), 'utf8')).registry);
-await runtime.cancelBuilderFlowSession(runtime.withLifecycleAuthorityTestSource({ sessionDir: session, authorizationFile: path.join(project, 'cancel.authorization.json') }, testAuthoritySource));
-await runtime.archiveBuilderFlowSession(runtime.withLifecycleAuthorityTestSource({ sessionDir: session, authorizationFile: path.join(project, 'archive.authorization.json') }, testAuthoritySource));
-NODE
-  node - "$PACKAGE_PROJECT" <<'NODE'
+  && ! package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
+  && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
 const slug = 'acme-builder-902';
-const archived = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'archive', slug, 'state.json'), 'utf8'));
 const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'state.json'), 'utf8'));
-const consumed = fs.readdirSync(path.join(project, '.kontourai', 'flow-agents', 'lifecycle-authority', 'consumed'));
-if (archived.status !== 'archived' || flow.status !== 'canceled' || consumed.length !== 2) process.exit(1);
-if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
+if (flow.status === 'canceled') process.exit(1);
+if (!fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
 NODE
 then
   _pass "packed npm consumer follows the public Builder workflow contract and lifecycle commands"

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { authorizationDigest, validateCritiqueResolutionAuthorization, type LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
+import { authorizationDigest, validateCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 
 type AnyRecord = Record<string, any>;
@@ -83,7 +83,7 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
-export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, testAuthoritySource?: LifecycleAuthorityTestSource): { valid: boolean; errors: string[]; live: AnyRecord[] } {
+export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   const errors: string[] = [];
   if (records.length === 0) return { valid: false, errors: ["critique graph has no records"], live: [] };
@@ -187,7 +187,7 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
         priorSnapshotSha256: String(eventPrior.review_target?.workspace_snapshot?.digest),
         resolvingSnapshotSha256: String(eventResolving.review_target?.workspace_snapshot?.digest),
         priorHeadSha: String(eventPrior.review_target?.workspace_snapshot?.head_sha ?? "none"),
-        resolvingHeadSha: String(eventResolving.review_target?.workspace_snapshot?.head_sha ?? "none"), allowExpired: true, testAuthoritySource,
+        resolvingHeadSha: String(eventResolving.review_target?.workspace_snapshot?.head_sha ?? "none"), allowExpired: true,
       });
       if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
     } catch { errors.push("critique resolution signed authorization is invalid"); }

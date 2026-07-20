@@ -3,14 +3,12 @@ import { flagString, parseArgs } from "../lib/args.js";
 import {
   cancelBuilderFlowSession,
   archiveBuilderFlowSession,
-  withLifecycleAuthorityTestSource,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
 } from "../builder-flow-runtime.js";
-import type { LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
 
 const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive> --session-dir <path> [--reason <text> | --authorization-file <path>]";
 const CANCEL_REQUEST_USAGE = "Usage: flow-agents builder-run cancel-request --session-dir <path> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]";
@@ -73,7 +71,7 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
   return 0;
 }
 
-export async function main(argv: string[], testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
+export async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   const action = parsed.positionals[0];
   const sessionDir = flagString(parsed.flags, "session-dir");
@@ -130,10 +128,10 @@ export async function main(argv: string[], testAuthoritySource?: LifecycleAuthor
           : action === "resume"
             ? await resumeBuilderFlowSession({ sessionDir, reason: reason! })
             : action === "cancel"
-              ? await cancelBuilderFlowSession(testAuthoritySource ? withLifecycleAuthorityTestSource({ sessionDir, authorizationFile: authorizationFile! }, testAuthoritySource) : { sessionDir, authorizationFile: authorizationFile! })
+              ? await cancelBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! })
               : action === "release-assignment"
                 ? await releaseBuilderFlowAssignment({ sessionDir, reason: reason! })
-                : await archiveBuilderFlowSession(testAuthoritySource ? withLifecycleAuthorityTestSource({ sessionDir, authorizationFile: authorizationFile! }, testAuthoritySource) : { sessionDir, authorizationFile: authorizationFile! });
+                : await archiveBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! });
   console.log(JSON.stringify({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,

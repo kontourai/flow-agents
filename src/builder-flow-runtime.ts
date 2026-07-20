@@ -15,7 +15,7 @@ import {
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization, type LifecycleAuthorityTestSource } from "./builder-lifecycle-authority.js";
+import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { execTrustedGitSync } from "./lib/trusted-git.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
@@ -33,7 +33,6 @@ import {
 } from "./builder-flow-run-adapter.js";
 
 type AnyRecord = Record<string, any>;
-const TEST_AUTHORITY_SOURCE = Symbol("flow-agents-test-authority-source");
 
 export interface BuilderFlowSessionInput {
   sessionDir: string;
@@ -44,10 +43,6 @@ export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionI
   authorizationFile: string;
 }
 
-/** Internal hermetic-test seam. This module path is not a package export. */
-export function withLifecycleAuthorityTestSource(input: BuilderFlowAuthorizedLifecycleInput, source: LifecycleAuthorityTestSource): BuilderFlowAuthorizedLifecycleInput {
-  return Object.assign({ ...input }, { [TEST_AUTHORITY_SOURCE]: source });
-}
 
 export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput {
   reason: string;
@@ -420,7 +415,6 @@ async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLife
     runId: context.slug,
     subject,
     actorKey: assignment.actor_key,
-    testAuthoritySource: (input as BuilderFlowAuthorizedLifecycleInput & { [TEST_AUTHORITY_SOURCE]?: LifecycleAuthorityTestSource })[TEST_AUTHORITY_SOURCE],
     ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
     ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
   });

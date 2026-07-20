@@ -5,15 +5,6 @@ import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
 
 type JsonRecord = Record<string, unknown>;
-const TEST_AUTHORITY_SOURCES = new WeakSet<object>();
-export type LifecycleAuthorityTestSource = Readonly<{ registry: JsonRecord }>;
-
-/** Internal hermetic-test seam. This module is not a package export. */
-export function createLifecycleAuthorityTestSource(registry: JsonRecord): LifecycleAuthorityTestSource {
-  const source = Object.freeze({ registry: structuredClone(registry) });
-  TEST_AUTHORITY_SOURCES.add(source);
-  return source;
-}
 export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
 
 export interface BuilderLifecycleAuthorization {
@@ -70,7 +61,7 @@ export function loadCritiqueResolutionAuthorization(fileInput: string, expected:
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
   resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
   priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
-  now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource;
+  now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
   const value = readRegularJson(fileInput, "critique resolution authorization", true);
   return validateCritiqueResolutionAuthorization(value, expected);
@@ -81,7 +72,7 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
   resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
   priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
-  now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource;
+  now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
   const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
   assertExactKeys(value, fields, "authorization");
@@ -109,7 +100,7 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   if (requestedAt > now + 5 * 60_000) throw new Error("critique resolution authorization request time is in the future");
   const signature = validateSignature(value.signature);
   const authorization = { ...Object.fromEntries(fields.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionAuthorization;
-  verifySignedAuthorization(authorization, expected.projectRoot, critiqueResolutionAuthorizationPayload, expected.testAuthoritySource);
+  verifySignedAuthorization(authorization, expected.projectRoot, critiqueResolutionAuthorizationPayload);
   return authorization;
 }
 
@@ -122,7 +113,7 @@ function boundedStringArray(value: unknown, field: string): string[] {
 
 export function loadBuilderLifecycleAuthorization(
   fileInput: string,
-  expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource },
+  expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean },
 ): BuilderLifecycleAuthorization {
   const value = readRegularJson(fileInput, "lifecycle authorization");
   assertExactKeys(value, ["schema_version", "operation", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
@@ -153,7 +144,7 @@ export function loadBuilderLifecycleAuthorization(
     request,
     signature,
   } satisfies BuilderLifecycleAuthorization;
-  verifySignedAuthorization(authorization, expected.projectRoot, builderLifecycleAuthorizationPayload, expected.testAuthoritySource);
+  verifySignedAuthorization(authorization, expected.projectRoot, builderLifecycleAuthorizationPayload);
   return authorization;
 }
 
@@ -260,10 +251,8 @@ export function authorizationDigest(authorization: SignedBuilderAuthorization): 
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
-function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string, testAuthoritySource?: LifecycleAuthorityTestSource): void {
-  const registry = testAuthoritySource && TEST_AUTHORITY_SOURCES.has(testAuthoritySource)
-    ? testAuthoritySource.registry
-    : readExternalAuthorityRegistry(projectRoot);
+function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
+  const registry = readExternalAuthorityRegistry(projectRoot);
   assertExactKeys(registry, ["schema_version", "keys"], "key registry");
   if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
   const seenKeyIds = new Set<string>();
