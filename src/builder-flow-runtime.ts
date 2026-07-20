@@ -15,7 +15,8 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { execTrustedGitSync } from "./lib/trusted-git.js";
+import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
@@ -775,46 +776,6 @@ function assertReviewedWorkspaceSnapshot(claim: AnyRecord, artifacts: AnyRecord[
   }
 }
 
-function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
-  const root = fs.realpathSync(projectRoot);
-  const hasGitMarker = fs.existsSync(path.join(root, ".git"));
-  try {
-    const gitRoot = String(execTrustedGitSync(root, ["rev-parse", "--show-toplevel"])).trim();
-    if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
-    }
-    const headSha = String(execTrustedGitSync(root, ["rev-parse", "HEAD"])).trim();
-    const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], "buffer") as Buffer;
-    const untracked = (execTrustedGitSync(root, ["ls-files", "--others", "--exclude-standard", "-z"], "buffer") as Buffer)
-      .toString("utf8").split("\0").filter(Boolean).sort();
-    const hash = createHash("sha256");
-    hash.update("flow-agents:git-worktree:v1\0");
-    hash.update(headSha).update("\0");
-    hash.update(trackedDiff).update("\0");
-    for (const file of untracked) {
-      const absolute = path.resolve(root, file);
-      if (!pathIsWithin(absolute, root)) throw new Error("untracked file escapes repository root");
-      const stat = fs.lstatSync(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("untracked entry is not a regular file");
-      hash.update(file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-    }
-    return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: headSha };
-  } catch (error) {
-    if (hasGitMarker || error instanceof BuilderBuildRunInputError) {
-      if (error instanceof BuilderBuildRunInputError) throw error;
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", `could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return null;
-  }
-}
-
-export function captureReviewWorkspaceSnapshot(
-  projectRoot: string,
-  reviewedFiles: Array<{ file: string; sha256: string }>,
-): AnyRecord {
-  return gitWorktreeSnapshot(projectRoot) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
-}
-
 function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha256: string }> {
   if (!Array.isArray(snapshot.files) || snapshot.files.length === 0
     || !snapshot.files.every((file) => isRecord(file) && typeof file.file === "string" && /^[a-f0-9]{64}$/i.test(String(file.sha256)))) {
@@ -825,17 +786,6 @@ function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha2
     throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.files", "must not contain duplicate files");
   }
   return files;
-}
-
-function reviewedFilesSnapshot(projectRoot: string, reviewedFiles: Array<{ file: string; sha256: string }>): AnyRecord {
-  const files = reviewedFiles.map((file) => ({ ...file }));
-  const hash = createHash("sha256");
-  hash.update("flow-agents:reviewed-files:v1\0");
-  for (const artifact of files) {
-    const absolute = safeReviewedArtifactPath(projectRoot, artifact.file);
-    hash.update(artifact.file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-  }
-  return { version: 1, kind: "reviewed-files", algorithm: "sha256", digest: hash.digest("hex"), files };
 }
 
 async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {

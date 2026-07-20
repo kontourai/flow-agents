@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
-import { captureReviewWorkspaceSnapshot } from "../builder-flow-runtime.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 
 type Issue = { path: string; message: string };
@@ -482,7 +482,9 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
           const stateResult = readJson(path.join(dir, "state.json"));
           const state = stateResult.value;
-          const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
+          const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1
+            ? state.work_item_refs[0]
+            : typeof state?.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
           const authorityEvents = readJson(path.join(dir, "lifecycle-authority.resolution-events.json")).value;
           const resolutionEvents = Array.isArray(authorityEvents?.events)
             ? authorityEvents.events

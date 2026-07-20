@@ -15,7 +15,8 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
-import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import {
   EVIDENCE_REF_FIELD_SCHEMAS,
@@ -4384,7 +4385,9 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const critiqueId = opt(p, "id", "review");
   if (!safeCritiqueId.test(critiqueId)) die("record-critique --id must be a safe identifier");
   const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
-  if (workItemRefs.length !== 1 || !hasNonEmptyString(workItemRefs[0])) die("record-critique requires one bound workflow subject");
+  const workflowSubjectRef = workItemRefs.length === 1 && hasNonEmptyString(workItemRefs[0])
+    ? String(workItemRefs[0])
+    : `flow-agents://session/${slug}`;
   const sequence = bundleCritiques.length + 1;
   const predecessor = sequence === 1 ? null : bundleCritiques.find((entry) => entry.critique_sequence === sequence - 1);
   if (bundleCritiques.length > 0 && (!predecessor || predecessor.critique_record_hash !== critiqueRecordHash(predecessor))) {
@@ -4407,7 +4410,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     },
     artifact_refs: reviewArtifacts.map((artifact) => artifact.file),
     findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"), projectRoot)),
-    workflow_subject_ref: String(workItemRefs[0]),
+    workflow_subject_ref: workflowSubjectRef,
     critique_sequence: sequence,
     critique_predecessor_hash: predecessor?.critique_record_hash ?? CRITIQUE_CHAIN_GENESIS,
     created_at: opt(p, "timestamp", ""),
@@ -6096,7 +6099,9 @@ function critiqueClean(dir: string): boolean {
     const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "critique");
     if (critiqueClaims.length === 0) return false; // no critique written yet
     const state = loadJson(path.join(dir, "state.json"));
-    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+      ? state.work_item_refs[0]
+      : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
     const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
     if (!graph.valid) return false;
     const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
