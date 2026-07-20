@@ -425,6 +425,15 @@ complete public re-review may repair an older automatic same-reviewer recheck
 edge by retargeting that lineage to the new pass; it preserves each historical
 record and never retargets a signed cross-reviewer edge.
 
+When passing `tests-evidence` is synchronized, Builder validates the critique
+resolution graph against the complete candidate bundle, including superseded
+critique history. This preserves the required contiguous append-only chain and
+makes prior recovery records auditable. Separately, only live critique records
+that are current for the active verify-gate visit can satisfy the clean-critique
+requirement: each must be substantive, passing, and review the current
+implementation workspace. Historical, stale, superseded, or open records never
+satisfy that current-visit requirement.
+
 ```text
 flow-agents builder-run pause --session-dir <dir> --reason <text>
 flow-agents builder-run resume --session-dir <dir> --reason <text>

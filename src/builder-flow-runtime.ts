@@ -1085,7 +1085,7 @@ async function bundleGateEvidence(
   }
   if (!forcedRouteReason && String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(bundle.claims as AnyRecord[], currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -1162,7 +1162,7 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   return { events, verified: true };
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
+async function assertVerifiedTestsTrust(bundleClaims: AnyRecord[], currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
@@ -1170,13 +1170,16 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     && isRecord(claim.metadata.gate_claim)
     && claim.metadata.gate_claim.expectation_id === "tests-evidence");
   if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
-  // A route-back starts a new gate visit and therefore a new critique generation. Historical
-  // reviewer slices remain in the bundle and manifest for audit, but only critiques acquired
-  // during this visit describe the implementation snapshot currently being verified. Within a
-  // visit every live reviewer slice still participates, so changing reviewers cannot bury a
-  // disputed finding.
-  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
+  // Resolution integrity is an append-only property of the complete candidate bundle. In
+  // particular, a live critique can have a valid predecessor chain through superseded history;
+  // filtering that history before validation would turn a valid recovery into a malformed chain.
+  const graph = validateCritiqueResolutionGraph(bundleClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
+  // A route-back starts a new gate visit and therefore a new critique generation. Historical
+  // reviewer slices remain in the bundle for audit and graph integrity, but only live critique
+  // records acquired during this visit describe the implementation snapshot currently being
+  // verified. Within a visit every live reviewer slice still participates, so changing reviewers
+  // cannot bury a disputed finding.
   const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)
