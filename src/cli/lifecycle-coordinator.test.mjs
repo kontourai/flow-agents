@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { canonicalJson, recoverTransaction, restoreTree, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const request = { action: "cancel", project_root: "/srv/project", session_dir: "/srv/project/.kontourai/flow-agents/run-1", authorization_file: "/etc/kontourai/request.json" };
 const envelope = { schema_version: "1.0", action: "cancel", request_sha256: sha256(request), request };
@@ -46,6 +46,21 @@ test("transaction snapshot restores an interrupted unprivileged artifact update"
     assert.equal(fs.readFileSync(path.join(root, "nested", "report.md"), "utf8"), "before report\n");
     assert.equal(fs.existsSync(path.join(root, "new.json")), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test("prepared root retry rolls a committed child transaction back to its signed preimage", () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-committed-retry-"));
+  try {
+    const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
+    const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
+    fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(flowDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "before\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "before flow\n");
+    const session = snapshotTree(sessionDir), flow = snapshotTree(flowDir);
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "committed child mutation\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "committed flow mutation\n");
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", session, flow }));
+    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }), true);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "before\n");
+    assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "before flow\n");
+  } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("transaction snapshot rejects symlink swap paths", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-symlink-"));

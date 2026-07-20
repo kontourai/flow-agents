@@ -115,6 +115,15 @@ export function recoverTransaction(paths) {
   restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
 }
+export function rollbackCommittedTransaction(paths) {
+  const file = transactionJournal(paths); if (!fs.existsSync(file)) return false;
+  const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
+  if (journal.status !== "committed") return false;
+  if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
+  restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+  atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
+  return true;
+}
 async function inProjectTransaction(paths, action) {
   recoverTransaction(paths);
   const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
@@ -251,6 +260,13 @@ async function cancelCanonicalFlow(paths, authorization) {
   const assignmentReleased = releaseAssignment(paths, authorization);
   return { result_core_sha256: sha256({ state: result.state, assignment_released: assignmentReleased }), assignmentReleased };
 }
+async function reconcileCanceledFlow(paths, authorization) {
+  const { flow } = await loadPinnedFlowReducer(); const run = await flow.loadRun(paths.runId, paths.projectRoot);
+  assertAuthorizationBinding(paths, authorization, run);
+  const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
+  if (run.state.status !== "canceled" || assignment.status !== "released" || assignment.actor_key !== authorization.assignment_actor_key || canonicalJson(assignment.actor) !== canonicalJson(authorization.assignment_actor)) return null;
+  return { result_core_sha256: sha256({ state: run.state, assignment_released: true }), run_id: paths.runId };
+}
 async function archiveCanonicalSession(paths, authorization) {
   const { flow } = await loadPinnedFlowReducer();
   const run = await flow.loadRun(paths.runId, paths.projectRoot);
@@ -360,11 +376,13 @@ async function processRootOperation(envelope) {
     }
     const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
     const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+    let resumePrepared = false;
     if (fs.existsSync(nonceFile)) {
       const prior = durableJson(nonceFile, "nonce record");
       if (canonicalJson(prior) !== canonicalJson(prepared)) throw new Error("lifecycle authorization nonce has already been consumed");
+      resumePrepared = true;
     } else atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
-    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization }) }, caller);
+    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared }) }, caller);
     if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
     const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
@@ -392,10 +410,19 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     }
     if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");
     const value = verifiedCapability(payload.capability, "mutation-capability");
-    if (!record(value.envelope) || !record(value.authorization)) throw new Error("mutation worker request is invalid");
+    if (!record(value.envelope) || !record(value.authorization) || typeof value.resume_prepared !== "boolean") throw new Error("mutation worker request is invalid");
     const envelope = validateEnvelope(value.envelope);
+    if (value.authorization.operation !== envelope.action || value.authorization.run_id !== path.basename(path.resolve(envelope.request.session_dir))) throw new Error("mutation worker authorization does not bind the request");
+    if (value.resume_prepared && envelope.action === "archive" && !fs.existsSync(envelope.request.session_dir)) {
+      const projectRoot = fs.realpathSync(envelope.request.project_root), runId = path.basename(path.resolve(envelope.request.session_dir));
+      const archived = path.join(projectRoot, ".kontourai", "flow-agents", "archive", runId);
+      const paths = { projectRoot, sessionDir: fs.realpathSync(archived), runId };
+      const { flow } = await loadPinnedFlowReducer(); const run = await flow.loadRun(runId, projectRoot); assertAuthorizationBinding(paths, value.authorization, run);
+      return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(projectRoot, archived) }), run_id: runId };
+    }
     const paths = canonicalMutationPaths(envelope.request);
-    if (value.authorization.operation !== envelope.action || value.authorization.run_id !== paths.runId) throw new Error("mutation worker authorization does not bind the request");
+    if (value.resume_prepared && envelope.action === "resolve-critique") rollbackCommittedTransaction(paths);
+    if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
     return executeMutation(envelope, paths, value.authorization);
   }
   const lines = input.split(/\r?\n/).filter(Boolean);

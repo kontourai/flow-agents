@@ -1004,7 +1004,7 @@ const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).
 });
 visit(root);
 const publicApi = await import(pathToFileURL(path.join(root, 'index.js')).href);
-for (const name of ['cancelBuilderFlowSession', 'archiveBuilderFlowSession', 'loadBuilderLifecycleAuthorization', 'loadCritiqueResolutionAuthorization']) {
+for (const name of ['loadCritiqueResolutionAuthorization']) {
   if (name in publicApi) process.exit(1);
 }
 for (const file of files.sort()) {

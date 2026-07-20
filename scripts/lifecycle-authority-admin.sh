@@ -5,6 +5,7 @@ source_file="${2:-packaging/lifecycle-authority/coordinator.mjs}"
 runtime_file="$(dirname "$source_file")/runtime-v1.mjs"
 reducer_pin_file="$(dirname "$source_file")/flow-reducer-v1.json"
 flow_node_modules="${3:-node_modules}"
+closure_verifier="$(dirname "$0")/verify-flow-reducer-closure.mjs"
 operator_group="${4:-kontourai-lifecycle-operator}"
 install_dir="/usr/local/libexec/kontourai"
 target="$install_dir/flow-agents-lifecycle-authority-v1"
@@ -86,6 +87,7 @@ NODE
     cp -R "$flow_node_modules" "$flow_stage/node_modules"
     chown -R root:wheel "$flow_stage" 2>/dev/null || chown -R root:root "$flow_stage"
     chmod -R go-w "$flow_stage"
+    node "$closure_verifier" "$flow_stage/node_modules" "$reducer_pin_file"
     if [ -f "$target" ]; then cp -p "$target" "$backup"; fi
     if [ -f "$target_runtime" ]; then cp -p "$target_runtime" "$backup_runtime"; fi
     if [ -f "$target_pin" ]; then cp -p "$target_pin" "$backup_pin"; fi
