@@ -5,6 +5,7 @@ source_file="${2:-packaging/lifecycle-authority/coordinator.mjs}"
 runtime_file="$(dirname "$source_file")/runtime-v1.mjs"
 reducer_pin_file="$(dirname "$source_file")/flow-reducer-v1.json"
 flow_node_modules="${3:-node_modules}"
+operator_group="${4:-kontourai-lifecycle-operator}"
 install_dir="/usr/local/libexec/kontourai"
 target="$install_dir/flow-agents-lifecycle-authority-v1"
 backup="$install_dir/flow-agents-lifecycle-authority-v1.previous"
@@ -14,7 +15,32 @@ target_pin="$install_dir/flow-reducer-v1.json"
 backup_pin="$install_dir/flow-reducer-v1.json.previous"
 target_flow="$install_dir/flow-reducer"
 backup_flow="$install_dir/flow-reducer.previous"
+sudoers_dir="/etc/sudoers.d"
+sudoers_file="$sudoers_dir/kontourai-flow-agents-lifecycle-authority-v1"
+sudoers_backup="$sudoers_file.previous"
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
+ensure_operator_group() {
+  case "$(uname -s)" in
+    Darwin) dseditgroup -o create "$operator_group" 2>/dev/null || true ;;
+    Linux) getent group "$operator_group" >/dev/null 2>&1 || groupadd --system "$operator_group" ;;
+    *) echo "unsupported platform for lifecycle operator group: $(uname -s)" >&2; exit 69 ;;
+  esac
+}
+install_sudoers_rule() {
+  ensure_operator_group
+  mkdir -p "$sudoers_dir"
+  sudoers_stage="$sudoers_file.$$"
+  umask 077
+  {
+    echo "Defaults!$target env_reset,secure_path=/usr/sbin:/usr/bin:/sbin:/bin"
+    echo "%$operator_group ALL=(root) NOPASSWD: $target \"\""
+  } > "$sudoers_stage"
+  chown root:wheel "$sudoers_stage" 2>/dev/null || chown root:root "$sudoers_stage"
+  chmod 440 "$sudoers_stage"
+  visudo -cf "$sudoers_stage" >/dev/null
+  if [ -f "$sudoers_file" ]; then cp -p "$sudoers_file" "$sudoers_backup"; fi
+  mv -f "$sudoers_stage" "$sudoers_file"
+}
 case "$action" in
   install|upgrade)
     test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file"
@@ -49,6 +75,7 @@ NODE
     mv -f "$target_pin.$$" "$target_pin"
     mv "$flow_stage" "$target_flow"
     mv -f "$temporary" "$target"
+    install_sudoers_rule
     ;;
   rollback)
     test -f "$backup" && test -f "$backup_runtime" && test -f "$backup_pin" && test -d "$backup_flow"
@@ -63,6 +90,7 @@ NODE
     chmod 644 "$target_pin"
     rm -rf "$target_flow"
     mv "$backup_flow" "$target_flow"
+    if [ -f "$sudoers_backup" ]; then mv -f "$sudoers_backup" "$sudoers_file"; else rm -f "$sudoers_file"; fi
     ;;
-  *) echo "usage: $0 <install|upgrade|rollback> [coordinator.mjs] [node_modules]" >&2; exit 64 ;;
+  *) echo "usage: $0 <install|upgrade|rollback> [coordinator.mjs] [node_modules] [operator-group]" >&2; exit 64 ;;
 esac

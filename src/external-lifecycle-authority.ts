@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
+export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
@@ -100,7 +101,7 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
   const helper = trustedHelper();
   let output: string;
   try {
-    output = execFileSync(helper, [], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout: 30_000, maxBuffer: 256 * 1024 });
+    output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout: 30_000, maxBuffer: 256 * 1024 });
   } catch (error) {
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");

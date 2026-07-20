@@ -155,7 +155,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/flow": "^3.1.4"
+    "@kontourai/flow": "3.5.0"
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.11.0",

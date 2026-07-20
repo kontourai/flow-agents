@@ -342,6 +342,13 @@ administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
+The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
+the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
+a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
+`secure_path` apply to that command. The rule grants only execution of the fixed helper. It does
+not bypass the signed authorization, protected key registry, replay lock, preimage CAS, or any
+other operation checks in the helper.
+
 Current implementation status is intentionally incremental and fail-closed. The separately installed
 `runtime-v1.mjs` artifact contains the pure, deterministic critique-resolution reducer; both its
 bytes and the signed completion bind a runtime digest. For critique resolution, the coordinator
@@ -349,10 +356,11 @@ uses the staged, exact Flow trust-attachment reducer to attach the authoritative
 bundle and synchronize the canonical Flow manifest, state, and reports. Flow attachment semantics
 therefore remain Flow-owned; the coordinator owns only locked CAS and writes described by the
 reducer. Package JavaScript validates the signed completion's immutable structural bindings
-read-only and never turns the response into a package-side mutation. Cancel and archive transition
-adapters remain unsupported and exit nonzero without emitting a completion. Positive root-owned
-installation remains `NOT_VERIFIED` until the 3.5.0 package is published and provisioned; issue
-#744 stays open for that container lane.
+read-only and never turns the response into a package-side mutation. The coordinator also invokes
+Flow's canonical cancellation transition, then releases the exact bound local assignment; archival
+requires a canceled or completed canonical Flow run and atomically relocates only the session to
+`.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains
+`NOT_VERIFIED` pending the root/container conformance lane.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

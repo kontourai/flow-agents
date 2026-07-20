@@ -157,6 +157,56 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   }
   return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId };
 }
+function sessionSubject(paths) {
+  const state = protectedJson(path.join(paths.sessionDir, "state.json"), "workflow session state", 4 * 1024 * 1024);
+  if (!Array.isArray(state.work_item_refs) || state.work_item_refs.length !== 1 || typeof state.work_item_refs[0] !== "string" || !state.work_item_refs[0]) {
+    throw new Error("workflow session must bind exactly one Work Item");
+  }
+  return state.work_item_refs[0];
+}
+function assignmentFile(paths) { return path.join(paths.projectRoot, ".kontourai", "flow-agents", "assignment", `${paths.runId}.json`); }
+function assertAuthorizationBinding(paths, authorization, run) {
+  if (authorization.subject !== sessionSubject(paths) || authorization.subject !== run.state.subject) throw new Error("authorization subject does not bind the canonical Flow run and session");
+  if (!record(authorization.request) || !record(authorization.assignment_actor) || typeof authorization.assignment_actor_key !== "string") throw new Error("lifecycle authorization is malformed");
+}
+function releaseAssignment(paths, authorization) {
+  const file = assignmentFile(paths);
+  if (!fs.existsSync(file)) return false;
+  const current = protectedJson(file, "canonical assignment", 256 * 1024);
+  if (current.status === "released") return false;
+  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || canonicalJson(current.actor) !== canonicalJson(authorization.assignment_actor)) {
+    throw new Error("authorization does not bind the canonical assignment holder");
+  }
+  const at = new Date().toISOString();
+  const released = { ...current, status: "released", audit_trail: [...(Array.isArray(current.audit_trail) ? current.audit_trail : []), { at, transition: "release", from_actor: current.actor, to_actor: authorization.assignment_actor, reason: authorization.request.reason }] };
+  atomicWrite(file, `${JSON.stringify(released, null, 2)}\n`);
+  return true;
+}
+async function cancelCanonicalFlow(paths, authorization) {
+  const { flow } = await loadPinnedFlowReducer();
+  const run = await flow.loadRun(paths.runId, paths.projectRoot);
+  assertAuthorizationBinding(paths, authorization, run);
+  const result = await flow.cancelRun(paths.runId, { cwd: paths.projectRoot, request: authorization.request });
+  const assignmentReleased = releaseAssignment(paths, authorization);
+  return { result_core_sha256: sha256({ state: result.state, assignment_released: assignmentReleased }), assignmentReleased };
+}
+async function archiveCanonicalSession(paths, authorization) {
+  const { flow } = await loadPinnedFlowReducer();
+  const run = await flow.loadRun(paths.runId, paths.projectRoot);
+  assertAuthorizationBinding(paths, authorization, run);
+  if (!['canceled', 'completed'].includes(run.state.status)) throw new Error("only canceled or completed canonical Flow runs may be archived");
+  const archiveRoot = path.join(paths.projectRoot, ".kontourai", "flow-agents", "archive");
+  if (fs.existsSync(archiveRoot)) {
+    const stat = fs.lstatSync(archiveRoot);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("workflow archive root must be a real directory");
+  } else {
+    fs.mkdirSync(archiveRoot, { recursive: true, mode: 0o700 });
+  }
+  const destination = path.join(archiveRoot, paths.runId);
+  if (fs.existsSync(destination)) throw new Error("workflow archive destination already exists");
+  fs.renameSync(paths.sessionDir, destination);
+  return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(paths.projectRoot, destination) }) };
+}
 function completion(envelope, paths, operationStatus, resultCoreSha256) {
   const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
   const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
@@ -191,8 +241,12 @@ async function processOperation(envelope) {
       atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
       return { completionRecord, replayed: false };
     }
-    // Cancel/archive remain fail-closed until their canonical adapters land.
-    throw new Error(`reference coordinator ${envelope.action} state transition is not implemented`);
+    const outcome = envelope.action === "cancel"
+      ? await cancelCanonicalFlow(paths, authorization)
+      : await archiveCanonicalSession(paths, authorization);
+    const completionRecord = completion(envelope, paths, "applied", outcome.result_core_sha256);
+    atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
+    return { completionRecord, replayed: false };
   });
 }
 function response(envelope, outcome) {
