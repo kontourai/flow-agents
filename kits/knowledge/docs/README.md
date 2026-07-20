@@ -11,6 +11,41 @@ index.
 
 Any storage backend can adopt this kit by implementing the contract without forking kit flows.
 
+## Promote residue sources
+
+The `knowledge.promote` ingest layer accepts two provider-neutral source ids:
+
+| Source | Input | Output / authority |
+|---|---|---|
+| `workflow-sidecar` | A completed `.kontourai/flow-agents/<slug>/` session directory. | The existing residue shape, byte-compatible with the pre-source-dispatch API. The Builder/session artifacts remain authoritative. |
+| `runtime-session` | Canonical telemetry v0.3.0 JSONL plus explicit Claude Code/Codex transcript roots and a dream-owned cursor path. | One or more schema-valid, bounded, redacted runtime residues. Raw transcripts remain runtime-owned; residue is not evidence or a trust claim. |
+
+The stable envelope is
+[`schemas/knowledge/residue.schema.json`](../../../schemas/knowledge/residue.schema.json).
+`ingestSession(sessionDir)` remains the compatibility API. New callers can use
+`ingestFromSource(source, input)`; `ingestRuntimeSessions(options)` exposes the
+runtime batch directly.
+
+Runtime ingestion processes telemetry in byte order. Its atomic cursor advances
+only through successfully handled records, deduplicates unchanged session
+transcripts across invocations, and binds each watermark to the telemetry file
+generation plus a digest of the processed prefix. Native rename rotation drains
+the matching `.1` predecessor before transitioning to the new file; copy-truncate
+or replacement without that continuity evidence blocks instead of abandoning a
+possibly unread tail.
+Malformed telemetry, mixed known/unknown transcript records, unreadable files,
+limit overflows, out-of-root paths, and cursor commit failures block before the
+affected record advances. Reports use domain-separated hashed event ids and
+fixed reason codes; they never echo transcript paths, content, or raw runtime
+identifiers. The deterministic scrub replaces provider tokens, compound
+credential assignments, home-directory paths, and email addresses before
+residue leaves the parser—even when transcript text asks the later distiller to
+preserve them.
+
+This slice supplies residue to later offline distillation. It does not schedule
+dreaming, write a Knowledge store, parse OpenCode/pi transcripts, or change the
+telemetry schema.
+
 ---
 
 ## Contract Summary
