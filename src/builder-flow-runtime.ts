@@ -955,8 +955,29 @@ function executeWorkspaceFreshness(run: BuilderFlowRunResult, bundle: unknown, p
   const claim = claims[0]!;
   const metadata = isRecord(claim.metadata) ? claim.metadata : null;
   const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
-  if (claim.value !== "pass" || claim.status !== "verified" || !gateClaim
+  if (claim.value !== "pass" || claim.status !== "verified" || !metadata || metadata.workflow_subject_ref !== run.state.subject || !gateClaim
     || gateClaim.expectation_id !== "implementation-scope" || gateClaim.identity_version !== 2) return { fresh: false };
+  // The mutable session bundle is only a current presentation of evidence. Its
+  // execute authority must be the exact claim accepted by Flow's one live
+  // execute-gate attachment; a replacement claim with a fresh-looking snapshot
+  // cannot rewrite what the canonical execute visit actually approved.
+  const authorityClaims = manifestEvidence(run.manifest).flatMap((entry) => {
+    if (entry.gate_id !== "execute-gate" || entry.status !== "passed"
+      || typeof entry.superseded_by === "string"
+      || !Array.isArray(entry.expectation_ids) || !entry.expectation_ids.includes("implementation-scope")) return [];
+    const attachmentClaims = isRecord(entry.bundle) && Array.isArray(entry.bundle.claims) ? entry.bundle.claims : [];
+    return attachmentClaims.filter((candidate): candidate is AnyRecord => isRecord(candidate)
+      && candidate.claimType === "builder.execute.scope" && candidate.subjectType === "change");
+  });
+  if (authorityClaims.length !== 1) return { fresh: false };
+  const authority = authorityClaims[0]!;
+  if (authority.id !== claim.id || authority.subjectId !== claim.subjectId
+    || authority.value !== "pass" || authority.status !== "verified"
+    || !isRecord(authority.metadata) || authority.metadata.workflow_subject_ref !== run.state.subject
+    || !isRecord(authority.metadata.gate_claim)
+    || authority.metadata.gate_claim.expectation_id !== "implementation-scope"
+    || authority.metadata.gate_claim.identity_version !== 2
+    || !isDeepStrictEqual(authority.metadata.gate_claim.workspace_snapshot, gateClaim.workspace_snapshot)) return { fresh: false };
   return { fresh: workspaceSnapshotMatches(projectRoot, gateClaim.workspace_snapshot) };
 }
 

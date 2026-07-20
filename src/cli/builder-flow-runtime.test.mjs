@@ -1739,6 +1739,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
 test("implementation scope snapshot routes tracked drift back before verification and permits fresh execute re-entry", async () => {
   const session = makeSession("execute-workspace-snapshot");
   initializeTrackedSession(session);
+  const ambient = claimAmbientSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
@@ -1747,16 +1748,43 @@ test("implementation scope snapshot routes tracked drift back before verificatio
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
 
-  const enteredVerify = await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  assert.equal(enteredVerify.run.state.current_step, "verify");
+  const deliver = path.join(session.sessionDir, `${session.slug}--deliver.md`);
+  fs.writeFileSync(deliver, "# Delivery\n\nTracked implementation scope.\n");
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "pass",
+    "--summary", "Tracked implementation scope recorded.",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, deliver), summary: "Delivery scope." }),
+  ]), 0);
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "verify");
   const executeClaim = readJson(path.join(session.sessionDir, "trust.bundle")).claims.find((claim) => claim.claimType === "builder.execute.scope");
   assert.deepEqual(executeClaim.metadata.gate_claim.workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
   assert.equal(executeClaim.metadata.gate_claim.workspace_snapshot.kind, "git-worktree");
+  const executeClaimId = executeClaim.id;
+  const executeSnapshot = structuredClone(executeClaim.metadata.gate_claim.workspace_snapshot);
+
+  // A public verify writer rebuilds the full trust bundle. Its rebuild must
+  // retain the immutable execute authority exactly rather than recapturing it.
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "tests-evidence", "--status", "fail",
+    "--summary", "Verification is intentionally deferred for the snapshot fixture.",
+  ]), 0);
+  const rebuiltExecuteClaim = readJson(path.join(session.sessionDir, "trust.bundle")).claims.find((claim) => claim.id === executeClaimId);
+  assert.deepEqual(rebuiltExecuteClaim.metadata.gate_claim.workspace_snapshot, executeSnapshot);
 
   // This is a tracked source edit made directly after execute passed. No hook is
-  // involved; the runtime must reject the attempted verify evidence itself.
+  // involved. A well-shaped replacement execute claim even carries the fresh
+  // post-edit snapshot, but it was not the claim Flow accepted at execute.
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "implementation changed after execute\n");
+  const replacement = withIdentitySuffix(bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+  }), "replacement");
+  replacement.claim.metadata.gate_claim.workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const attemptedVerify = await writeAndSync(session, [
+    replacement,
     bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
     ...verifiedTestsPrerequisites(session),
   ]);
@@ -1779,6 +1807,7 @@ test("implementation scope snapshot routes tracked drift back before verificatio
   const unchanged = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(unchanged.run.state.current_step, "verify");
   assert.equal(unchanged.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
