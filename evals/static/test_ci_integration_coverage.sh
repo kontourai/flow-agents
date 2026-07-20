@@ -18,11 +18,6 @@ const EXEMPTIONS = {
   'evals/integration/test_claim_lookup.sh':
     'Baseline-red in #297: stop-goal-fit fixture emits no disputed-claim gate hint.',
 
-  // Baseline-red in #297: goal-fit block streak fixture now exits 0 instead of
-  // the expected block/release sequence. This touches hook/gate behavior, which
-  // is explicitly out of scope for #297.
-  'evals/integration/test_goal_fit_escape_hatch.sh':
-    'Baseline-red in #297: goal-fit block streak fixture exits 0 instead of block/release sequence.',
 };
 
 function slugify(label) {
