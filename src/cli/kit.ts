@@ -15,6 +15,37 @@ import { root } from "../tools/common.js";
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 
+const KIT_USAGE: Record<string, string> = {
+  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]",
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
+  validate: "usage: flow-agents kit validate [<kit-dir>]",
+  provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
+  inspect: "usage: flow-agents kit inspect [<kit-dir>] [--json]",
+  list: "usage: flow-agents kit list [--dest <path>]",
+  status: "usage: flow-agents kit status [<kit-id>] [--dest <path>]",
+};
+
+function hasHelp(argv: string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+function printKitUsage(): void {
+  console.log(`Usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> [args]
+
+Commands:
+  install    Install a Flow Kit from a local path or Git URL.
+  activate   Write runtime projections for installed and built-in kits.
+  validate   Validate a Flow Kit repository.
+  provision  Copy a kit's declared provisions into a target repository.
+  inspect    Report a kit's conformance and consumer targets.
+  list       List locally installed Flow Kits.
+  status     Report local Flow Kit installation status.`);
+}
+
+function printCommandUsage(command: keyof typeof KIT_USAGE): void {
+  console.log(KIT_USAGE[command]);
+}
+
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
@@ -445,6 +476,38 @@ async function inspect(argv: string[]): Promise<number> {
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "--help" || command === "-h") {
+    printKitUsage();
+    return 0;
+  }
+  if (command === "install" && hasHelp(rest)) {
+    printCommandUsage("install");
+    return 0;
+  }
+  if (command === "activate" && hasHelp(rest)) {
+    printCommandUsage("activate");
+    return 0;
+  }
+  if (command === "validate" && hasHelp(rest)) {
+    printCommandUsage("validate");
+    return 0;
+  }
+  if (command === "provision" && hasHelp(rest)) {
+    printCommandUsage("provision");
+    return 0;
+  }
+  if (command === "inspect" && hasHelp(rest)) {
+    printCommandUsage("inspect");
+    return 0;
+  }
+  if (command === "list" && hasHelp(rest)) {
+    printCommandUsage("list");
+    return 0;
+  }
+  if (command === "status" && hasHelp(rest)) {
+    printCommandUsage("status");
+    return 0;
+  }
   if (command === "install") return await install(rest);
   // Legacy sub-subcommands forwarded for backward compatibility within the kit subcommand.
   if (command === "install-local") return await installLocalSource(path.resolve(rest[0] ?? ""), rest);
