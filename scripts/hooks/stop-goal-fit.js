@@ -2385,12 +2385,14 @@ async function analyze(root, now = Date.now()) {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     if (activeTurnAuthority.valid && isOrdinaryActiveGateWarning(w, relPath)) return false;
-    // #793: "learning outstanding" always blocks, independent of terminal/blockRe
-    // classification — a delivered/verified parked session narrows to HARD_BLOCK-only
-    // (see blockRe above), which this warning deliberately does not match (kept out of
-    // isHardStopWarning's HARD_BLOCK/FULL_BLOCK vocabulary so the MAX_BLOCKS escape valve
-    // still releases it after N identical blocks, same as any ordinary gap).
-    if (LEARNING_GATE_PATTERN.test(w)) return true;
+    // #793: "learning outstanding" is WARN-ONLY — always emitted (never silent) but
+    // never blocking. The CI goal-fit baseline (12 assertions) and real operations
+    // encode that a terminal delivered/done session with valid sidecars is releasable;
+    // blocking on outstanding learning broke that contract (Runtime and Kit lane,
+    // 2026-07-20). Persistent loud nagging on every stop is the enforcement; the
+    // blocking teeth live in advance-state's terminal guard (+ --skip-learning) and
+    // the #800 CI receipt-closeout backstop.
+    if (LEARNING_GATE_PATTERN.test(w)) return false;
     return blockingRe.test(w);
   });
   return {
