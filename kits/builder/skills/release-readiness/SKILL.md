@@ -38,6 +38,10 @@ run at `merge-ready-ci`, whose Flow Definition composes the step from
 - Check and review state from `CheckProvider`.
 - Release and deployment capabilities from `ReleaseProvider` and `DeployProvider`.
 - Risk, rollback, observability, ownership, and authorization information.
+- Repo-local governance evidence when `.veritas/repo-map.json` is present. The
+  stable input is the `software-readiness-verdict` claim in the trust bundle
+  written by `veritas readiness`; do not inspect or reproduce Veritas policy
+  evaluation inside Builder Kit.
 
 No provider is assumed. A change record, check, release record, or deployment
 record may be unavailable because the repository or provider does not offer it.
@@ -49,6 +53,21 @@ terms or treating absence as success.
 1. Confirm the confidence report remains applicable to the proposed scope.
 2. Reconcile current provider checks and review state with the revision covered
    by acceptance evidence. Stale or mismatched evidence is `NOT_VERIFIED`.
+   When the repository has `.veritas/repo-map.json`, run the installed Veritas
+   engine for the same base/head revision (prefer
+   `veritas readiness --check evidence --changed-from <base> --changed-to <head>
+   --format json`), follow its returned `reportArtifactPath`, and record the
+   `software-readiness-verdict` claim plus that artifact reference in
+   `release.json`. If the Veritas Governance Kit is active, its
+   `veritas-governance.readiness-check` flow may supply the same claim as a
+   gate-ready trust bundle. Never parse console prose or import Veritas runtime
+   internals.
+   During an explicitly recorded Observe/advisory rollout, a rejected or
+   unavailable governance verdict is a visible residual risk and
+   `NOT_VERIFIED` gap, not an automatic Builder `HOLD`. Once the repository has
+   separately promoted Veritas governance to blocking enforcement, a missing,
+   stale, or non-verified verdict is required evidence and therefore routes to
+   `HOLD`.
 3. Evaluate change publication, release and deployment implications through the
    available providers. Before `RELEASE` or `DEPLOY`, require an owner, an
    executable rollback or recovery path, observable success and failure

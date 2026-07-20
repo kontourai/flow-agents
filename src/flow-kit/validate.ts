@@ -648,6 +648,10 @@ export async function validateKitRepositoryDiagnostics(kitDir: string): Promise<
   const warnings: string[] = [];
   const manifestPath = path.join(kitDir, "kit.json");
   let manifest: Record<string, unknown>;
+  if (!fs.existsSync(manifestPath)) {
+    errors.push(`${manifestPath}: missing required root Flow Kit manifest (kit.json)`);
+    return { errors, warnings };
+  }
   try {
     manifest = readJson(manifestPath) as Record<string, unknown>;
   } catch (error) {
