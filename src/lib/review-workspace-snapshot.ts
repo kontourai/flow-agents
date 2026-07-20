@@ -5,11 +5,11 @@ import { execTrustedGitSync } from "./trusted-git.js";
 
 type ReviewedFile = { file: string; sha256: string };
 
-export function captureReviewWorkspaceSnapshot(projectRoot: string, reviewedFiles: ReviewedFile[]): Record<string, unknown> {
-  return gitWorktreeSnapshot(projectRoot) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
+export function captureReviewWorkspaceSnapshot(projectRoot: string, reviewedFiles: ReviewedFile[], excludedRoots: string[] = []): Record<string, unknown> {
+  return gitWorktreeSnapshot(projectRoot, excludedRoots) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
 }
 
-function gitWorktreeSnapshot(projectRoot: string): Record<string, unknown> | null {
+function gitWorktreeSnapshot(projectRoot: string, excludedRoots: string[]): Record<string, unknown> | null {
   const root = fs.realpathSync(projectRoot);
   const hasGitMarker = fs.existsSync(path.join(root, ".git"));
   let gitRoot: string;
@@ -21,12 +21,18 @@ function gitWorktreeSnapshot(projectRoot: string): Record<string, unknown> | nul
   }
   try {
     if (!gitRoot || fs.realpathSync(gitRoot) !== root) throw new Error("canonical project root must match the Git worktree root");
+    const exclusions = excludedRoots.map((entry) => normalizeExcludedRoot(entry)).sort();
     const headSha = String(execTrustedGitSync(root, ["rev-parse", "HEAD"])).trim();
-    const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], "buffer") as Buffer;
+    const pathspecs = exclusions.length === 0 ? [] : [".", ...exclusions.map((entry) => `:(exclude)${entry}/**`)];
+    const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--", ...pathspecs], "buffer") as Buffer;
     const untracked = (execTrustedGitSync(root, ["ls-files", "--others", "--exclude-standard", "-z"], "buffer") as Buffer)
-      .toString("utf8").split("\0").filter(Boolean).sort();
+      .toString("utf8").split("\0").filter(Boolean)
+      .filter((file) => !exclusions.some((entry) => file === entry || file.startsWith(`${entry}/`)))
+      .sort();
     const hash = createHash("sha256");
-    hash.update("flow-agents:git-worktree:v1\0").update(headSha).update("\0").update(trackedDiff).update("\0");
+    hash.update("flow-agents:git-worktree:v1\0").update(headSha).update("\0");
+    for (const exclusion of exclusions) hash.update("exclude\0").update(exclusion).update("\0");
+    hash.update(trackedDiff).update("\0");
     for (const file of untracked) {
       const absolute = path.resolve(root, file);
       if (!pathIsWithin(absolute, root)) throw new Error("untracked file escapes repository root");
@@ -38,6 +44,14 @@ function gitWorktreeSnapshot(projectRoot: string): Record<string, unknown> | nul
   } catch (error) {
     throw new Error(`could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function normalizeExcludedRoot(entry: string): string {
+  const normalized = entry.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+  if (!normalized || path.posix.isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../") || normalized.includes("/../")) {
+    throw new Error("workspace snapshot excluded root must remain within the repository");
+  }
+  return normalized;
 }
 
 function reviewedFilesSnapshot(projectRoot: string, reviewedFiles: ReviewedFile[]): Record<string, unknown> {

@@ -50,6 +50,58 @@ as selected-work evidence, and creates a local runtime lease mirror for atomic s
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
 
+## Approved cross-repository rollouts
+
+An approved portfolio or retrofit initiative does not authorize a retroactive Builder run. Before
+editing each target repository, create or select that target's provider-backed Work Item, link it
+to the portfolio approval, and complete its normal `pull-work` selection and ownership preflight.
+Then bind the target Work Item through the public command:
+
+```bash
+flow_agents workflow start \
+  --flow builder.build \
+  --work-item kontourai/target-repository#123 \
+  --assignment-provider github \
+  --effective-state-json .kontourai/flow-agents/target-assignment-status.json
+```
+
+The provider status must confirm the calling actor holds that exact Work Item. `start` retains the
+provider result as selected-work evidence and begins at the canonical Builder entry step. A
+portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
+the work has already been changed without a bound run, record the gap and create a follow-up Work
+Item; do not manufacture a prior session, use a private writer, or use a `delivery/DECLARED`
+exemption for agent-delivered work.
+
+Follow the reported public `next_action` through planning, implementation, review, verification,
+and release readiness. After the final release-ready session bundle is sealed for the target
+checkout, publish the CI-visible delivery evidence through the primary public CLI, commit that
+delivery output with the change, and push the resulting head:
+
+```bash
+flow_agents workflow publish-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --json
+```
+
+This command derives the repository and session from the bound artifact; it does not accept a
+caller-selected output repository or private-writer escape hatch. It refuses a missing bundle, a
+partial Builder run, an unreconciled bundle shape, a stale or non-holder actor, and a positively
+identified checkpoint/checkout mismatch. Public test verification stamps the canonical Git
+workspace snapshot alongside its successful command observations. Before sealing, publishing
+requires both that stamped verification snapshot and the canonical live review graph to match the
+exact current workspace; a commit or worktree change must go back through canonical review and
+verification rather than rebinding either old evidence slice to a new checkpoint. Sessions whose
+older test evidence lacks this snapshot fail closed on public publishing until verification is
+rerun. The publisher holds the session subject lock and rechecks the identical snapshot after
+sealing, immediately before copying, and after the copy. A post-copy source change restores the
+exact prior `delivery/<session>/` destination (if any) and leaves every sibling delivery untouched
+before failing. It then seals against the derived target checkout's current
+`HEAD`, replaces stale
+companions with one newly emitted signed or in-toto companion, and verifies that companion binds
+both the checkpoint digest and current trust bundle before copying the set into
+`delivery/<session>/`. The committed delivery bundle is then available to the repository's Trust
+Verify check to reconcile against the pushed change.
+
 `builder.shape` uses a caller-supplied, safe slug. Derive it from a selected
 title using lowercase ASCII words separated by single hyphens. Never inject raw
 request text into a shell command or use it as a slug:

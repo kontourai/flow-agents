@@ -47,6 +47,12 @@ MAIN_AROOT="$TMP/main-project/.kontourai/flow-agents"
 SLUG="activation-test"
 SESSION_DIR="$MAIN_AROOT/$SLUG"
 mkdir -p "$SESSION_DIR"
+git -C "$TMP/main-project" init -q
+git -C "$TMP/main-project" config user.email flow-activation@example.invalid
+git -C "$TMP/main-project" config user.name "Flow Activation Eval"
+printf '.kontourai/\n' > "$TMP/main-project/.gitignore"
+git -C "$TMP/main-project" add .gitignore
+git -C "$TMP/main-project" commit -qm "seed flow activation fixture"
 printf 'Selected Work Item: activation:test\n' > "$SESSION_DIR/$SLUG--pull-work.md"
 
 if FLOW_AGENTS_ACTOR=activation-test-actor node "$ROOT/build/src/cli.js" workflow start \
@@ -203,20 +209,19 @@ else
   _fail "public workflow critique did not record a clean review before tests-evidence"
 fi
 
-# Corrected bytes make the first substantive PASS historical. A new independent
-# reviewer can attest the exact current workspace without impersonating or
-# superseding the unavailable prior reviewer.
-printf '\nCorrected after the historical clean review.\n' >> "$SESSION_DIR/$SLUG--deliver.md"
-if FLOW_AGENTS_ACTOR=activation-current-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+# A same-reviewer revision must retain its predecessor for chain validation
+# while only the current critique participates in the clean-review decision.
+printf '\nClarified after the first review revision.\n' >> "$SESSION_DIR/$SLUG--deliver.md"
+if FLOW_AGENTS_ACTOR=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
   --session-dir "$SESSION_DIR" \
-  --id "activation-current-review" \
+  --id "activation-review" \
   --verdict pass \
-  --summary "A second independent reviewer verified the corrected fixture bytes." \
+  --summary "The fixture reviewer verified the clarified bytes as a new review revision." \
   --artifact-ref "$SESSION_DIR/$SLUG--deliver.md" \
-  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the corrected activation fixture.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION_DIR/$SLUG--deliver.md\",\"summary\":\"Reviewed corrected delivery artifact.\"}]}" >/dev/null 2>&1; then
-  _pass "public workflow critique records an exact-workspace review while retaining the stale pass"
+  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the clarified activation fixture.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION_DIR/$SLUG--deliver.md\",\"summary\":\"Reviewed current delivery artifact.\"}]}" >/dev/null 2>&1; then
+  _pass "public workflow critique records a superseding same-reviewer revision"
 else
-  _fail "public workflow critique did not record the exact-workspace review"
+  _fail "public workflow critique did not record the superseding review revision"
 fi
 
 TEST_COMMAND="node --test checks/check-flow-step.test.mjs"
@@ -262,15 +267,13 @@ const declared = (bundle.claims || []).find(c => c.metadata?.gate_claim?.expecta
 if (!declared) throw new Error('MISSING builder.verify.tests; claims: ' + (bundle.claims||[]).map(c=>c.claimType).join(', '));
 if (declared.claimType !== 'builder.verify.tests' || declared.status !== 'verified') throw new Error('expected verified builder.verify.tests, got ' + JSON.stringify({ claimType: declared.claimType, status: declared.status }));
 const critiques = (bundle.claims || []).filter(c => c.metadata?.origin === 'critique' && c.value === 'pass' && !c.metadata?.superseded_by);
-if (critiques.length !== 2) throw new Error('expected historical and current clean critiques, got ' + critiques.length);
-const snapshots = critiques.map(c => c.metadata?.review_target?.workspace_snapshot?.digest);
-if (new Set(snapshots).size !== 2) throw new Error('expected distinct historical and current workspace snapshots');
+if (critiques.length !== 1) throw new Error('expected one current clean critique, got ' + critiques.length);
 const criterion = (bundle.claims || []).find(c => c.metadata?.origin === 'acceptance' && c.metadata?.criterion?.id === 'AC-1');
 if (!criterion || criterion.value !== 'pass' || criterion.status !== 'verified') throw new Error('MISSING verified completed AC-1 criterion');
-console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; historical+current clean critiques and AC-1 verified');
+console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; current clean critique and AC-1 verified');
 " 2>&1 \
-  && _pass "bundle advances with historical and current clean critiques plus completed AC-1" \
-  || _fail "bundle lacks declared tests evidence, retained critique history, current critique, or completed AC-1"
+  && _pass "bundle advances with a current clean critique plus completed AC-1" \
+  || _fail "bundle lacks declared tests evidence, current critique, or completed AC-1"
 
 # ─── TEST 4: tampered bundle at verify step BLOCKS ────────────────────────────
 echo ""

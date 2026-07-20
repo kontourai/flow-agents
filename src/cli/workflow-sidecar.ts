@@ -996,6 +996,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
         .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
       : null;
+    const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
+      && typeof check._verification_workspace_snapshot === "object"
+      && !Array.isArray(check._verification_workspace_snapshot)
+      ? check._verification_workspace_snapshot as AnyObj
+      : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -1034,6 +1039,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
+      ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -3536,6 +3542,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
     return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
   };
+  const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    const snapshot = md && typeof md === "object" ? md.verification_workspace_snapshot : undefined;
+    return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as AnyObj : undefined;
+  };
   const applyProducerStamp = (check: AnyObj, claim: AnyObj): void => {
     const md = claim.metadata as AnyObj;
     if (md && typeof md.expected_producer === "string") check._producer = md.expected_producer;
@@ -3619,6 +3630,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3639,6 +3652,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -4043,7 +4058,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -4160,6 +4175,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
+  if (mustRunTests && publicWorkflowAuthority) {
+    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
+    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
+      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
+    }
+    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
@@ -4735,9 +4757,9 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
 // is skipped gracefully (no error surfaced to the caller).
 
 /** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
-function resolveCommitSha(): string | null {
+function resolveCommitSha(projectRoot?: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execFileSync("git", ["rev-parse", "HEAD"], { ...(projectRoot ? { cwd: projectRoot } : {}), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -4758,11 +4780,20 @@ function resolveCommitSha(): string | null {
  *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
-export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+export type TrustCheckpointSealResult = {
+  checkpointPath: string;
+  attestationPath: string;
+  companionPath: string;
+  status: "signed" | "unsigned";
+  checkpointSha256: string;
+  bundleSha256: string;
+};
+
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<TrustCheckpointSealResult | null> {
   const bundlePath = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundlePath)) return null; // no bundle — skip gracefully
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return null; // Surface unavailable
 
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const report = surface.buildTrustReport(bundle as Record<string, unknown>);
@@ -4783,17 +4814,25 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     status,
     phase,
     sealed_at: sealedAt,
-    commit_sha: resolveCommitSha(),
+    commit_sha: resolveCommitSha(projectRoot),
     checkpoint,
   };
   writeJson(checkpointPath, envelope);
+
+  // Every seal owns a fresh, mutually-exclusive companion set. Removing all prior
+  // companions before signing prevents an old .sig/.intoto or pointer file from
+  // satisfying a later existence-only check when this attempt emits nothing.
+  for (const name of ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"]) {
+    fs.rmSync(path.join(dir, name), { force: true });
+  }
 
   // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
   // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
   // The .catch() at the call site already guards the parent command; this inner
   // catch is defense-in-depth so signing never propagates an error upward.
-  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
+  return await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
     process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
   });
 }
 
@@ -4822,11 +4861,11 @@ async function signCheckpointAttestation(
   surface: SurfaceModule,
   bundle: AnyObj,
   checkpointPath: string,
-): Promise<void> {
+): Promise<TrustCheckpointSealResult | null> {
   // Guard: both primitives must be present (consumed from Surface, never reimplemented).
   if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
     process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
-    return;
+    return null;
   }
 
   // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
@@ -4883,6 +4922,15 @@ async function signCheckpointAttestation(
   // in-toto statement ties it back to the checkpoint without breaking the digest.
   const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
   writeJson(attestationPath, attestation);
+  const companionPath = path.join(dir, String(attestation.path));
+  return {
+    checkpointPath,
+    attestationPath,
+    companionPath,
+    status: attestation.status as "signed" | "unsigned",
+    checkpointSha256: sha256hex,
+    bundleSha256: createHash("sha256").update(fs.readFileSync(path.join(dir, "trust.bundle"))).digest("hex"),
+  };
 }
 
 /**
@@ -5278,7 +5326,19 @@ export function runReconcilePreflight(
   // package.json trust-reconcile-verify tiers apply locally; a repo with neither and no
   // manifest source resolves to the same empty legacy fallback CI itself would in that case.
   const canonicalCommands = tr.resolveCanonicalCommands({ commands: [] }, repoRoot) ?? [];
-  const manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  // A delivery published from a repository must be checked against the same
+  // repository-owned manifest that hosted CI will resolve.  In particular, do
+  // not let an ambient TRUST_RECONCILE_MANIFEST make a locally invalid bundle
+  // appear publishable; CI intentionally does not inherit the caller's shell.
+  const ambientManifest = process.env.TRUST_RECONCILE_MANIFEST;
+  delete process.env.TRUST_RECONCILE_MANIFEST;
+  let manifestResolution: AnyObj;
+  try {
+    manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  } finally {
+    if (ambientManifest === undefined) delete process.env.TRUST_RECONCILE_MANIFEST;
+    else process.env.TRUST_RECONCILE_MANIFEST = ambientManifest;
+  }
   const manifestByCmd = new Map<string, AnyObj>();
   for (const e of manifestResolution.entries) manifestByCmd.set(tr.normalizeCmd(e.command), e);
 
@@ -6119,6 +6179,54 @@ function critiqueClean(dir: string): boolean {
     });
   }
   return false;
+}
+
+/**
+ * Read-only release-boundary freshness check for the public workflow facade.
+ * Reuses the canonical critique graph and workspace-snapshot validation rather
+ * than treating a newly stamped checkpoint as proof that older evidence covered
+ * the current source. A changed HEAD or worktree therefore requires canonical
+ * review and verification to be recorded again before delivery can be published.
+ */
+export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
+  const fail = (): never => {
+    throw new Error("workflow publish-delivery requires current canonical review and test verification evidence bound to the exact same source snapshot; re-run critique and verification after any HEAD or workspace change");
+  };
+  if (!evidenceClean(dir)) fail();
+  const bundle = loadTrustBundleForTrustMachinery(dir);
+  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
+  if (current.kind !== "git-worktree" || typeof current.head_sha !== "string") fail();
+  const critiqueClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "critique")
+    : [];
+  if (critiqueClaims.length === 0) fail();
+  const state = loadJson(path.join(dir, "state.json"));
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+    ? state.work_item_refs[0]
+    : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+  if (!graph.valid) fail();
+  const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+  if (!graph.live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return critique && critiqueIsSubstantivePass(critique)
+      && isDeepStrictEqual(critique.review_target?.workspace_snapshot, current);
+  })) fail();
+  const testsClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
+      && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
+      && claim.value === "pass" && claim.status === "verified")
+    : [];
+  if (testsClaims.length !== 1) fail();
+  const metadata = testsClaims[0]!.metadata as AnyObj;
+  const observed = metadata.observed_commands;
+  const expected = metadata.verification_workspace_snapshot;
+  if (!Array.isArray(observed) || observed.length === 0
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
+    || !expected || typeof expected !== "object" || Array.isArray(expected)
+    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  if (!isDeepStrictEqual(expected, current)) fail();
+  return structuredClone(current);
 }
 function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
@@ -7268,7 +7376,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
