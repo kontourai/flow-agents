@@ -530,6 +530,51 @@ After `evidence-gate` is clean:
 - collect provider checks such as CI, status checks, required review, mergeability, policy, or deployment checks
 - record missing provider checks as `not_verified` unless they are explicitly skipped under the risk policy
 
+For an active Builder `pull-request-opened` gate, first inspect the projected action with
+`flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json`. A configured,
+compatible ChangeProvider exposes the operation argv; invoke it with the verified branch and
+intended change text:
+
+```bash
+flow-agents publish-change execute \
+  --session-dir .kontourai/flow-agents/<slug> \
+  --title "Describe the verified change" \
+  --body "Explain the change and its evidence" \
+  --head-ref feature/verified-change \
+  --base-ref main \
+  --draft
+```
+
+`--draft` is optional; all other flags are required and bounded. The command derives the
+repository, resolved immutable SHA for `--head-ref`, active assignment actor, run, and gate visit.
+It does not take `--result-json`, arbitrary evidence/expectation ids, credentials, or a private
+writer option. Configure the provider explicitly in
+`<repo-path>/context/settings/change-provider-settings.json`, optionally with a global base at
+`$HOME/.config/flow-agents/change-provider-settings.json`, and inspect the effective setting with
+`flow-agents effective-change-provider-settings --repo-path . --json`. Project match, project
+defaults, global project match, then global defaults take precedence.
+
+If status is `external_capability_required` (unconfigured) or reports an incompatible setting,
+do not claim completion or synthesize a result file: record the external gap and resolve the
+configuration/provider condition. For a configured GitHub adapter, `gh` is resolved from a fixed
+trusted absolute location rather than caller-controlled `PATH`; its authentication and the exact
+repository/base/head/SHA/title/body/draft match are verified before Flow records the result.
+The adapter recovers one matching published pull request before creation and after an ambiguous
+create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
+Open records support the normal path; merged records support reconciliation after provider work
+completed ahead of the local run. Auth, provider, ambiguity, stale/closed-but-unmerged-record, or
+wrong-intent failures leave the gate unresolved.
+
+Only the authenticated Flow-owned transaction writes the bounded
+`publish-change.result.json`, revalidates the assignment, gate visit, and configuration under the
+subject lock, satisfies only `pull-request-opened`, and requires Flow to advance exactly one
+canonical step. Generic driver
+JSON/evidence, caller-authored result files, and package-internal writers cannot substitute for
+that transaction. The receipt separately preserves the bound `assignment_actor` and actual
+authenticated GitHub `provider_actor`. Credentials and provider diagnostics are never stored in workflow artifacts,
+trust bundles, logs, or snapshots. A real provider mutation remains separate from local test
+proof; do not report a live recovery as complete without its provider and canonical-run evidence.
+
 Example prompt:
 
 ```text

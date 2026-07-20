@@ -57,6 +57,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | assignment-provider-settings.schema.json | Flow Agents Assignment Provider Settings | https://flow-agents.dev/schemas/assignment-provider-settings.schema.json |
 | backlog-provider-settings.schema.json | Flow Agents Backlog Provider Settings | https://flow-agents.dev/schemas/backlog-provider-settings.schema.json |
 | builder-lifecycle-authorization.schema.json | Builder Lifecycle Authorization | https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json |
+| change-provider-settings.schema.json | Flow Agents Change Provider Settings | https://flow-agents.dev/schemas/change-provider-settings.schema.json |
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
 | flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |
 | grounded-execution-narrative.schema.json | Flow Agents Grounded Execution Narrative | https://flow-agents.dev/schemas/grounded-execution-narrative.schema.json |

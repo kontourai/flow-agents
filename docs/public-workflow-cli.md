@@ -267,14 +267,75 @@ state rollback or deletion is rejected when its append-only event history proves
 started. These local coordination records detect accidental or in-process rollback; they are not a
 cryptographic boundary against a process that can rewrite the entire artifact directory.
 
-An operation mutation is a structured product protocol, not necessarily a directly executable CLI
-command. In particular, `publish-change` identifies the provider capability `pull_request.create`,
-its bounded parameters, the required provider result, and `publish-change.result.json` as its dedicated
-result artifact. This release has no authenticated ChangeProvider executor. The operation therefore
-reports `external_capability_required` and `external_verification_required`, exposes no completion
-mutation, and parks the continuation. A locally authored result is not provider evidence. The installed
-`flow-agents publish-change` helper renders and validates publish artifacts and provider checks; it does
-not create a pull request and must not be treated as the operation executor.
+### Authenticated `publish-change`
+
+`publish-change` is a provider-neutral product operation with a GitHub `gh`-CLI adapter as
+the first implementation. It is not a generic operation runner and it is not a generic evidence
+interface. A configured status projects the executable argv beginning with:
+
+```bash
+flow-agents publish-change execute --session-dir .kontourai/flow-agents/<slug>
+```
+
+The status projection supplies this operation only when its effective ChangeProvider is
+configured and compatible. It then describes the bounded `--title`, `--body`, `--head-ref`,
+`--base-ref`, and optional `--draft` inputs. The command accepts those named flags only; it
+does not accept a result JSON, a caller-selected expectation or operation id, or a private-writer
+switch. It derives the repository, immutable head SHA, current assignment actor, canonical run,
+and current gate-visit identity from the active session rather than trusting caller copies.
+
+Configuration is explicit. Project settings live at
+`<repo-path>/context/settings/change-provider-settings.json`; optional machine-global settings live at
+`$HOME/.config/flow-agents/change-provider-settings.json`. Resolve and inspect the effective
+settings without running a mutation:
+
+```bash
+flow-agents effective-change-provider-settings --repo-path . --json
+```
+
+Settings are deep-merged in this order, where each later value wins:
+
+1. global defaults
+2. matching global project entry
+3. project defaults
+4. matching project entry
+
+The currently supported configured provider declares role `ChangeProvider`, kind `github`,
+capabilities `change.create` and `change.observe`, and executor `gh-cli`; credentials remain in
+the authenticated `gh` environment, never in these settings. An absent configuration remains
+`external_capability_required`; an invalid or incompatible configuration remains unavailable
+with its compatibility reason. Neither state exposes an executable completion claim, and both
+must remain an explicit external capability/verification gap rather than a successful publish.
+
+For a configured provider, the GitHub adapter resolves `gh` only from fixed trusted absolute
+locations (never caller-controlled `PATH`), authenticates it, queries pull
+requests by configured repository, base ref, head ref, and immutable head SHA, and verifies the
+title, body, and draft intent before returning a result. It creates only when no exact match
+exists. If creation has an ambiguous failure (for example, a timeout after GitHub accepted it),
+it queries again and recovers exactly one matching published pull request. An exact open record
+supports the normal path; an exact merged record supports truthful reconciliation when provider
+work completed before the local workflow caught up. Multiple candidates, wrong
+repository/base/head/SHA/intent, a closed-but-unmerged record, malformed output, or an
+unauthenticated provider fail rather than selecting or creating another record.
+
+The durable result is bounded to 65,536 bytes and is written only by the Flow-owned completion
+transaction as `publish-change.result.json`. It records the bound run/definition/step/gate visit,
+provider kind/configuration/adapter, repository, provider record id and number, HTTPS URL, normalized
+published state (`open` or `merged`), base ref, head ref and SHA, the bound `assignment_actor`, the authenticated GitHub
+`provider_actor`, and observation time. Title, body, and draft are
+authenticated request intent rather than free-form result fields. Before persistence, Flow
+reacquires the subject lock and revalidates assignment ownership, active gate visit, exact request
+binding, and effective provider configuration; it then re-observes the provider record, attaches
+only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
+and projects the resulting state.
+
+A caller-authored `publish-change.result.json`, generic adapter JSON/evidence, or a package
+internal/private writer cannot complete this gate. Provider/authentication failures leave the
+gate unresolved; retry the public operation after correcting the provider condition, relying on
+the exact-match recovery protocol rather than a blind second create. Provider stdout/stderr and
+authentication material are deliberately excluded from result artifacts, trust bundles,
+diagnostics, logs, and test snapshots. Local deterministic coverage does not itself prove a live
+provider operation; privileged live recovery remains a separate verification activity.
 
 Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
 `active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,

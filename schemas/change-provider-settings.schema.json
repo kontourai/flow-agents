@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/change-provider-settings.schema.json",
+  "title": "Flow Agents Change Provider Settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "1.0" },
+    "defaults": { "$ref": "#/$defs/change_provider_settings" },
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project_change_provider_settings" } }
+  },
+  "anyOf": [{ "required": ["defaults"] }, { "required": ["projects"] }],
+  "$defs": {
+    "project_change_provider_settings": {
+      "allOf": [
+        { "$ref": "#/$defs/change_provider_settings" },
+        { "type": "object", "required": ["project"] }
+      ]
+    },
+    "change_provider_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "project": { "$ref": "#/$defs/project_match" },
+        "provider": { "$ref": "#/$defs/github_change_provider" }
+      }
+    },
+    "project_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": { "repo": { "$ref": "#/$defs/repository" } }
+    },
+    "github_change_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "kind", "repository", "capabilities", "executor"],
+      "properties": {
+        "role": { "const": "ChangeProvider" },
+        "kind": { "const": "github" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "capabilities": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["change.create", "change.observe"] },
+          "allOf": [
+            { "contains": { "const": "change.create" } },
+            { "contains": { "const": "change.observe" } }
+          ]
+        },
+        "executor": { "const": "gh-cli" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "url": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      }
+    }
+  }
+}

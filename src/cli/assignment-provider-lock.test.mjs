@@ -5,7 +5,49 @@ import os from "node:os";
 import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 
-import { withSubjectLock } from "../../build/src/cli/assignment-provider.js";
+import { withSubjectLock, withSubjectLockAsync } from "../../build/src/cli/assignment-provider.js";
+
+test("async subject locks remain owned through settlement and release for both outcomes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-async-lifetime-"));
+  const subject = "async-lifetime";
+  const lockDir = path.join(root, "assignment", ".async-lifetime.lockdir");
+  let resolve;
+  const pending = withSubjectLock(root, subject, () => new Promise((done) => { resolve = done; }));
+  assert.equal(fs.existsSync(lockDir), true, "the lock remains held while the Promise is pending");
+  resolve("done");
+  await pending;
+  assert.equal(fs.existsSync(lockDir), false, "the lock releases after resolution");
+
+  const rejected = withSubjectLock(root, subject, () => Promise.reject(new Error("fixture rejection")));
+  assert.equal(fs.existsSync(lockDir), true, "the lock remains held until rejection settles");
+  await assert.rejects(rejected, /fixture rejection/);
+  assert.equal(fs.existsSync(lockDir), false, "the lock releases after rejection");
+});
+
+test("async contenders yield so the current same-process owner can settle", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-async-lock-contention-"));
+  const subject = "async-contention";
+  const order = [];
+  let releaseFirst;
+  const firstEntered = new Promise((resolve) => { releaseFirst = resolve; });
+  let observeFirst;
+  const firstObserved = new Promise((resolve) => { observeFirst = resolve; });
+  const first = withSubjectLockAsync(root, subject, async () => {
+    order.push("first-enter");
+    observeFirst();
+    await firstEntered;
+    order.push("first-exit");
+  });
+  await firstObserved;
+  const second = withSubjectLockAsync(root, subject, async () => {
+    order.push("second-enter");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(order, ["first-enter"], "the contender waits without blocking the active owner's event loop");
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ["first-enter", "first-exit", "second-enter"]);
+});
 
 test("a displaced lock owner cannot heartbeat or release a replacement lock", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-aba-"));
