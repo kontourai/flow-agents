@@ -59,6 +59,28 @@ function walkForGitMarker(startDir: string): string | null {
   }
 }
 
+/**
+ * Canonicalize a path that may not exist yet: realpath the deepest EXISTING ancestor
+ * (resolving symlinks and platform aliases like macOS /var -> /private/var), then re-append
+ * the not-yet-existing remainder. Twin of the hook lib's canonicalize — keep in sync.
+ */
+export function canonicalize(p: string): string {
+  try {
+    let dir = path.resolve(p);
+    const pending: string[] = [];
+    const root = path.parse(dir).root;
+    for (let depth = 0; depth < 64 && !fs.existsSync(dir); depth++) {
+      if (dir === root) break;
+      pending.unshift(path.basename(dir));
+      dir = path.dirname(dir);
+    }
+    const real = fs.realpathSync(dir);
+    return pending.length ? path.join(real, ...pending) : real;
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 function configuredWorkspaceRoots(): string[] {
   const raw = String(process.env[WORKSPACE_ROOTS_ENV] || "");
   if (!raw.trim()) return [];
@@ -97,8 +119,9 @@ export function declaredArtifactRoots(cwd: string = process.cwd()): DeclaredArti
 
   const roots: string[] = [];
   if (!ambiguous) {
-    for (const root of repoRoots) roots.push(...subRootsFor(root));
-    for (const extra of configuredWorkspaceRoots()) roots.push(...subRootsFor(extra));
+    // Canonical forms on both sides of every containment comparison (symlinks, /var aliases).
+    for (const root of repoRoots) roots.push(...subRootsFor(canonicalize(root)));
+    for (const extra of configuredWorkspaceRoots()) roots.push(...subRootsFor(canonicalize(extra)));
   }
 
   return { roots: [...new Set(roots)], ambiguous, repoRoots: [...repoRoots] };
@@ -122,6 +145,13 @@ export function isWithinAnyRoot(absPath: string | null | undefined, roots: strin
 export function isProvablyOutsideDeclaredRoots(candidatePath: string, cwd: string = process.cwd()): boolean {
   const { roots, ambiguous } = declaredArtifactRoots(cwd);
   if (ambiguous) return false;
-  const resolved = path.resolve(cwd, candidatePath);
-  return !isWithinAnyRoot(resolved, roots);
+  const canonical = canonicalize(path.resolve(cwd, candidatePath));
+  if (isWithinAnyRoot(canonical, roots)) return false;
+  // #783 review F3/F4: a target inside ANY git working tree (a sibling checkout, another
+  // lane's worktree) is never a provably-safe fixture location, even though that checkout is
+  // not among THIS cwd's declared roots — and canonicalization above means a symlink routed
+  // into one cannot hide it. Scratch/temp dirs are not git trees, so the sanctioned fixture
+  // path is unaffected.
+  if (walkForGitMarker(path.dirname(canonical)) !== null) return false;
+  return true;
 }

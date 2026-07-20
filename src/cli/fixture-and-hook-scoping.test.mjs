@@ -133,6 +133,100 @@ test("hook fails closed on bare basenames with no directory context (interpreter
   assert.ok(hit, "bare-basename interpreter write must stay blocked (fail-closed)");
 });
 
+// --- #783 security-review hardening (F1-F4) ---
+
+test("F1 regression: shell profiles and .claude settings block globally, even from scratch cwd", () => {
+  const scratch = tmpdir();
+  assert.ok(hook.checkRedirectToProtected("echo x > ~/.bashrc", scratch));
+  assert.ok(hook.checkRedirectToProtected("echo x > .claude/settings.json", scratch));
+  const settingsToken = [".claude/", "settings.json"].join("");
+  assert.ok(
+    hook.checkInterpreterWriteToProtected(
+      `node -e "require('fs').writeFileSync('${settingsToken}','x')"`,
+      scratch,
+    ),
+  );
+});
+
+test("F2: bare $VAR expansion in an artifact-shaped target fails closed", () => {
+  const scratch = tmpdir();
+  assert.ok(hook.checkRedirectToProtected("echo x > $TARGET/.kontourai/flow-agents/s/state.json", scratch));
+});
+
+test("F2: an in-command cd removes root-scoping relief (fail closed)", () => {
+  const outside = path.join(tmpdir(), ".kontourai", "flow-agents", "s", "state.json");
+  // Without cd this exact target is allowed from packageRoot (proven above); with cd it blocks.
+  assert.ok(hook.checkRedirectToProtected(`cd sub && echo x > ${outside}`, packageRoot));
+});
+
+test("F3: an artifact path inside ANY git working tree blocks, even a non-declared sibling checkout", () => {
+  const sibling = tmpdir();
+  fs.mkdirSync(path.join(sibling, ".git"), { recursive: true });
+  const target = path.join(sibling, ".kontourai", "flow-agents", "s", "state.json");
+  assert.ok(hook.checkRedirectToProtected(`echo x > ${target}`, packageRoot));
+  assert.throws(
+    () => runFixture(["write", path.dirname(target), "--malformed", "--content", "x"], packageRoot),
+    /refused/,
+  );
+});
+
+test("F4: a symlink routed into a declared root cannot launder a fixture write", () => {
+  const scratch = tmpdir();
+  const workspace = path.join(tmpdir(), "ws");
+  const protectedDir = path.join(workspace, ".kontourai", "flow-agents");
+  fs.mkdirSync(protectedDir, { recursive: true });
+  const link = path.join(scratch, "innocent");
+  fs.symlinkSync(protectedDir, link);
+  assert.throws(() =>
+    execFileSync(process.execPath, [sidecarCli, "fixture", "write", path.join(link, "forged"), "--malformed", "--content", "x"], {
+      cwd: scratch,
+      encoding: "utf8",
+      env: { ...process.env, SA_PROTECTED_WORKSPACE_ROOTS: workspace },
+    }),
+  );
+  assert.equal(fs.existsSync(path.join(protectedDir, "forged")), false);
+});
+
+test("F4: symlink-aliased tmpdir spelling cannot bypass a declared workspace root", (t) => {
+  const aliased = fs.mkdtempSync(path.join(os.tmpdir(), "alias-"));
+  const canonical = fs.realpathSync(aliased);
+  if (canonical === path.resolve(aliased)) {
+    t.skip("tmpdir is not symlink-aliased on this platform");
+    return;
+  }
+  const target = path.join(canonical, ".kontourai", "flow-agents", "s", "state.json");
+  const origEnv = process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+  process.env.SA_PROTECTED_WORKSPACE_ROOTS = aliased; // declared with the ALIASED spelling
+  try {
+    assert.ok(hook.checkRedirectToProtected(`echo x > ${target}`, packageRoot));
+  } finally {
+    if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+    else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
+  }
+});
+
+test("JS/TS twin parity over a shared case table", async () => {
+  const tsLib = await import(path.join(packageRoot, "build", "src", "lib", "declared-artifact-roots.js"));
+  const jsLib = require_(path.join(packageRoot, "scripts", "hooks", "lib", "declared-artifact-roots.js"));
+  const scratch = tmpdir();
+  const sibling = tmpdir();
+  fs.mkdirSync(path.join(sibling, ".git"), { recursive: true });
+  const cases = [
+    path.join(scratch, "fixture", "state.json"),
+    path.join(packageRoot, ".kontourai", "flow-agents", "s", "state.json"),
+    path.join(sibling, ".kontourai", "flow-agents", "s", "state.json"),
+  ];
+  for (const candidate of cases) {
+    const hookSaysWithin = jsLib.isCandidateWithinDeclaredRoots(candidate, packageRoot);
+    const fixtureSaysOutside = tsLib.isProvablyOutsideDeclaredRoots(candidate, packageRoot);
+    assert.equal(
+      hookSaysWithin,
+      !fixtureSaysOutside,
+      `twin divergence for ${candidate}: hook within=${hookSaysWithin}, fixture outside=${fixtureSaysOutside}`,
+    );
+  }
+});
+
 test("hook block message names the fixture affordance", () => {
   const result = hook.run(
     JSON.stringify({
