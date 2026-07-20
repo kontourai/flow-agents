@@ -4,6 +4,8 @@
 
 **A portable process-discipline layer for agentic work — canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes.**
 
+In plain terms: it keeps your coding agent honest — tracking what it did, checking its work at each step, and refusing to call a job done until the evidence backs it up. (New to the terms below? See the [glossary](CONTEXT.md#glossary).)
+
 [![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -30,7 +32,7 @@ Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition in
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
 - **Tamper-evident "done"** — the local runtime gate is advisory and best-effort; the controlled CI re-run is the authoritative anchor that reconciles manifest commands and git diff against fresh results before evidence is treated as CI-verified. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
 - **Engine plus opt-in kits** — `kits/catalog.json` lists discoverable kits, each `kit.json` declares its flows and assets, and bring-your-own-kit follows the same validation and activation path. See [Engine and Kits](docs/architecture-engine-and-kits.md).
-- **Evals that keep the bundle honest** — 60 integration scenarios (1,829 assertions) and 7 static suites (110 assertions) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **Evals that keep the bundle honest** — dozens of integration scripts and a full static-suite layer (`bash evals/run.sh`) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
 
 ## Flow Agents as a process-discipline layer
 
@@ -53,8 +55,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Runtime | Ships | Tested |
 | --- | --- | --- |
-| Claude Code | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
-| Codex | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
+| Claude Code | install + hooks + bundle | full integration + static eval layer (`bash evals/run.sh`) — reference implementation |
+| Codex | install + hooks + bundle | full integration + static eval layer (`bash evals/run.sh`) — reference implementation |
 | Kiro | install + hooks + bundle | included in bundle assertions |
 
 **Partial support — L1 (steering + stop-goal-fit warning)**
@@ -68,7 +70,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Tier | Runtime | Ships | Tested |
 | --- | --- | --- | --- |
-| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 50 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 76 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Official framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` — `@kontourai/flow-agents-strands` native-import package | shipped telemetry + native config-protection hot path; workflow-steering/quality-gate/stop-goal-fit are conformance-shim-only — preview, see [integrations/strands-ts/README.md](integrations/strands-ts/README.md) |
 | Conformance-certified | Community / third-party | Self-certify using the conformance kit | Conformance kit in development; not yet shipped |
 
 ## Install
@@ -148,7 +151,7 @@ A Flow Kit bundles a workflow AND its opinionated output shape into a single val
 
 **Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items), `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning), and `builder.publish-learn` (publish, provider/CI merge readiness, and learning feedback gates).
 
-**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with 198 tests.
+**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with an extensive automated test suite.
 
 The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
 
@@ -189,7 +192,7 @@ The same canonical policies that wire into coding-agent harnesses via file-based
 - enforces config protection via `BeforeToolCallEvent` cancellation (the Strands equivalent of a blocking `preToolUse` hook)
 - injects workflow steering context at agent construction via `steering_context()`
 
-This is a spike/preview — 50 unit tests pass without requiring the Strands SDK, and the README documents 7 limitations honestly. It demonstrates that the policy engine is not harness-specific.
+This is a spike/preview — 76 unit tests pass without requiring the Strands SDK, and the README documents 8 limitations honestly. It demonstrates that the policy engine is not harness-specific.
 
 The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) documents the full framework adapter mapping, including VoltAgent, LangGraph, and OpenAI Agents SDK hook surfaces, and the minimum viable adapter pseudocode.
 

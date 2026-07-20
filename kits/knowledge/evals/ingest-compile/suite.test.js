@@ -6,7 +6,7 @@
  *   AC2: ingest+compile against default store yields a compiled note whose
  *        provenance refs resolve (all ref.id values retrievable from store)
  *   AC3: canonical telemetry emitted at each gate (schema v0.3.0 events
- *        appear in .telemetry/full.jsonl)
+ *        appear in .kontourai/telemetry/full.jsonl)
  *
  * Also covers:
  *   - ingest produces classified raw (category + type="raw")
@@ -50,7 +50,7 @@ function makeStore(dir) {
 }
 
 function makeRunner(store, storeDir) {
-  // Telemetry sink lives in storeDir/.telemetry/full.jsonl for test isolation
+  // Telemetry sink lives in storeDir/.kontourai/telemetry/full.jsonl for test isolation
   return new KnowledgeFlowRunner({
     store,
     workspace: storeDir,
@@ -60,7 +60,7 @@ function makeRunner(store, storeDir) {
 }
 
 function readTelemetryEvents(dir) {
-  const sinkPath = path.join(dir, ".telemetry", "full.jsonl");
+  const sinkPath = path.join(dir, ".kontourai", "telemetry", "full.jsonl");
   if (!fs.existsSync(sinkPath)) return [];
   return fs.readFileSync(sinkPath, "utf8")
     .trim()
@@ -503,7 +503,7 @@ describe("telemetry — canonical events at gates (AC3)", () => {
     try {
       await testRunner.capture("JSONL format test");
 
-      const sinkPath = path.join(testDir, ".telemetry", "full.jsonl");
+      const sinkPath = path.join(testDir, ".kontourai", "telemetry", "full.jsonl");
       assert.ok(fs.existsSync(sinkPath), "telemetry sink file exists");
 
       const lines = fs.readFileSync(sinkPath, "utf8")
@@ -540,7 +540,7 @@ describe("KnowledgeTelemetry — helper unit tests", () => {
     assert.equal(ev.event_type, "tool.invoke");
     assert.equal(ev.schema_version, "0.3.0");
 
-    const sinkPath = path.join(dir, ".telemetry", "full.jsonl");
+    const sinkPath = path.join(dir, ".kontourai", "telemetry", "full.jsonl");
     assert.ok(fs.existsSync(sinkPath), "JSONL file was created");
   });
 
