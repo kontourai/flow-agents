@@ -475,7 +475,7 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
   const priorRecordId = flagString(parsed.flags, "prior-record-id");
   const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
   if (!priorRecordId || !resolvingRecordId) throw new Error("workflow resolve-critique-request requires both critique record ids");
-  const { slug } = readBoundSession(sessionDir);
+  const { slug, projectRoot } = readBoundSession(sessionDir);
   const bundleFile = path.join(sessionDir, "trust.bundle");
   const bundleBytes = fs.readFileSync(bundleFile);
   const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
@@ -502,7 +502,7 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
   const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
   if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
   const request = buildUnsignedCritiqueResolutionAuthorization({
-    run_id: slug, subject, prior_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+    project_root: projectRoot, run_id: slug, subject, prior_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash),
     resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash),
     expected_resolver: String(resolving.reviewer), resolved_lane_ids: unresolvedLaneIds, resolved_finding_ids: unresolvedFindingIds,

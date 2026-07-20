@@ -27,6 +27,37 @@ function oneClaim(claims, recordId, label) {
 }
 function failedLaneIds(metadata) { return (Array.isArray(metadata.lanes) ? metadata.lanes : []).filter((lane) => lane.status !== "pass").map((lane) => String(lane.id)).sort(); }
 function openFindingIds(metadata) { return (Array.isArray(metadata.findings) ? metadata.findings : []).filter((finding) => finding.status === "open").map((finding) => String(finding.id)).sort(); }
+function exactText(actual, expected, label) { if (typeof actual !== "string" || actual !== expected) throw new Error(`authorization does not bind ${label}`); }
+function snapshot(metadata, field) {
+  const value = metadata.review_target?.workspace_snapshot;
+  if (!record(value)) throw new Error(`critique ${field} is missing from the immutable workspace snapshot`);
+  if (field === "head_sha" && (value[field] === undefined || value[field] === null)) return "none";
+  if (typeof value[field] !== "string" || !value[field]) throw new Error(`critique ${field} is missing from the immutable workspace snapshot`);
+  return value[field];
+}
+function assertDescends(claims, prior, resolving) {
+  const byHash = new Map(claims.filter((claim) => claim?.metadata?.origin === "critique").map((claim) => [claim.metadata.critique_record_hash, claim.metadata]));
+  const visited = new Set(); let cursor = resolving;
+  while (cursor && !visited.has(cursor.critique_record_hash)) {
+    visited.add(cursor.critique_record_hash);
+    if (cursor.critique_predecessor_hash === prior.critique_record_hash) return;
+    cursor = byHash.get(cursor.critique_predecessor_hash);
+  }
+  throw new Error("resolving critique is not a descendant of the authorized prior critique");
+}
+function assertAuthorizationPreimage(authorization, prior, resolving, claims) {
+  exactText(authorization.subject, prior.workflow_subject_ref, "the prior critique subject");
+  exactText(resolving.workflow_subject_ref, prior.workflow_subject_ref, "one workflow subject");
+  exactText(authorization.prior_record_hash, prior.critique_record_hash, "the prior record hash");
+  exactText(authorization.resolving_record_hash, resolving.critique_record_hash, "the resolving record hash");
+  exactText(authorization.expected_resolver, resolving.reviewer, "the resolving reviewer");
+  exactText(authorization.prior_snapshot_sha256, snapshot(prior, "digest"), "the prior snapshot digest");
+  exactText(authorization.resolving_snapshot_sha256, snapshot(resolving, "digest"), "the resolving snapshot digest");
+  exactText(authorization.prior_head_sha, snapshot(prior, "head_sha"), "the prior snapshot head");
+  exactText(authorization.resolving_head_sha, snapshot(resolving, "head_sha"), "the resolving snapshot head");
+  if (resolving.critique_sequence <= prior.critique_sequence) throw new Error("resolving critique is not later than the prior critique");
+  assertDescends(claims, prior, resolving);
+}
 
 /** Pure deterministic critique-resolution transition. Performs no I/O. */
 export function resolveCritiqueTransition(input) {
@@ -43,6 +74,7 @@ export function resolveCritiqueTransition(input) {
   if (!["fail", "not_verified"].includes(prior.value)) throw new Error("prior critique must be failing or not verified");
   if (resolving.value !== "pass" || resolving.status !== "verified") throw new Error("resolving critique must be a verified pass");
   if (!priorMetadata.reviewer || priorMetadata.reviewer === resolvingMetadata.reviewer || authorization.expected_resolver !== resolvingMetadata.reviewer) throw new Error("resolution requires the distinct signed resolving reviewer");
+  assertAuthorizationPreimage(authorization, priorMetadata, resolvingMetadata, input.bundle.claims);
   const lanes = failedLaneIds(priorMetadata);
   const findings = openFindingIds(priorMetadata);
   if (canonical(authorization.resolved_lane_ids) !== canonical(lanes) || canonical(authorization.resolved_finding_ids) !== canonical(findings)) throw new Error("authorization does not cover the exact failing critique surface");

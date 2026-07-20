@@ -82,108 +82,97 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
+type GraphState = {
+  records: AnyRecord[]; byId: Map<string, AnyRecord>; byHash: Map<string, AnyRecord>;
+  errors: string[]; referencedEventIds: Set<string>; expectedSubject?: string;
+  resolutionEvents: AnyRecord[]; projectRoot?: string; externalCompletionVerified: boolean;
+};
+
+function validateRecords(records: AnyRecord[], state: GraphState): void {
+  const bySequence = new Map<number, AnyRecord>();
+  for (const record of records) {
+    if (typeof record.critique_record_id !== "string" || !record.critique_record_id || state.byId.has(record.critique_record_id)) state.errors.push("critique record ids must be present and unique"); else state.byId.set(record.critique_record_id, record);
+    if (!Number.isSafeInteger(record.critique_sequence) || record.critique_sequence < 1 || bySequence.has(record.critique_sequence)) state.errors.push("critique sequences must be positive and unique"); else bySequence.set(record.critique_sequence, record);
+    if (!HASH_RE.test(String(record.critique_predecessor_hash)) || !HASH_RE.test(String(record.critique_record_hash))) state.errors.push("critique chain hashes must be SHA-256 values");
+    else if (critiqueRecordHash(record) !== record.critique_record_hash) state.errors.push(`critique record ${String(record.critique_record_id)} hash is invalid`);
+    else state.byHash.set(record.critique_record_hash, record);
+    if (state.expectedSubject && record.workflow_subject_ref !== state.expectedSubject) state.errors.push(`critique record ${String(record.critique_record_id)} has a mismatched workflow subject`);
+  }
+  [...bySequence.entries()].sort(([a], [b]) => a - b).forEach(([, record], index, ordered) => {
+    const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : ordered[index - 1]![1].critique_record_hash;
+    if (record.critique_sequence !== index + 1 || record.critique_predecessor_hash !== predecessor) state.errors.push("critique sequence must form one contiguous predecessor hash chain");
+  });
+}
+
+function validateCoverage(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, errors: string[]): void {
+  const lanes = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyRecord) => lane.status !== "pass").map((lane: AnyRecord) => lane.id).sort();
+  const coveredLanes = Array.isArray(resolution.resolved_lane_ids) ? [...resolution.resolved_lane_ids].sort() : [];
+  const resolverLanes = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : []).map((lane: AnyRecord) => [lane.id, lane.status]));
+  if (canonical(lanes) !== canonical(coveredLanes) || lanes.some((id) => resolverLanes.get(id) !== "pass")) errors.push("critique resolution does not cover every failed lane");
+  const findings = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyRecord) => finding.status === "open").map((finding: AnyRecord) => finding.id).sort();
+  const coveredFindings = Array.isArray(resolution.resolved_finding_ids) ? [...resolution.resolved_finding_ids].sort() : [];
+  const resolverFindings = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyRecord) => [finding.id, finding.status]));
+  if (canonical(findings) !== canonical(coveredFindings) || findings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
+}
+
+function validateResolution(prior: AnyRecord, state: GraphState): void {
+  if (!prior.superseded_by && !prior.critique_resolution) return;
+  const resolution = prior.critique_resolution;
+  if (!prior.superseded_by || !resolution || typeof resolution !== "object") { state.errors.push(`critique record ${String(prior.critique_record_id)} has an incomplete resolution edge`); return; }
+  const resolving = state.byId.get(resolution.resolving_record_id);
+  if (!resolving || prior.superseded_by !== resolution.resolving_record_id || resolution.prior_record_id !== prior.critique_record_id) { state.errors.push(`critique record ${String(prior.critique_record_id)} has a missing or mismatched resolver`); return; }
+  if (resolving === prior || resolving.critique_sequence <= prior.critique_sequence) state.errors.push("critique resolution graph is circular or not forward ordered");
+  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) state.errors.push("critique resolver must be a current verified PASS");
+  if (resolution.resolver !== resolving.reviewer || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer) || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer) || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) state.errors.push("critique resolution actor binding is invalid");
+  if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) state.errors.push("critique resolution crosses workflow subjects");
+  validateResolutionSnapshots(prior, resolving, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
+}
+
+function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, state: GraphState): void {
+  const first = prior.review_target?.workspace_snapshot; const second = resolving.review_target?.workspace_snapshot;
+  if (first?.kind !== "git-worktree" && second?.kind !== "git-worktree") return;
+  if (!state.projectRoot || first?.kind !== "git-worktree" || second?.kind !== "git-worktree") { state.errors.push("critique resolution Git snapshots require one trusted project context"); return; }
+  try { assertTrustedGitAncestor(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid"); }
+}
+
+function validateResolutionEvent(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {
+  const events = state.resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
+  if (resolution.kind === "cross-reviewer" && events.length !== 1) { state.errors.push("cross-reviewer critique resolution must link one append-only authorization event"); return; }
+  if (events.length !== 1) return;
+  const event = events[0]!; state.referencedEventIds.add(String(event.event_id));
+  if (event.subject !== prior.workflow_subject_ref || event.prior_record_id !== prior.critique_record_id || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer || event.authorization_sha256 !== resolution.authorization_sha256 || canonical(event.edge) !== canonical(resolution)) state.errors.push("critique resolution authorization event does not bind the exact edge");
+}
+
+function validateDescendant(prior: AnyRecord, resolving: AnyRecord, state: GraphState): void {
+  let cursor: AnyRecord | undefined = resolving; const visited = new Set<string>();
+  while (cursor && !visited.has(cursor.critique_record_hash)) { visited.add(cursor.critique_record_hash); if (cursor.critique_predecessor_hash === prior.critique_record_hash) return; cursor = state.byHash.get(cursor.critique_predecessor_hash); }
+  state.errors.push("critique resolver is not a hash-chain descendant of the prior critique");
+}
+
+function validateEvents(state: GraphState): void {
+  const seen = new Set<string>();
+  state.resolutionEvents.forEach((event, index) => {
+    const { event_hash: hash, ...unsigned } = event; const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : state.resolutionEvents[index - 1]?.event_hash;
+    if (event.sequence !== index + 1 || event.predecessor_hash !== predecessor || createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") !== hash) state.errors.push("critique resolution events must form one valid append-only hash chain");
+    if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
+    if (!state.referencedEventIds.has(String(event.event_id))) state.errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
+    if (event.operation !== "resolve-critique" || !state.projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
+    else if (createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex") !== event.authorization_sha256) state.errors.push("critique resolution signed authorization does not match its event");
+    else if (!state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");
+    const prior = state.byId.get(String(event.prior_record_id)); const resolving = state.byId.get(String(event.resolving_record_id));
+    if (!prior || !resolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(prior, resolving, event.edge)) state.errors.push("critique resolution event resulting bundle core digest is invalid");
+  });
+}
+
 export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, externalCompletionVerified = false): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
-  const errors: string[] = [];
-  if (records.length === 0) return { valid: false, errors: ["critique graph has no records"], live: [] };
-  const byId = new Map<string, AnyRecord>();
-  const byHash = new Map<string, AnyRecord>();
-  const bySequence = new Map<number, AnyRecord>();
-  const referencedEventIds = new Set<string>();
-  for (const record of records) {
-    if (typeof record.critique_record_id !== "string" || !record.critique_record_id || byId.has(record.critique_record_id)) errors.push("critique record ids must be present and unique");
-    else byId.set(record.critique_record_id, record);
-    if (!Number.isSafeInteger(record.critique_sequence) || record.critique_sequence < 1 || bySequence.has(record.critique_sequence)) errors.push("critique sequences must be positive and unique");
-    else bySequence.set(record.critique_sequence, record);
-    if (!HASH_RE.test(String(record.critique_predecessor_hash)) || !HASH_RE.test(String(record.critique_record_hash))) errors.push("critique chain hashes must be SHA-256 values");
-    else if (critiqueRecordHash(record) !== record.critique_record_hash) errors.push(`critique record ${String(record.critique_record_id)} hash is invalid`);
-    else byHash.set(record.critique_record_hash, record);
-    if (expectedSubject && record.workflow_subject_ref !== expectedSubject) errors.push(`critique record ${String(record.critique_record_id)} has a mismatched workflow subject`);
-  }
-  const ordered = [...bySequence.entries()].sort(([a], [b]) => a - b).map(([, record]) => record);
-  ordered.forEach((record, index) => {
-    const expectedPredecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : ordered[index - 1]!.critique_record_hash;
-    if (record.critique_sequence !== index + 1 || record.critique_predecessor_hash !== expectedPredecessor) errors.push("critique sequence must form one contiguous predecessor hash chain");
-  });
-  for (const prior of records) {
-    if (!prior.superseded_by && !prior.critique_resolution) continue;
-    const resolution = prior.critique_resolution;
-    if (!prior.superseded_by || !resolution || typeof resolution !== "object") {
-      errors.push(`critique record ${String(prior.critique_record_id)} has an incomplete resolution edge`);
-      continue;
-    }
-    const resolving = byId.get(resolution.resolving_record_id);
-    if (!resolving || prior.superseded_by !== resolution.resolving_record_id || resolution.prior_record_id !== prior.critique_record_id) {
-      errors.push(`critique record ${String(prior.critique_record_id)} has a missing or mismatched resolver`);
-      continue;
-    }
-    if (resolving === prior || resolving.critique_sequence <= prior.critique_sequence) errors.push("critique resolution graph is circular or not forward ordered");
-    if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) errors.push("critique resolver must be a current verified PASS");
-    if (resolution.resolver !== resolving.reviewer
-      || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer)
-      || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer)
-      || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) errors.push("critique resolution actor binding is invalid");
-    if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) errors.push("critique resolution crosses workflow subjects");
-    const priorWorkspace = prior.review_target?.workspace_snapshot;
-    const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
-    if (priorWorkspace?.kind === "git-worktree" || resolvingWorkspace?.kind === "git-worktree") {
-      if (!projectRoot || priorWorkspace?.kind !== "git-worktree" || resolvingWorkspace?.kind !== "git-worktree") errors.push("critique resolution Git snapshots require one trusted project context");
-      else try { assertTrustedGitAncestor(projectRoot, String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha)); }
-      catch { errors.push("critique resolver Git ancestry is invalid"); }
-    }
-    const linkedEvents = resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
-    if (resolution.kind === "cross-reviewer" && linkedEvents.length !== 1) errors.push("cross-reviewer critique resolution must link one append-only authorization event");
-    else if (linkedEvents.length === 1) {
-      const event = linkedEvents[0]!;
-      referencedEventIds.add(String(event.event_id));
-      if (event.subject !== prior.workflow_subject_ref || event.prior_record_id !== prior.critique_record_id
-        || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id
-        || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer
-        || event.authorization_sha256 !== resolution.authorization_sha256
-        || canonical(event.edge) !== canonical(resolution)) errors.push("critique resolution authorization event does not bind the exact edge");
-    }
-    let cursor: AnyRecord | undefined = resolving;
-    let reachesPrior = false;
-    const visited = new Set<string>();
-    while (cursor && !visited.has(cursor.critique_record_hash)) {
-      visited.add(cursor.critique_record_hash);
-      if (cursor.critique_predecessor_hash === prior.critique_record_hash) { reachesPrior = true; break; }
-      cursor = byHash.get(cursor.critique_predecessor_hash);
-    }
-    if (!reachesPrior) errors.push("critique resolver is not a hash-chain descendant of the prior critique");
-    const requiredLanes = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyRecord) => lane.status !== "pass").map((lane: AnyRecord) => lane.id).sort();
-    const coveredLanes = Array.isArray(resolution.resolved_lane_ids) ? [...resolution.resolved_lane_ids].sort() : [];
-    const resolverLanes = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : []).map((lane: AnyRecord) => [lane.id, lane.status]));
-    if (canonical(requiredLanes) !== canonical(coveredLanes) || requiredLanes.some((id) => resolverLanes.get(id) !== "pass")) errors.push("critique resolution does not cover every failed lane");
-    const requiredFindings = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyRecord) => finding.status === "open").map((finding: AnyRecord) => finding.id).sort();
-    const coveredFindings = Array.isArray(resolution.resolved_finding_ids) ? [...resolution.resolved_finding_ids].sort() : [];
-    const resolverFindings = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyRecord) => [finding.id, finding.status]));
-    if (canonical(requiredFindings) !== canonical(coveredFindings) || requiredFindings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
-  }
+  if (!records.length) return { valid: false, errors: ["critique graph has no records"], live: [] };
+  const state: GraphState = { records, byId: new Map(), byHash: new Map(), errors: [], referencedEventIds: new Set(), expectedSubject, resolutionEvents, projectRoot, externalCompletionVerified };
+  validateRecords(records, state); records.forEach((record) => validateResolution(record, state));
   const live = records.filter((record) => !record.superseded_by);
-  const seenEventIds = new Set<string>();
-  resolutionEvents.forEach((event, index) => {
-    const { event_hash: eventHash, ...unsigned } = event;
-    const expectedPredecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : resolutionEvents[index - 1]?.event_hash;
-    if (event.sequence !== index + 1 || event.predecessor_hash !== expectedPredecessor
-      || createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") !== eventHash) errors.push("critique resolution events must form one valid append-only hash chain");
-    if (typeof event.event_id !== "string" || !event.event_id || seenEventIds.has(event.event_id)
-      || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) errors.push("critique resolution events must have unique authorization-bound ids");
-    else seenEventIds.add(event.event_id);
-    if (!referencedEventIds.has(String(event.event_id))) errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
-    if (event.operation !== "resolve-critique" || !projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") {
-      errors.push("critique resolution event requires a verifiable signed authorization");
-    } else {
-      const authorizationSha256 = createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex");
-      if (authorizationSha256 !== event.authorization_sha256) errors.push("critique resolution signed authorization does not match its event");
-      if (!externalCompletionVerified) errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
-    }
-    if (expectedSubject && event.subject !== expectedSubject) errors.push("critique resolution event has a mismatched workflow subject");
-    const eventPrior = byId.get(String(event.prior_record_id));
-    const eventResolving = byId.get(String(event.resolving_record_id));
-    if (!eventPrior || !eventResolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(eventPrior, eventResolving, event.edge)) errors.push("critique resolution event resulting bundle core digest is invalid");
-  });
-  if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) errors.push("critique graph requires a current verified PASS");
-  if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) errors.push("critique graph has unresolved live critique records");
-  return { valid: errors.length === 0, errors: [...new Set(errors)], live };
+  validateEvents(state);
+  if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) state.errors.push("critique graph requires a current verified PASS");
+  if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) state.errors.push("critique graph has unresolved live critique records");
+  return { valid: state.errors.length === 0, errors: [...new Set(state.errors)], live };
 }

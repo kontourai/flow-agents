@@ -10,6 +10,7 @@ export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
 export interface BuilderLifecycleAuthorization {
   schema_version: "1.0";
   operation: AuthorizedBuilderLifecycleOperation;
+  project_root: string;
   run_id: string;
   subject: string;
   assignment_actor_key: string;
@@ -23,6 +24,7 @@ export interface BuilderLifecycleAuthorization {
 export interface CritiqueResolutionAuthorization {
   schema_version: "1.0";
   operation: "resolve-critique";
+  project_root: string;
   run_id: string;
   subject: string;
   prior_bundle_sha256: string;
@@ -74,10 +76,11 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
   now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
-  const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
+  const fields = ["schema_version", "operation", "project_root", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
   assertExactKeys(value, fields, "authorization");
   if (value.schema_version !== "1.0" || value.operation !== "resolve-critique") throw new Error("critique resolution authorization identity is invalid");
   const exact: Array<[keyof typeof expected, string]> = [["runId", "run_id"], ["subject", "subject"], ["priorBundleSha256", "prior_bundle_sha256"], ["priorRecordId", "prior_record_id"], ["priorRecordHash", "prior_record_hash"], ["resolvingRecordId", "resolving_record_id"], ["resolvingRecordHash", "resolving_record_hash"]];
+  if (value.project_root !== expected.projectRoot) throw new Error("critique resolution authorization project_root does not match the canonical project");
   for (const [expectedKey, field] of exact) if (value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the current resolution preimage`);
   const semantic: Array<[keyof typeof expected, string]> = [["resolvedLaneIds", "resolved_lane_ids"], ["resolvedFindingIds", "resolved_finding_ids"]];
   for (const [expectedKey, field] of semantic) {
@@ -88,7 +91,7 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
     boundedText(value[field], `authorization.${field}`, 256);
     if (expected[expectedKey] && value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the intended resolution edge`);
   }
-  for (const field of ["run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at"]) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 256);
+  for (const field of ["project_root", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at"]) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 4096);
   for (const field of ["prior_bundle_sha256", "prior_record_hash", "resolving_record_hash", "prior_snapshot_sha256", "resolving_snapshot_sha256"]) {
     if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`critique resolution authorization ${field} must be a SHA-256 digest`);
   }
@@ -116,9 +119,10 @@ export function loadBuilderLifecycleAuthorization(
   expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean },
 ): BuilderLifecycleAuthorization {
   const value = readRegularJson(fileInput, "lifecycle authorization");
-  assertExactKeys(value, ["schema_version", "operation", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
+  assertExactKeys(value, ["schema_version", "operation", "project_root", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
   if (value.schema_version !== "1.0") throw new Error("lifecycle authorization schema_version must be 1.0");
   assertEqual(value.operation, expected.operation, "operation");
+  assertEqual(value.project_root, expected.projectRoot, "project_root");
   assertEqual(value.run_id, expected.runId, "run_id");
   assertEqual(value.subject, expected.subject, "subject");
   assertEqual(value.assignment_actor_key, expected.actorKey, "assignment_actor_key");
@@ -135,6 +139,7 @@ export function loadBuilderLifecycleAuthorization(
   const authorization = {
     schema_version: "1.0",
     operation: expected.operation,
+    project_root: expected.projectRoot,
     run_id: expected.runId,
     subject: expected.subject,
     assignment_actor_key: expected.actorKey,
@@ -167,6 +172,7 @@ export function builderLifecycleAuthorizationPayload(value: Omit<BuilderLifecycl
  */
 export function buildUnsignedLifecycleAuthorization(fields: {
   operation: AuthorizedBuilderLifecycleOperation;
+  project_root: string;
   run_id: string;
   subject: string;
   assignment_actor_key: string;
@@ -175,6 +181,7 @@ export function buildUnsignedLifecycleAuthorization(fields: {
   expires_at: string;
   request: unknown;
 }): { unsigned: Omit<BuilderLifecycleAuthorization, "signature">; signingPayload: string } {
+  boundedText(fields.project_root, "project_root", 4096);
   boundedText(fields.run_id, "run_id", 256);
   boundedText(fields.subject, "subject", 2048);
   boundedText(fields.assignment_actor_key, "assignment_actor_key", 256);
@@ -189,6 +196,7 @@ export function buildUnsignedLifecycleAuthorization(fields: {
   const unsigned = {
     schema_version: "1.0",
     operation: fields.operation,
+    project_root: fields.project_root,
     run_id: fields.run_id,
     subject: fields.subject,
     assignment_actor_key: fields.assignment_actor_key,

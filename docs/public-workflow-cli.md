@@ -116,7 +116,7 @@ a supported ownership adapter fail closed. The helperâ€”not package JavaScriptâ€
 registry verification, locking, nonce replay protection, preimage CAS, atomic bundle/history writes,
 canonical evidence attachment, and any Flow synchronization for the authorized transition.
 The authorization binds
-the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
+the exact canonical project root, run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
 
@@ -133,7 +133,10 @@ transition itself.
 
 The helper and its provider-neutral key registry are deployed and configured by runtime
 administrators outside source control. Flow Agents ships neither helper configuration nor keys.
-Missing, untrusted, repository-local, or writable helpers fail closed.
+Missing, untrusted, repository-local, or writable helpers fail closed. The privileged
+coordinator only verifies authority, serializes and records the operation, then gives a
+one-use signed capability to a worker running as the invoking non-root user; repository
+artifacts are read and written only by that unprivileged worker.
 
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the

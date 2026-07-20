@@ -99,7 +99,7 @@ node /work/sign-authorization.mjs /tmp/resolve-request.json /root/lifecycle-auth
 cat > /work/make-lifecycle-authorization.mjs <<'NODE'
 import fs from 'node:fs'; import crypto from 'node:crypto';
 const [operation, slug, output, expiresAt] = process.argv.slice(2); const fixture = JSON.parse(fs.readFileSync('/tmp/lifecycle-authority-e2e/fixture.json', 'utf8'));
-const now = new Date().toISOString(); const unsigned = { schema_version: '1.0', operation, run_id: slug, subject: fixture.subject, assignment_actor_key: fixture.actorKey, assignment_actor: fixture.actor, nonce: `${operation}-${slug}-${crypto.randomBytes(8).toString('hex')}`, expires_at: expiresAt, request: { reason: `fixture ${operation}`, authority: { kind: 'operator_request', actor: 'fixture-operator', request_ref: `fixture://${operation}/${slug}`, requested_at: now } } };
+const now = new Date().toISOString(); const unsigned = { schema_version: '1.0', operation, project_root: fixture.project, run_id: slug, subject: fixture.subject, assignment_actor_key: fixture.actorKey, assignment_actor: fixture.actor, nonce: `${operation}-${slug}-${crypto.randomBytes(8).toString('hex')}`, expires_at: expiresAt, request: { reason: `fixture ${operation}`, authority: { kind: 'operator_request', actor: 'fixture-operator', request_ref: `fixture://${operation}/${slug}`, requested_at: now } } };
 const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
 fs.writeFileSync(output, `${JSON.stringify({ ...unsigned, signature: { algorithm: 'ed25519', key_id: 'fixture-authority', value: crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), key).toString('base64') } })}\n`, { mode: 0o600 });
 NODE

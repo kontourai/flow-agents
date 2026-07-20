@@ -260,6 +260,7 @@ export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInp
 
   const { unsigned, signingPayload } = buildUnsignedLifecycleAuthorization({
     operation: "cancel",
+    project_root: context.projectRoot,
     run_id: context.slug,
     subject,
     assignment_actor_key: assignment.actor_key as string,

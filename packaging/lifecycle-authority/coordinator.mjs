@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, resolveCritiqueTransition } from "./runtime-v1.mjs";
@@ -11,9 +12,11 @@ export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
 export const STATE_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-authority-v1";
 export const REGISTRY_FILE = `${CONFIG_ROOT}/keys.json`;
 export const COMPLETION_PRIVATE_KEY_FILE = `${CONFIG_ROOT}/completion-signing-key.pem`;
+export const COMPLETION_PUBLIC_KEY_FILE = `${CONFIG_ROOT}/completion-verification-key.pem`;
 const INSTALL_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const FLOW_REDUCER_PIN_FILE = path.join(INSTALL_ROOT, "flow-reducer-v1.json");
 const FLOW_REDUCER_PACKAGE_ROOT = path.join(INSTALL_ROOT, "flow-reducer", "node_modules", "@kontourai", "flow");
+const CHILD_MODE = process.env.FLOW_AGENTS_LIFECYCLE_MUTATION_WORKER === "1";
 const ACTION_FIELDS = {
   cancel: ["action", "project_root", "session_dir", "authorization_file"],
   archive: ["action", "project_root", "session_dir", "authorization_file"],
@@ -42,15 +45,19 @@ function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
     return fs.readFileSync(descriptor);
   } finally { fs.closeSync(descriptor); }
 }
-function canonicalInputPaths(request) {
+function canonicalMutationPaths(request) {
   const projectRoot = fs.realpathSync(request.project_root);
   const sessionDir = fs.realpathSync(request.session_dir);
   const expectedSessionRoot = path.join(projectRoot, ".kontourai", "flow-agents");
   if (!within(sessionDir, expectedSessionRoot) || path.dirname(sessionDir) !== expectedSessionRoot) throw new Error("session_dir must identify one direct canonical Flow Agents session");
+  return { projectRoot, sessionDir, runId: path.basename(sessionDir) };
+}
+function canonicalInputPaths(request) {
+  const paths = canonicalMutationPaths(request);
   const authorizationFile = fs.realpathSync(request.authorization_file);
-  if (within(authorizationFile, projectRoot)) throw new Error("authorization_file must be outside the project and worktree");
+  if (within(authorizationFile, paths.projectRoot)) throw new Error("authorization_file must be outside the project and worktree");
   protectedRegularFile(authorizationFile, "authorization file");
-  return { projectRoot, sessionDir, authorizationFile, runId: path.basename(sessionDir) };
+  return { ...paths, authorizationFile };
 }
 export function validateEnvelope(value) {
   exact(value, ["schema_version", "action", "request_sha256", "request"], "coordinator envelope");
@@ -80,9 +87,47 @@ function atomicWrite(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(temporary, bytes, { mode, flag: "wx" });
+  const temporaryDescriptor = fs.openSync(temporary, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(temporaryDescriptor); } finally { fs.closeSync(temporaryDescriptor); }
   fs.renameSync(temporary, file);
   const descriptor = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+}
+function transactionJournal(paths) { return path.join(paths.sessionDir, ".lifecycle-authority.transaction.json"); }
+function snapshotTree(root, relative = "") {
+  const target = path.join(root, relative); const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink()) throw new Error("lifecycle transaction refuses symlinked artifact paths");
+  if (stat.isFile()) return [{ path: relative, bytes: fs.readFileSync(target).toString("base64"), mode: stat.mode & 0o777 }];
+  if (!stat.isDirectory()) throw new Error("lifecycle transaction requires regular artifact paths");
+  return fs.readdirSync(target).flatMap((entry) => entry === ".lifecycle-authority.transaction.json" ? [] : snapshotTree(root, path.join(relative, entry)));
+}
+function restoreTree(root, snapshot) {
+  const original = new Map(snapshot.map((entry) => [entry.path, entry]));
+  const current = snapshotTree(root);
+  for (const entry of current.filter((entry) => !original.has(entry.path))) fs.unlinkSync(path.join(root, entry.path));
+  for (const entry of snapshot) atomicWrite(path.join(root, entry.path), Buffer.from(entry.bytes, "base64"), entry.mode);
+}
+function recoverTransaction(paths) {
+  const file = transactionJournal(paths); if (!fs.existsSync(file)) return;
+  const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
+  if (journal.status !== "prepared") return;
+  if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
+  restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+  atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
+}
+async function inProjectTransaction(paths, action) {
+  recoverTransaction(paths);
+  const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
+  atomicWrite(transactionJournal(paths), `${JSON.stringify(journal)}\n`);
+  try {
+    const result = await action();
+    atomicWrite(transactionJournal(paths), `${JSON.stringify({ ...journal, status: "committed", committed_at: new Date().toISOString() })}\n`);
+    return result;
+  } catch (error) {
+    restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+    atomicWrite(transactionJournal(paths), `${JSON.stringify({ ...journal, status: "rolled_back", rolled_back_at: new Date().toISOString() })}\n`);
+    throw error;
+  }
 }
 function protectedJson(file, label, maxBytes = 4 * 1024 * 1024) {
   return JSON.parse(protectedRegularFile(file, label, maxBytes).toString("utf8"));
@@ -134,6 +179,9 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   const definition = JSON.parse(definitionBytes.toString("utf8"));
   const state = JSON.parse(stateBytes.toString("utf8"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  if (definition.id !== "builder.build" || state.definition_id !== "builder.build" || state.current_step !== "verify") {
+    throw new Error("critique resolution is authorized only for the canonical builder.build verify step");
+  }
   const gateId = openGateId(definition, state);
   const attachmentId = `lifecycle-authority:${envelope.request_sha256}`;
   const supersede = (Array.isArray(manifest.evidence) ? manifest.evidence : [])
@@ -167,6 +215,7 @@ function sessionSubject(paths) {
 }
 function assignmentFile(paths) { return path.join(paths.projectRoot, ".kontourai", "flow-agents", "assignment", `${paths.runId}.json`); }
 function assertAuthorizationBinding(paths, authorization, run) {
+  if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
   if (authorization.subject !== sessionSubject(paths) || authorization.subject !== run.state.subject) throw new Error("authorization subject does not bind the canonical Flow run and session");
   if (!record(authorization.request) || !record(authorization.assignment_actor) || typeof authorization.assignment_actor_key !== "string") throw new Error("lifecycle authorization is malformed");
 }
@@ -183,10 +232,21 @@ function releaseAssignment(paths, authorization) {
   atomicWrite(file, `${JSON.stringify(released, null, 2)}\n`, 0o644);
   return true;
 }
+function assertLiveAssignmentHolder(paths, authorization) {
+  const file = assignmentFile(paths);
+  if (!fs.existsSync(file)) throw new Error("canonical assignment holder is required before Flow cancellation");
+  const current = protectedJson(file, "canonical assignment", 256 * 1024);
+  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || canonicalJson(current.actor) !== canonicalJson(authorization.assignment_actor)) {
+    throw new Error("authorization does not bind the live canonical assignment holder");
+  }
+}
 async function cancelCanonicalFlow(paths, authorization) {
   const { flow } = await loadPinnedFlowReducer();
   const run = await flow.loadRun(paths.runId, paths.projectRoot);
   assertAuthorizationBinding(paths, authorization, run);
+  // Check the exact active holder before the irreversible canonical transition.
+  // A stale or released assignment must leave the Flow run untouched.
+  assertLiveAssignmentHolder(paths, authorization);
   const result = await flow.cancelRun(paths.runId, { cwd: paths.projectRoot, ...authorization.request });
   const assignmentReleased = releaseAssignment(paths, authorization);
   return { result_core_sha256: sha256({ state: result.state, assignment_released: assignmentReleased }), assignmentReleased };
@@ -213,22 +273,26 @@ function completion(envelope, paths, operationStatus, resultCoreSha256) {
   const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
+function signedCapability(kind, value) {
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: `kontourai.lifecycle-authority.${kind}`, value };
+  const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
+  return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
+}
+function verifiedCapability(capability, kind) {
+  if (!record(capability) || capability.schema_version !== PROTOCOL_VERSION || capability.kind !== `kontourai.lifecycle-authority.${kind}` || !record(capability.value) || !record(capability.signature) || capability.signature.algorithm !== "ed25519" || typeof capability.signature.value !== "string") throw new Error("mutation worker capability is invalid");
+  const { signature, ...unsigned } = capability;
+  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
+  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("mutation worker capability signature is invalid");
+  return capability.value;
+}
 async function withDurableLock(requestSha256, callback) {
   const lock = path.join(STATE_ROOT, "locks", requestSha256);
   fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
   fs.mkdirSync(lock, { mode: 0o700 });
   try { return await callback(); } finally { fs.rmdirSync(lock); }
 }
-async function processOperation(envelope) {
-  const paths = canonicalInputPaths(envelope.request);
-  const authorization = verifyAuthorization(paths.authorizationFile);
-  if (authorization.operation !== envelope.action || authorization.run_id !== paths.runId) throw new Error("authorization does not bind the requested operation and run");
-  const completionFile = path.join(STATE_ROOT, "completions", `${envelope.request_sha256}.json`);
-  return withDurableLock(envelope.request_sha256, async () => {
-    if (fs.existsSync(completionFile)) {
-      const applied = JSON.parse(protectedRegularFile(completionFile, "completion record").toString("utf8"));
-      return { completionRecord: completion(envelope, paths, "replayed", applied.result_core_sha256), replayed: true };
-    }
+async function executeMutation(envelope, paths, authorization, completionRecord = null) {
+    if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
     if (envelope.action === "resolve-critique") {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
@@ -236,26 +300,73 @@ async function processOperation(envelope) {
       if (sha256(beforeBytes) !== authorization.prior_bundle_sha256) throw new Error("critique resolution preimage bundle digest changed");
       const reduced = resolveCritiqueTransition({ bundle: before, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id });
       const resultCoreSha256 = sha256(reduced);
-      const completionRecord = completion(envelope, paths, "applied", resultCoreSha256);
       // Coordinator receipts and append-only resolution authorizations live
       // beside, never inside, the upstream Hachure trust bundle.
       const sessionBundle = { ...reduced };
       const resolutionEvents = Array.isArray(sessionBundle.critique_resolution_events) ? sessionBundle.critique_resolution_events : [];
       delete sessionBundle.critique_resolution_events;
-      await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
-      // Recheck the exact preimage immediately before the atomic replace.
-      if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
-      atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
-      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json"), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events: resolutionEvents }, null, 2)}\n`, 0o644);
-      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
-      atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
-      return { completionRecord, replayed: false };
+      await inProjectTransaction(paths, async () => {
+        await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
+        // Recheck the exact preimage immediately before the atomic replace.
+        if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
+        atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
+        atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json"), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events: resolutionEvents }, null, 2)}\n`, 0o644);
+        if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
+      });
+      return { result_core_sha256: resultCoreSha256, run_id: paths.runId };
     }
     const outcome = envelope.action === "cancel"
       ? await cancelCanonicalFlow(paths, authorization)
       : await archiveCanonicalSession(paths, authorization);
-    const completionRecord = completion(envelope, paths, "applied", outcome.result_core_sha256);
-    atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
+    return { result_core_sha256: outcome.result_core_sha256, run_id: paths.runId };
+}
+function callerIdentity() {
+  const uid = Number(process.env.SUDO_UID); const gid = Number(process.env.SUDO_GID);
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0) throw new Error("lifecycle authority requires validated non-root SUDO_UID and SUDO_GID");
+  return { uid, gid };
+}
+function operationIdentity(envelope, authorization) {
+  const project = path.resolve(envelope.request.project_root);
+  const runId = path.basename(path.resolve(envelope.request.session_dir));
+  if (!runId || runId === "." || runId === path.sep) throw new Error("lifecycle authority request has an invalid session identity");
+  const keyId = authorization.signature?.key_id;
+  if (typeof keyId !== "string" || typeof authorization.nonce !== "string") throw new Error("authorization does not contain a durable key and nonce identity");
+  return { project, runId, keyId, nonce: authorization.nonce, id: sha256({ project, run_id: runId, action: envelope.action, key_id: keyId, nonce: authorization.nonce }) };
+}
+function durableJson(file, label) { return JSON.parse(protectedRegularFile(file, label, 256 * 1024).toString("utf8")); }
+function childInvocation(payload, identity) {
+  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { input: `${JSON.stringify(payload)}\n`, encoding: "utf8", env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C", FLOW_AGENTS_LIFECYCLE_MUTATION_WORKER: "1" }, uid: identity.uid, gid: identity.gid, timeout: 30_000, maxBuffer: 512 * 1024 });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(String(result.stderr || "unprivileged lifecycle mutation worker rejected the request").trim());
+  const line = String(result.stdout).trim(); if (!line || line.includes("\n")) throw new Error("unprivileged lifecycle mutation worker returned an invalid response");
+  return JSON.parse(line);
+}
+async function processRootOperation(envelope) {
+  const authorizationPath = path.resolve(envelope.request.authorization_file);
+  const authorization = verifyAuthorization(authorizationPath);
+  const identity = operationIdentity(envelope, authorization);
+  if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
+  const authorizationSha256 = sha256(canonicalJson(authorization));
+  const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);
+  return withDurableLock(identity.id, async () => {
+    if (fs.existsSync(completionFile)) {
+      const prior = durableJson(completionFile, "completion record");
+      if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256) throw new Error("consumed lifecycle authorization record does not match the exact request");
+      return { completionRecord: completion(envelope, { runId: identity.runId }, "replayed", prior.result_core_sha256), replayed: true };
+    }
+    const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
+    if (fs.existsSync(nonceFile)) throw new Error("lifecycle authorization nonce has already been consumed");
+    atomicWrite(nonceFile, `${JSON.stringify({ schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" })}\n`);
+    const caller = callerIdentity();
+    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization }) }, caller);
+    if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
+    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
+    // The root process has already returned to a root-owned boundary. A second
+    // unprivileged invocation installs a receipt only where that receipt is a
+    // verification-gate input; archive moves the session and has no receipt path.
+    if (envelope.action === "resolve-critique") childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
+    atomicWrite(nonceFile, `${JSON.stringify({ schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "applied", result_core_sha256: mutation.result_core_sha256 })}\n`);
     return { completionRecord, replayed: false };
   });
 }
@@ -263,10 +374,28 @@ function response(envelope, outcome) {
   return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord } };
 }
 export async function main(input = fs.readFileSync(0, "utf8")) {
+  if (CHILD_MODE) {
+    const payload = JSON.parse(input);
+    if (!record(payload) || typeof payload.kind !== "string") throw new Error("mutation worker request is invalid");
+    if (payload.kind === "receipt") {
+      const value = verifiedCapability(payload.capability, "receipt-capability");
+      if (!record(value.request) || !record(value.completion)) throw new Error("mutation worker receipt is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(value.completion, null, 2)}\n`, 0o644);
+      return { run_id: paths.runId, receipt: "written" };
+    }
+    if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");
+    const value = verifiedCapability(payload.capability, "mutation-capability");
+    if (!record(value.envelope) || !record(value.authorization)) throw new Error("mutation worker request is invalid");
+    const envelope = validateEnvelope(value.envelope);
+    const paths = canonicalMutationPaths(envelope.request);
+    if (value.authorization.operation !== envelope.action || value.authorization.run_id !== paths.runId) throw new Error("mutation worker authorization does not bind the request");
+    return executeMutation(envelope, paths, value.authorization);
+  }
   const lines = input.split(/\r?\n/).filter(Boolean);
   if (lines.length !== 1) throw new Error("coordinator requires exactly one JSON request line");
   const envelope = validateEnvelope(JSON.parse(lines[0]));
-  return response(envelope, await processOperation(envelope));
+  return response(envelope, await processRootOperation(envelope));
 }
 if (path.resolve(process.argv[1] ?? "") === path.resolve(fileURLToPath(import.meta.url))) {
   try { process.stdout.write(`${JSON.stringify(await main())}\n`); }
