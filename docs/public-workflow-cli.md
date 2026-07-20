@@ -86,10 +86,15 @@ flow_agents workflow publish-delivery \
 This command derives the repository and session from the bound artifact; it does not accept a
 caller-selected output repository or private-writer escape hatch. It refuses a missing bundle, a
 partial Builder run, an unreconciled bundle shape, a stale or non-holder actor, and a positively
-identified checkpoint/checkout mismatch. Before sealing, it revalidates the canonical live review
-graph against the exact current workspace snapshot; a commit or worktree change after review must
-go back through canonical review and verification rather than rebinding old evidence to a new
-checkpoint. It then re-seals against the derived target checkout's current `HEAD`, replaces stale
+identified checkpoint/checkout mismatch. Public test verification stamps the canonical Git
+workspace snapshot alongside its successful command observations. Before sealing, publishing
+requires both that stamped verification snapshot and the canonical live review graph to match the
+exact current workspace; a commit or worktree change must go back through canonical review and
+verification rather than rebinding either old evidence slice to a new checkpoint. Sessions whose
+older test evidence lacks this snapshot fail closed on public publishing until verification is
+rerun. The publisher holds the session subject lock and rechecks the identical snapshot after
+sealing and immediately before copying. It then seals against the derived target checkout's current
+`HEAD`, replaces stale
 companions with one newly emitted signed or in-toto companion, and verifies that companion binds
 both the checkpoint digest and current trust bundle before copying the set into
 `delivery/<session>/`. The committed delivery bundle is then available to the repository's Trust

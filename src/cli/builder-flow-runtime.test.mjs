@@ -28,7 +28,7 @@ import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecor
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, withStableDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
@@ -59,6 +59,20 @@ childProcess.execFileSync = ((file, args, options) => {
     return '{"verified":true}\n';
   }
   return realExecFileSync(file, args, options);
+});
+
+test("public delivery refuses a concurrent source mutation during checkpoint sealing", async () => {
+  let snapshot = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "1".repeat(40) };
+  await assert.rejects(
+    () => withStableDeliverySnapshot(
+      () => structuredClone(snapshot),
+      async () => {
+        snapshot = { ...snapshot, digest: "b".repeat(64), head_sha: "2".repeat(40) };
+        return { sealed: true };
+      },
+    ),
+    /source snapshot changed while sealing/,
+  );
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;

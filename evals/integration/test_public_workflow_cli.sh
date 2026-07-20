@@ -356,6 +356,62 @@ ACTOR_MISMATCH_RC=$?
 set -e
 [[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
 pass "public delivery publishing requires the exact ordinary assignment actor"
+printf 'source snapshot B\n' > "$CONSUMER/source-b.txt"
+(cd "$CONSUMER" && git add source-b.txt && git commit -qm 'source snapshot B after initial verification')
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+# Reset only the prior review slice so this fixture can record an independent
+# canonical review at B while deliberately retaining the tests-evidence from A.
+node - "$RELEASE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const removed = new Set(bundle.claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.id));
+bundle.claims = bundle.claims.filter((claim) => !removed.has(claim.id));
+bundle.evidence = bundle.evidence.filter((entry) => !removed.has(entry.claimId));
+bundle.events = bundle.events.filter((entry) => !removed.has(entry.claimId));
+bundle.critique_resolution_events = [];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+run_candidate_as public-reviewer critique --session-dir "$RELEASE_SESSION" --id public-review --verdict pass --summary "Review source snapshot B." --artifact-ref "$DELIVER_REPORT" --lane-json "$CODE_LANE" --lane-json "$SECURITY_LANE" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+set +e
+STALE_TESTS_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_TESTS_RC=$?
+set -e
+[[ "$STALE_TESTS_RC" -ne 0 && "$STALE_TESTS_PUBLISH" == *"test verification evidence bound to the exact same source snapshot"* ]] || fail "a fresh critique rebound tests from source snapshot A onto source snapshot B"
+pass "fresh critique at source snapshot B cannot reuse tests recorded at snapshot A"
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation tests-evidence --status pass --summary "Re-run verification for source snapshot B." --command "$TEST_COMMAND" --command "$TEST_COMMAND_TWO" --command "$TEST_COMMAND_THREE" --evidence-ref-json "$COMMAND_REF" --evidence-ref-json "$COMMAND_REF_TWO" --evidence-ref-json "$COMMAND_REF_THREE" --criterion-json "$CRITERION_JSON" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+pass "canonical verification rerun binds tests to source snapshot B"
 PUBLISH_JSON="$(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval \
   TRUST_RECONCILE_COMMANDS="$TEST_COMMAND
 $TEST_COMMAND_TWO
@@ -384,7 +440,7 @@ set +e
 STALE_EVIDENCE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
 STALE_EVIDENCE_RC=$?
 set -e
-[[ "$STALE_EVIDENCE_RC" -ne 0 && "$STALE_EVIDENCE_PUBLISH" == *"exact source snapshot"* ]] || fail "public delivery publishing rebound old verification evidence onto a newer HEAD"
+[[ "$STALE_EVIDENCE_RC" -ne 0 && "$STALE_EVIDENCE_PUBLISH" == *"exact same source snapshot"* ]] || fail "public delivery publishing rebound old verification evidence onto a newer HEAD"
 pass "public delivery publishing requires canonical re-verification after HEAD changes"
 
 ASSIGNMENT="$ARTIFACT_ROOT/assignment/$(basename "$RELEASE_SESSION").json"

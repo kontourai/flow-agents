@@ -86,42 +86,62 @@ export async function main(argv: string[]): Promise<number> {
 
 async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boolean): Promise<number> {
   const { projectRoot, slug } = readBoundSession(sessionDir);
-  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
-  if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) {
-    throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
-  }
-  const inspected = await inspectBuilderFlowSession({ sessionDir });
-  const completed = inspected.run.definitionId === "builder.build" && inspected.run.state.status === "completed";
-  const release = readOptionalJson(path.join(sessionDir, "release.json"));
-  const releaseReady = inspected.run.definitionId === "builder.build"
-    && inspected.run.state.status === "active"
-    && inspected.run.state.current_step === "learn"
-    && ["merge", "release", "deploy"].includes(String(release?.decision));
-  if (!completed && !releaseReady) {
-    throw new Error("workflow publish-delivery requires a completed or release-ready canonical builder.build run; partial sessions cannot publish delivery evidence");
-  }
-  assertCurrentVerifiedWorkspaceEvidence(sessionDir);
-  const seal = await sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot);
-  if (!seal) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
-  validateFreshCheckpointSeal(sessionDir, seal);
-  const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
-  const checkpoint = readJsonFile(checkpointPath, "workflow trust checkpoint");
-  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  if (checkpoint.commit_sha !== headSha) {
-    throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
-  }
-  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
-  await publishDelivery(sessionDir, projectRoot);
-  const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
-  const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
-  const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
-  if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
-    throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
-  }
-  const report = immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, published: true });
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) {
+      throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
+    }
+    const inspected = await inspectBuilderFlowSession({ sessionDir });
+    const completed = inspected.run.definitionId === "builder.build" && inspected.run.state.status === "completed";
+    const release = readOptionalJson(path.join(sessionDir, "release.json"));
+    const releaseReady = inspected.run.definitionId === "builder.build"
+      && inspected.run.state.status === "active"
+      && inspected.run.state.current_step === "learn"
+      && ["merge", "release", "deploy"].includes(String(release?.decision));
+    if (!completed && !releaseReady) {
+      throw new Error("workflow publish-delivery requires a completed or release-ready canonical builder.build run; partial sessions cannot publish delivery evidence");
+    }
+    const guardedSeal = await withStableDeliverySnapshot(
+      () => assertCurrentVerifiedWorkspaceEvidence(sessionDir),
+      () => sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot),
+    );
+    const verifiedSnapshot = guardedSeal.snapshot;
+    const seal = guardedSeal.result;
+    if (!seal) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
+    validateFreshCheckpointSeal(sessionDir, seal);
+    const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
+    const checkpoint = readJsonFile(checkpointPath, "workflow trust checkpoint");
+    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (checkpoint.commit_sha !== headSha) {
+      throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
+    }
+    const immediatelyBeforePublish = assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    if (!isDeepStrictEqual(verifiedSnapshot, immediatelyBeforePublish)) {
+      throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
+    }
+    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    await publishDelivery(sessionDir, projectRoot);
+    const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
+    const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
+    const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
+    if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
+      throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
+    }
+    return immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, published: true });
+  });
   if (json) console.log(JSON.stringify(report));
-  else console.log(`Published delivery trust bundle: ${deliveryBundle}`);
+  else console.log(`Published delivery trust bundle: ${String(report.delivery_bundle)}`);
   return 0;
+}
+
+export async function withStableDeliverySnapshot<T>(capture: () => JsonRecord, seal: () => Promise<T>): Promise<{ snapshot: JsonRecord; result: T }> {
+  const before = structuredClone(capture());
+  const result = await seal();
+  const after = capture();
+  if (!isDeepStrictEqual(before, after)) {
+    throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
+  }
+  return { snapshot: before, result };
 }
 
 function validateFreshCheckpointSeal(sessionDir: string, seal: TrustCheckpointSealResult): void {

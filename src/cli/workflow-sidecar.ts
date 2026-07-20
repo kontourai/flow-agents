@@ -996,6 +996,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
         .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
       : null;
+    const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
+      && typeof check._verification_workspace_snapshot === "object"
+      && !Array.isArray(check._verification_workspace_snapshot)
+      ? check._verification_workspace_snapshot as AnyObj
+      : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -1034,6 +1039,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
+      ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -3536,6 +3542,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
     return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
   };
+  const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    const snapshot = md && typeof md === "object" ? md.verification_workspace_snapshot : undefined;
+    return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as AnyObj : undefined;
+  };
   const applyProducerStamp = (check: AnyObj, claim: AnyObj): void => {
     const md = claim.metadata as AnyObj;
     if (md && typeof md.expected_producer === "string") check._producer = md.expected_producer;
@@ -3619,6 +3630,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3639,6 +3652,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -4043,7 +4058,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -4160,6 +4175,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
+  if (mustRunTests && publicWorkflowAuthority) {
+    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
+    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
+      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
+    }
+    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
@@ -6154,10 +6176,28 @@ function critiqueClean(dir: string): boolean {
  * the current source. A changed HEAD or worktree therefore requires canonical
  * review and verification to be recorded again before delivery can be published.
  */
-export function assertCurrentVerifiedWorkspaceEvidence(dir: string): void {
-  if (!critiqueClean(dir)) {
-    throw new Error("workflow publish-delivery requires current canonical review and verification evidence for the exact source snapshot; re-run critique and verification after any HEAD or workspace change");
-  }
+export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
+  const fail = (): never => {
+    throw new Error("workflow publish-delivery requires current canonical review and test verification evidence bound to the exact same source snapshot; re-run critique and verification after any HEAD or workspace change");
+  };
+  if (!critiqueClean(dir) || !evidenceClean(dir)) fail();
+  const bundle = loadTrustBundleForTrustMachinery(dir);
+  const testsClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
+      && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
+      && claim.value === "pass" && claim.status === "verified")
+    : [];
+  if (testsClaims.length !== 1) fail();
+  const metadata = testsClaims[0]!.metadata as AnyObj;
+  const observed = metadata.observed_commands;
+  const expected = metadata.verification_workspace_snapshot;
+  if (!Array.isArray(observed) || observed.length === 0
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
+    || !expected || typeof expected !== "object" || Array.isArray(expected)
+    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
+  if (!isDeepStrictEqual(expected, current)) fail();
+  return structuredClone(current);
 }
 function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
@@ -7307,7 +7347,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
