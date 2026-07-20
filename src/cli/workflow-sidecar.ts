@@ -10,6 +10,8 @@ import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
+import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -88,6 +90,63 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   fs.appendFileSync(file, `${line}\n`);
 }
 function die(message: string): never { throw new Error(message); }
+
+/**
+ * #783: sanctioned fixture authoring. `fixture write <dir> [--from-json <file> | --malformed
+ * --content <string|@file>]` writes a state.json fixture for TESTS — never real session state.
+ *
+ * Contract (mirrors the config-protection hook's scoping, same fail-closed resolver):
+ * - The target dir must be PROVABLY OUTSIDE every declared artifact root
+ *   (isProvablyOutsideDeclaredRoots; ambiguity refuses). A fixture writer that disagreed with
+ *   the hook about root containment would let an agent forge real sidecar state by routing
+ *   through this command, so the refusal is non-negotiable.
+ * - Default (--from-json) validates against schemas/workflow-state.schema.json with the SAME
+ *   validator the artifact validator uses (mini-json-schema), so a "valid fixture" here is
+ *   valid everywhere.
+ * - --malformed writes the provided content VERBATIM (negative-test fixtures: corrupt JSON,
+ *   schema-violating shapes). Allowed only because the outside-roots proof already succeeded.
+ */
+function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
+  const action = p.positional[0] || die("fixture requires an action: write");
+  if (action !== "write") die(`unknown fixture action: ${action} (only "write" is supported)`);
+  const dirArg = p.positional[1] || die("fixture write requires a target directory");
+  const dir = path.resolve(dirArg);
+  const cwd = process.cwd();
+  if (!isProvablyOutsideDeclaredRoots(dir, cwd)) {
+    die(
+      `fixture write refused: ${dir} is inside — or cannot be proven outside — the declared ` +
+        `artifact roots (repo/workspace .kontourai/flow-agents, .flow-agents, delivery/). ` +
+        `Fixtures belong in a scratch or temp directory. Root detection fails closed by design.`,
+    );
+  }
+  const malformed = p.flags.has("malformed") || p.opts["malformed"] !== undefined;
+  const target = path.join(dir, "state.json");
+  let mode: string;
+  if (malformed) {
+    const contentArg = opt(p, "content") || die("fixture write --malformed requires --content <string|@file>");
+    const content = contentArg.startsWith("@") ? read(contentArg.slice(1)) : contentArg;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, content);
+    mode = "malformed (verbatim, schema deliberately NOT enforced)";
+  } else {
+    const fromJson = opt(p, "from-json") || die("fixture write requires --from-json <file> (or --malformed --content)");
+    const value = loadJsonInputFile(fromJson);
+    const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "schemas", "workflow-state.schema.json");
+    const schema = JSON.parse(read(schemaPath));
+    const issues: SchemaIssue[] = [];
+    validateSchemaValue("state.json", value, schema, "state", issues);
+    if (issues.length > 0) {
+      die(`fixture write refused: content does not satisfy workflow-state.schema.json:\n${issues.map((i) => `  - ${i.message}`).join("\n")}\n(use --malformed --content to author an intentionally-invalid fixture)`);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`);
+    mode = "schema-valid";
+  }
+  process.stdout.write(
+    `${JSON.stringify({ written: target, mode, allowed_because: "target is provably outside every declared artifact root" }, null, 2)}\n`,
+  );
+  return 0;
+}
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
 /** Derives a deterministic, filesystem-safe slug from a canonical work-item ref like `kontourai/flow-agents#161`.
  * Format: `<owner>-<repo>-<id>` e.g. `kontourai-flow-agents-161`.
@@ -7475,6 +7534,9 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   // immediately below and is scoped to the `whoami` action only: `liveness status` (a read path)
   // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
   // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
+  // #783: `fixture` writes only OUTSIDE declared artifact roots by contract, so it must not
+  // acquire (or create) a session lock inside any artifact root; lock-free like resolve-slug.
+  const isFixture = p.command === "fixture";
   const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
   // #320 AC1: `liveness verdict` is read-only and lock-free, exactly like `whoami` above — it
   // must never acquire the workflow-sidecar lock. Same bypass shape, scoped to the `verdict`
@@ -7482,7 +7544,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   const isLivenessVerdict = p.command === "liveness" && p.positional[0] === "verdict";
   const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami && !isLivenessVerdict)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict || isFixture) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
@@ -7509,6 +7571,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
       case "resolve-slug": return resolveSlugCmd(p);
+      case "fixture": return fixtureCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       case "reconcile-preflight": return reconcilePreflightCmd(p);
