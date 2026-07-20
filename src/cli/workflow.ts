@@ -8,14 +8,14 @@ import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { assertCurrentCritiqueClaim, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { assertAuthorizationUnused, authorizationDigest, buildUnsignedCritiqueResolutionAuthorization, loadCritiqueResolutionAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
+import { normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
@@ -482,6 +482,11 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
     const resolvingRecordId = flagString(parsed.flags, "resolving-record-id")!;
     const priorMetadata = metadataFor(priorRecordId);
     const resolvingMetadata = metadataFor(resolvingRecordId);
+    const requiredLaneIds = (Array.isArray(priorMetadata.lanes) ? priorMetadata.lanes as JsonRecord[] : []).filter((lane) => lane.status !== "pass").map((lane) => String(lane.id)).sort();
+    const requiredFindingIds = (Array.isArray(priorMetadata.findings) ? priorMetadata.findings as JsonRecord[] : []).filter((finding) => finding.status === "open").map((finding) => String(finding.id)).sort();
+    const workspace = (metadata: JsonRecord) => ((metadata.review_target as JsonRecord | undefined)?.workspace_snapshot ?? {}) as JsonRecord;
+    const priorWorkspace = workspace(priorMetadata);
+    const resolvingWorkspace = workspace(resolvingMetadata);
     const subject = Array.isArray((readJsonFile(path.join(sessionDir, "state.json"), "workflow state").work_item_refs))
       ? String((readJsonFile(path.join(sessionDir, "state.json"), "workflow state").work_item_refs as unknown[])[0]) : "";
     const authorizationInput = readJsonFile(authorizationFile, "critique resolution authorization");
@@ -489,14 +494,24 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
       projectRoot, runId: slug, subject, priorBundleSha256: String(authorizationInput.prior_bundle_sha256),
       priorRecordId, priorRecordHash: String(priorMetadata.critique_record_hash),
       resolvingRecordId, resolvingRecordHash: String(resolvingMetadata.critique_record_hash),
+      resolvedLaneIds: requiredLaneIds, resolvedFindingIds: requiredFindingIds,
+      priorSnapshotSha256: String(priorWorkspace.digest), resolvingSnapshotSha256: String(resolvingWorkspace.digest),
+      priorHeadSha: String(priorWorkspace.head_sha ?? "none"), resolvingHeadSha: String(resolvingWorkspace.head_sha ?? "none"),
     });
     if (authorization.expected_resolver !== resolvingMetadata.reviewer) throw new Error("critique resolution authorization expected_resolver does not match the resolving reviewer");
     const priorConsumption = readAuthorizationConsumption(path.dirname(sessionDir), authorization);
     if (beforeTrustBundle !== authorization.prior_bundle_sha256) {
       const resolution = priorMetadata.critique_resolution as JsonRecord | undefined;
-      if (priorConsumption
+      const events = Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events as JsonRecord[] : [];
+      const exactEvents = events.filter((event) => event.event_id === resolution?.resolution_event_id
+        && event.authorization_sha256 === authorizationDigest(authorization));
+      const graph = validateCritiqueResolutionGraph(claims, subject, events, projectRoot);
+      const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
+      const resolvingClaim = claims.find((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === resolvingRecordId);
+      if (priorConsumption && blockingGraphErrors.length === 0 && exactEvents.length === 1 && resolvingClaim
         && priorMetadata.superseded_by === resolvingRecordId
         && resolution?.authorization_sha256 === authorizationDigest(authorization)) {
+        await assertCurrentCritiqueClaim(resolvingClaim, projectRoot);
         return immutableReport({ run_id: slug, resolved: false, replayed: true });
       }
       throw new Error("critique resolution authorization prior_bundle_sha256 does not match the current resolution preimage");
@@ -540,6 +555,14 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
   };
   const prior = metadata(priorRecordId);
   const resolving = metadata(resolvingRecordId);
+  const unresolvedLaneIds = (Array.isArray(prior.lanes) ? prior.lanes as JsonRecord[] : []).filter((lane) => lane.status !== "pass").map((lane) => String(lane.id)).sort();
+  const unresolvedFindingIds = (Array.isArray(prior.findings) ? prior.findings as JsonRecord[] : []).filter((finding) => finding.status === "open").map((finding) => String(finding.id)).sort();
+  const snapshot = (record: JsonRecord): JsonRecord => {
+    const target = record.review_target as JsonRecord | undefined;
+    return target?.workspace_snapshot && typeof target.workspace_snapshot === "object" ? target.workspace_snapshot as JsonRecord : {};
+  };
+  const priorWorkspace = snapshot(prior);
+  const resolvingWorkspace = snapshot(resolving);
   const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
   const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
   if (!subject) throw new Error("workflow resolve-critique-request requires one bound subject");
@@ -550,7 +573,10 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
     run_id: slug, subject, prior_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash),
     resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash),
-    expected_resolver: String(resolving.reviewer), nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
+    expected_resolver: String(resolving.reviewer), resolved_lane_ids: unresolvedLaneIds, resolved_finding_ids: unresolvedFindingIds,
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest),
+    prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
     requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
   });
   console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));

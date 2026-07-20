@@ -55,6 +55,24 @@ function readRegularFileNoFollow(file: string, label: string): Buffer {
   }
 }
 export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
+
+function writeTrustBundleAtomically(file: string, payload: AnyObj): void {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true });
+  const temporary = path.join(directory, `.trust.bundle.${process.pid}.${Date.now()}.tmp`);
+  const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(payload, null, 2)}\n`);
+    fs.fsyncSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+  try {
+    fs.renameSync(temporary, file);
+    const directoryDescriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+  } finally {
+    try { fs.rmSync(temporary, { force: true }); } catch { /* rename completed or cleanup best effort */ }
+  }
+}
 // Single-line but readable "key": "value" form. Built by collapsing the
 // structural whitespace from an indented stringify — corruption-proof, unlike a
 // regex that would also rewrite ":"/"," sequences inside string values.
@@ -1307,7 +1325,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
     }
-    writeJson(path.join(dir, "trust.bundle"), bundle);
+    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -4457,6 +4475,13 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const authorizationKeyId = requiredResolutionRecordId(p, "authorization-key-id");
   const authorizationNonce = requiredResolutionRecordId(p, "authorization-nonce");
   const preimageDigest = requiredResolutionRecordId(p, "preimage-digest");
+  const bundleFile = path.join(dir, "trust.bundle");
+  const bundleDescriptor = fs.openSync(bundleFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let lockedPreimage: Buffer;
+  try { lockedPreimage = fs.readFileSync(bundleDescriptor); } finally { fs.closeSync(bundleDescriptor); }
+  if (createHash("sha256").update(lockedPreimage).digest("hex") !== preimageDigest) {
+    die("resolve-critique preimage changed before the locked mutation");
+  }
   let signedAuthorization: AnyObj;
   try { signedAuthorization = JSON.parse(Buffer.from(opt(p, "authorization-base64"), "base64").toString("utf8")); }
   catch { die("resolve-critique requires the verified signed authorization payload"); }

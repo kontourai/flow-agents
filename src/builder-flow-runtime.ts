@@ -925,6 +925,21 @@ async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: st
   }
 }
 
+/** Revalidate the current substantive PASS represented by one persisted critique claim. */
+export async function assertCurrentCritiqueClaim(claim: AnyRecord, projectRoot: string): Promise<void> {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : {};
+  if (claim.value !== "pass" || claim.status !== "verified"
+    || !Array.isArray(metadata.lanes) || metadata.lanes.length === 0 || metadata.lanes.some((lane: AnyRecord) => lane.status !== "pass")
+    || (Array.isArray(metadata.findings) && metadata.findings.some((finding: AnyRecord) => finding.status === "open"))) {
+    throw new BuilderBuildRunInputError("evidence.critique", "must remain a substantive current PASS");
+  }
+  const target = isRecord(metadata.review_target) ? metadata.review_target : {};
+  const artifacts = Array.isArray(target.artifacts) ? target.artifacts : [];
+  if (artifacts.length === 0) throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts", "must not be empty");
+  await Promise.all(artifacts.map((artifact: AnyRecord) => assertReviewedArtifactDigest(artifact, projectRoot)));
+  assertReviewedWorkspaceSnapshot({ metadata }, artifacts, projectRoot);
+}
+
 function safeReviewedArtifactPath(projectRoot: string, file: string): string {
   const canonicalRoot = fs.realpathSync(projectRoot);
   const candidate = path.resolve(canonicalRoot, file);

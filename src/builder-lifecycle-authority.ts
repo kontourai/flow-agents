@@ -4,6 +4,7 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
 import { durableFlowAgentsRoot } from "./lib/local-artifact-root.js";
+import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 
 type JsonRecord = Record<string, unknown>;
 export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
@@ -32,6 +33,12 @@ export interface CritiqueResolutionAuthorization {
   resolving_record_id: string;
   resolving_record_hash: string;
   expected_resolver: string;
+  resolved_lane_ids: string[];
+  resolved_finding_ids: string[];
+  prior_snapshot_sha256: string;
+  resolving_snapshot_sha256: string;
+  prior_head_sha: string;
+  resolving_head_sha: string;
   nonce: string;
   expires_at: string;
   requested_at: string;
@@ -54,7 +61,9 @@ export function buildUnsignedCritiqueResolutionAuthorization(fields: Omit<Critiq
 export function loadCritiqueResolutionAuthorization(fileInput: string, expected: {
   projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
-  resolvingRecordHash: string; now?: string; allowExpired?: boolean;
+  resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
+  priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
+  now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
   const value = readRegularJson(fileInput, "critique resolution authorization", true);
   return validateCritiqueResolutionAuthorization(value, expected);
@@ -63,15 +72,26 @@ export function loadCritiqueResolutionAuthorization(fileInput: string, expected:
 export function validateCritiqueResolutionAuthorization(value: JsonRecord, expected: {
   projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
-  resolvingRecordHash: string; now?: string; allowExpired?: boolean;
+  resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
+  priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
+  now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
-  const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at", "signature"];
+  const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
   assertExactKeys(value, fields, "authorization");
   if (value.schema_version !== "1.0" || value.operation !== "resolve-critique") throw new Error("critique resolution authorization identity is invalid");
   const exact: Array<[keyof typeof expected, string]> = [["runId", "run_id"], ["subject", "subject"], ["priorBundleSha256", "prior_bundle_sha256"], ["priorRecordId", "prior_record_id"], ["priorRecordHash", "prior_record_hash"], ["resolvingRecordId", "resolving_record_id"], ["resolvingRecordHash", "resolving_record_hash"]];
   for (const [expectedKey, field] of exact) if (value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the current resolution preimage`);
-  for (const field of fields.slice(2, 12)) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 256);
-  for (const field of ["prior_bundle_sha256", "prior_record_hash", "resolving_record_hash"]) {
+  const semantic: Array<[keyof typeof expected, string]> = [["resolvedLaneIds", "resolved_lane_ids"], ["resolvedFindingIds", "resolved_finding_ids"]];
+  for (const [expectedKey, field] of semantic) {
+    const actual = boundedStringArray(value[field], `authorization.${field}`);
+    if (expected[expectedKey] && JSON.stringify(actual) !== JSON.stringify(expected[expectedKey])) throw new Error(`critique resolution authorization ${field} does not match the intended resolution edge`);
+  }
+  for (const [expectedKey, field] of [["priorSnapshotSha256", "prior_snapshot_sha256"], ["resolvingSnapshotSha256", "resolving_snapshot_sha256"], ["priorHeadSha", "prior_head_sha"], ["resolvingHeadSha", "resolving_head_sha"]] as const) {
+    boundedText(value[field], `authorization.${field}`, 256);
+    if (expected[expectedKey] && value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the intended resolution edge`);
+  }
+  for (const field of ["run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at"]) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 256);
+  for (const field of ["prior_bundle_sha256", "prior_record_hash", "resolving_record_hash", "prior_snapshot_sha256", "resolving_snapshot_sha256"]) {
     if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`critique resolution authorization ${field} must be a SHA-256 digest`);
   }
   const requestedAt = dateTime(value.requested_at, "requested_at");
@@ -84,6 +104,13 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   const authorization = { ...Object.fromEntries(fields.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionAuthorization;
   verifySignedAuthorization(authorization, lifecycleAuthorityKeysPath(expected.projectRoot), critiqueResolutionAuthorizationPayload);
   return authorization;
+}
+
+function boundedStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length > 256) throw new Error(`lifecycle authorization ${field} must be an array`);
+  const result = value.map((entry, index) => boundedText(entry, `${field}[${index}]`, 256));
+  if (new Set(result).size !== result.length || JSON.stringify(result) !== JSON.stringify([...result].sort())) throw new Error(`lifecycle authorization ${field} must contain unique sorted ids`);
+  return result;
 }
 
 export function lifecycleAuthorityKeysPath(projectRoot: string): string {
@@ -235,7 +262,7 @@ function verifyAuthorizationSignature(authorization: BuilderLifecycleAuthorizati
 }
 
 function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, keysFile: string, payload: (value: Omit<T, "signature">) => string): void {
-  const registry = readRegularJson(keysFile, "lifecycle authority key registry", true);
+  const registry = readProtectedRegistry(keysFile);
   assertExactKeys(registry, ["schema_version", "keys"], "key registry");
   if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
   const seenKeyIds = new Set<string>();
@@ -260,6 +287,43 @@ function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authori
     verified = false;
   }
   if (!verified) throw new Error("lifecycle authorization signature is invalid");
+}
+
+function readProtectedRegistry(keysFile: string): JsonRecord {
+  const projectRoot = path.dirname(path.dirname(path.resolve(keysFile)));
+  const canonicalRoot = fs.realpathSync(projectRoot);
+  const canonicalKeysFile = path.join(fs.realpathSync(path.dirname(keysFile)), path.basename(keysFile));
+  const relative = path.relative(canonicalRoot, canonicalKeysFile);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("lifecycle authority key registry is outside the project root");
+  let cursor = canonicalRoot;
+  for (const component of relative.split(path.sep)) {
+    cursor = path.join(cursor, component);
+    const stat = fs.lstatSync(cursor);
+    if (stat.isSymbolicLink()) throw new Error("lifecycle authority key registry path must not contain symlinks");
+  }
+  if (!pathIsWithin(fs.realpathSync(path.dirname(keysFile)), canonicalRoot)) throw new Error("lifecycle authority key registry canonical path escapes the project root");
+  const registryDescriptor = fs.openSync(keysFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let registryBytes: Buffer;
+  try {
+    const stat = fs.fstatSync(registryDescriptor);
+    if (!stat.isFile() || stat.size > 64 * 1024 || (stat.mode & 0o022) !== 0) throw new Error("lifecycle authority key registry must be a protected regular file of at most 64 KiB");
+    registryBytes = fs.readFileSync(registryDescriptor);
+  } finally { fs.closeSync(registryDescriptor); }
+  const parsed = JSON.parse(registryBytes.toString("utf8")) as unknown;
+  if (!isRecord(parsed)) throw new Error("lifecycle authority key registry must be a JSON object");
+  let baseCommit = "";
+  for (const ref of ["refs/remotes/origin/main", "refs/remotes/origin/master"]) {
+    try { baseCommit = resolveTrustedLocalGitCommit(canonicalRoot, ref); break; } catch { /* next protected base */ }
+  }
+  if (!baseCommit) throw new Error("lifecycle authority key registry requires a trusted origin base ref");
+  let protectedBytes: Buffer;
+  try {
+    protectedBytes = execTrustedGitSync(canonicalRoot, ["show", `${baseCommit}:${relative.split(path.sep).join("/")}`], "buffer") as Buffer;
+    execTrustedGitSync(canonicalRoot, ["diff", "--quiet", "--", relative]);
+    execTrustedGitSync(canonicalRoot, ["diff", "--cached", "--quiet", "--", relative]);
+  } catch { throw new Error("lifecycle authority key registry differs from its protected origin base"); }
+  if (!registryBytes.equals(protectedBytes)) throw new Error("lifecycle authority key registry differs from its protected origin base");
+  return parsed;
 }
 
 function readRegularJson(fileInput: string, label: string, requireProtected = false): JsonRecord {

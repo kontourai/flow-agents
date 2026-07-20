@@ -2,7 +2,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { captureReviewWorkspaceSnapshot } from "../builder-flow-runtime.js";
 
 type Issue = { path: string; message: string };
 
@@ -481,6 +484,25 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
           const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [], projectRootForSession(dir));
           if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
+          const projectRoot = projectRootForSession(dir);
+          if (!projectRoot) {
+            issues.push({ path: trustBundlePath, message: "required critique project root could not be resolved" });
+            continue;
+          }
+          for (const critique of graph.live) {
+            const artifacts = Array.isArray(critique.review_target?.artifacts) ? critique.review_target.artifacts : [];
+            try {
+              const currentArtifacts = artifacts.map((artifact: any) => {
+                const file = path.resolve(projectRoot, String(artifact.file));
+                const relative = path.relative(fs.realpathSync(projectRoot), fs.realpathSync(file));
+                if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("artifact escapes project root");
+                const sha256 = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+                if (sha256 !== artifact.sha256) throw new Error("artifact digest changed");
+                return { file: String(artifact.file), sha256 };
+              });
+              if (currentArtifacts.length === 0 || !isDeepStrictEqual(critique.review_target?.workspace_snapshot, captureReviewWorkspaceSnapshot(projectRoot, currentArtifacts))) throw new Error("workspace snapshot changed");
+            } catch { issues.push({ path: trustBundlePath, message: "required critique resolver artifacts or workspace are no longer current" }); }
+          }
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

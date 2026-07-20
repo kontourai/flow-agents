@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
@@ -91,9 +91,11 @@ function writeJson(file, value) {
 
 function runWorkflowProcess(args, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", ...args], { cwd, stdio: "ignore" });
+    const child = spawn(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", ...args], { cwd, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.once("error", reject);
-    child.once("close", (code) => resolve(code));
+    child.once("close", (code) => { if (code !== 0) process.stderr.write(stderr); resolve(code); });
   });
 }
 
@@ -165,6 +167,7 @@ function claimAmbientSessionAssignment(session) {
 }
 
 function lifecycleAuthorization(session, operation, name, overrides = {}) {
+  ensureProtectedRegistryBase(session.projectRoot);
   const file = path.join(session.projectRoot, `${name}.authorization.json`);
   const unsigned = {
     schema_version: "1.0",
@@ -233,6 +236,7 @@ function expiredLifecycleAuthorization(session, operation, name, overrides = {})
 }
 
 function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, resolver, name = "resolve", overrides = {}) {
+  ensureProtectedRegistryBase(session.projectRoot);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const bundle = readJson(bundleFile);
   const critiqueClaims = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
@@ -247,12 +251,21 @@ function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecord
     return normalized.find((record) => record.critique_record_id === id);
   };
   const now = new Date();
+  const prior = metadata(priorRecordId);
+  const resolving = metadata(resolvingRecordId);
+  const priorSnapshot = prior.review_target?.workspace_snapshot ?? {};
+  const resolvingSnapshot = resolving.review_target?.workspace_snapshot ?? {};
   const unsigned = {
     schema_version: "1.0", operation: "resolve-critique", run_id: session.slug, subject: SUBJECT,
     prior_bundle_sha256: createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex"),
-    prior_record_id: priorRecordId, prior_record_hash: metadata(priorRecordId).critique_record_hash,
-    resolving_record_id: resolvingRecordId, resolving_record_hash: metadata(resolvingRecordId).critique_record_hash,
-    expected_resolver: resolver, nonce: `${name}-${Date.now()}-${Math.random()}`,
+    prior_record_id: priorRecordId, prior_record_hash: prior.critique_record_hash,
+    resolving_record_id: resolvingRecordId, resolving_record_hash: resolving.critique_record_hash,
+    expected_resolver: resolver,
+    resolved_lane_ids: (prior.lanes ?? []).filter((lane) => lane.status !== "pass").map((lane) => lane.id).sort(),
+    resolved_finding_ids: (prior.findings ?? []).filter((finding) => finding.status === "open").map((finding) => finding.id).sort(),
+    prior_snapshot_sha256: priorSnapshot.digest, resolving_snapshot_sha256: resolvingSnapshot.digest,
+    prior_head_sha: priorSnapshot.head_sha ?? "none", resolving_head_sha: resolvingSnapshot.head_sha ?? "none",
+    nonce: `${name}-${Date.now()}-${Math.random()}`,
     expires_at: new Date(now.getTime() + 60_000).toISOString(), requested_at: now.toISOString(),
     ...overrides,
   };
@@ -260,6 +273,18 @@ function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecord
   const file = path.join(session.sessionDir, `${name}.authorization.json`);
   writeJson(file, value);
   return file;
+}
+
+function ensureProtectedRegistryBase(projectRoot) {
+  if (!fs.existsSync(path.join(projectRoot, ".git"))) execFileSync("git", ["init", "-q", "-b", "main"], { cwd: projectRoot });
+  fs.appendFileSync(path.join(projectRoot, ".git", "info", "exclude"), "\n.kontourai/\n*.authorization.json\n");
+  execFileSync("git", ["config", "user.email", "flow-agents-test@example.invalid"], { cwd: projectRoot });
+  execFileSync("git", ["config", "user.name", "Flow Agents Test"], { cwd: projectRoot });
+  const hasHead = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: projectRoot, stdio: "ignore" }).status === 0;
+  execFileSync("git", ["add", ".flow-agents/lifecycle-authority-keys.json", ...(!hasHead ? ["review-target"] : [])], { cwd: projectRoot });
+  const staged = spawnSync("git", ["diff", "--cached", "--quiet", "--", ".flow-agents/lifecycle-authority-keys.json"], { cwd: projectRoot, stdio: "ignore" }).status !== 0;
+  if (!hasHead || staged) execFileSync("git", ["commit", "-q", "-m", "protected authority registry"], { cwd: projectRoot });
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], { cwd: projectRoot });
 }
 
 function snapshotFile(file) {
@@ -1074,6 +1099,7 @@ test("prepareBuilderCancelRequest emits a payload that, signed by the operator k
   };
   const file = path.join(session.projectRoot, "friendly-cancel-e2e.authorization.json");
   writeJson(file, signed);
+  ensureProtectedRegistryBase(session.projectRoot);
 
   const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
   assert.equal(canceled.run.state.status, "canceled");
@@ -1121,6 +1147,7 @@ test("a cancel-request payload signed with the WRONG key is rejected (signature 
   };
   const file = path.join(session.projectRoot, "friendly-cancel-badsig.authorization.json");
   writeJson(file, badSigned);
+  ensureProtectedRegistryBase(session.projectRoot);
   await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file }), /signature is invalid/);
 });
 
@@ -1179,6 +1206,7 @@ test("cancel-request signing-payload parity holds for non-ASCII reason/actor (un
   };
   const file = path.join(session.projectRoot, "unicode.authorization.json");
   writeJson(file, signed);
+  ensureProtectedRegistryBase(session.projectRoot);
   const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
   assert.equal(canceled.run.state.status, "canceled");
 });
@@ -1195,6 +1223,7 @@ test("prepareBuilderCancelRequest mints from the released assignment once the ru
   };
   const firstFile = path.join(session.projectRoot, "recovery-1.authorization.json");
   writeJson(firstFile, firstSigned);
+  ensureProtectedRegistryBase(session.projectRoot);
   await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile });
 
   // Now canceled with a RELEASED assignment: the mint-time fallback matches the
@@ -1597,6 +1626,7 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
 
 test("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
+  ensureProtectedRegistryBase(session.projectRoot);
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
@@ -1677,8 +1707,19 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   await assert.rejects(workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
     "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
-  ]), /unsupported field private_key_pem/);
+  ]), /differs from its protected origin base/);
   writeJson(registryFile, validRegistry);
+  const shadowRegistry = path.join(session.projectRoot, "shadow-authority-registry.json");
+  writeJson(shadowRegistry, validRegistry);
+  fs.unlinkSync(registryFile);
+  fs.symlinkSync(shadowRegistry, registryFile);
+  await assert.rejects(workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
+    "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
+  ]), /must not contain symlinks|too many levels of symbolic links/i);
+  fs.unlinkSync(registryFile);
+  writeJson(registryFile, validRegistry);
+  fs.unlinkSync(shadowRegistry);
   const resolveWith = (file, priorId = priorRecordId, resolverId = resolvingRecordId) => workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorId,
     "--resolving-record-id", resolverId, "--authorization-file", file,
@@ -1689,6 +1730,8 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-subject", { subject: "local:work-item/other" })), /subject does not match/);
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-preimage", { prior_bundle_sha256: "0".repeat(64) })), /prior_bundle_sha256 does not match/);
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-record-hash", { prior_record_hash: "1".repeat(64) })), /prior_record_hash does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-lanes", { resolved_lane_ids: [] })), /resolved_lane_ids does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-snapshot", { resolving_snapshot_sha256: "2".repeat(64) })), /resolving_snapshot_sha256 does not match/);
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, "wrong-resolver", "wrong-resolver")), /expected_resolver does not match/);
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "expired", { requested_at: new Date(Date.now() - 120_000).toISOString(), expires_at: expiredAt })), /is expired/);
   await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "future", { requested_at: futureAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() })), /request time is in the future/);
@@ -1792,6 +1835,7 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
   // a real historical session. It proves migration without carrying repository,
   // provider, or runtime identifiers into a public test fixture.
   const session = makeSession("scrubbed-critique-history");
+  ensureProtectedRegistryBase(session.projectRoot);
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
@@ -1897,6 +1941,9 @@ test("trusted Git ancestry rejects a divergent repair snapshot", () => {
   fs.writeFileSync(path.join(projectRoot, "review.txt"), "other\n");
   git(["commit", "-am", "other"]);
   const divergentHead = git(["rev-parse", "HEAD"]);
+  const maliciousReplacement = git(["commit-tree", `${divergentHead}^{tree}`, "-p", repairHead, "-m", "hostile replacement"]);
+  git(["replace", divergentHead, maliciousReplacement]);
+  assert.equal(spawnSync("/usr/bin/git", ["merge-base", "--is-ancestor", repairHead, divergentHead], { cwd: projectRoot }).status, 0, "hostile replacement makes ordinary Git accept false ancestry");
   assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, divergentHead));
 });
 
