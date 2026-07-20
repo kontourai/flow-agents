@@ -184,7 +184,7 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
 
 export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean };
+  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as unknown as BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean };
 }
 
 export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
@@ -301,7 +301,7 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
 
 export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
   const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as BuilderFlowSessionResult & { archiveDir: string };
+  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as unknown as BuilderFlowSessionResult & { archiveDir: string };
 }
 
 async function changeBuilderFlowSessionLifecycle(

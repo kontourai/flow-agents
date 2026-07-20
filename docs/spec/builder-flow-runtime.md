@@ -308,12 +308,23 @@ an Ed25519-signed authorization record conforming to
 `schemas/builder-lifecycle-authorization.schema.json`. The record is operation-bound and binds
 the request to the run id, selected Work Item, current assignment actor, immutable external
 request reference, nonce, and expiry. Flow Agents serializes the request to an independently
-provisioned helper selected by `FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER`. That executable and every
+provisioned protocol-v1 helper pinned at
+`/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1`. Callers cannot override that
+identity or select another root-owned executable. The helper and every
 path component must be OS-owned, outside the project/package/worktree, and non-writable by the
 runtime user, group, and world. The external helper owns verification, locking, nonce replay
 protection, compare-and-swap, and all persistent writes; package JavaScript never enacts a mutation
 from a helper return value. Flow Agents ships no helper, keys, or deployment-specific configuration.
 Missing or untrusted helpers fail closed.
+
+The wire contract is one canonical JSON request line and exactly one JSON response line. Both bind
+protocol version, action, and canonical request SHA-256; accepted responses also carry an exact
+action-specific result. Unknown/extra fields, actions, versions, digests, statuses, empty output,
+multiple output records, and malformed JSON fail closed. The helper independently canonicalizes and
+constrains all received paths, derives root relationships itself, and never treats caller-provided
+paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
+`NOT_VERIFIED` in ordinary checkout CI until the administrator-owned reference helper is provisioned.
+Reference implementation, provisioning, and positive platform conformance are tracked in issue #744.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

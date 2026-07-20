@@ -132,6 +132,10 @@ export async function main(argv: string[]): Promise<number> {
               : action === "release-assignment"
                 ? await releaseBuilderFlowAssignment({ sessionDir, reason: reason! })
                 : await archiveBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! });
+  if (action === "cancel" || action === "archive") {
+    console.log(JSON.stringify(result));
+    return 0;
+  }
   console.log(JSON.stringify({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,

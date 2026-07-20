@@ -108,8 +108,9 @@ supplies a trusted delegation credential.
 without deleting it or borrowing the earlier reviewer's identity. It is only
 available during `builder.build` verification. It requires an Ed25519-signed
 user/operator authorization handled by an externally provisioned lifecycle-authority helper.
-Administrators select its absolute path with `FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER`; the
-executable must be outside the project, package, and worktree, OS-owned, executable, and
+Administrators provision protocol v1 at the immutable path
+`/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1`; callers cannot select another
+executable. The helper must be outside the project, package, and worktree, OS-owned, executable, and
 non-writable by the runtime user, group, or world through every path component. Platforms without
 a supported ownership adapter fail closed. The helper—not package JavaScript—owns signature and
 registry verification, locking, nonce replay protection, preimage CAS, and the atomic mutation.
@@ -117,6 +118,13 @@ The authorization binds
 the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
+
+Requests and responses use strict single-line JSON envelopes. A response is accepted only when its
+protocol version, action, canonical request SHA-256 digest, status, and exact action-specific result
+match the request. Empty, multi-line, malformed, or extended responses fail closed. The helper must
+independently reject unknown fields/actions, canonicalize and constrain every received path, derive
+the run/project/artifact roots rather than trusting claimed relationships, and perform mutation only
+after its own locked precondition and compare-and-swap checks.
 
 The helper and its provider-neutral key registry are deployed and configured by runtime
 administrators outside source control. Flow Agents ships neither helper configuration nor keys.

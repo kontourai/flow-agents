@@ -465,7 +465,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
   const { projectRoot } = readBoundSession(sessionDir);
   const report = invokeExternalLifecycleAuthority({ action: "resolve-critique", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: flagString(parsed.flags, "prior-record-id")!, resolving_record_id: flagString(parsed.flags, "resolving-record-id")! }) as JsonRecord;
   if (json) console.log(JSON.stringify(report));
-  else console.log(report?.replayed ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
+  else console.log(report.operation_status === "replayed" ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
   return 0;
 }
 
