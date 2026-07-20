@@ -306,6 +306,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
 
+      - name: Goal Fit escape hatch integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-escape-hatch-integration
+
       - name: Plain stop messaging integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check plain-stop-messaging-integration
