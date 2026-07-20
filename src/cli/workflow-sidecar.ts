@@ -3271,8 +3271,17 @@ function critiqueSnapshotDigest(critique: AnyObj): string | null {
 // BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
 // enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
 // before, and superseding a STAMPED existing id is now rejected too.
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd()): AnyObj {
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd(), allowSkipLearningStamp = false): AnyObj {
   const check = { ...raw };
+  // Codex verify round 3/4: the _waiver.skip_learning stamp is minted ONLY by
+  // advance-state's --skip-learning path (which passes allowSkipLearningStamp). Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json)
+  // flows through here — scrubbing at this single choke point makes the stamp
+  // unforgeable regardless of ingestion route.
+  if (!allowSkipLearningStamp && check._waiver && typeof check._waiver === "object" && (check._waiver as AnyObj).skip_learning !== undefined) {
+    check._waiver = { ...(check._waiver as AnyObj) };
+    delete (check._waiver as AnyObj).skip_learning;
+  }
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -3852,15 +3861,7 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   const projectRoot = narrativeGuardRoot(dir);
   const _checksRaw = [
-    ...opts(p, "check-json").map((v) => {
-      const parsed = parseJson(v, "--check-json") as AnyObj;
-      // Codex verify round 3: the skip_learning waiver stamp is MINTED ONLY by
-      // advance-state's --skip-learning path. A caller-supplied _waiver carrying it
-      // (via --check-json) would both silence the learning stop-gate and authorize a
-      // later skip to overwrite the reserved check — scrub it on ingest.
-      if (parsed && typeof parsed._waiver === "object" && parsed._waiver && (parsed._waiver as AnyObj).skip_learning !== undefined) delete (parsed._waiver as AnyObj).skip_learning;
-      return normalizeCheck(parsed, false, _existingCheckStampById, projectRoot);
-    }),
+    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
     ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
   ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
@@ -4387,7 +4388,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
       summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
       _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor, skip_learning: true },
       ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
-    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir));
+    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir), true);
     const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
     assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
     process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, approved by ${skipWaivedBy}, recorded by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
