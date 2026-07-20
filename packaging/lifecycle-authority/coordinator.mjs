@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { coordinatorRuntimeSha256, resolveCritiqueTransition } from "./runtime-v1.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
@@ -21,7 +22,7 @@ export function canonicalJson(value) {
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-export const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" ? value : canonicalJson(value)).digest("hex");
+export const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonicalJson(value)).digest("hex");
 function exact(value, fields, label) {
   if (!record(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson([...fields].sort())) throw new Error(`${label} contains unexpected or missing fields`);
 }
@@ -78,8 +79,8 @@ function atomicWrite(file, bytes) {
   const descriptor = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
 }
-function completion(envelope, paths, operationStatus) {
-  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, completed_at: new Date().toISOString() };
+function completion(envelope, paths, operationStatus, resultCoreSha256) {
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
   const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
@@ -95,14 +96,28 @@ function processOperation(envelope) {
   if (authorization.operation !== envelope.action || authorization.run_id !== paths.runId) throw new Error("authorization does not bind the requested operation and run");
   const completionFile = path.join(STATE_ROOT, "completions", `${envelope.request_sha256}.json`);
   return withDurableLock(envelope.request_sha256, () => {
-    if (fs.existsSync(completionFile)) return JSON.parse(protectedRegularFile(completionFile, "completion record").toString("utf8"));
-    // State-transition adapters are intentionally fail-closed until their canonical
-    // Flow/bundle CAS implementations land; never emit a completion before mutation.
+    if (fs.existsSync(completionFile)) return { completionRecord: JSON.parse(protectedRegularFile(completionFile, "completion record").toString("utf8")), replayed: true };
+    if (envelope.action === "resolve-critique") {
+      const bundleFile = path.join(paths.sessionDir, "trust.bundle");
+      const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+      const before = JSON.parse(beforeBytes.toString("utf8"));
+      if (sha256(beforeBytes) !== authorization.prior_bundle_sha256) throw new Error("critique resolution preimage bundle digest changed");
+      const reduced = resolveCritiqueTransition({ bundle: before, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id });
+      const resultCoreSha256 = sha256(reduced);
+      const completionRecord = completion(envelope, paths, "applied", resultCoreSha256);
+      const after = { ...reduced, lifecycle_authority_completion: completionRecord };
+      // Recheck the exact preimage immediately before the atomic replace.
+      if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
+      atomicWrite(bundleFile, `${JSON.stringify(after, null, 2)}\n`);
+      atomicWrite(completionFile, `${JSON.stringify(completionRecord, null, 2)}\n`);
+      return { completionRecord, replayed: false };
+    }
+    // Cancel/archive remain fail-closed until their canonical adapters land.
     throw new Error(`reference coordinator ${envelope.action} state transition is not implemented`);
   });
 }
-function response(envelope, completionRecord) {
-  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: completionRecord.run_id, operation_status: "replayed" } };
+function response(envelope, outcome) {
+  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied" } };
 }
 export function main(input = fs.readFileSync(0, "utf8")) {
   const lines = input.split(/\r?\n/).filter(Boolean);

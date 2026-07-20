@@ -339,13 +339,15 @@ coordinator fixes those administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
-Current implementation status is intentionally fail-closed: strict protocol parsing, canonical
-path confinement, protected registry/signature verification, durable serialized locking, and the
-signed completion-record format are implemented. Canonical cancel, archive, and critique-resolution
-CAS/write adapters are not yet implemented, so a fresh operation exits nonzero and no completion is
-emitted. A previously completed operation can only replay an existing protected completion. Positive
-mutation and immutable-attestation E2E therefore remain `NOT_VERIFIED`; issue #744 stays open until
-the three transition adapters and a root-capable container lane land.
+Current implementation status is intentionally incremental and fail-closed. The separately installed
+`runtime-v1.mjs` artifact contains the pure, deterministic critique-resolution reducer; both its
+bytes and the signed completion bind a runtime digest. The coordinator implements locked preimage
+CAS, atomic fsync trust-bundle replacement, history-preserving critique supersession, immutable
+completion embedding, and durable replay for `resolve-critique`. Cancel and archive transition
+adapters remain unsupported and exit nonzero without emitting a completion. Positive root-owned
+installation, canonical Flow evidence attachment/synchronization, and package-side immutable
+completion verification remain `NOT_VERIFIED`; issue #744 stays open for those slices and the
+root-capable container lane.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not
