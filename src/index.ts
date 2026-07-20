@@ -345,6 +345,34 @@ export type {
   WorkItemStatus,
 } from "./lib/work-item-vocabulary.js";
 
+// #776: provider-neutral work-item MUTATION vocabulary (status transition, field update,
+// comment) plus the shared conflict-detection function every adapter
+// (src/cli/work-item-mutation-provider.ts's GitHub render-only and local-file real-I/O adapters)
+// calls instead of reimplementing the "provider wins, with staleness detection" comparison. See
+// context/contracts/work-item-contract.md's "Mutations" section for the governing prose.
+export {
+  WORK_ITEM_MUTATION_SCHEMA_VERSION,
+  WorkItemMutationError,
+  detectMutationConflict,
+  parseObservedWorkItemState,
+  parseWorkItemMutationRequest,
+  workItemMutationOperations,
+  workItemMutationResultStatuses,
+} from "./lib/work-item-mutations.js";
+export type {
+  WorkItemCommentPayload,
+  WorkItemFieldUpdatePayload,
+  WorkItemMutationBase,
+  WorkItemMutationConflict,
+  WorkItemMutationFieldValue,
+  WorkItemMutationOperation,
+  WorkItemMutationRef,
+  WorkItemMutationRequest,
+  WorkItemMutationResult,
+  WorkItemMutationResultStatus,
+  WorkItemStatusTransitionPayload,
+} from "./lib/work-item-mutations.js";
+
 export {
   CAPABILITIES,
   RUNTIME_ADAPTER_IDS,

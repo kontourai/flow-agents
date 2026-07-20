@@ -71,6 +71,118 @@ Pickup Probe drift outcomes:
 
 If a legacy work item lacks `planned_base_sha`, pickup Probe should record the gap and use current main plus provider history as the best available baseline instead of inventing certainty.
 
+## Mutations
+
+Selection and planning are read-only. Hosts that render boards (for example a Tasks board) also
+need provider-neutral **write-back**: transitioning a work item's status, updating a field, or
+posting a comment, without growing bespoke per-host sync logic. This section is the engine
+contract extension for that write-back (issue #776), owner-ratified alongside the read-only shape
+above. `@kontourai/flow-agents` exports the mutation types from its library entry
+(`src/lib/work-item-mutations.ts`), the same way it exports the read-only `WorkItem` vocabulary
+(`src/lib/work-item-vocabulary.ts`) — hosts should import these instead of hand-mirroring them.
+
+### Operations
+
+Three provider-neutral mutation operations cover the write-back surface a board host needs. Each
+is defined without assuming any one provider's representation:
+
+| Operation | Meaning | Payload |
+| --- | --- | --- |
+| `status_transition` | Move a work item to a different provider-neutral lifecycle status (`WorkItemStatus`, see "Status Guidance"). | `{ to_status, to_status_raw? }` — `to_status_raw` carries the provider's native status text when the caller already resolved one (e.g. a board column name), so the adapter does not have to re-derive it. |
+| `field_update` | Set a single named field's value (a custom board field, or a mapped field such as `priority`/`size`/`risk`). | `{ field, value }` — `value` is a string, number, boolean, or `null`. |
+| `comment` | Post a comment on the work item. | `{ body }`. |
+
+A mutation request is a single provider-neutral shape regardless of operation:
+
+```json
+{
+  "schema_version": "1.0",
+  "operation": "status_transition",
+  "work_item_ref": { "id": "github:owner/repo#123", "owner": "owner", "repo": "repo", "number": 123 },
+  "base": { "status": "in_progress" },
+  "payload": { "to_status": "review" }
+}
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `schema_version` | yes | `"1.0"`. |
+| `operation` | yes | `status_transition`, `field_update`, or `comment`. |
+| `work_item_ref` | yes | The target work item's stable id (`WorkItem.id`) plus provider coordinates when known (`owner`, `repo`, `number`), matching the "Work Item Shape" `id` convention. |
+| `base` | operation-dependent (see Conflict Policy) | The provider state the mutation was computed from — the write-side counterpart to `planned_base_ref`/`planned_base_sha`. |
+| `payload` | yes | The operation-specific payload from the table above. |
+
+A mutation result reports what actually happened, never a silent best-effort guess:
+
+| `status` | Meaning |
+| --- | --- |
+| `rendered` | The adapter produced the exact provider-native operation (e.g. `gh` argv) for the host to execute; the adapter itself did not execute it (see "Render, Don't Execute" below). |
+| `applied` | The adapter executed the mutation directly (only adapters with write access to their own storage, such as a local-file provider, return this). |
+| `conflict` | The declared `base` diverged from the provider's current observed state; nothing was rendered or applied (see Conflict Policy). |
+| `rejected` | The request was invalid for this provider/operation (e.g. an unresolvable field, a missing required `base`). |
+| `not_verified` | The adapter could not determine whether the mutation is safe to apply (e.g. no current observation was available to compare against `base`). |
+
+### Conflict Policy: Provider Wins, With Staleness Detection
+
+Two-way sync creates a clobber risk: an agent's mutation was computed against a snapshot of the
+work item that may no longer be current by the time it is applied (a human edited the board, or
+another agent already transitioned the status). This contract's policy is **provider wins, with
+staleness detection** — the same shape as "Planning Base And Drift" above, applied to mutations
+instead of planning scope:
+
+- Every mutation request carries the `base` state it was computed from — the minimum needed to
+  detect drift for that operation, not a full work-item snapshot.
+  - `status_transition` requires `base.status`: the status the caller last observed.
+  - `field_update` requires `base.field_values[payload.field]`: the value the caller last observed
+    for that specific field. A request missing its required `base` entry is `rejected` — mutating
+    without a declared base would defeat staleness detection, so this contract treats it as
+    invalid input rather than a permissive default.
+  - `comment` mutations are append-only and do not clobber concurrent state, so `base` is optional
+    for `comment`; a missing or stale `base` never blocks a comment.
+- Before rendering or applying, the adapter compares the request's `base` against the current
+  observed provider state for the same field. If they match, the mutation proceeds
+  (`rendered`/`applied`). If they diverge, the **current provider state wins**: the adapter returns
+  `conflict` with the observed value and does not clobber it. The caller must re-fetch current
+  state (the same remediation pickup Probe already asks for on scope drift) and recompute the
+  mutation before retrying.
+- This mirrors the read-side drift table's spirit (`no_material_drift` vs. `scope_drift` /
+  `conflict_risk`) but is deliberately a smaller, two-outcome vocabulary (`no conflict` /
+  `conflict`) scoped to a single field's before/after value, not the broader repository-scope drift
+  classification pickup Probe performs.
+
+### Render, Don't Execute
+
+Mutation adapters keep the same render/execute split already established for GitHub write paths in
+this repository (`context/contracts/assignment-provider-contract.md`'s "Implementation Note", and
+`publish-change-helper.ts`): a GitHub mutation adapter is a **pure function** that renders the exact
+`gh` argv for a mutation and never shells out itself. The calling host executes the rendered argv
+(or declines to, on `conflict`/`rejected`) and is responsible for any retry/backoff. A provider
+adapter with its own direct storage access (for example a local-file backlog used by tracker-less
+repos and evals) may instead apply the mutation itself (`status: "applied"`) — the operation and
+conflict-policy vocabulary above is identical either way; only whether execution happens inside or
+outside the adapter differs. This is the deliberate, minimal scope for #776: an authenticated
+self-executing GitHub mutation path (mirroring `publish-change`'s Wave 2B `ChangeProvider`) is a
+distinct, larger trust decision this contract does not make.
+
+### Mutation Capability Flags
+
+A provider declares which mutation operations it supports separately from the read-only capability
+flags above (`issues`, `comments`, etc. describe reading, not writing):
+
+| Capability | Meaning |
+| --- | --- |
+| `status_transition` | Provider can move a work item to a different lifecycle status. |
+| `field_update` | Provider can set a named field's value. |
+| `comment` | Provider can post a comment. |
+
+`backlog-provider-settings.schema.json`'s optional `mutation_policy` declares `supported_operations`
+(this enum) plus `conflict_policy` (currently only `provider_wins_with_staleness_detection`, matching
+the policy above) and, for GitHub, which native surface a mutation targets:
+`status_transition_target` is `board_status_field` (a GitHub Projects v2 status field) or `labels`;
+`field_update_target` is `board_custom_field` (a GitHub Projects v2 custom field) or `labels`. Absent
+`mutation_policy`, no mutation capability is assumed; this keeps the addition additive to existing
+settings documents.
+
 ## Publish Change Shape
 
 `publish-change` is the provider-neutral step between clean local evidence and release readiness. It publishes the verified diff to a `ChangeProvider`, records the provider result, and collects provider checks without making any one provider's terms core workflow vocabulary.
@@ -240,6 +352,25 @@ GitHub capability flags should reflect what the current token and project config
 | `evidence_refs` | Workflow sidecars, verification summaries, CI URLs, check run URLs, review artifacts, and release-readiness records linked from the pull request. |
 
 GitHub is the first adapter/example for publish-change. Core workflow text should still say `change_ref`, `provider_checks`, and `closing_reference_check` unless it is inside a GitHub mapping or example.
+
+### GitHub Mutations
+
+The GitHub mutation adapter renders `gh` argv and never executes it (see "Render, Don't Execute"
+above). Every rendered record carries `{ operation, status, work_item_ref, base_ref, gh_commands? ,
+conflict? }`, where `base_ref` is the `owner/repo#number` coordinate the argv targets and
+`gh_commands` (present only when `status` is `rendered`) is a JSON array of argv arrays — one
+element per `gh` argument, matching the `assignment-provider-contract.md` `gh_commands` execution
+contract: the host must run each entry as argv, never reconstruct or concatenate it into a shell
+string.
+
+| Operation | Default GitHub representation | With `mutation_policy` project-field target |
+| --- | --- | --- |
+| `status_transition` | Swap a `status:<value>` label (remove the label for `base.status`, add the label for `payload.to_status`) — the same label-prefix convention `priority`/`size`/`risk` already use above. | `gh project item-edit --field-id <status field> --single-select-option-id <option>` against the configured GitHub Projects v2 item. |
+| `field_update` | Swap a `<field>:<value>` label the same way. | `gh project item-edit --field-id <field>` with `--text`, `--number`, or `--single-select-option-id` chosen from the payload value's type. |
+| `comment` | `gh issue comment <number> --repo <owner>/<repo> --body <text>`. | Same — comments are not project-field-scoped. |
+
+A `conflict` result never renders `gh_commands` — the host receives the observed divergence instead
+and must re-fetch before retrying, per the Conflict Policy above.
 
 ## Artifact References
 
