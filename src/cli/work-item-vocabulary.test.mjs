@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
 
 import { workItemStatuses } from "../../build/src/lib/work-item-vocabulary.js";
+// Also import from the package's own root entry (self-reference resolution via package.json
+// "name" + "exports"), not just the internal built module above, so a dropped re-export in
+// src/index.ts (the actual public surface hosts consume) fails this test too.
+import { workItemStatuses as workItemStatusesFromPackageRoot } from "@kontourai/flow-agents";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = path.join(__dirname, "..", "..", "schemas", "backlog-provider-settings.schema.json");
@@ -54,4 +58,26 @@ test("workItemStatuses matches the neutral lifecycle order in context/contracts/
     workItemStatuses,
     ["todo", "ready", "in_progress", "blocked", "review", "verification", "done"]
   );
+});
+
+// Guards against the internal-module re-export and the package's public root entry silently
+// diverging (e.g. someone edits src/lib/work-item-vocabulary.ts without updating the src/index.ts
+// re-export, or vice versa).
+test("workItemStatuses exported from the package root entry (@kontourai/flow-agents) matches the internal module", () => {
+  assert.deepEqual([...workItemStatusesFromPackageRoot], [...workItemStatuses]);
+});
+
+// Anti-drift guard (#775 item 4): consumers should be able to resolve the shipped schemas via the
+// package's `./schemas/*` exports subpath instead of require.resolve path math. This proves the
+// subpath actually resolves (via Node's self-reference resolution against this package's own
+// package.json "exports") to the same schema file used above, and that the resolved file is valid,
+// parseable JSON — not just that the exports map entry exists in package.json.
+test("the ./schemas/*.json exports subpath resolves to a readable, valid schema file", () => {
+  const resolvedUrl = import.meta.resolve("@kontourai/flow-agents/schemas/backlog-provider-settings.schema.json");
+  const resolvedPath = fileURLToPath(resolvedUrl);
+
+  assert.equal(realpathSync(resolvedPath), realpathSync(SCHEMA_PATH));
+
+  const schema = JSON.parse(readFileSync(resolvedPath, "utf8"));
+  assert.equal(schema.title, "Flow Agents Backlog Provider Settings");
 });
