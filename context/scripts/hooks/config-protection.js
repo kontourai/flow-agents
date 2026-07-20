@@ -52,8 +52,23 @@
 'use strict';
 
 const path = require('path');
+// #783: root-scoping for the Bash-command detectors below (redirect / interpreter-write /
+// cp-move) -- see that module's header comment for the full fail-closed contract.
+const { isCandidateWithinDeclaredRoots } = require('./lib/declared-artifact-roots.js');
 
 const MAX_STDIN = 1024 * 1024;
+
+// #783: named once so every Bash-detector block message below can point a legitimate
+// fixture-authoring agent at the sanctioned, discoverable escape instead of dying on a raw
+// redirect/interpreter one-liner (issue #783's dogfooding complaint). Only reachable when a
+// scoped path is blocked because it is INSIDE a declared root or root detection was ambiguous
+// -- a path already outside every declared root was never blocked in the first place.
+const FIXTURE_AFFORDANCE_HINT =
+  'To author a test fixture, target a path OUTSIDE every declared artifact root (a scratch/temp ' +
+  'dir, never the repo durable .kontourai/flow-agents, .flow-agents, or delivery/) and use ' +
+  '`npm run workflow:sidecar -- fixture write <dir> --from-json <file>` for a schema-valid ' +
+  'fixture, or `... fixture write <dir> --malformed --content <string|@file>` for an ' +
+  'intentionally-invalid one (negative-test fixtures). Both refuse to write inside a declared root.';
 
 const PROTECTED_FILES = new Set([
   '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
@@ -439,15 +454,20 @@ function matchesRedirectProtected(token) {
 }
 
 /**
- * checkRedirectToProtected(command): scan a Bash command string for shell
+ * checkRedirectToProtected(command, cwd): scan a Bash command string for shell
  * redirects (> >>) or tee invocations that target protected kill-switch paths.
  *
  * Returns a human-readable description of the matched redirect, or null if
  * none found.
  *
+ * #783: a shape match ALONE no longer blocks -- the resolved target must also be inside a
+ * DECLARED artifact root (isCandidateWithinDeclaredRoots; fails closed on ambiguity), so a
+ * test fixture written to a scratch/temp dir outside every declared root is no longer caught
+ * by this detector just because its basename looks like state.json/current.json/trust.bundle.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
-function checkRedirectToProtected(command) {
+function checkRedirectToProtected(command, cwd) {
   if (typeof command !== 'string' || !command) return null;
   // Fast path: skip if no redirect indicators present.
   if (!command.includes('>') && !command.includes('tee')) return null;
@@ -461,7 +481,7 @@ function checkRedirectToProtected(command) {
       // Redirect operators: > and >>
       if ((t === '>' || t === '>>') && i + 1 < tokens.length) {
         const target = tokens[i + 1];
-        if (matchesRedirectProtected(target)) {
+        if (matchesRedirectProtected(target) && isCandidateWithinDeclaredRoots(target, cwd)) {
           return `shell redirect (${t}) to ${target}`;
         }
       }
@@ -475,7 +495,7 @@ function checkRedirectToProtected(command) {
           if (!pastDashDash && arg === '--') { pastDashDash = true; continue; }
           if (!pastDashDash && arg.startsWith('-')) continue; // skip tee flags (-a, --append, etc.)
           // Check every positional arg — no early break (tee writes to all of them).
-          if (matchesRedirectProtected(arg)) return `tee to ${arg}`;
+          if (matchesRedirectProtected(arg) && isCandidateWithinDeclaredRoots(arg, cwd)) return `tee to ${arg}`;
         }
       }
     }
@@ -540,15 +560,24 @@ const INTERPRETER_PROTECTED_TOKENS = [
 ];
 
 /**
- * checkInterpreterWriteToProtected(command): detect interpreter invocations
- * (node -e, py3 -c, sed -i, perl -e) in segments that also contain a
+ * checkInterpreterWriteToProtected(command, cwd): detect interpreter invocations
+ * (see INTERPRETER_WRITE_RE) in segments that also contain a
  * protected-path token as a literal substring.
  *
  * Returns a human-readable description of the match, or null if not detected.
  *
+ * Root-scoping (issue 783 follow-up) via isCandidateWithinDeclaredRoots(token, cwd) applies
+ * here too, using the LITERAL matched token as the candidate. For tokens with no directory
+ * context at all (the sidecar runtime file basenames, the bare shell-profile names) this
+ * is a bare basename, which isCandidateWithinDeclaredRoots's resolver treats as ambiguous
+ * -- so those stay blocked exactly as before (a substring match can't prove WHERE a
+ * runtime-constructed path will land, so failing closed here is correct, not overreach). For
+ * tokens that already carry directory context (the settings file under a dotdir, the
+ * delivery trust-anchor paths) scoping applies normally.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
-function checkInterpreterWriteToProtected(command) {
+function checkInterpreterWriteToProtected(command, cwd) {
   if (typeof command !== 'string' || !command) return null;
   // Fast path: skip if no interpreter keywords present.
   if (!command.includes('node') && !command.includes(_PY_CMD) &&
@@ -562,7 +591,7 @@ function checkInterpreterWriteToProtected(command) {
 
     // Check for protected-path token literal in the same segment.
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
-      if (seg.includes(token)) {
+      if (seg.includes(token) && isCandidateWithinDeclaredRoots(token, cwd)) {
         return `${interpMatch[0].trim()} with protected path token "${token}"`;
       }
     }
@@ -588,19 +617,23 @@ function matchesDeliveryProtected(token) {
 }
 
 /**
- * checkCopyMoveToProtected(command): detect cp/mv/install commands whose
+ * checkCopyMoveToProtected(command, cwd): detect cp/mv/install commands whose
  * destination argument targets a delivery-protected path.
  *
  * Catches the plain-cp attack vector: `cp forged.json delivery/trust.bundle`
  * is not a redirect and not an interpreter invocation, so those checks miss it.
  * The destination is the LAST positional (non-flag) argument.
  *
+ * Root-scoping (issue 783 follow-up) via isCandidateWithinDeclaredRoots(dest, cwd) applies
+ * here too -- a destination provably outside every declared artifact root is allowed (a
+ * fixture-authoring scratch dir is not the CI trust anchor), fails closed on ambiguity.
+ *
  * INCOMPLETE COVERAGE: only cp, mv, install are checked. Other copy tools
  * (rsync, scp, dd, etc.) and runtime-constructed path arguments are NOT caught.
  * The real anchor remains external (clean CI env + human review). Bar-raiser only.
  * RESIDUAL: publishDelivery uses fs.copyFileSync (not bash cp) -- unaffected.
  */
-function checkCopyMoveToProtected(command) {
+function checkCopyMoveToProtected(command, cwd) {
   if (typeof command !== "string" || !command) return null;
   if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
   if (!command.includes("delivery/")) return null;
@@ -619,7 +652,7 @@ function checkCopyMoveToProtected(command) {
     if (positional.length === 0) continue;
 
     const dest = positional[positional.length - 1];
-    if (matchesDeliveryProtected(dest)) {
+    if (matchesDeliveryProtected(dest) && isCandidateWithinDeclaredRoots(dest, cwd)) {
       return `${cmd} to ${dest} (delivery-protected path)`;
     }
   }
@@ -720,6 +753,10 @@ function run(inputOrRaw, options = {}) {
     }
   }
   const command = input?.tool_input?.command || '';
+  // #783: cwd for declared-artifact-root scoping below -- input.cwd when the harness
+  // provides one (matches other hooks' input.cwd || process.cwd() convention), else the
+  // hook process's own cwd.
+  const cwd = input?.cwd || process.cwd();
   if (command) {
     const bypass = checkCommandForBypass(command);
     if (bypass) {
@@ -734,7 +771,7 @@ function run(inputOrRaw, options = {}) {
     // Gate lock-down: check for shell redirects to protected kill-switch paths.
     // HONEST — INCOMPLETE: only > >> and tee are covered; sed -i and other forms
     // are NOT. An agent with shell access can still evade. Bar-raiser only.
-    const redirect = checkRedirectToProtected(command);
+    const redirect = checkRedirectToProtected(command, cwd);
     if (redirect) {
       return {
         exitCode: 2,
@@ -742,14 +779,15 @@ function run(inputOrRaw, options = {}) {
           'Writing to shell profiles or Claude/flow-agents config files via shell redirect could ' +
           'disable or tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught).',
+          'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught). ' +
+          FIXTURE_AFFORDANCE_HINT,
       };
     }
     // Gate lock-down: check for interpreter invocations (node -e, py3 -c, sed -i,
     // perl -e) combined with a protected-path token literal in the command string.
     // HONEST — INCOMPLETE (R5a best-effort): runtime-constructed paths, base64,
     // multi-step assembly, and other interpreters not listed are NOT caught.
-    const interpWrite = checkInterpreterWriteToProtected(command);
+    const interpWrite = checkInterpreterWriteToProtected(command, cwd);
     if (interpWrite) {
       return {
         exitCode: 2,
@@ -757,13 +795,14 @@ function run(inputOrRaw, options = {}) {
           'Interpreter invocations (node -e, py3 -c, sed -i, perl -e) that reference ' +
           'protected gate files could tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
+          'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it. ' +
+          FIXTURE_AFFORDANCE_HINT,
       };
     }
     // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
     // Catches the plain-cp attack: `cp forged.json delivery/trust.bundle`.
     // INCOMPLETE: cp/mv/install only; rsync/scp/dd evade. Real anchor is external.
-    const copyMove = checkCopyMoveToProtected(command);
+    const copyMove = checkCopyMoveToProtected(command, cwd);
     if (copyMove) {
       return {
         exitCode: 2,
@@ -771,7 +810,8 @@ function run(inputOrRaw, options = {}) {
           'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
           'could forge the CI trust anchor. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check covers cp/mv/install only -- other copy tools may evade it.',
+          'NOTE: This check covers cp/mv/install only -- other copy tools may evade it. ' +
+          FIXTURE_AFFORDANCE_HINT,
       };
     }
   }
