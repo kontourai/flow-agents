@@ -541,7 +541,15 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
     nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
     requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
   });
-  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  console.log(JSON.stringify({
+    authorization: request.unsigned,
+    signing_payload: request.signingPayload,
+    next_steps: [
+      "Sign the exact signing_payload with a registered Ed25519 lifecycle-authority key.",
+      "Store the signed authorization at a non-symlink path outside the project and worktree, such as $HOME/.config/kontour/lifecycle-authority/authorizations/.",
+      `Run: flow-agents workflow resolve-critique --session-dir ${sessionDir} --prior-record-id '${priorRecordId}' --resolving-record-id '${resolvingRecordId}' --authorization-file <external signed file>`,
+    ],
+  }, null, 2));
   return 0;
 }
 

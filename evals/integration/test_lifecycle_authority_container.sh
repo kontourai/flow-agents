@@ -87,7 +87,7 @@ fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(pro
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
 fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
-for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e']) await makeSession(slug);
+for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'project-auth-e2e', 'symlink-auth-e2e']) await makeSession(slug);
 write(path.join(project, 'fixture.json'), { project, subject, actor, actorKey });
 NODE
 node /work/setup-fixture.mjs
@@ -168,10 +168,14 @@ node /work/make-lifecycle-authorization.mjs cancel stale-e2e /root/lifecycle-aut
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-a.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-b.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel symlink-e2e /root/lifecycle-authorizations/symlink.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel project-auth-e2e /root/lifecycle-authorizations/project-auth.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel symlink-auth-e2e /root/lifecycle-authorizations/symlink-auth.json "$FUTURE"
 node - /root/lifecycle-authorizations/unauthorized.json <<'NODE'
 const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...unsigned } = value;
 value.signature.value = crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64'); fs.writeFileSync(file, JSON.stringify(value));
 NODE
+cp /root/lifecycle-authorizations/project-auth.json "$PROJECT/project-authorization.json"
+ln -s /root/lifecycle-authorizations /tmp/lifecycle-authorization-parent-link
 chown -R node:node "$PROJECT"
 
 cat > /work/operator-e2e.mjs <<'NODE'
@@ -182,6 +186,8 @@ const project = '/tmp/lifecycle-authority-e2e'; const session = (slug) => path.j
 const invoke = (action, slug, authorization_file, extra = {}) => invokeExternalLifecycleAuthority({ action, project_root: project, session_dir: session(slug), authorization_file, ...extra });
 const expectReject = (fn, pattern) => { try { fn(); } catch (error) { if (pattern.test(String(error))) return; throw error; } throw new Error(`expected rejection: ${pattern}`); };
 const ids = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'trust.bundle'), 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.metadata.critique_record_id);
+expectReject(() => invoke('cancel', 'project-auth-e2e', path.join(project, 'project-authorization.json')), /authorization_file must be outside the project and worktree/);
+expectReject(() => invoke('cancel', 'symlink-auth-e2e', '/tmp/lifecycle-authorization-parent-link/symlink-auth.json'), /authorization_file must not contain symlinks/);
 const resolve = invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve.json', { prior_record_id: ids[0], resolving_record_id: ids[1] });
 if (resolve.operation_status !== 'applied') throw new Error('resolve was not applied');
 const replay = invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve.json', { prior_record_id: ids[0], resolving_record_id: ids[1] });

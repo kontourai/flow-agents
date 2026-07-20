@@ -37,6 +37,14 @@ function within(candidate, root) {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
+function rejectSymlinkComponents(file, label) {
+  const absolute = path.resolve(file);
+  let current = path.parse(absolute).root;
+  for (const component of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`${label} must not contain symlinks`);
+  }
+}
 function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
@@ -53,6 +61,10 @@ function canonicalMutationPaths(request) {
   return { projectRoot, sessionDir, runId: path.basename(sessionDir) };
 }
 function canonicalInputPaths(request) {
+  const lexicalProjectRoot = path.resolve(request.project_root);
+  const lexicalAuthorizationFile = path.resolve(request.authorization_file);
+  if (within(lexicalAuthorizationFile, lexicalProjectRoot)) throw new Error("authorization_file must be outside the project and worktree");
+  rejectSymlinkComponents(lexicalAuthorizationFile, "authorization_file");
   const paths = canonicalMutationPaths(request);
   const authorizationFile = fs.realpathSync(request.authorization_file);
   if (within(authorizationFile, paths.projectRoot)) throw new Error("authorization_file must be outside the project and worktree");
@@ -348,9 +360,9 @@ function callerIdentity() {
   if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0) throw new Error("lifecycle authority requires validated non-root SUDO_UID and SUDO_GID");
   return { uid, gid };
 }
-function operationIdentity(envelope, authorization) {
-  const project = path.resolve(envelope.request.project_root);
-  const runId = path.basename(path.resolve(envelope.request.session_dir));
+function operationIdentity(envelope, authorization, paths) {
+  const project = paths.projectRoot;
+  const runId = paths.runId;
   if (!runId || runId === "." || runId === path.sep) throw new Error("lifecycle authority request has an invalid session identity");
   const keyId = authorization.signature?.key_id;
   if (typeof keyId !== "string" || typeof authorization.nonce !== "string") throw new Error("authorization does not contain a durable key and nonce identity");
@@ -365,9 +377,9 @@ function childInvocation(payload, identity) {
   return JSON.parse(line);
 }
 async function processRootOperation(envelope) {
-  const authorizationPath = path.resolve(envelope.request.authorization_file);
-  const authorization = verifyAuthorization(authorizationPath);
-  const identity = operationIdentity(envelope, authorization);
+  const paths = canonicalInputPaths(envelope.request);
+  const authorization = verifyAuthorization(paths.authorizationFile);
+  const identity = operationIdentity(envelope, authorization, paths);
   if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
   const authorizationSha256 = sha256(canonicalJson(authorization));
   const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);

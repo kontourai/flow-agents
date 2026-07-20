@@ -373,6 +373,9 @@ multiple output records, and malformed JSON fail closed. The helper independentl
 constrains all received paths, derives root relationships itself, and never treats caller-provided
 paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
 `NOT_VERIFIED` when the administrator-owned helper and pinned verification key are absent.
+The coordinator accepts a signed authorization only from a canonical, non-symlink path outside the
+project and worktree. This keeps privileged lifecycle inputs out of agent-controlled repository scope;
+the Ed25519 signature, registry, request binding, and replay checks remain independently required.
 Package-side validation does not call a live verification action; it verifies the immutable signed
 completion locally and binds its result digest to the exact resolution graph before Builder consumes
 the transition.
