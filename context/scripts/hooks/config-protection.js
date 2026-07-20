@@ -54,7 +54,7 @@
 const path = require('path');
 // #783: root-scoping for the Bash-command detectors below (redirect / interpreter-write /
 // cp-move) -- see that module's header comment for the full fail-closed contract.
-const { isCandidateWithinDeclaredRoots } = require('./lib/declared-artifact-roots.js');
+const { isCandidateWithinDeclaredRoots, resolveCandidatePath, canonicalize } = require('./lib/declared-artifact-roots.js');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -446,8 +446,16 @@ function checkCommandForBypass(command) {
 // with NO legitimate fixture use anywhere; a shape match alone blocks, exactly as before root
 // scoping existed. ARTIFACT arms — sidecar/delivery files — are scoped to declared artifact
 // roots so scratch-dir test fixtures stay authorable.
-const REDIRECT_GLOBAL_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/;
-const REDIRECT_ARTIFACT_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+// Case-insensitive (confirmation-review F1 variant): the host filesystems this hook defends
+// are commonly case-insensitive, so ~/.BASHRC IS ~/.bashrc.
+const REDIRECT_GLOBAL_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/i;
+const REDIRECT_ARTIFACT_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/i;
+
+// Basenames that identify a flow-artifact even when the DIRECTORY spelling is laundered
+// through a symlink (confirmation-review F4 variant): a token like /tmp/hop/slug/state.json
+// carries none of the .kontourai spelling, so the shape regex alone cannot see it — but its
+// basename justifies one canonicalization + re-test.
+const ARTIFACT_BASENAME_RE = /(?:^|\/)(state\.json|current\.json|trust\.bundle|trust\.checkpoint\.json|\.goal-fit-block-streak\.json)$/i;
 
 function matchesRedirectGlobal(token) {
   if (!token || typeof token !== 'string') return false;
@@ -470,7 +478,10 @@ function matchesRedirectProtected(token) {
  * commands that change directory get NO root-scoping relief on artifact-shaped targets.
  */
 function commandChangesDirectory(command) {
-  return /(^|[;&|(]|\s)(cd|pushd|popd)(\s|$)/.test(String(command || ''));
+  // Strip quote characters first (confirmation-review F2 variant): the shell concatenates
+  // adjacent quoted fragments, so `c""d` executes as `cd` — the guard must see through that.
+  const dequoted = String(command || '').replace(/["']/g, '');
+  return /(^|[;&|(]|\s)(cd|pushd|popd)(\s|$)/.test(dequoted);
 }
 
 /**
@@ -482,7 +493,19 @@ function protectedTargetBlocks(token, cwd, command) {
   if (!token || typeof token !== 'string') return false;
   const norm = token.replace(/\\/g, '/');
   if (REDIRECT_GLOBAL_RE.test(norm)) return true;
-  if (!REDIRECT_ARTIFACT_RE.test(norm)) return false;
+  let artifactShaped = REDIRECT_ARTIFACT_RE.test(norm);
+  if (!artifactShaped && ARTIFACT_BASENAME_RE.test(norm)) {
+    // Symlink-laundering check (F4): the visible spelling is innocent but the basename is a
+    // flow artifact — canonicalize once and re-test the shape against where it REALLY lands.
+    try {
+      const resolved = resolveCandidatePath(token, cwd);
+      if (!resolved.ambiguous && resolved.path) {
+        const canonicalNorm = canonicalize(resolved.path).replace(/\\/g, '/');
+        artifactShaped = REDIRECT_ARTIFACT_RE.test(canonicalNorm) || REDIRECT_GLOBAL_RE.test(canonicalNorm);
+      }
+    } catch { /* canonicalization failure degrades to the lexical result */ }
+  }
+  if (!artifactShaped) return false;
   if (commandChangesDirectory(command)) return true;
   return isCandidateWithinDeclaredRoots(token, cwd);
 }
@@ -584,7 +607,7 @@ const INTERPRETER_PROTECTED_TOKENS = [
   // Shell profiles (basename match is specific in this context)
   '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile',
   // Claude and flow-agents routing files
-  '.claude/settings.json',
+  '.claude/settings.json', '.claude/settings.local.json',
   // Flow-agents session sidecars (basename match; false-positive risk is low
   // in the interpreter-write context and accepted per R5a honest framing)
   'current.json', 'state.json', 'trust.bundle',
@@ -596,7 +619,8 @@ const INTERPRETER_PROTECTED_TOKENS = [
 // #783 review F1: tokens in this set are GLOBAL kill switches — blocked on segment match
 // alone, never root-scoped (see protectedTargetBlocks for the same split on redirect targets).
 const INTERPRETER_GLOBAL_TOKENS = new Set([
-  '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile', '.claude/settings.json',
+  '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile',
+  '.claude/settings.json', '.claude/settings.local.json',
 ]);
 
 /**
@@ -634,8 +658,11 @@ function checkInterpreterWriteToProtected(command, cwd) {
     // they have no fixture use and must not receive root-scoping relief. Artifact tokens go
     // through the fail-closed resolver (bare basenames stay ambiguous → blocked; the
     // cd-in-command guard applies as everywhere else).
+    // Case-insensitive segment match (confirmation-review F1 variant): the defended
+    // filesystems are commonly case-insensitive, so '.CLAUDE/Settings.json' is the same file.
+    const segLower = seg.toLowerCase();
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
-      if (!seg.includes(token)) continue;
+      if (!segLower.includes(token.toLowerCase())) continue;
       if (INTERPRETER_GLOBAL_TOKENS.has(token) || commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(token, cwd)) {
         return `${interpMatch[0].trim()} with protected path token "${token}"`;
       }

@@ -46,7 +46,7 @@ function walkForGitMarker(startDir: string): string | null {
   try {
     let dir = path.resolve(startDir);
     const root = path.parse(dir).root;
-    for (let depth = 0; depth < 40; depth++) {
+    for (let depth = 0; depth < 1024; depth++) {
       if (fs.existsSync(path.join(dir, ".git"))) return dir;
       if (dir === root) break;
       const parent = path.dirname(dir);
