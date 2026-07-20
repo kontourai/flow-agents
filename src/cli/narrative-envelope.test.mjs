@@ -162,7 +162,7 @@ test("snapshot capture preserves Flow bytes and freezes a stable Surface explana
 
   assert.equal(surface.status, "snapshotted");
   assert.equal(surface.integrity_class, "path_only");
-  assert.deepEqual(surface.origin.package, { name: "@kontourai/surface", version: "2.11.0" });
+  assert.deepEqual(surface.origin.package, { name: "@kontourai/surface", version: "2.12.0" });
   const resolvedSurface = resolveSource(narrativeDir, surface.source_id);
   assert.equal(resolvedSurface.status, "resolved");
   const explanation = JSON.parse(Buffer.from(resolvedSurface.content).toString("utf8"));

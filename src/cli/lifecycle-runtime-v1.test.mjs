@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveCritiqueTransition } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 
-const claim = (id, reviewer, verdict, status, lanes, findings) => ({ id: `claim-${id}`, status: "verified", metadata: { origin: "critique", critique_record_id: id, reviewer, verdict, claim_status: status, lanes, findings } });
+const claim = (id, reviewer, verdict, status, lanes, findings) => ({ id: `claim-${id}`, value: verdict, status: "verified", metadata: { origin: "critique", critique_record_id: id, reviewer, verdict, claim_status: status, lanes, findings } });
 const bundle = { schema_version: "1.0", claims: [
   claim("prior", "reviewer-a", "fail", "verified", [{ id: "security", status: "fail" }], [{ id: "F-1", status: "open" }]),
   claim("resolving", "reviewer-b", "pass", "verified", [{ id: "security", status: "pass" }], [{ id: "F-1", status: "fixed" }]),
