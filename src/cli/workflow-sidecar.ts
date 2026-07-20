@@ -3852,7 +3852,15 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   const projectRoot = narrativeGuardRoot(dir);
   const _checksRaw = [
-    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
+    ...opts(p, "check-json").map((v) => {
+      const parsed = parseJson(v, "--check-json") as AnyObj;
+      // Codex verify round 3: the skip_learning waiver stamp is MINTED ONLY by
+      // advance-state's --skip-learning path. A caller-supplied _waiver carrying it
+      // (via --check-json) would both silence the learning stop-gate and authorize a
+      // later skip to overwrite the reserved check — scrub it on ingest.
+      if (parsed && typeof parsed._waiver === "object" && parsed._waiver && (parsed._waiver as AnyObj).skip_learning !== undefined) delete (parsed._waiver as AnyObj).skip_learning;
+      return normalizeCheck(parsed, false, _existingCheckStampById, projectRoot);
+    }),
     ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
   ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can

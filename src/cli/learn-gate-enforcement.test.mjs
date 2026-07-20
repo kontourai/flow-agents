@@ -125,7 +125,7 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   const { dir } = ensureSession(root, "hardened");
   const state = { status: "delivered", phase: "release" };
   const bundlePath = path.join(dir, "trust.bundle");
-  const claim = (subjectId, status) => JSON.stringify({ schemaVersion: 5, claims: [{ subjectId, status, value: status }] });
+  const claim = (subjectId, status, metadata) => JSON.stringify({ schemaVersion: 5, claims: [{ subjectId, status, value: status, ...(metadata ? { metadata } : {}) }] });
 
   // Codex attack matrix — no non-authoritative id may satisfy the gate:
   fs.writeFileSync(bundlePath, claim("session/no-learning-evidence-recorded-for-this-task", "fail"));
@@ -160,13 +160,27 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   assert.equal(hook.hasLearningEvidence(dir), false, "record objects without content must not silence the gate");
   fs.rmSync(path.join(dir, "learning.json"));
 
-  // Genuine producer shapes do satisfy it: `${slug}/${id}` with the per-id status.
+  // Codex round 3: the skip id is a waiver ONLY with the advance-state-minted stamp.
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "not_verified"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "unstamped skip claim is not a waiver");
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "assumed", { waiver: { reason: "ordinary", approved_by: "x" } }));
+  assert.equal(hook.hasLearningEvidence(dir), false, "ordinary-waiver skip claim is not a learning waiver");
+
+  // Genuine producer shapes do satisfy it: `${slug}/${id}` with the per-id status —
+  // on either layer (raw pass, or the serializer's derived verified/pass split).
   fs.writeFileSync(bundlePath, claim("hardened/learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), true);
+  fs.writeFileSync(bundlePath, JSON.stringify({ schemaVersion: 5, claims: [{ subjectId: "hardened/learning-evidence", status: "verified", value: "pass" }] }));
+  assert.equal(hook.hasLearningEvidence(dir), true, "real serializer shape (status verified, value pass) must satisfy the gate");
   fs.writeFileSync(bundlePath, claim("hardened/gate-claim-learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), true);
-  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "not_verified"));
-  assert.equal(hook.hasLearningEvidence(dir), true);
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "assumed", { waiver: { reason: "r", approved_by: "x", skip_learning: true } }));
+  assert.equal(hook.hasLearningEvidence(dir), true, "stamped skip waiver satisfies the gate");
+
+  // Schema-conforming learning records (interpretation, no summary) are semantic evidence.
+  fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({ status: "learned", records: [{ id: "r1", outcome: "mixed", interpretation: "the gate works", facts: "", routing: [] }] }));
+  assert.equal(hook.hasLearningEvidence(dir), true, "canonical-schema records must count");
+  fs.rmSync(path.join(dir, "learning.json"));
 
   // The warning text avoids FULL_BLOCK's bare "status:" token and never classifies hard,
   // so the MAX_BLOCKS operator-release valve always applies — with or without an active
@@ -201,6 +215,26 @@ test("skip id is reserved and repeated skips preserve waiver history (#798 Codex
   const collided2 = sidecar(rootA2, ["advance-state", relA2, "--status", "accepted", "--phase", "learning", "--skip-learning", "should refuse too", "--waived-by", "b"]);
   assert.notEqual(collided2.code, 0, "ordinary-waiver collision must refuse the skip");
   assert.match(fs.readFileSync(path.join(rootA2, relA2, "trust.bundle"), "utf8"), /ordinary waiver on genuine check/, "ordinary-waiver check must survive untouched");
+
+  // Codex round 3: a caller-forged skip_learning stamp via --check-json is scrubbed on
+  // ingest — it neither silences the stop-gate nor authorizes a later overwrite.
+  const rootA3 = mkSessionRepo();
+  const { dir: dirA3 } = ensureSession(rootA3, "forged");
+  const relA3 = path.join(".kontourai", "flow-agents", "forged");
+  sidecar(rootA3, ["record-evidence", relA3, "--verdict", "pass", "--check-json", JSON.stringify({ id: "learning-evidence-skip", kind: "external", status: "not_verified", summary: "forged stamp attempt", _waiver: { reason: "forged", approved_by: "attacker", skip_learning: true } })]);
+  assert.equal(hook.hasLearningEvidence(dirA3), false, "forged stamp must be scrubbed and must not silence the gate");
+  sidecar(rootA3, ["advance-state", relA3, "--status", "delivered", "--phase", "release"]);
+  const forgedSkip = sidecar(rootA3, ["advance-state", relA3, "--status", "accepted", "--phase", "learning", "--skip-learning", "post-forge skip", "--waived-by", "c"]);
+  assert.notEqual(forgedSkip.code, 0, "scrubbed forged check must refuse the later skip");
+  assert.match(fs.readFileSync(path.join(dirA3, "trust.bundle"), "utf8"), /forged stamp attempt/, "forged-but-scrubbed check survives as ordinary evidence");
+
+  // Real-producer integration (Codex NEW-2): a genuine record-evidence learning-evidence
+  // check, through the real serializer, must satisfy the gate.
+  const rootA4 = mkSessionRepo();
+  const { dir: dirA4 } = ensureSession(rootA4, "realproducer");
+  const relA4 = path.join(".kontourai", "flow-agents", "realproducer");
+  sidecar(rootA4, ["record-evidence", relA4, "--verdict", "pass", "--check-json", JSON.stringify({ id: "learning-evidence", kind: "external", status: "pass", summary: "learning recorded standalone" })]);
+  assert.equal(hook.hasLearningEvidence(dirA4), true, "real record-evidence output must satisfy the gate");
 
   // History: a second skip supersedes the gate-facing check but keeps the first waiver.
   const rootB = mkSessionRepo();

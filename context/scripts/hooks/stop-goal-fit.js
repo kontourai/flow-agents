@@ -2137,21 +2137,26 @@ const LEARNING_GATE_PATTERN = / learning outstanding — /;
 // round 2: leaf-splitting recreated the collision via "unrelated/learning-evidence").
 // Status is positive-only PER id: real learning evidence must be pass; only the
 // waiver-stamped skip check may be not_verified.
+// Statuses are checked on BOTH layers of a real bundle claim (Codex verify round 3):
+// the serializer derives claim.status via Surface ("pass" check -> "verified" claim,
+// waived check -> "assumed") while claim.value carries the raw check status. Either
+// layer matching its id's allowed set counts; synthetic single-layer shapes still work.
 const LEARNING_EVIDENCE_STATUS_BY_ID = new Map([
-  ['learning-evidence', new Set(['pass'])],
-  ['gate-claim-learning-evidence', new Set(['pass'])],
-  // The bundle serializer maps waived checks onto claim status "assumed" (the
-  // accepted_gap -> assumed convention); the raw check itself is not_verified.
+  ['learning-evidence', new Set(['pass', 'verified'])],
+  ['gate-claim-learning-evidence', new Set(['pass', 'verified'])],
   ['learning-evidence-skip', new Set(['not_verified', 'assumed'])],
 ]);
 
+function nonblank(v) { return typeof v === 'string' && v.trim().length > 0; }
+
 function hasLearningEvidence(artifactDir) {
-  // learning.json must be SEMANTIC evidence: status "learned" AND at least one real
-  // record object carrying a non-empty summary. Placeholders ({}, [null], [""]) are
-  // not learning (Codex verify round 2).
+  // learning.json must be SEMANTIC evidence: status "learned" AND at least one record
+  // object carrying real content. The canonical workflow-learning schema's semantic
+  // fields are interpretation/facts/outcome (no "summary"); legacy records used
+  // "summary" — accept content in either shape, never placeholders (Codex round 3).
   const lj = readJsonFile(path.join(artifactDir, 'learning.json'));
   if (lj && String(lj.status || '') === 'learned' && Array.isArray(lj.records)
-      && lj.records.some(r => r && typeof r === 'object' && typeof r.summary === 'string' && r.summary.trim().length > 0)) return true;
+      && lj.records.some(r => r && typeof r === 'object' && (nonblank(r.interpretation) || nonblank(r.facts) || nonblank(r.summary)))) return true;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
   return claims.some(c => {
@@ -2159,7 +2164,17 @@ function hasLearningEvidence(artifactDir) {
     const id = String(claimCheckId(c.subjectId) || '').trim().toLowerCase();
     const allowed = LEARNING_EVIDENCE_STATUS_BY_ID.get(id);
     if (!allowed) return false;
-    return allowed.has(String(c.status ?? c.value ?? '').toLowerCase());
+    const statusOk = allowed.has(String(c.status ?? '').toLowerCase()) || allowed.has(String(c.value ?? '').toLowerCase());
+    if (!statusOk) return false;
+    // The skip id is only a waiver when it carries the advance-state-minted stamp
+    // (record-evidence scrubs caller-supplied skip_learning, so the stamp is
+    // unforgeable via --check-json). An ordinary waiver or bare check on the skip id
+    // is not learning evidence.
+    if (id === 'learning-evidence-skip') {
+      const md = c && typeof c.metadata === 'object' ? c.metadata : null;
+      return !!(md && md.waiver && md.waiver.skip_learning === true);
+    }
+    return true;
   });
 }
 
