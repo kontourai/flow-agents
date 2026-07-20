@@ -56,10 +56,26 @@ test("prepared root retry rolls a committed child transaction back to its signed
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "before\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "before flow\n");
     const session = snapshotTree(sessionDir), flow = snapshotTree(flowDir);
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "committed child mutation\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "committed flow mutation\n");
-    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", session, flow }));
-    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }), true);
+    const binding = { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) };
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding, session, flow }));
+    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, binding), true);
     assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "before\n");
     assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "before flow\n");
+  } finally { fs.rmSync(project, { recursive: true, force: true }); }
+});
+test("a later prepared operation never rolls back an earlier committed journal", () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-distinct-retry-"));
+  try {
+    const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1"), flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
+    fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(flowDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "before A\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "before A flow\n");
+    const session = snapshotTree(sessionDir), flow = snapshotTree(flowDir), bindingA = { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) };
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "after A\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "after A flow\n");
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding: bindingA, session, flow }));
+    const bindingB = { request_sha256: "c".repeat(64), authorization_sha256: "d".repeat(64) };
+    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, bindingB), false);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "after A\n");
+    assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "after A flow\n");
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("transaction snapshot rejects symlink swap paths", () => {

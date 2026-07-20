@@ -115,18 +115,19 @@ export function recoverTransaction(paths) {
   restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
 }
-export function rollbackCommittedTransaction(paths) {
+export function rollbackCommittedTransaction(paths, expectedBinding) {
   const file = transactionJournal(paths); if (!fs.existsSync(file)) return false;
   const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
   if (journal.status !== "committed") return false;
+  if (canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) return false;
   if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
   restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
   return true;
 }
-async function inProjectTransaction(paths, action) {
+async function inProjectTransaction(paths, binding, action) {
   recoverTransaction(paths);
-  const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
+  const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", binding, created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
   atomicWrite(transactionJournal(paths), `${JSON.stringify(journal)}\n`);
   try {
     const result = await action();
@@ -321,7 +322,7 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const sessionBundle = { ...reduced };
       const resolutionEvents = Array.isArray(sessionBundle.critique_resolution_events) ? sessionBundle.critique_resolution_events : [];
       delete sessionBundle.critique_resolution_events;
-      await inProjectTransaction(paths, async () => {
+      await inProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
         await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
         // Recheck the exact preimage immediately before the atomic replace.
         if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
@@ -421,7 +422,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(projectRoot, archived) }), run_id: runId };
     }
     const paths = canonicalMutationPaths(envelope.request);
-    if (value.resume_prepared && envelope.action === "resolve-critique") rollbackCommittedTransaction(paths);
+    if (value.resume_prepared && envelope.action === "resolve-critique") rollbackCommittedTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(value.authorization)) });
     if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
     return executeMutation(envelope, paths, value.authorization);
   }
