@@ -34,6 +34,8 @@ printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; tou
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
 chmod +x "$CONSUMER/checks/check-success-background.sh"
+printf '.kontourai/\ndelivery/\n' > "$CONSUMER/.gitignore"
+(cd "$CONSUMER" && git init -q && git config user.email public-workflow@example.invalid && git config user.name 'Public Workflow Eval' && git add . && git commit -qm 'seed public workflow consumer')
 
 run_candidate() {
   (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow "$@")
@@ -330,6 +332,60 @@ if (!claim || claim.metadata?.output_digest?.algorithm !== 'sha256' || typeof cl
 NODE
 [[ "$(wc -l < "$MULTI_COMMAND_ONE" | tr -d ' ')" == 1 && "$(wc -l < "$MULTI_COMMAND_TWO" | tr -d ' ')" == 1 ]] || fail "public evidence did not execute every repeated --command exactly once"
 pass "tests-evidence executes every repeated command once and records matching observations"
+
+# The remaining provider operations are independently covered by their authenticated
+# operation E2Es. Put this already-verified canonical fixture at the supported release-ready
+# boundary so this test can exercise the public publisher itself, including its exact actor,
+# freshness, and fresh-companion invariants.
+FLOW_STATE="$CONSUMER/.kontourai/flow/runs/$(basename "$RELEASE_SESSION")/state.json"
+node - "$FLOW_STATE" "$RELEASE_SESSION/release.json" "$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const [stateFile, releaseFile, slug] = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+fs.writeFileSync(releaseFile, `${JSON.stringify({ schema_version: '1.0', task_slug: slug, decision: 'merge' }, null, 2)}\n`);
+NODE
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.sig.json"
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.intoto.json"
+printf '{"status":"signed","path":"trust.checkpoint.sig.json"}\n' > "$RELEASE_SESSION/trust.checkpoint.attestation.json"
+set +e
+ACTOR_MISMATCH_PUBLISH="$(run_candidate_as unrelated-publisher publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+ACTOR_MISMATCH_RC=$?
+set -e
+[[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
+pass "public delivery publishing requires the exact ordinary assignment actor"
+PUBLISH_JSON="$(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval \
+  TRUST_RECONCILE_COMMANDS="$TEST_COMMAND
+$TEST_COMMAND_TWO
+$TEST_COMMAND_THREE" "$FLOW_AGENTS_BIN" workflow publish-delivery --session-dir "$RELEASE_SESSION" --json)"
+node - "$PUBLISH_JSON" "$RELEASE_SESSION" "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [reportText, session, delivery] = process.argv.slice(2);
+const report = JSON.parse(reportText);
+const attestation = JSON.parse(fs.readFileSync(`${session}/trust.checkpoint.attestation.json`, 'utf8'));
+const companion = `${session}/${attestation.path}`;
+const stale = attestation.status === 'signed' ? `${session}/trust.checkpoint.intoto.json` : `${session}/trust.checkpoint.sig.json`;
+const statement = attestation.status === 'signed'
+  ? JSON.parse(Buffer.from(JSON.parse(fs.readFileSync(companion, 'utf8')).payload, 'base64').toString('utf8'))
+  : JSON.parse(fs.readFileSync(companion, 'utf8'));
+const checkpointDigest = crypto.createHash('sha256').update(fs.readFileSync(`${session}/trust.checkpoint.json`)).digest('hex');
+const subject = statement.subject?.find((entry) => entry.name === 'trust.checkpoint.json');
+if (!report.published || !fs.existsSync(`${delivery}/trust.bundle`) || !fs.existsSync(`${delivery}/${attestation.path}`)
+  || fs.existsSync(stale) || subject?.digest?.sha256 !== checkpointDigest
+  || JSON.stringify(statement.predicate) !== JSON.stringify(JSON.parse(fs.readFileSync(`${session}/trust.bundle`, 'utf8')))) process.exit(1);
+NODE
+pass "release-ready public publishing emits and copies only newly digest-bound checkpoint companions"
+printf 'post-verification source change\n' > "$CONSUMER/source-change.txt"
+(cd "$CONSUMER" && git add source-change.txt && git commit -qm 'post verification source change')
+set +e
+STALE_EVIDENCE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_EVIDENCE_RC=$?
+set -e
+[[ "$STALE_EVIDENCE_RC" -ne 0 && "$STALE_EVIDENCE_PUBLISH" == *"exact source snapshot"* ]] || fail "public delivery publishing rebound old verification evidence onto a newer HEAD"
+pass "public delivery publishing requires canonical re-verification after HEAD changes"
 
 ASSIGNMENT="$ARTIFACT_ROOT/assignment/$(basename "$RELEASE_SESSION").json"
 ASSIGNMENT_TARGET="$TMP/assignment-target.json"

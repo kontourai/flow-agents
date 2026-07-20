@@ -4758,11 +4758,20 @@ function resolveCommitSha(projectRoot?: string): string | null {
  *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
-export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<void> {
+export type TrustCheckpointSealResult = {
+  checkpointPath: string;
+  attestationPath: string;
+  companionPath: string;
+  status: "signed" | "unsigned";
+  checkpointSha256: string;
+  bundleSha256: string;
+};
+
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<TrustCheckpointSealResult | null> {
   const bundlePath = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundlePath)) return null; // no bundle — skip gracefully
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return null; // Surface unavailable
 
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const report = surface.buildTrustReport(bundle as Record<string, unknown>);
@@ -4788,12 +4797,20 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
   };
   writeJson(checkpointPath, envelope);
 
+  // Every seal owns a fresh, mutually-exclusive companion set. Removing all prior
+  // companions before signing prevents an old .sig/.intoto or pointer file from
+  // satisfying a later existence-only check when this attempt emits nothing.
+  for (const name of ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"]) {
+    fs.rmSync(path.join(dir, name), { force: true });
+  }
+
   // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
   // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
   // The .catch() at the call site already guards the parent command; this inner
   // catch is defense-in-depth so signing never propagates an error upward.
-  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
+  return await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
     process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
   });
 }
 
@@ -4822,11 +4839,11 @@ async function signCheckpointAttestation(
   surface: SurfaceModule,
   bundle: AnyObj,
   checkpointPath: string,
-): Promise<void> {
+): Promise<TrustCheckpointSealResult | null> {
   // Guard: both primitives must be present (consumed from Surface, never reimplemented).
   if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
     process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
-    return;
+    return null;
   }
 
   // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
@@ -4883,6 +4900,15 @@ async function signCheckpointAttestation(
   // in-toto statement ties it back to the checkpoint without breaking the digest.
   const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
   writeJson(attestationPath, attestation);
+  const companionPath = path.join(dir, String(attestation.path));
+  return {
+    checkpointPath,
+    attestationPath,
+    companionPath,
+    status: attestation.status as "signed" | "unsigned",
+    checkpointSha256: sha256hex,
+    bundleSha256: createHash("sha256").update(fs.readFileSync(path.join(dir, "trust.bundle"))).digest("hex"),
+  };
 }
 
 /**
@@ -6119,6 +6145,19 @@ function critiqueClean(dir: string): boolean {
     });
   }
   return false;
+}
+
+/**
+ * Read-only release-boundary freshness check for the public workflow facade.
+ * Reuses the canonical critique graph and workspace-snapshot validation rather
+ * than treating a newly stamped checkpoint as proof that older evidence covered
+ * the current source. A changed HEAD or worktree therefore requires canonical
+ * review and verification to be recorded again before delivery can be published.
+ */
+export function assertCurrentVerifiedWorkspaceEvidence(dir: string): void {
+  if (!critiqueClean(dir)) {
+    throw new Error("workflow publish-delivery requires current canonical review and verification evidence for the exact source snapshot; re-run critique and verification after any HEAD or workspace change");
+  }
 }
 function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");

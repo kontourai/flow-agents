@@ -18,7 +18,7 @@ import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
-import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { assertCurrentVerifiedWorkspaceEvidence, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustCheckpointSealResult, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
@@ -86,6 +86,7 @@ export async function main(argv: string[]): Promise<number> {
 
 async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boolean): Promise<number> {
   const { projectRoot, slug } = readBoundSession(sessionDir);
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) {
     throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
   }
@@ -99,18 +100,17 @@ async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boole
   if (!completed && !releaseReady) {
     throw new Error("workflow publish-delivery requires a completed or release-ready canonical builder.build run; partial sessions cannot publish delivery evidence");
   }
-  await sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot);
+  assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+  const seal = await sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot);
+  if (!seal) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
+  validateFreshCheckpointSeal(sessionDir, seal);
   const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
   const checkpoint = readJsonFile(checkpointPath, "workflow trust checkpoint");
   const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   if (checkpoint.commit_sha !== headSha) {
     throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
   }
-  const checkpointCompanions = ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"];
-  if (!fs.existsSync(path.join(sessionDir, "trust.checkpoint.attestation.json"))
-    || !checkpointCompanions.slice(1).some((name) => fs.existsSync(path.join(sessionDir, name)))) {
-    throw new Error("workflow publish-delivery requires the checkpoint attestation companions emitted by the checkpoint sealer");
-  }
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   await publishDelivery(sessionDir, projectRoot);
   const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
   const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
@@ -122,6 +122,53 @@ async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boole
   if (json) console.log(JSON.stringify(report));
   else console.log(`Published delivery trust bundle: ${deliveryBundle}`);
   return 0;
+}
+
+function validateFreshCheckpointSeal(sessionDir: string, seal: TrustCheckpointSealResult): void {
+  const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
+  const attestationPath = path.join(sessionDir, "trust.checkpoint.attestation.json");
+  const expectedCompanion = path.join(sessionDir, seal.status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json");
+  const staleCompanion = path.join(sessionDir, seal.status === "signed" ? "trust.checkpoint.intoto.json" : "trust.checkpoint.sig.json");
+  if (seal.checkpointPath !== checkpointPath || seal.attestationPath !== attestationPath || seal.companionPath !== expectedCompanion
+    || !fs.existsSync(checkpointPath) || !fs.existsSync(attestationPath) || !fs.existsSync(expectedCompanion) || fs.existsSync(staleCompanion)) {
+    throw new Error("workflow publish-delivery requires the fresh, mutually-exclusive checkpoint companions returned by the current seal attempt");
+  }
+  const checkpointBytes = fs.readFileSync(checkpointPath);
+  const bundleBytes = fs.readFileSync(path.join(sessionDir, "trust.bundle"));
+  if (createHash("sha256").update(checkpointBytes).digest("hex") !== seal.checkpointSha256
+    || createHash("sha256").update(bundleBytes).digest("hex") !== seal.bundleSha256) {
+    throw new Error("workflow publish-delivery checkpoint or trust bundle changed after the current seal attempt");
+  }
+  const attestation = readJsonFile(attestationPath, "workflow checkpoint attestation");
+  if (attestation.status !== seal.status || attestation.path !== path.basename(expectedCompanion)) {
+    throw new Error("workflow publish-delivery checkpoint attestation does not identify the companion emitted by the current seal attempt");
+  }
+  const statement = seal.status === "signed"
+    ? readSignedCheckpointStatement(expectedCompanion)
+    : readJsonFile(expectedCompanion, "workflow unsigned checkpoint statement");
+  const subjects = Array.isArray(statement.subject) ? statement.subject : [];
+  const subject = subjects.find((entry) => entry && typeof entry === "object" && (entry as JsonRecord).name === "trust.checkpoint.json") as JsonRecord | undefined;
+  const digest = subject?.digest && typeof subject.digest === "object" ? (subject.digest as JsonRecord).sha256 : null;
+  if (statement._type !== "https://in-toto.io/Statement/v1"
+    || statement.predicateType !== "https://hachure.org/v1/bundle"
+    || digest !== seal.checkpointSha256
+    || !isDeepStrictEqual(statement.predicate, JSON.parse(bundleBytes.toString("utf8")))) {
+    throw new Error("workflow publish-delivery checkpoint companion is not digest-bound to the current checkpoint and trust bundle");
+  }
+}
+
+function readSignedCheckpointStatement(file: string): JsonRecord {
+  const envelope = readJsonFile(file, "workflow signed checkpoint envelope");
+  if (envelope.payloadType !== "application/vnd.in-toto+json" || typeof envelope.payload !== "string" || !Array.isArray(envelope.signatures) || envelope.signatures.length === 0) {
+    throw new Error("workflow publish-delivery signed checkpoint companion has an invalid DSSE envelope");
+  }
+  try {
+    const decoded = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
+    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("not an object");
+    return decoded as JsonRecord;
+  } catch {
+    throw new Error("workflow publish-delivery signed checkpoint companion payload is not valid JSON");
+  }
 }
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {

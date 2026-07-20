@@ -111,7 +111,9 @@ learning through their owning Builder skills.
 
 When an eligible code-host change needs its verified trust state committed for
 CI reconciliation, use the public `flow-agents workflow publish-delivery
---session-dir <session>` command after release readiness. Do not manufacture a
+--session-dir <session>` command after release readiness while the assignment actor
+and reviewed source snapshot still exactly match. A later source change requires
+canonical review and verification again. Do not manufacture a
 prior session, invoke a private writer, or use a `delivery/DECLARED` exemption
 for agent-delivered work.
 
