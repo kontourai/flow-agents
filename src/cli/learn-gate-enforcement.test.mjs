@@ -141,13 +141,31 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   fs.writeFileSync(bundlePath, claim("totally-my-learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), false, "suffix forgery must not silence the gate — exact producer ids only");
 
-  fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "fail"));
-  assert.equal(hook.hasLearningEvidence(dir), false, "failed learning evidence is not learning evidence");
-
-  // Genuine producer ids with non-failing status do satisfy it.
+  // Codex verify round 2: multi-segment ids reachable via record-evidence must not
+  // satisfy the gate (no leaf inference), and namespace-prefixed ids are not producer shapes.
+  fs.writeFileSync(bundlePath, claim("hardened/unrelated/learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "multi-segment id must not silence the gate");
   fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "namespace-prefixed id is not a producer shape");
+
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence", "fail"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "failed learning evidence is not learning evidence");
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence", "not_verified"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "real learning evidence must be positively passed, not merely unverified");
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "a skip claiming pass is not a waiver shape");
+
+  // Placeholder learning.json records are not learning (Codex verify round 2).
+  fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({ status: "learned", records: [null, {}, ""] }));
+  assert.equal(hook.hasLearningEvidence(dir), false, "record objects without content must not silence the gate");
+  fs.rmSync(path.join(dir, "learning.json"));
+
+  // Genuine producer shapes do satisfy it: `${slug}/${id}` with the per-id status.
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), true);
-  fs.writeFileSync(bundlePath, claim("session/gate-claim-learning-evidence", "pass"));
+  fs.writeFileSync(bundlePath, claim("hardened/gate-claim-learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), true);
+  fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "not_verified"));
   assert.equal(hook.hasLearningEvidence(dir), true);
 
   // The warning text avoids FULL_BLOCK's bare "status:" token and never classifies hard,
@@ -172,6 +190,17 @@ test("skip id is reserved and repeated skips preserve waiver history (#798 Codex
   assert.match(collided.stderr + collided.stdout, /reserved id/);
   const bundleA = fs.readFileSync(path.join(rootA, relA, "trust.bundle"), "utf8");
   assert.match(bundleA, /genuine check that happens to use the reserved id/, "genuine check must survive untouched");
+
+  // Codex verify round 2: a genuine check carrying an ORDINARY accepted-gap waiver on the
+  // reserved id must also refuse — only prior skip-stamped waivers may be superseded.
+  const rootA2 = mkSessionRepo();
+  ensureSession(rootA2, "collide2");
+  const relA2 = path.join(".kontourai", "flow-agents", "collide2");
+  sidecar(rootA2, ["record-evidence", relA2, "--verdict", "pass", "--accepted-gap-reason", "ordinary waiver on genuine check", "--waived-by", "someone", "--check-json", JSON.stringify({ id: "learning-evidence-skip", kind: "external", status: "not_verified", summary: "genuine ordinary-waiver check" })]);
+  sidecar(rootA2, ["advance-state", relA2, "--status", "delivered", "--phase", "release"]);
+  const collided2 = sidecar(rootA2, ["advance-state", relA2, "--status", "accepted", "--phase", "learning", "--skip-learning", "should refuse too", "--waived-by", "b"]);
+  assert.notEqual(collided2.code, 0, "ordinary-waiver collision must refuse the skip");
+  assert.match(fs.readFileSync(path.join(rootA2, relA2, "trust.bundle"), "utf8"), /ordinary waiver on genuine check/, "ordinary-waiver check must survive untouched");
 
   // History: a second skip supersedes the gate-facing check but keeps the first waiver.
   const rootB = mkSessionRepo();

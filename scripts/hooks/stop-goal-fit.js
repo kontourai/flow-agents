@@ -2131,22 +2131,35 @@ const LEARNING_GATE_PATTERN = / learning outstanding — /;
 // deliberately-suffixed forgeries. The leaf of the check id must equal a known producer id
 // exactly: learning-review's record-evidence check, advance-state's reserved skip check, or
 // the flow-bound gate-claim producer.
-const LEARNING_EVIDENCE_CHECK_IDS = new Set(['learning-evidence', 'learning-evidence-skip', 'gate-claim-learning-evidence']);
+// Producer shapes only, verified against the real bundle writer: subjectId is
+// `${slug}/${check.id}` and claimCheckId strips exactly the slug segment, so the
+// remainder must EQUAL a producer id — no splitting, no leaf inference (Codex verify
+// round 2: leaf-splitting recreated the collision via "unrelated/learning-evidence").
+// Status is positive-only PER id: real learning evidence must be pass; only the
+// waiver-stamped skip check may be not_verified.
+const LEARNING_EVIDENCE_STATUS_BY_ID = new Map([
+  ['learning-evidence', new Set(['pass'])],
+  ['gate-claim-learning-evidence', new Set(['pass'])],
+  // The bundle serializer maps waived checks onto claim status "assumed" (the
+  // accepted_gap -> assumed convention); the raw check itself is not_verified.
+  ['learning-evidence-skip', new Set(['not_verified', 'assumed'])],
+]);
 
 function hasLearningEvidence(artifactDir) {
-  // learning.json must be SEMANTIC evidence, not a mere file: parseable, and either
-  // status "learned" or at least one record. An empty/placeholder file is not learning.
+  // learning.json must be SEMANTIC evidence: status "learned" AND at least one real
+  // record object carrying a non-empty summary. Placeholders ({}, [null], [""]) are
+  // not learning (Codex verify round 2).
   const lj = readJsonFile(path.join(artifactDir, 'learning.json'));
-  if (lj && (String(lj.status || '') === 'learned' || (Array.isArray(lj.records) && lj.records.length > 0))) return true;
+  if (lj && String(lj.status || '') === 'learned' && Array.isArray(lj.records)
+      && lj.records.some(r => r && typeof r === 'object' && typeof r.summary === 'string' && r.summary.trim().length > 0)) return true;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
   return claims.some(c => {
     if (!c || typeof c.subjectId !== 'string') return false;
-    const raw = String(claimCheckId(c.subjectId) || '');
-    const leaf = raw.split('/').pop().split(':').pop().trim().toLowerCase();
-    if (!LEARNING_EVIDENCE_CHECK_IDS.has(leaf)) return false;
-    const status = String(c.status ?? c.value ?? '').toLowerCase();
-    return status !== 'fail' && status !== 'failed';
+    const id = String(claimCheckId(c.subjectId) || '').trim().toLowerCase();
+    const allowed = LEARNING_EVIDENCE_STATUS_BY_ID.get(id);
+    if (!allowed) return false;
+    return allowed.has(String(c.status ?? c.value ?? '').toLowerCase());
   });
 }
 

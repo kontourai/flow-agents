@@ -4367,14 +4367,17 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     // gate-facing check but preserve every prior waiver in an append-only history so the
     // audit trail (each reason, approver, recorder) survives.
     const _skipPrior = (_skipExistingState.checks as any[]).find((c) => c && c.id === "learning-evidence-skip");
-    if (_skipPrior && !_skipPrior._waiver) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" without a waiver record — resolve that collision instead of overwriting evidence');
+    // Codex verify round 2: an existing check carrying an ORDINARY accepted-gap waiver is
+    // still genuine evidence — only a check stamped as a prior learning-skip may be
+    // superseded. Skip waivers are self-identified via _waiver.skip_learning below.
+    if (_skipPrior && !(_skipPrior._waiver && _skipPrior._waiver.skip_learning === true)) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" and is not a prior learning-skip waiver — resolve that collision instead of overwriting evidence');
     const _skipHistory = [...(Array.isArray(_skipPrior?._waiver_history) ? _skipPrior._waiver_history : []), ...(_skipPrior?._waiver ? [_skipPrior._waiver] : [])];
     const skipCheck = normalizeCheck({
       id: "learning-evidence-skip",
       kind: "external",
       status: "not_verified",
       summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
-      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor },
+      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor, skip_learning: true },
       ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
     }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir));
     const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
