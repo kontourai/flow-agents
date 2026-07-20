@@ -1137,7 +1137,13 @@ for (const operation of ['cancel', 'archive']) {
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
 NODE
-  package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
+  git -C "$PACKAGE_PROJECT" init -q -b main \
+  && git -C "$PACKAGE_PROJECT" config user.email packed-fixture@example.invalid \
+  && git -C "$PACKAGE_PROJECT" config user.name "Packed Fixture" \
+  && git -C "$PACKAGE_PROJECT" add .flow-agents/lifecycle-authority-keys.json \
+  && git -C "$PACKAGE_PROJECT" commit -q -m "protect lifecycle authority registry" \
+  && git -C "$PACKAGE_PROJECT" update-ref refs/remotes/origin/main HEAD \
+  && package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
   && package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null \
   && package_flow archive --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null \
