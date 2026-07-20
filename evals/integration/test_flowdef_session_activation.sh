@@ -203,6 +203,22 @@ else
   _fail "public workflow critique did not record a clean review before tests-evidence"
 fi
 
+# Corrected bytes make the first substantive PASS historical. A new independent
+# reviewer can attest the exact current workspace without impersonating or
+# superseding the unavailable prior reviewer.
+printf '\nCorrected after the historical clean review.\n' >> "$SESSION_DIR/$SLUG--deliver.md"
+if FLOW_AGENTS_ACTOR=activation-current-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+  --session-dir "$SESSION_DIR" \
+  --id "activation-current-review" \
+  --verdict pass \
+  --summary "A second independent reviewer verified the corrected fixture bytes." \
+  --artifact-ref "$SESSION_DIR/$SLUG--deliver.md" \
+  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the corrected activation fixture.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION_DIR/$SLUG--deliver.md\",\"summary\":\"Reviewed corrected delivery artifact.\"}]}" >/dev/null 2>&1; then
+  _pass "public workflow critique records an exact-workspace review while retaining the stale pass"
+else
+  _fail "public workflow critique did not record the exact-workspace review"
+fi
+
 TEST_COMMAND="node --test checks/check-flow-step.test.mjs"
 CRITERION_JSON="$(node - "$TEST_COMMAND" <<'NODE'
 const command = process.argv[2];
@@ -245,14 +261,16 @@ const bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
 const declared = (bundle.claims || []).find(c => c.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 if (!declared) throw new Error('MISSING builder.verify.tests; claims: ' + (bundle.claims||[]).map(c=>c.claimType).join(', '));
 if (declared.claimType !== 'builder.verify.tests' || declared.status !== 'verified') throw new Error('expected verified builder.verify.tests, got ' + JSON.stringify({ claimType: declared.claimType, status: declared.status }));
-const critique = (bundle.claims || []).find(c => c.metadata?.origin === 'critique' && c.value === 'pass' && !c.metadata?.superseded_by);
-if (!critique) throw new Error('MISSING clean live critique before tests-evidence');
+const critiques = (bundle.claims || []).filter(c => c.metadata?.origin === 'critique' && c.value === 'pass' && !c.metadata?.superseded_by);
+if (critiques.length !== 2) throw new Error('expected historical and current clean critiques, got ' + critiques.length);
+const snapshots = critiques.map(c => c.metadata?.review_target?.workspace_snapshot?.digest);
+if (new Set(snapshots).size !== 2) throw new Error('expected distinct historical and current workspace snapshots');
 const criterion = (bundle.claims || []).find(c => c.metadata?.origin === 'acceptance' && c.metadata?.criterion?.id === 'AC-1');
 if (!criterion || criterion.value !== 'pass' || criterion.status !== 'verified') throw new Error('MISSING verified completed AC-1 criterion');
-console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; clean critique and AC-1 verified');
+console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; historical+current clean critiques and AC-1 verified');
 " 2>&1 \
-  && _pass "bundle contains declared tests evidence with a clean critique and completed AC-1" \
-  || _fail "bundle lacks declared tests evidence, clean critique, or completed AC-1"
+  && _pass "bundle advances with historical and current clean critiques plus completed AC-1" \
+  || _fail "bundle lacks declared tests evidence, retained critique history, current critique, or completed AC-1"
 
 # ─── TEST 4: tampered bundle at verify step BLOCKS ────────────────────────────
 echo ""

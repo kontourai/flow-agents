@@ -3175,10 +3175,17 @@ function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean
 }
 
 function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
-  if (critique.verdict !== "pass") return false;
+  if (!critiqueIsSubstantivePass(critique)) return false;
+  return reviewTargetArtifactsMatch(dir, critique.review_target);
+}
+
+function critiqueIsSubstantivePass(critique: AnyObj): boolean {
+  if (critique.verdict !== "pass" || critique.claim_status !== "verified") return false;
   if (!Array.isArray(critique.lanes) || critique.lanes.length === 0 || critique.lanes.some((lane: AnyObj) => lane.status !== "pass")) return false;
   if (Array.isArray(critique.findings) && critique.findings.some((finding: AnyObj) => finding.status === "open")) return false;
-  return reviewTargetArtifactsMatch(dir, critique.review_target);
+  const artifacts = critique.review_target?.artifacts;
+  return Array.isArray(artifacts) && artifacts.length > 0
+    && artifacts.every((artifact: AnyObj) => hasNonEmptyString(artifact?.file) && /^[a-f0-9]{64}$/i.test(String(artifact?.sha256)));
 }
 
 function critiqueWorkspaceSnapshotIsCurrent(dir: string, critique: AnyObj): boolean {
@@ -4167,7 +4174,8 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
-    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
+    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
+    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
       die("a passing tests-evidence claim requires a current clean critique first");
     }
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
