@@ -1958,6 +1958,45 @@ test("same-reviewer rechecks reject incomplete passes and recover a legacy autom
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+test("same-reviewer rechecks remain recoverable after implementation history is rebased", async () => {
+  const session = makeSession("same-reviewer-rebase-recovery");
+  initializeTrackedSession(session);
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const reviewer = "same-reviewer-after-rebase";
+  const lane = (status) => JSON.stringify({
+    id: "code-review",
+    status,
+    summary: `Rebase recovery ${status}.`,
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  const finding = (status) => JSON.stringify({ id: "rebase-defect", severity: "medium", status, description: "Repair must survive a history rewrite." });
+  const record = (verdict, laneStatus, findingStatus, timestamp) => workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "rebase-review", "--reviewer", reviewer, "--verdict", verdict,
+    "--summary", `Same reviewer ${verdict} after rebase.`, "--artifact-ref", delivery,
+    "--lane-json", lane(laneStatus), "--finding-json", finding(findingStatus), "--timestamp", timestamp,
+  ]);
+
+  await record("fail", "fail", "open", "2030-01-01T00:00:00.000Z");
+  const priorHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  fs.writeFileSync(delivery, "reviewed delivery artifact after rebase\n");
+  execFileSync("git", ["add", "review-target/delivery.md"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "--amend", "-qm", "Rebased implementation"], { cwd: session.projectRoot });
+  const resolvingHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  assert.notEqual(priorHead, resolvingHead);
+  assert.notEqual(spawnSync("/usr/bin/git", ["merge-base", "--is-ancestor", priorHead, resolvingHead], { cwd: session.projectRoot }).status, 0);
+
+  await record("pass", "pass", "fixed", "2030-01-01T00:01:00.000Z");
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const graph = validateCritiqueResolutionGraph(bundle.claims, SUBJECT, [], session.projectRoot);
+  assert.equal(graph.valid, true, graph.errors.join("; "));
+  const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const prior = critiques.find((claim) => claim.metadata?.review_target?.workspace_snapshot?.head_sha === priorHead);
+  const resolving = critiques.find((claim) => claim.metadata?.review_target?.workspace_snapshot?.head_sha === resolvingHead);
+  assert.equal(prior.metadata.critique_resolution.kind, "same-reviewer-recheck");
+  assert.equal(prior.metadata.superseded_by, resolving.metadata.critique_record_id);
+});
+
 externalAuthorityE2E("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
   claimSessionAssignment(session);

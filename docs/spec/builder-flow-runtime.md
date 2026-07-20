@@ -432,7 +432,20 @@ must resolve every open finding from every eligible record in that recheck
 lineage. An incomplete pass is rejected before the bundle changes. A later
 complete public re-review may repair an older automatic same-reviewer recheck
 edge by retargeting that lineage to the new pass; it preserves each historical
-record and never retargets a signed cross-reviewer edge.
+record and never retargets a signed cross-reviewer edge. Before persistence, the
+writer validates the complete candidate critique graph in writer mode and
+atomically replaces `trust.bundle` only when the graph is structurally valid.
+Writer mode permits unresolved live review verdicts, which are legitimate gate
+state, but still enforces chain, resolution, subject, actor, coverage, snapshot,
+and event integrity.
+
+A same-reviewer recheck does not require the prior reviewed Git commit to be an
+ancestor of the new reviewed commit. Canonical execute route-backs can replace or
+rebase implementation history, and the same reviewer remains responsible for
+re-evaluating their own lane against the fresh immutable workspace snapshot and
+covering all prior failed lanes and findings. A cross-reviewer resolution still
+requires trusted Git ancestry plus its externally authorized resolution event;
+history rewriting never weakens an authority transfer between reviewers.
 
 When passing `tests-evidence` is synchronized, Builder validates the critique
 resolution graph against the complete candidate bundle, including superseded

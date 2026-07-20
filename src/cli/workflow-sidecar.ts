@@ -4531,12 +4531,38 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     return e;
   });
   const critiques = [..._mergedCritiques, critique];
+  const priorBundle = loadJson(path.join(dir, "trust.bundle"));
+  const resolutionEvents = Array.isArray(priorBundle.critique_resolution_events) ? priorBundle.critique_resolution_events : [];
+  const candidateBundle = await buildTrustBundle(
+    slug,
+    critique.reviewed_at,
+    _critiqueState.checks,
+    _critiqueState.criteria,
+    critiques,
+    undefined,
+    path.dirname(dir),
+    undefined,
+    exactFlowContext,
+    resolutionEvents,
+  );
+  if (!candidateBundle) die("record-critique could not build the candidate trust bundle");
+  const candidateGraph = validateCritiqueResolutionGraph(
+    Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [],
+    workflowSubjectRef,
+    resolutionEvents,
+    projectRoot,
+    false,
+    "writer",
+  );
+  if (!candidateGraph.valid) {
+    die(`record-critique refused an invalid candidate critique graph: ${candidateGraph.errors.join("; ")}`);
+  }
   // Phase 4c: build bundle from raw inputs; read checks/criteria via the shared compose-safe
   // readBundleState path (#270 LOW consolidation) instead of hand-rolling the identical
   // checksFromBundle + acceptance.json read inline — this is the exact pattern readBundleState
   // already exists to share; recordLearning uses it directly (see below) and recordCritique
   // previously duplicated it by hand for no reason.
-  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext));
+  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext, resolutionEvents));
   return 0;
 }
 

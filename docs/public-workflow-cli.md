@@ -169,7 +169,13 @@ passing lanes cover every failed or not-verified lane and its findings resolve
 every open finding in its eligible recheck lineage. A later complete re-review
 repairs an older automatic same-reviewer-recheck edge by pointing that lineage
 to the new pass. It preserves history and never rewrites a signed
-cross-reviewer resolution.
+cross-reviewer resolution. The writer validates the complete candidate critique
+graph before atomically replacing `trust.bundle`; an invalid candidate leaves
+the prior bundle unchanged. A same-reviewer recheck may cover a rebased or
+otherwise rewritten implementation history after route-back because that reviewer
+is re-evaluating their own lane against a fresh immutable workspace snapshot.
+Cross-reviewer resolution continues to require trusted Git ancestry and external
+authorization because it transfers resolution authority between identities.
 
 ## Resolving repaired critique history
 
