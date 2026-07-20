@@ -53,10 +53,11 @@ terms or treating absence as success.
 1. Confirm the confidence report remains applicable to the proposed scope.
 2. Reconcile current provider checks and review state with the revision covered
    by acceptance evidence. Stale or mismatched evidence is `NOT_VERIFIED`.
-   When the repository has `.veritas/repo-map.json`, run the installed Veritas
+   When the repository has `.veritas/repo-map.json`, run the pinned Veritas
    engine for the same base/head revision (prefer
-   `veritas readiness --check evidence --changed-from <base> --changed-to <head>
-   --format json`), follow its returned `reportArtifactPath`, and record the
+   `npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness
+   --check evidence --changed-from <base> --changed-to <head> --format json`),
+   follow its returned `reportArtifactPath`, and record the
    `software-readiness-verdict` claim plus that artifact reference in
    `release.json`. If the Veritas Governance Kit is active, its
    `veritas-governance.readiness-check` flow may supply the same claim as a
