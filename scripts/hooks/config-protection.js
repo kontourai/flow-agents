@@ -737,6 +737,8 @@ function checkCopyMoveToProtected(command, cwd) {
       if (tok === "--") { for (let j = i + 1; j < tokens.length; j++) positional.push(tokens[j]); break; }
       if (tok.startsWith("--target-directory=")) { targetDir = tok.slice("--target-directory=".length); continue; }
       if (tok === "-t" || tok === "--target-directory") { if (i + 1 < tokens.length) { targetDir = tokens[i + 1]; i++; } continue; }
+      // GNU attached short form: -tDIR (sixth-pass closure).
+      if (tok.startsWith("-t") && !tok.startsWith("--") && tok.length > 2) { targetDir = tok.slice(2); continue; }
       if (tok.startsWith("--") && tok.includes("=")) continue;
       if (tok.startsWith("-") && tok !== "-") { if (VALUE_FLAGS.has(tok) && i + 1 < tokens.length) i++; continue; }
       positional.push(tok);

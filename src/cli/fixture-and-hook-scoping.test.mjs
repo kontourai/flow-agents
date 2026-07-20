@@ -320,6 +320,9 @@ test("F4 fifth-pass: option-form cp/mv/install destinations block; value flags a
   process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
   try {
     assert.ok(hook.checkCopyMoveToProtected(`cp -t ${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`cp -t${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`mv -t${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`install -t${innocentDir} /tmp/trust.bundle`, scratch));
     assert.ok(hook.checkCopyMoveToProtected(`cp --target-directory=${innocentDir} /tmp/trust.bundle`, scratch));
     assert.ok(hook.checkCopyMoveToProtected(`install --target-directory=${innocentDir} /tmp/trust.bundle`, scratch));
     assert.ok(hook.checkCopyMoveToProtected(`install /tmp/forged.json ${innocentFile} -m 0644`, scratch));
