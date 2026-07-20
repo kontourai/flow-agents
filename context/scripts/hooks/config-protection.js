@@ -713,10 +713,10 @@ function matchesDeliveryProtected(token) {
 function checkCopyMoveToProtected(command, cwd) {
   if (typeof command !== "string" || !command) return null;
   if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
-  // Fast path: proceed when either the delivery/ spelling OR a trust-anchor basename appears —
-  // the basename alone matters when a symlink launders the directory spelling (F4 variant).
-  const lowerCommand = command.toLowerCase();
-  if (!lowerCommand.includes("delivery/") && !/trust\.(bundle|checkpoint\.json)/.test(lowerCommand)) return null;
+  // #783 fourth-pass closure: NO textual content gate — an innocent-name symlink destination
+  // carries neither the delivery/ spelling nor a trust-anchor basename, so the only sound
+  // fast path is the command-name check above. protectedTargetBlocks canonicalizes each
+  // destination candidate (one realpath walk per cp/mv/install command — negligible).
 
   const segments = splitSegments(command);
   for (const seg of segments) {
