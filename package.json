@@ -159,8 +159,8 @@
     "@kontourai/survey": "1.18.0",
     "@kontourai/traverse": "0.19.0",
     "@types/node": "^26.1.1",
-    "gcp-metadata": "7.0.1",
-    "promptfoo": "^0.121.18",
+    "gcp-metadata": "8.1.3",
+    "promptfoo": "^0.121.19",
     "typescript": "^7.0.2"
   },
   "dependencies": {
