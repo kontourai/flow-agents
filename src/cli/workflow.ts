@@ -28,7 +28,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "regenerate-critique-chain", "resolve-critique-request", "resolve-critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -38,6 +38,8 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
+  regenerate-critique-chain
+                      Explicitly regenerate pre-chain critique history through the sole writer.
   resolve-critique    Resolve a repaired historical critique through a later review record.
   drive               Continue the canonical run through an explicit runtime adapter.
   pause               Pause the current run as its assignment actor.
@@ -69,6 +71,7 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "regenerate-critique-chain") return regenerateCritiqueChain(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
@@ -76,6 +79,33 @@ export async function main(argv: string[]): Promise<number> {
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+async function regenerateCritiqueChain(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow regenerate-critique-chain");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+    if (current.definitionId !== "builder.build" || current.state.status !== "active") {
+      throw new Error("workflow regenerate-critique-chain requires one active canonical builder.build run");
+    }
+    const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
+    const beforeBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
+    await mainFromPublicWorkflow(["regenerate-critique-chain", sessionDir]);
+    const after = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+    if (!isDeepStrictEqual(after.manifest, beforeManifest)) {
+      throw new Error("workflow regenerate-critique-chain must not mutate the Flow manifest");
+    }
+    const digest = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
+    if (!digest || digest === beforeBundle) throw new Error("workflow regenerate-critique-chain did not replace trust.bundle");
+    return immutableReport({ run_id: slug, regenerated: true, trust_bundle_sha256: digest });
+  });
+  if (json) console.log(JSON.stringify(report));
+  else console.log("Regenerated critique history through the trust-bundle writer.");
+  return 0;
 }
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
@@ -521,7 +551,11 @@ function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {
     const metadata = claim.metadata as JsonRecord;
     return { ...metadata, verdict: claim.value, summary: claim.fieldOrBehavior };
   });
-  const normalized = normalizeCritiqueChainRecords(records).records;
+  const normalization = normalizeCritiqueChainRecords(records);
+  if (normalization.migrated) {
+    throw new Error("critique history requires regeneration; run `flow-agents workflow regenerate-critique-chain --session-dir <path>`");
+  }
+  const normalized = normalization.records;
   let index = 0;
   return claims.map((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
     ? { ...claim, metadata: { ...(claim.metadata as JsonRecord), ...normalized[index++] } }

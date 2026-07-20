@@ -181,7 +181,7 @@ test("pre-chain critique migration is deterministic and never rewrites legacy re
   assert.equal(first.records[1].critique_predecessor_hash, first.records[0].critique_record_hash);
 });
 
-test("legacy writer superseded clean PASS remains history beside a current pre-chain PASS", () => {
+test("ordinary validation rejects pre-chain history with the public regeneration command", () => {
   const base = (id, status, reviewedAt) => ({
     id: `claim-${id}`,
     value: "pass",
@@ -203,8 +203,74 @@ test("legacy writer superseded clean PASS remains history beside a current pre-c
 
   const graph = validateCritiqueResolutionGraph([historical, current], SUBJECT);
 
+  assert.equal(graph.valid, false);
+  assert.deepEqual(graph.errors, ["critique history requires regeneration; run `flow-agents workflow regenerate-critique-chain --session-dir <path>`"]);
+});
+
+test("public critique-chain regeneration preserves logical ids, history, provenance, and Flow manifest", async () => {
+  const session = makeSession("explicit-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const capturedAt = Date.now();
+  const historical = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "legacy-history");
+  historical.claim.metadata.critique_record_id = "legacy-logical-record";
+  historical.claim.status = "superseded";
+  historical.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  const current = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "current-review");
+  current.claim.metadata.critique_record_id = "current-logical-record";
+  const logicalIds = [historical.claim.metadata.critique_record_id, current.claim.metadata.critique_record_id];
+  writeBundle(session.sessionDir, [historical, current]);
+  const beforeManifest = snapshotTree(runDir(session.slug, session.projectRoot));
+
+  assert.equal(await workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]), 0);
+
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.deepEqual(critiques.map((claim) => claim.metadata.critique_record_id), logicalIds);
+  assert.ok(critiques.every((claim) => claim.metadata.critique_chain_regeneration?.operation === "regenerate-critique-chain"));
+  assert.match(critiques[0].metadata.critique_chain_regeneration.prior_bundle_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(critiques[0].metadata.critique_resolution.kind, "same-reviewer-recheck");
+  assert.equal(critiques[0].metadata.superseded_by, critiques[1].metadata.critique_record_id);
+  const graph = validateCritiqueResolutionGraph(critiques, SUBJECT, [], session.projectRoot);
   assert.equal(graph.valid, true, graph.errors.join("; "));
-  assert.deepEqual(graph.live.map((record) => record.source_claim_id), [current.id]);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeManifest);
+  const regeneratedBytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /found no pre-chain critique history/,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), regeneratedBytes);
+});
+
+test("public critique-chain regeneration rejects ambiguous legacy supersession before mutation", async () => {
+  const session = makeSession("ambiguous-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const capturedAt = Date.now();
+  const historical = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "ambiguous-history");
+  historical.claim.status = "superseded";
+  historical.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  const currentOne = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "ambiguous-current-one");
+  const currentTwo = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 2).toISOString())[0], "ambiguous-current-two");
+  writeBundle(session.sessionDir, [historical, currentOne, currentTwo]);
+  const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /requires one unique later same-reviewer clean recheck/,
+  );
+
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
 });
 
 test("a partially populated critique chain fails closed instead of being re-stamped", () => {
@@ -2340,18 +2406,15 @@ test("stale passing critique remains audit history when a current exact-workspac
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   const capturedAt = Date.now();
-  const legacy = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "legacy-same-reviewer-pass");
-  legacy.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
-  legacy.claim.status = "superseded";
-  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "stale-other-reviewer-pass");
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-other-reviewer-pass");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 2).toISOString());
-  const current = asPreChainCritique(currentEntry, "current-pass");
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = withIdentitySuffix(currentEntry, "current-pass");
+  appendCritiqueAfter(stale, current);
 
   const result = await writeAndSync(session, [
     bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
-    legacy,
     stale,
     current,
     criterion,
@@ -2371,12 +2434,13 @@ test("stale open critique remains blocking even when a different reviewer suppli
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   const capturedAt = Date.now();
-  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-open");
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-open");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.findings = [{ id: "old-open-finding", status: "open", summary: "Must not be buried." }];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
   const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
-  const current = asPreChainCritique(currentEntry, "current-after-open");
+  const current = withIdentitySuffix(currentEntry, "current-after-open");
+  appendCritiqueAfter(stale, current);
 
   await assert.rejects(
     () => writeAndSync(session, [
@@ -2400,12 +2464,13 @@ test("malformed stale passing critique remains blocking when a current clean cri
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   const capturedAt = Date.now();
-  const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-stale");
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-stale");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.review_target.workspace_snapshot.files = [];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
   const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
-  const current = asPreChainCritique(currentEntry, "current-after-malformed");
+  const current = withIdentitySuffix(currentEntry, "current-after-malformed");
+  appendCritiqueAfter(stale, current);
 
   await assert.rejects(
     () => writeAndSync(session, [

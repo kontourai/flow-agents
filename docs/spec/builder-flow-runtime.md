@@ -80,6 +80,20 @@ one distinct-actor clean critique must match the current workspace exactly and
 retain matching reviewed-artifact digests. This current-snapshot selection does
 not supersede another reviewer's record and cannot bury a disputed finding.
 
+Critique validation never repairs pre-chain history implicitly. An upgraded
+session with critique records that predate writer-issued sequence and hash
+anchors fails with a migration-required diagnostic naming the public command:
+
+```sh
+flow-agents workflow regenerate-critique-chain --session-dir <path>
+```
+
+That command is the sole regeneration boundary. It runs under the bound session
+assignment, preserves logical critique record ids, records prior-bundle digest
+provenance, converts unambiguous legacy same-reviewer supersession to explicit
+resolution edges, and leaves the canonical Flow manifest unchanged. Partial or
+ambiguous histories fail before mutation.
+
 Attachments carry the exact expectation ids selected from the current bundle.
 Digest idempotence applies only while an unsuperseded attachment for that gate
 and expectation set remains live. After route-back, claims must be current for

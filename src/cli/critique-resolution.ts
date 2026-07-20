@@ -63,7 +63,13 @@ export function normalizeCritiqueChainRecords(records: AnyRecord[]): { records: 
     const base = { ...record, critique_sequence: index + 1, critique_predecessor_hash: predecessor };
     const hash = critiqueRecordHash(base);
     predecessor = hash;
-    byOriginalIndex.set(originalIndex, { ...base, critique_record_hash: hash, critique_record_id: `critique:${hash}` });
+    byOriginalIndex.set(originalIndex, {
+      ...base,
+      critique_record_hash: hash,
+      critique_record_id: typeof record.critique_record_id === "string" && record.critique_record_id.length > 0
+        ? record.critique_record_id
+        : `critique:${hash}`,
+    });
   });
   const migrated = records.map((_, index) => byOriginalIndex.get(index)!);
   return { records: migrated, migrated: true };
@@ -89,23 +95,6 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
     critique_resolution: metadata.critique_resolution,
     claim_status: claim.status,
   };
-}
-
-function isLegacyHistoricalCleanPass(record: AnyRecord): boolean {
-  const incompleteChain = !Number.isSafeInteger(record.critique_sequence)
-    && !HASH_RE.test(String(record.critique_predecessor_hash))
-    && !HASH_RE.test(String(record.critique_record_hash));
-  const lanes = Array.isArray(record.lanes) ? record.lanes : [];
-  const findings = Array.isArray(record.findings) ? record.findings : [];
-  return incompleteChain
-    && typeof record.superseded_by === "string"
-    && record.superseded_by.length > 0
-    && !record.critique_resolution
-    && record.verdict === "pass"
-    && record.claim_status === "superseded"
-    && lanes.length > 0
-    && lanes.every((lane: AnyRecord) => lane?.status === "pass" || lane?.verdict === "pass")
-    && !findings.some((finding: AnyRecord) => finding?.status === "open");
 }
 
 type GraphState = {
@@ -195,18 +184,20 @@ function validateEvents(state: GraphState): void {
 export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, externalCompletionVerified = false): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const extracted = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   if (!extracted.length) return { valid: false, errors: ["critique graph has no records"], live: [] };
-  // Before the hash-chain contract shipped, same-reviewer rechecks marked the prior clean PASS
-  // as superseded without a resolution edge. Those already-resolved clean records remain audit
-  // history; deterministically chain the remaining records in memory. A legacy FAIL, open
-  // finding, malformed partial chain, or unresolved supersession is never filtered here.
-  const candidates = extracted.filter((record) => !isLegacyHistoricalCleanPass(record));
   let records: AnyRecord[];
   try {
-    records = normalizeCritiqueChainRecords(candidates).records;
+    const normalized = normalizeCritiqueChainRecords(extracted);
+    if (normalized.migrated) {
+      return {
+        valid: false,
+        errors: ["critique history requires regeneration; run `flow-agents workflow regenerate-critique-chain --session-dir <path>`"],
+        live: [],
+      };
+    }
+    records = normalized.records;
   } catch (error) {
     return { valid: false, errors: [error instanceof Error ? error.message : String(error)], live: [] };
   }
-  if (!records.length) return { valid: false, errors: ["critique graph has no current records"], live: [] };
   const state: GraphState = { records, byId: new Map(), byHash: new Map(), errors: [], referencedEventIds: new Set(), expectedSubject, resolutionEvents, projectRoot, externalCompletionVerified };
   validateRecords(records, state); records.forEach((record) => validateResolution(record, state));
   const live = records.filter((record) => !record.superseded_by);
