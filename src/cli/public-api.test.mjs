@@ -36,6 +36,7 @@ test("public API retains the documented native-host compatibility surface", asyn
   for (const name of [
     "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
     "pauseBuilderFlowSession", "resumeBuilderFlowSession",
+    "cancelBuilderFlowSession", "archiveBuilderFlowSession",
     "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
     "ContinuationAdapterTimeoutError",
     "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
@@ -45,7 +46,8 @@ test("public API retains the documented native-host compatibility surface", asyn
   assert.equal(typeof lib.loadJson, "function");
   assert.equal(typeof lib.validateTrustBundle, "function");
   assert.equal(typeof lib.builderLifecycleAuthorizationPayload, "function");
-  for (const name of ["cancelBuilderFlowSession", "archiveBuilderFlowSession", "loadBuilderLifecycleAuthorization", "loadCritiqueResolutionAuthorization"]) {
+  assert.equal(typeof lib.loadBuilderLifecycleAuthorization, "function");
+  for (const name of ["loadCritiqueResolutionAuthorization"]) {
     assert.equal(lib[name], undefined, `${name} must remain CLI-only so untrusted in-process callers cannot bypass process isolation`);
   }
 });

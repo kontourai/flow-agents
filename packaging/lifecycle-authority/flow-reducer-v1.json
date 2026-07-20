@@ -2,6 +2,7 @@
   "package": "@kontourai/flow",
   "package_version": "3.5.0",
   "release_commit": "871ed9c",
+  "closure_sha256": "d6fec9277a27df126a3005ce09068e65ab486ee641b4963c9f81043bcda77b0d",
   "reducer": {
     "artifact_id": "kontourai.flow.trust-attachment-reducer",
     "version": "1.0.0",

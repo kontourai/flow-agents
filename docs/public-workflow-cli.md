@@ -126,10 +126,9 @@ match the request. Empty, multi-line, malformed, or extended responses fail clos
 independently reject unknown fields/actions, canonicalize and constrain every received path, derive
 the run/project/artifact roots rather than trusting claimed relationships, and perform mutation only
 after its own locked precondition and compare-and-swap checks.
-Package-side graph validation never invokes a live verification subprocess and never treats a helper
-response as authorization. Until a future immutable attestation verification contract exists, it
-reports externally resolved history as `NOT_VERIFIED`; the helper must complete the authoritative
-transition itself.
+Package-side graph validation never invokes a live verification subprocess or treats a helper
+response as authorization. It verifies the coordinator's pinned Ed25519 completion receipt and
+requires its result digest to bind the exact resolved graph before Builder consumes the transition.
 
 The helper and its provider-neutral key registry are deployed and configured by runtime
 administrators outside source control. Flow Agents ships neither helper configuration nor keys.

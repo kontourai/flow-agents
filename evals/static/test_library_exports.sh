@@ -57,8 +57,9 @@ const required = [
   "loadJson", "readSidecar", "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
   "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
   "pauseBuilderFlowSession", "resumeBuilderFlowSession",
+  "cancelBuilderFlowSession", "archiveBuilderFlowSession",
   "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
-  "builderLifecycleAuthorizationPayload",
+  "builderLifecycleAuthorizationPayload", "loadBuilderLifecycleAuthorization",
   "statuses", "phases", "checkKinds", "checkStatuses", "verdicts",
 ];
 const missing = required.filter((name) => lib[name] === undefined);

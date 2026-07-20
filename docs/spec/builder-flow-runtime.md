@@ -315,7 +315,7 @@ path component must be OS-owned, outside the project/package/worktree, and non-w
 runtime user, group, and world. The external helper owns verification, locking, nonce replay
 protection, compare-and-swap, critique edge/history persistence, canonical evidence attachment, Flow
 synchronization, and all other authoritative writes; package JavaScript never enacts a mutation from
-a helper return value. Flow Agents ships no helper, keys, or deployment-specific configuration.
+a helper return value. Flow Agents ships the public coordinator and installer, but no keys or deployment-specific configuration.
 Missing or untrusted helpers fail closed.
 
 The wire contract is one canonical JSON request line and exactly one JSON response line. Both bind
@@ -324,11 +324,10 @@ action-specific result. Unknown/extra fields, actions, versions, digests, status
 multiple output records, and malformed JSON fail closed. The helper independently canonicalizes and
 constrains all received paths, derives root relationships itself, and never treats caller-provided
 paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
-`NOT_VERIFIED` in ordinary checkout CI until the administrator-owned reference helper is provisioned.
-Package-side replay/graph validation does not call a live `verify-authorization` action. Without an
-immutable helper-produced attestation and pinned public verification contract it reports the
-external resolution `NOT_VERIFIED`, and that verdict cannot unlock evidence attachment or Flow sync.
-Reference implementation, provisioning, and positive platform conformance are tracked in issue #744.
+`NOT_VERIFIED` when the administrator-owned helper and pinned verification key are absent.
+Package-side validation does not call a live verification action; it verifies the immutable signed
+completion locally and binds its result digest to the exact resolution graph before Builder consumes
+the transition.
 
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
