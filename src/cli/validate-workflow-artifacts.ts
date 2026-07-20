@@ -2,6 +2,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
 
 type Issue = { path: string; message: string };
 
@@ -438,8 +439,11 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     const evidence = payloads.get("evidence.json");
     if (evidence?.verdict === "pass" && Array.isArray(evidence.checks) && evidence.checks.some((c: any) => c.status !== "pass" && c.status !== "skip")) issues.push({ path: path.join(dir, "evidence.json"), message: "pass verdict requires all non-skipped checks to pass" });
   }
-  if (requireSidecars) {
-    const dirs = new Set<string>(markdown.map((p) => path.dirname(p)));
+  if (requireSidecars || requireCritique) {
+    const dirs = new Set<string>([
+      ...markdown.map((p) => path.dirname(p)),
+      ...inputs.filter((p) => fs.existsSync(p) && fs.statSync(p).isDirectory()).map((p) => path.resolve(p)),
+    ]);
     for (const dir of dirs) {
       const deliver = markdown.find((p) => path.dirname(p) === dir && p.includes("deliver") && !p.includes("plan") && !p.includes("review"));
       const delivered = deliver ? /status:\s*(delivered|accepted|archived)/i.test(readText(deliver)) : true;
@@ -448,8 +452,10 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       // Hard-fail on evidence.json absence only when no trust.bundle exists for a delivered session.
       const hasTrustBundle = fs.existsSync(path.join(dir, "trust.bundle"));
       const evidenceRequired = delivered && !hasTrustBundle;
-      for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
-        if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+      if (requireSidecars) {
+        for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
+          if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+        }
       }
       // ADR 0010 Phase 4c: critique.json no longer written; trust.bundle carries critique claims. Accept either.
       if (requireCritique && !fs.existsSync(path.join(dir, "critique.json")) && !fs.existsSync(path.join(dir, "trust.bundle"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });
@@ -459,12 +465,11 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
         const { value: bundleValue } = readJson(trustBundlePath);
         if (bundleValue) {
           const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
-          const critiqueClaims = claims.filter((c: any) => c && c.claimType === "workflow.critique.review");
-          // #282: a historical fail/disputed critique that has been explicitly superseded by a later
-          // resolving write (metadata.superseded_by) is retained structurally as history and does NOT
-          // block a top-level pass — only a LIVE (non-superseded) fail/disputed critique blocks.
-          const isSuperseded = (c: any) => c && c.metadata && typeof c.metadata === "object" && c.metadata.superseded_by;
-          if (critiqueClaims.some((c: any) => (c.value === "fail" || c.status === "disputed") && !isSuperseded(c))) issues.push({ path: trustBundlePath, message: "required critique must pass" });
+          const stateResult = readJson(path.join(dir, "state.json"));
+          const state = stateResult.value;
+          const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
+          const graph = validateCritiqueResolutionGraph(claims, subject);
+          if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

@@ -107,14 +107,18 @@ supplies a trusted delegation credential.
 `workflow resolve-critique` closes a historical failing or not-verified review
 without deleting it or borrowing the earlier reviewer's identity. It is only
 available during `builder.build` verification. The caller is authenticated from
-the runtime actor and must be the reviewer recorded on the later passing
-critique, while remaining distinct from the active implementation assignment.
+a stable runtime-session or CI identity and must be the reviewer recorded on
+the later passing critique, while remaining distinct from the active
+implementation assignment. Explicit actor overrides and process-ancestry
+fallback identities are rejected for this operation.
 
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the
-workspace, strictly newer than the historical review, and cover at least one
-of the same lane IDs. This lane overlap is the policy-defined relationship
-between the two reviews.
+workspace, later in the writer-issued predecessor hash chain, and cover every
+failed or not-verified lane plus every open finding from the earlier critique.
+When both reviews target Git worktrees, the resolving commit must descend from
+the earlier reviewed commit. The explicit per-lane and per-finding edges are
+the policy-defined relationship between the two reviews.
 
 ```bash
 flow_agents workflow resolve-critique \
@@ -128,6 +132,12 @@ findings, timestamps, `superseded_by` reference, and `critique_resolution`
 audit record. Repeating the identical valid request is a no-op. Missing,
 ambiguous, circular, stale, equal-snapshot, wrong-subject, or unauthorized
 requests fail without changing the bundle.
+
+The local sequence and predecessor hashes are tamper-evident workflow records;
+they are not an externally signed append-only ledger. Deployments that require
+cryptographic reviewer delegation or non-repudiation must add a trusted
+provider-neutral identity credential and external anchor rather than treating
+local runtime identity as that stronger assurance.
 
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"

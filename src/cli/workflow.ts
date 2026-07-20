@@ -419,7 +419,7 @@ function builderOperationForExpectation(flowId: string, expectationId: string): 
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json", "timestamp"]), "workflow critique");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]), "workflow critique");
   if (!flagString(parsed.flags, "summary")) throw new Error("workflow critique requires --summary <text>");
   if (Object.hasOwn(parsed.flags, "reviewer")) throw new Error("workflow critique derives reviewer identity from the authenticated assignment actor; --reviewer is not accepted");
   const { slug, projectRoot } = readBoundSession(sessionDir);
@@ -459,7 +459,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
   const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
-    const caller = assertDistinctReviewActor(sessionDir, slug);
+    const caller = assertStableDistinctReviewActor(sessionDir, slug);
     const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
     if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") {
       throw new Error("workflow resolve-critique is allowed only for the canonical builder.build verify step");
@@ -760,6 +760,20 @@ function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType
         "(the runtime session id seeds the actor).",
     );
   }
+  return caller;
+}
+
+function assertStableDistinctReviewActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
+  const helper = REQUIRE(helperPath) as {
+    resolveActorIdentity: (env: NodeJS.ProcessEnv) => { actor: string; source: string; actorStruct: JsonRecord | null };
+  };
+  const identity = helper.resolveActorIdentity(process.env);
+  if (!identity.source.startsWith("runtime-session-id:") && !identity.source.startsWith("ci-runtime:")) {
+    throw new Error("workflow resolve-critique requires a stable runtime-session or CI identity; explicit actor overrides and process-ancestry identities are not accepted");
+  }
+  const caller = assertDistinctReviewActor(sessionDir, slug);
+  if (caller.actorKey !== identity.actor) throw new Error("workflow resolve-critique runtime identity changed during authorization");
   return caller;
 }
 

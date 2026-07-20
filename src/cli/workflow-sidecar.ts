@@ -29,6 +29,7 @@ import {
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 
 type AnyObj = Record<string, any>;
 
@@ -1003,7 +1004,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimMetadata: AnyObj = {
       origin: "check",
       check_kind: String(check.kind ?? "external"),
-      ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
+      ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(typeof check._producer === "string" ? { expected_producer: check._producer } : {}),
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
       ...(Array.isArray(check._producer_self_produced_trust_slices) ? { self_produced_trust_slices: check._producer_self_produced_trust_slices } : {}),
@@ -1181,12 +1182,17 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
       ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
+      critique_sequence: c.critique_sequence,
+      critique_predecessor_hash: c.critique_predecessor_hash,
+      critique_record_hash: c.critique_record_hash,
       findings: Array.isArray(c.findings) ? c.findings : [],
       lanes: Array.isArray(c.lanes) ? c.lanes : [],
       review_target: c.review_target && typeof c.review_target === "object" ? c.review_target : { artifacts: [] },
       // Keep the legacy field for consumers that still render a flat artifact list.
       artifact_refs: Array.isArray(c.artifact_refs) ? c.artifact_refs : [],
-      ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
+      ...((typeof c.workflow_subject_ref === "string" && c.workflow_subject_ref.length > 0) || workflowSubjectRef
+        ? { workflow_subject_ref: c.workflow_subject_ref ?? workflowSubjectRef }
+        : {}),
       ...(supersededBy ? { superseded_by: supersededBy } : {}),
       ...(c.critique_resolution && typeof c.critique_resolution === "object" && !Array.isArray(c.critique_resolution)
         ? { critique_resolution: c.critique_resolution }
@@ -1219,7 +1225,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
 
     // Critique is intentionally report-only. It must never inherit a Flow gate expectation,
     // even while a run is positioned at a gate-bearing step.
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id, metadata: critMeta };
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: c.created_at ?? critiqueReviewedAt, updatedAt: c.updated_at ?? critiqueReviewedAt, impactLevel: "medium", verificationPolicyId: policy.id, metadata: critMeta };
     if (supersededBy) {
       // History: status is "superseded" directly (no verification event); excluded from evaluation.
       claims.push({ ...claimObj, status: "superseded" });
@@ -3692,7 +3698,12 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
+      critique_sequence: md.critique_sequence,
+      critique_predecessor_hash: md.critique_predecessor_hash,
+      critique_record_hash: md.critique_record_hash,
       claim_status: c.status,
+      created_at: c.createdAt,
+      updated_at: c.updatedAt,
       artifact_refs: Array.isArray(md.artifact_refs) ? md.artifact_refs : [],
       ...(typeof md.workflow_subject_ref === "string" ? { workflow_subject_ref: md.workflow_subject_ref } : {}),
       ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
@@ -4345,7 +4356,14 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const bundleCritiques = _critiqueState.critiques;
   const critiqueId = opt(p, "id", "review");
   if (!safeCritiqueId.test(critiqueId)) die("record-critique --id must be a safe identifier");
-  const critique = {
+  const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
+  if (workItemRefs.length !== 1 || !hasNonEmptyString(workItemRefs[0])) die("record-critique requires one bound workflow subject");
+  const sequence = bundleCritiques.length + 1;
+  const predecessor = sequence === 1 ? null : bundleCritiques.find((entry) => entry.critique_sequence === sequence - 1);
+  if (bundleCritiques.length > 0 && (!predecessor || predecessor.critique_record_hash !== critiqueRecordHash(predecessor))) {
+    die("record-critique requires an intact writer-issued critique hash chain");
+  }
+  const critique: AnyObj = {
     id: critiqueId,
     reviewer: opt(p, "reviewer", "tool-code-reviewer"),
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
@@ -4362,7 +4380,16 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     },
     artifact_refs: reviewArtifacts.map((artifact) => artifact.file),
     findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"), projectRoot)),
+    workflow_subject_ref: String(workItemRefs[0]),
+    critique_sequence: sequence,
+    critique_predecessor_hash: predecessor?.critique_record_hash ?? CRITIQUE_CHAIN_GENESIS,
+    created_at: opt(p, "timestamp", ""),
+    updated_at: opt(p, "timestamp", ""),
   };
+  critique.created_at = critique.created_at || critique.reviewed_at;
+  critique.updated_at = critique.updated_at || critique.reviewed_at;
+  critique.critique_record_hash = critiqueRecordHash(critique);
+  critique.critique_record_id = `critique:${critique.critique_record_hash}`;
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   // #267/#282: supersede-by-critique-id. The latest write for a critique id wins for
   // reconcile / status / validator purposes; each prior LIVE write for the same id is RETAINED as
@@ -4374,11 +4401,19 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // distinction yet — that lands with the runtime actor-identity slice (#287/#290). Same-reviewer-
   // string scoping is the strongest honest enforcement available today and matches the granularity
   // the critique record already has.
-  const _supersedeMarker = `${critique.id}@${critique.reviewed_at}`;
+  const _supersedeMarker = critique.critique_record_id;
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
     const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
     const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
-    if (e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) return { ...e, superseded_by: _supersedeMarker };
+    if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
+      const resolvedLaneIds = (Array.isArray(e.lanes) ? e.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
+      const resolvedFindingIds = (Array.isArray(e.findings) ? e.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+      return { ...e, superseded_by: _supersedeMarker, critique_resolution: {
+        schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: e.critique_record_id,
+        resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
+        resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
+      } };
+    }
     return e;
   });
   const critiques = [..._mergedCritiques, critique];
@@ -4401,11 +4436,6 @@ function critiqueByRecordId(critiques: AnyObj[], recordId: string, label: string
   const matches = critiques.filter((critique) => critique.critique_record_id === recordId);
   if (matches.length !== 1) die(`resolve-critique ${label} critique record ${recordId} is missing or ambiguous`);
   return matches[0]!;
-}
-
-function critiqueLaneIds(critique: AnyObj): Set<string> {
-  return new Set((Array.isArray(critique.lanes) ? critique.lanes : [])
-    .flatMap((lane: AnyObj) => typeof lane?.id === "string" && lane.id.length > 0 ? [lane.id] : []));
 }
 
 async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
@@ -4453,27 +4483,57 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   if (!priorSnapshot || !resolvingSnapshot || priorSnapshot === resolvingSnapshot) {
     die("resolve-critique resolving critique must reference a newer immutable workspace snapshot");
   }
-  const priorReviewedAt = Date.parse(String(prior.reviewed_at));
-  const resolvingReviewedAt = Date.parse(String(resolving.reviewed_at));
-  if (!Number.isFinite(priorReviewedAt) || !Number.isFinite(resolvingReviewedAt) || resolvingReviewedAt <= priorReviewedAt) {
-    die("resolve-critique resolving critique must be newer than the prior critique");
+  if (!Number.isSafeInteger(prior.critique_sequence) || !Number.isSafeInteger(resolving.critique_sequence)
+    || resolving.critique_sequence <= prior.critique_sequence) {
+    die("resolve-critique resolving critique must be newer in the writer-issued critique sequence");
   }
-  const priorLanes = critiqueLaneIds(prior);
-  const resolvingLanes = critiqueLaneIds(resolving);
-  if (priorLanes.size === 0 || ![...priorLanes].some((laneId) => resolvingLanes.has(laneId))) {
-    die("resolve-critique requires the resolving critique to cover a prior review lane");
+  const chainByHash = new Map(existing.critiques.map((critique) => [critique.critique_record_hash, critique]));
+  let chainCursor: AnyObj | undefined = resolving;
+  let descendsFromPrior = false;
+  const visitedHashes = new Set<string>();
+  while (chainCursor && !visitedHashes.has(chainCursor.critique_record_hash)) {
+    visitedHashes.add(chainCursor.critique_record_hash);
+    if (chainCursor.critique_predecessor_hash === prior.critique_record_hash) { descendsFromPrior = true; break; }
+    chainCursor = chainByHash.get(chainCursor.critique_predecessor_hash);
+  }
+  if (!descendsFromPrior) die("resolve-critique resolving critique must be a hash-chain descendant of the prior critique");
+  const priorWorkspace = prior.review_target?.workspace_snapshot;
+  const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
+  if (priorWorkspace?.kind === "git-worktree" && resolvingWorkspace?.kind === "git-worktree") {
+    try {
+      execFileSync("git", ["merge-base", "--is-ancestor", String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha)], {
+        cwd: canonicalProjectRootForSession(dir), stdio: "ignore",
+      });
+    } catch { die("resolve-critique resolving Git snapshot must descend from the prior reviewed commit"); }
+  }
+  const requiredLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
+  const resolvingLaneStatus = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : []).map((lane: AnyObj) => [lane.id, lane.status]));
+  if (requiredLaneIds.length === 0 || requiredLaneIds.some((laneId: string) => resolvingLaneStatus.get(laneId) !== "pass")) {
+    die("resolve-critique requires the resolving critique to cover every failed or not-verified review lane");
+  }
+  const requiredFindingIds = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+  const resolvingFindingStatus = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyObj) => [finding.id, finding.status]));
+  if (requiredFindingIds.some((findingId: string) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolvingFindingStatus.get(findingId)))) {
+    die("resolve-critique requires the resolving critique to cover every open finding");
   }
   const resolvedAt = now();
   const resolution = {
     schema_version: "1.0",
+    kind: "cross-reviewer",
     prior_record_id: priorRecordId,
     resolving_record_id: resolvingRecordId,
     resolver,
+    resolved_lane_ids: requiredLaneIds,
+    resolved_finding_ids: requiredFindingIds,
     resolved_at: resolvedAt,
   };
   const critiques = existing.critiques.map((critique) => critique.critique_record_id === priorRecordId
     ? { ...critique, superseded_by: resolvingRecordId, critique_resolution: resolution }
     : critique);
+  const candidateBundle = await buildTrustBundle(slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, path.dirname(dir), undefined, exactFlowContext);
+  if (!candidateBundle) die("resolve-critique could not build the candidate trust bundle");
+  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef);
+  if (!graph.valid) die(`resolve-critique rejected invalid critique graph: ${graph.errors.join("; ")}`);
   assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext));
   return 0;
 }
@@ -5971,16 +6031,17 @@ function critiqueClean(dir: string): boolean {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
-    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
-      if (!c) return false;
-      // #267/#282: superseded history is not evaluated for cleanliness.
-      if (c.metadata && typeof c.metadata === "object" && (c.metadata as AnyObj).superseded_by) return false;
-      return claimOrigin(c) === "critique";
-    });
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "critique");
     if (critiqueClaims.length === 0) return false; // no critique written yet
-    return critiquesFromBundle(dir)
-      .filter((critique) => !critique.superseded_by)
-      .every((critique) => critiqueIsCleanAndCurrent(dir, critique));
+    const state = loadJson(path.join(dir, "state.json"));
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
+    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject);
+    if (!graph.valid) return false;
+    const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+    return graph.live.every((record) => {
+      const critique = byRecordId.get(record.critique_record_id);
+      return critique && critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique);
+    });
   }
   return false;
 }
@@ -7136,7 +7197,10 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
-      case "resolve-critique": return resolveCritique(p);
+      case "resolve-critique": {
+        if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("resolve-critique is available only through the authenticated public workflow interface");
+        return resolveCritique(p);
+      }
       case "import-critique": return importCritique(p);
       case "record-release": return recordRelease(p);
       case "record-learning": return recordLearning(p);
