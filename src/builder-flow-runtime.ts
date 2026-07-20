@@ -641,9 +641,8 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(definition, run.state, run.manifest, gate.id, run.config);
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -917,10 +916,7 @@ function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
 }
 
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(
-    JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")),
-    run.state,
-  ) as Array<FlowGate & { id: string }>;
+  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
 async function bundleGateEvidence(
@@ -1294,7 +1290,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 }
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
+  const definition = run.definition;
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
@@ -1370,6 +1366,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       run_id: run.runId,
       definition_id: run.definitionId,
       definition_version: run.definitionVersion,
+      definition_digest: run.definitionDigest,
       status: run.state.status,
       current_step: run.state.current_step,
       run_ref: path.relative(context.projectRoot, run.dir),

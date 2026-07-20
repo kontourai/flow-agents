@@ -174,6 +174,14 @@ Route-back changes the canonical head. A gate-action envelope derived before an
 new plan head; callers must obtain the newly projected envelope after Flow records the
 route.
 
+An authorized Flow definition amendment also changes the canonical head. The immutable
+`definition.json` continues to authenticate the installed Builder definition that started
+the run, while Flow's validated effective successor drives gates and projections. Envelopes,
+progress snapshots, and sidecar `flow_run` projections bind the successor's version and
+SHA-256 digest. A pre-amendment envelope therefore fails canonical snapshot validation even
+when the run id and current step are unchanged. Legacy unamended runs remain readable without
+a projected digest.
+
 The envelope provides the current gate ids and claim shapes, including each
 expectation's required flag and `satisfied`, `accepted_exception`, or `unresolved`
 status. Accepted exceptions are identified separately. Flow Agents evaluates

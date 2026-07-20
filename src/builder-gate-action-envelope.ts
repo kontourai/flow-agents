@@ -98,6 +98,7 @@ export type GateActionEnvelope = {
     run_id: string;
     definition_id: string;
     definition_version: string;
+    definition_digest: string;
     status: string;
     current_step: string;
     gate_ids: string[];
@@ -175,6 +176,9 @@ export { EVIDENCE_REF_JSON_SCHEMA } from "./cli/public-contracts.js";
 
 export type GateActionProgressSnapshot = Pick<GateActionEnvelope["progress"], "canonical_evidence" | "observed_artifacts"> & {
   current_step: string;
+  /** Effective Flow definition identity; absent only in legacy snapshots. */
+  definition_version?: string;
+  definition_digest?: string;
   /** Optional for compatibility with snapshots persisted before terminal status capture. */
   canonical_status?: string;
 };
@@ -195,6 +199,7 @@ export type BuilderGateActionEnvelopeInput = {
     runId: string;
     definitionId: string;
     definitionVersion: string;
+    definitionDigest: string;
     state: FlowRunState;
     manifest: AnyRecord;
     config: AnyRecord;
@@ -335,6 +340,8 @@ export function deriveBuilderGateActionProgressSnapshot(input: BuilderGateAction
   const { actions } = loadGateAction(input);
   return {
     current_step: input.run.state.current_step,
+    definition_version: input.run.definitionVersion,
+    definition_digest: input.run.definitionDigest,
     canonical_status: input.run.state.status,
     canonical_evidence: canonicalEvidence(input.run.manifest),
     observed_artifacts: observeBuilderArtifactsForProgress(input.sessionDir, actions.flatMap((entry) => entry.artifacts)),
@@ -397,6 +404,7 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
       run_id: input.run.runId,
       definition_id: input.run.definitionId,
       definition_version: input.run.definitionVersion,
+      definition_digest: input.run.definitionDigest,
       status: input.run.state.status,
       current_step: input.run.state.current_step,
       gate_ids: gates.map((gate) => gate.id),
@@ -470,6 +478,8 @@ function envelopeStopCondition(
 export function gateActionProgressSnapshot(envelope: GateActionEnvelope): GateActionProgressSnapshot {
   return {
     current_step: envelope.flow.current_step,
+    definition_version: envelope.flow.definition_version,
+    definition_digest: envelope.flow.definition_digest,
     canonical_status: envelope.flow.status,
     canonical_evidence: [...envelope.progress.canonical_evidence],
     observed_artifacts: [...envelope.progress.observed_artifacts],

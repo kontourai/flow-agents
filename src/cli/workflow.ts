@@ -618,7 +618,8 @@ function doctor(argv: string[]): number {
   const currentDefinition = definitions.find((definition) => definition.id === currentRun?.definition_id);
   if (currentRun?.definition_id && !currentDefinition) {
     warnings.push(`Current run uses unsupported Flow definition ${String(currentRun.definition_id)}; recover or migrate before mutation.`);
-  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version) {
+  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version
+    && typeof currentRun.definition_digest !== "string") {
     warnings.push(`Current run uses ${currentDefinition.id}@${String(currentRun.definition_version)} while CLI resolves ${currentDefinition.id}@${String(currentDefinition.packageDefinition?.version)}; recover or migrate before mutation.`);
   }
   if (state && state.schema_version !== "1.0") warnings.push(`Artifact schema ${String(state.schema_version)} is unsupported; recreate or migrate the session with CLI ${cliVersion}.`);

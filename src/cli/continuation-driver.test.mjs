@@ -13,6 +13,7 @@ import { EVIDENCE_REF_JSON_SCHEMA, installedBuilderGateActionAuthority } from ".
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
+const TEST_DEFINITION_DIGEST = "0".repeat(64);
 
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
@@ -30,6 +31,8 @@ function snapshot(step, status = "active") {
   return {
     run_id: "run-251",
     definition_id: "builder.build",
+    definition_version: "1.1",
+    definition_digest: TEST_DEFINITION_DIGEST,
     status,
     disposition,
     current_step: step,
@@ -47,7 +50,7 @@ function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationA
   const unresolvedRequiredSet = new Set(unresolvedRequired);
   value.gate_action_envelope = {
     schema_version: "3.0",
-    flow: { run_id: value.run_id, definition_id: value.definition_id, definition_version: authority.definition_version, current_step: step, status, gate_ids: [authority.gate_id] },
+    flow: { run_id: value.run_id, definition_id: value.definition_id, definition_version: authority.definition_version, definition_digest: TEST_DEFINITION_DIGEST, current_step: step, status, gate_ids: [authority.gate_id] },
     action: { ...structuredClone(authority.action), ...(implementationAllowed === undefined ? {} : { implementation_allowed: implementationAllowed }) },
     public_interfaces: {
       status: {

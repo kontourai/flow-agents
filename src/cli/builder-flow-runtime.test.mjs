@@ -7,7 +7,7 @@ import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 
-import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
+import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, runDir } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
@@ -23,6 +23,7 @@ import {
 import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
+import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
@@ -79,6 +80,7 @@ async function loadRuntimeTestSeams() {
     fs.unlinkSync(transient);
   }
 }
+const stopGoalFit = require("../../scripts/hooks/stop-goal-fit.js");
 const AMBIENT_IDENTITY_ENV_KEYS = [
   "FLOW_AGENTS_ACTOR",
   "CODEX_THREAD_ID",
@@ -1680,6 +1682,75 @@ test("execute plan_gap routes to plan and invalidates the execute action context
   assert.equal(stale.run.state.transitions.filter((entry) => entry.type === "route_back").length, 1);
   assert.deepEqual(snapshotTree(flowDirectory), beforeFlow, "first-visit execute evidence cannot mutate the later execute visit");
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection, "first-visit execute evidence cannot mutate the later execute projection");
+});
+
+test("authorized Flow amendments replace the effective Builder envelope identity without changing the run origin", async () => {
+  const session = makeSession("effective-definition-amendment");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  const executing = await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  const staleEnvelope = structuredClone(executing.gateActionEnvelope);
+  const startDefinition = structuredClone(executing.run.startDefinition);
+  const successor = { ...structuredClone(executing.run.definition), version: "1.1-amended-test" };
+  const beforeState = structuredClone(executing.run.state);
+
+  await amendRunDefinition(session.slug, {
+    cwd: session.projectRoot,
+    definition: successor,
+    request: {
+      reason: "prove Flow Agents consumes an authorized effective definition",
+      expected_run_head: flowRunHead(beforeState),
+      expected_definition: definitionIdentity(executing.run.definition),
+      successor_digest: definitionDigest(successor),
+      authority: {
+        kind: "user_request",
+        actor: "builder-runtime-test",
+        request_ref: "test:effective-definition-amendment",
+        requested_at: new Date().toISOString(),
+      },
+    },
+  });
+
+  const amended = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.deepEqual(amended.run.startDefinition, startDefinition, "the installed start definition remains the run origin");
+  assert.deepEqual(amended.run.definition, successor, "Flow-validated successor drives Builder projection");
+  assert.equal(amended.run.definitionVersion, successor.version);
+  assert.equal(amended.run.definitionDigest, definitionDigest(successor));
+  assert.equal(amended.gateActionEnvelope.flow.definition_version, successor.version);
+  assert.equal(amended.gateActionEnvelope.flow.definition_digest, definitionDigest(successor));
+  assert.equal(amended.projection.flow_run.definition_digest, definitionDigest(successor));
+  const hookRun = stopGoalFit.canonicalFlowState(session.projectRoot, session.sessionDir);
+  assert.equal(hookRun.error, null);
+  assert.deepEqual(hookRun.definition, successor, "hooks consume the same authenticated effective successor");
+
+  assert.throws(() => validateSnapshot({
+    run_id: amended.run.runId,
+    definition_id: amended.run.definitionId,
+    definition_version: amended.run.definitionVersion,
+    definition_digest: amended.run.definitionDigest,
+    status: amended.run.state.status,
+    disposition: "continue",
+    current_step: amended.run.state.current_step,
+    next_action: amended.projection.next_action,
+    progress_snapshot: amended.progressSnapshot,
+    gate_action_envelope: staleEnvelope,
+  }), /definition (version|digest) does not match the canonical snapshot/);
+  assert.doesNotThrow(() => validateSnapshot({
+    run_id: amended.run.runId,
+    definition_id: amended.run.definitionId,
+    definition_version: amended.run.definitionVersion,
+    definition_digest: amended.run.definitionDigest,
+    status: amended.run.state.status,
+    disposition: "continue",
+    current_step: amended.run.state.current_step,
+    next_action: amended.projection.next_action,
+    progress_snapshot: amended.progressSnapshot,
+    gate_action_envelope: amended.gateActionEnvelope,
+  }));
 });
 
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {

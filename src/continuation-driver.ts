@@ -20,6 +20,8 @@ export type ContinuationBarrier =
 export type ContinuationSnapshot = {
   run_id: string;
   definition_id: string;
+  definition_version?: string;
+  definition_digest?: string;
   status: string;
   disposition: "continue" | "waiting" | "done" | "failed";
   current_step: string;
@@ -519,6 +521,8 @@ function builderSessionSnapshot(result: Awaited<ReturnType<typeof inspectBuilder
   return validateSnapshot({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,
+    definition_version: result.run.definitionVersion,
+    definition_digest: result.run.definitionDigest,
     status: result.run.state.status,
     disposition: builderContinuationDisposition(result.projection.next_action),
     current_step: result.run.state.current_step,
@@ -633,11 +637,17 @@ function reconcileInterruptedTurn(
 
 function sameProgressSnapshot(left: GateActionProgressSnapshot, right: GateActionProgressSnapshot): boolean {
   return left.current_step === right.current_step
+    && compatibleIdentityField(left.definition_version, right.definition_version)
+    && compatibleIdentityField(left.definition_digest, right.definition_digest)
     && sameCanonicalStatus(left.canonical_status, right.canonical_status)
     && left.canonical_evidence.length === right.canonical_evidence.length
     && left.canonical_evidence.every((entry, index) => entry === right.canonical_evidence[index])
     && left.observed_artifacts.length === right.observed_artifacts.length
     && left.observed_artifacts.every((entry, index) => entry === right.observed_artifacts[index]);
+}
+
+function compatibleIdentityField(left: string | undefined, right: string | undefined): boolean {
+  return left === undefined || right === undefined || left === right;
 }
 
 function isTerminalCanonicalStatus(status: string | undefined): boolean {
@@ -684,7 +694,11 @@ function measureProgress(
   if (!before || !after) return null;
   const terminalStatusAdvanced = isTerminalCanonicalStatus(after.canonical_status)
     && before.canonical_status !== after.canonical_status;
-  const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced;
+  const definitionAdvanced = (before.definition_version !== undefined && after.definition_version !== undefined
+      && before.definition_version !== after.definition_version)
+    || (before.definition_digest !== undefined && after.definition_digest !== undefined
+      && before.definition_digest !== after.definition_digest);
+  const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced || definitionAdvanced;
   const evidenceAdded = after.canonical_evidence.filter((entry) => !before.canonical_evidence.includes(entry));
   const artifactChanges = after.observed_artifacts.filter((entry) => !before.observed_artifacts.includes(entry));
   const noProgress = !stepAdvanced && evidenceAdded.length === 0 && artifactChanges.length === 0;

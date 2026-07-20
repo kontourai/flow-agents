@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   attachEvidence,
+  definitionDigest,
   evaluateRun,
   expectationsForGate,
   loadRun,
@@ -86,6 +87,11 @@ export interface ChangeBuilderBuildRunLifecycleInput extends LoadBuilderBuildRun
 export interface BuilderFlowRunResult {
   definitionId: BuilderFlowId;
   definitionVersion: string;
+  definitionDigest: string;
+  /** Flow-validated effective definition, including any authorized successor. */
+  definition: JsonObject;
+  /** Immutable definition that authenticated this run at start. */
+  startDefinition: JsonObject;
   runId: string;
   dir: string;
   state: FlowRunState;
@@ -189,8 +195,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
 
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
-  assertCanonicalDefinition(input.runId, definition, run.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, run);
 
   let attachedEvidence: FlowEvidenceEntry[] = [];
   if (input.evidence !== undefined) {
@@ -212,16 +217,11 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
   }
 
   const evaluated = await evaluateRun(input.runId, { cwd });
+  const result = resultFromRun(evaluated, input.runId);
   return {
-    definitionId: evaluated.definition.id,
-    definitionVersion: evaluated.definition.version,
-    runId: input.runId,
-    dir: evaluated.dir,
-    state: evaluated.state,
+    ...result,
     attachedEvidence,
     outcomes: evaluated.outcomes,
-    manifest: evaluated.manifest,
-    config: evaluated.config,
     freshnessTransitions: evaluated.freshness_transitions,
   };
 }
@@ -235,8 +235,7 @@ export async function loadBuilderFlowRun(input: LoadBuilderBuildRunInput): Promi
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
-  assertCanonicalDefinition(input.runId, definition, run.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, run);
   return resultFromRun(run, input.runId);
 }
 
@@ -275,8 +274,7 @@ async function changeBuilderFlowRunLifecycleResult(
   const cwd = input.cwd ?? process.cwd();
   const before = await loadBuilderFlowRun({ runId: input.runId, cwd });
   const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, changed.definition);
-  assertCanonicalDefinition(input.runId, definition, changed.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, changed);
   if (changed.state.subject !== before.state.subject) {
     throw new BuilderBuildRunInputError("flow_run.state.subject", "changed during lifecycle transition");
   }
@@ -284,9 +282,13 @@ async function changeBuilderFlowRunLifecycleResult(
 }
 
 function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderFlowRunResult {
+  const definition = run.definition as JsonObject & { id: BuilderFlowId; version: string };
   return {
-    definitionId: run.definition.id,
-    definitionVersion: run.definition.version,
+    definitionId: definition.id,
+    definitionVersion: definition.version,
+    definitionDigest: definitionDigest(definition),
+    definition,
+    startDefinition: run.startDefinition as JsonObject,
     runId,
     dir: run.dir,
     state: run.state,
@@ -304,8 +306,19 @@ async function loadCanonicalBuilderFlowRun(
   definition: { id: string; version: string },
 ): Promise<Awaited<ReturnType<typeof loadRun>>> {
   const run = await loadRun(runId, cwd);
-  assertCanonicalDefinition(runId, definition, run.definition);
+  assertCanonicalDefinition(runId, definition, run.startDefinition);
   return run;
+}
+
+async function assertCanonicalBuilderRunOrigin(
+  runId: string,
+  run: Pick<Awaited<ReturnType<typeof loadRun>>, "definition" | "startDefinition">,
+): Promise<void> {
+  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.startDefinition);
+  assertCanonicalDefinition(runId, definition, run.startDefinition);
+  if (!isBuilderFlowId(run.definition.id)) {
+    throw new BuilderBuildRunIdentityError(runId, definition, run.definition, "definition-id");
+  }
 }
 
 async function loadShippedBuilderFlowDefinition(flowId: BuilderFlowId, definitionPath: string): Promise<{ id: string; version: string }> {

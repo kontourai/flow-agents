@@ -1882,7 +1882,13 @@ function canonicalFlowState(root, artifactDir) {
     const stateRead = readSecureCanonicalJson(path.join(runDir, 'state.json'), 'canonical Flow state', parents, MAX_CANONICAL_FLOW_STATE_BYTES);
     const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
     const state = stateRead.value;
-    const definition = definitionRead.value;
+    const startDefinition = definitionRead.value;
+    const amendment = Array.isArray(state.definition_amendments) && state.definition_amendments.length > 0
+      ? state.definition_amendments[state.definition_amendments.length - 1]
+      : null;
+    const definition = amendment && amendment.successor && typeof amendment.successor === 'object' && !Array.isArray(amendment.successor)
+      ? amendment.successor
+      : startDefinition;
     if (!state || typeof state !== 'object' || Array.isArray(state)
       || !CANONICAL_FLOW_STATUSES.has(state.status)
       || state.run_id !== slug
@@ -1898,8 +1904,16 @@ function canonicalFlowState(root, artifactDir) {
       || definition.steps.some(step => !step || typeof step !== 'object' || Array.isArray(step) || typeof step.id !== 'string' || !step.id)) {
       return { state: null, definition: null, error: 'canonical Flow definition is malformed' };
     }
+    const digest = crypto.createHash('sha256').update(canonicalPersistedJson(definition)).digest('hex');
     if (state.definition_id !== definition.id || state.definition_version !== definition.version) {
-      return { state: null, definition: null, error: 'canonical Flow definition identity does not match state' };
+      return { state: null, definition: null, error: 'canonical Flow effective definition id or version does not match state' };
+    }
+    if (amendment && (typeof state.definition_digest !== 'string' || state.definition_digest !== digest)) {
+      return { state: null, definition: null, error: 'canonical Flow effective definition digest does not match state' };
+    }
+    if (amendment && (!amendment.successor_definition || amendment.successor_definition.id !== definition.id
+      || amendment.successor_definition.version !== definition.version || amendment.successor_definition.digest !== digest)) {
+      return { state: null, definition: null, error: 'canonical Flow amendment ledger identity does not match its successor' };
     }
     if (!definition.steps.some(step => step.id === state.current_step)) {
       return { state: null, definition: null, error: 'canonical Flow current_step is not present in definition' };
@@ -1911,6 +1925,12 @@ function canonicalFlowState(root, artifactDir) {
   } catch (error) {
     return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
   }
+}
+
+function canonicalPersistedJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalPersistedJson).join(',')}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalPersistedJson(value[key])}`).join(',')}}`;
 }
 
 function readSecureCanonicalJson(file, label, parents, maxBytes) {
