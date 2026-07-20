@@ -496,9 +496,12 @@ function protectedTargetBlocks(token, cwd, command) {
   const norm = token.replace(/\\/g, '/');
   if (REDIRECT_GLOBAL_RE.test(norm)) return true;
   let artifactShaped = REDIRECT_ARTIFACT_RE.test(norm);
-  if (!artifactShaped && ARTIFACT_BASENAME_RE.test(norm)) {
-    // Symlink-laundering check (F4): the visible spelling is innocent but the basename is a
-    // flow artifact — canonicalize once and re-test the shape against where it REALLY lands.
+  if (!artifactShaped) {
+    // Symlink-laundering check (F4, third-pass closure): the visible spelling can be FULLY
+    // innocent (a symlink named anything pointing at a protected anchor), so any token that
+    // resolves at all gets one canonicalization + shape re-test against where it REALLY
+    // lands. Bare basenames stay ambiguous in resolveCandidatePath and are skipped here —
+    // they are handled by the interpreter detector's fail-closed rules instead.
     try {
       const resolved = resolveCandidatePath(token, cwd);
       if (!resolved.ambiguous && resolved.path) {
@@ -731,6 +734,16 @@ function checkCopyMoveToProtected(command, cwd) {
     const dest = positional[positional.length - 1];
     if (protectedTargetBlocks(dest, cwd, command) || (matchesDeliveryProtected(dest) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(dest, cwd)))) {
       return `${cmd} to ${dest} (delivery-protected path)`;
+    }
+    // Third-pass closure: `cp /tmp/trust.bundle delivery/` writes dest/<source-basename> —
+    // when a SOURCE carries a trust-anchor basename, test the effective destination path too.
+    for (let s = 0; s < positional.length - 1; s++) {
+      const srcBase = path.basename(positional[s].replace(/\\/g, '/'));
+      if (!/^(trust\.bundle|trust\.checkpoint\.json|state\.json|current\.json)$/i.test(srcBase)) continue;
+      const effective = `${dest.replace(/\/+$/, '')}/${srcBase}`;
+      if (protectedTargetBlocks(effective, cwd, command) || (matchesDeliveryProtected(effective) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(effective, cwd)))) {
+        return `${cmd} of ${srcBase} into ${dest} (delivery-protected destination)`;
+      }
     }
   }
   return null;
