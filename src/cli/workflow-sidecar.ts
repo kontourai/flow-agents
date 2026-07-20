@@ -2328,6 +2328,18 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
     md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${acceptanceCriteria.map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
+    // #793 ENSURE-SESSION notice: every session ensure-session creates is deliver-type
+    // (the "type: deliver" markdown header above, always), and terminal states
+    // (accepted/archived) plus the learn-gate (stop-goal-fit.js's #793 STOP-GATE rule,
+    // and advance-state's terminal_jump_rejected guard) are only reachable/meaningful for a
+    // session bound to a canonical Flow run. Without --flow-id (or a subsequent
+    // `builder.build` binding), this session can advance through delivered/release but can
+    // never legally reach accepted/archived, and has no learn-gate at all — make that gap
+    // loud at creation instead of silently discoverable only much later. Full default-binding
+    // is tracked as a follow-up (see #793); this is the smallest defensible fix: a notice.
+    if (!entry.flowId) {
+      process.stderr.write(`[ensure-session] NOTICE: session ${JSON.stringify(slug)} has no canonical Flow bound — terminal states (accepted/archived) are unreachable and the learn-gate is absent; pass --flow-id <flow> (e.g. builder.build) to bind one now, or run builder.build later to bind it.\n`);
+    }
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
@@ -4314,7 +4326,37 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (!phases.includes(phase)) die(`phase must be one of: ${phases.join(", ")}`);
   if (target && !phases.includes(target)) die(`target phase must be one of: ${phases.join(", ")}`);
   const prev = loadJson(path.join(dir, "state.json"));
-  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") {
+    // #793: --skip-learning <reason> is the ONLY way past this guard without a real
+    // phase:learning transition, and it never bypasses silently — it first records a loud,
+    // reviewable accepted-gap check into the session's trust.bundle, then permits the
+    // transition. Absent the flag, behavior is byte-for-byte unchanged (still rejected).
+    const skipLearningProvided = p.flags.has("skip-learning") || opts(p, "skip-learning").length > 0;
+    const skipLearningReason = opt(p, "skip-learning").trim();
+    if (skipLearningProvided && !skipLearningReason) die('--skip-learning requires a non-empty reason, e.g. --skip-learning "customer escalation; learning-review deferred to next sprint"');
+    if (!skipLearningReason) diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+    // Mirrors the repo's existing accepted-gap convention (ADR 0020, parseWaiver/
+    // --accepted-gap-reason/--waived-by): kind:"external" (session-local attestation — a
+    // command-backed check reconciles against CI and can never be waived), status:"not_verified"
+    // (the check-level status a waived gap carries), plus a _waiver record so no reviewer or
+    // reconciler can mistake it for a genuine pass. The check id ("learning-evidence-skip")
+    // deliberately contains "learning-evidence" so stop-goal-fit.js's hasLearningEvidence()
+    // (#793 STOP-GATE) recognizes it as satisfying the learning-gate requirement.
+    const _skipTs = opt(p, "timestamp", now());
+    const _skipSlug = taskSlugFor(dir, opt(p, "task-slug"));
+    const _skipActor = resolveReadActorKey(p);
+    const _skipExistingState = readBundleState(dir);
+    const skipCheck = normalizeCheck({
+      id: "learning-evidence-skip",
+      kind: "external",
+      status: "not_verified",
+      summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
+      _waiver: { reason: skipLearningReason, approved_by: _skipActor, approved_at: _skipTs },
+    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir));
+    const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
+    assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
+    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, waived by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
+  }
   const flow = opt(p, "flow-definition");
   // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).
   // Fires when the active flow's gate for prev.phase declares a route_back_policy

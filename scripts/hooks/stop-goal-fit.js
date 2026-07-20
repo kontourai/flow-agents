@@ -98,6 +98,17 @@ function isTerminalDeliveredState(state) {
   return TERMINAL_STATUSES.has(status) || phase === 'done';
 }
 
+// #793: "delivered"/"verified" are PARKING statuses, not the genuinely-terminal
+// accepted/archived ones — those already require phase:learning at the advance-state
+// transition (workflow-sidecar's terminal_jump_rejected guard). A session can sit at
+// delivered/verified past the release phase forever with no learning.json and no
+// learning-evidence claim ever recorded, and the stop-gate previously went silent for it
+// (sidecarGuidance's status-summary warning deliberately stops emitting once status is in
+// TERMINAL_STATUSES, and a terminal task's blockRe narrows to HARD_BLOCK-only). See
+// learningGateOutstandingWarning below, which closes that silent gap.
+const LEARNING_GATE_STATUSES = new Set(['delivered', 'verified']);
+const RELEASE_OR_LATER_PHASES = new Set(['release', 'learning', 'done']);
+
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
 }
@@ -2096,6 +2107,48 @@ const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence 
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
 const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
 
+// #793: deliberately NOT folded into HARD_BLOCK/FULL_BLOCK above. Those two constants are
+// reused by isHardStopWarning() to decide whether the AC2 MAX_BLOCKS escape valve is allowed
+// to auto-release (see run()) — a genuine HARD_BLOCK match (tamper/integrity/dispute) must
+// NEVER auto-release. "Learning outstanding" is exactly the opposite case: it is a real,
+// intentional gap (the issue's own valve requirement), so it must block on its own (via the
+// dedicated OR-branch in analyze()'s `blocking` computation below) while staying OUT of
+// isHardStopWarning's classification — after MAX_BLOCKS identical blocks it releases and hands
+// the decision to the operator, exactly like an ordinary (non-hard) block.
+const LEARNING_GATE_PATTERN = / learning outstanding — /;
+
+/**
+ * #793: true once learning has been recorded for this session — either the plain
+ * learning.json sidecar (learning-review's local record) or a learning-evidence claim in
+ * trust.bundle (the Flow-bound gate-claim producer `gate-claim-learning-evidence`, or the
+ * `advance-state --skip-learning` accepted-gap check, id "learning-evidence-skip"). Matches
+ * on the check id substring "learning-evidence" rather than an exact id so either producer
+ * satisfies it without this file needing to know both ids by name.
+ */
+function hasLearningEvidence(artifactDir) {
+  if (fs.existsSync(path.join(artifactDir, 'learning.json'))) return true;
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
+  return claims.some(c => c && typeof c.subjectId === 'string' && /learning-evidence/i.test(claimCheckId(c.subjectId)));
+}
+
+/**
+ * #793 STOP-GATE rule: a session parked at status delivered/verified with phase release (or
+ * later) and no learning evidence at all must keep being flagged — never go silent just
+ * because the status happens to be in TERMINAL_STATUSES. Returns null when the rule does not
+ * apply (wrong status/phase) or is already satisfied (learning evidence present).
+ */
+function learningGateOutstandingWarning(root, artifactDir, state) {
+  if (!state) return null;
+  const status = normalizedStatus(state.status || '');
+  const phase = normalizedStatus(state.phase || '');
+  if (!LEARNING_GATE_STATUSES.has(status)) return null;
+  if (!RELEASE_OR_LATER_PHASES.has(phase)) return null;
+  if (hasLearningEvidence(artifactDir)) return null;
+  const base = relative(root, artifactDir);
+  return `${base} learning outstanding — status:${status} phase:${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>"\`.`;
+}
+
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
@@ -2237,6 +2290,12 @@ async function analyze(root, now = Date.now()) {
   const preExecution = isPreExecution(latestArtifactDir, status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
 
+  // #793 STOP-GATE: flag (and block, see `blocking` below) a session parked at
+  // delivered/verified past the release phase with no learning evidence, instead of
+  // going silent just because `terminal` (above) is true for status:delivered.
+  const learningGateWarning = learningGateOutstandingWarning(root, latestArtifactDir, gateState);
+  if (learningGateWarning) warnings.push(learningGateWarning);
+
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
@@ -2276,6 +2335,12 @@ async function analyze(root, now = Date.now()) {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     if (activeTurnAuthority.valid && isOrdinaryActiveGateWarning(w, relPath)) return false;
+    // #793: "learning outstanding" always blocks, independent of terminal/blockRe
+    // classification — a delivered/verified parked session narrows to HARD_BLOCK-only
+    // (see blockRe above), which this warning deliberately does not match (kept out of
+    // isHardStopWarning's HARD_BLOCK/FULL_BLOCK vocabulary so the MAX_BLOCKS escape valve
+    // still releases it after N identical blocks, same as any ordinary gap).
+    if (LEARNING_GATE_PATTERN.test(w)) return true;
     return blockingRe.test(w);
   });
   return {
@@ -2837,4 +2902,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence };
