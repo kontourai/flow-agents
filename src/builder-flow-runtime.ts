@@ -16,7 +16,7 @@ import {
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { execTrustedGitSync } from "./lib/trusted-git.js";
-import { invokeExternalLifecycleAuthority, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import {
@@ -356,6 +356,7 @@ async function syncAndProject(
   sidecarSnapshot: SidecarSnapshot,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
+  assertLifecycleResolutionAttestation(context, run);
   let attached = false;
   const gates = openGatesForResult(run);
   if (run.state.status === "active" && gates.length !== 1) {
@@ -371,6 +372,7 @@ async function syncAndProject(
         run.state,
         run.state.subject,
         context.projectRoot,
+        context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
       );
@@ -409,6 +411,7 @@ async function syncAndProject(
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
+  assertLifecycleResolutionAttestation(context, run);
   const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "projection");
   return {
@@ -420,6 +423,25 @@ async function syncAndProject(
     progressSnapshot,
     attached,
   };
+}
+
+function assertLifecycleResolutionAttestation(context: SessionContext, run: BuilderFlowRunResult): void {
+  const attachments = manifestEvidence(run.manifest).filter((entry) => typeof entry.id === "string" && entry.id.startsWith("lifecycle-authority:") && typeof entry.superseded_by !== "string");
+  if (attachments.length === 0) return;
+  if (attachments.length !== 1) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must have exactly one live lifecycle resolution attachment");
+  const storedPath = attachments[0]!.stored_path;
+  if (typeof storedPath !== "string") throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must identify its immutable Flow evidence");
+  const evidenceFile = path.resolve(run.dir, storedPath);
+  assertSafeFile(evidenceFile, run.dir, "lifecycle authority Flow evidence");
+  const evidenceBytes = fs.readFileSync(evidenceFile);
+  if (typeof attachments[0]!.sha256 !== "string" || createHash("sha256").update(evidenceBytes).digest("hex") !== attachments[0]!.sha256) {
+    throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "immutable Flow evidence digest does not match its manifest");
+  }
+  const bundle = JSON.parse(evidenceBytes.toString("utf8"));
+  if (!isRecord(bundle) || !Array.isArray(bundle.claims)) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must attach a trust bundle");
+  const authority = verifiedResolutionAuthority(bundle, context.sessionDir);
+  const graph = validateCritiqueResolutionGraph(bundle.claims as AnyRecord[], run.state.subject, authority.events, context.projectRoot, authority.verified);
+  if (!graph.valid) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", graph.errors.join("; "));
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
@@ -508,6 +530,7 @@ async function bundleGateEvidence(
   state: FlowRunState,
   subject: string,
   projectRoot: string,
+  sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
@@ -591,7 +614,8 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
-    await assertVerifiedTestsTrust(relevant, projectRoot, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events as AnyRecord[] : []);
+    const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
+    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -620,7 +644,23 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[]): Promise<void> {
+function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { events: AnyRecord[]; verified: boolean } {
+  const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+  if (!fs.existsSync(eventsFile)) return { events: [], verified: false };
+  assertSafeFile(eventsFile, sessionDir, "lifecycle-authority.resolution-events.json");
+  const payload = JSON.parse(fs.readFileSync(eventsFile, "utf8"));
+  const events = isRecord(payload) && Array.isArray(payload.events) ? payload.events as AnyRecord[] : [];
+  const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
+  assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
+  const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
+  const expectedCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events });
+  if (completion.action !== "resolve-critique" || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
+    throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
+  }
+  return { events, verified: true };
+}
+
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
@@ -633,7 +673,7 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   // during this visit describe the implementation snapshot currently being verified. Within a
   // visit every live reviewer slice still participates, so changing reviewers cannot bury a
   // disputed finding.
-  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot);
+  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
   const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)

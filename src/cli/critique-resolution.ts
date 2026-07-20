@@ -157,6 +157,7 @@ function validateEvents(state: GraphState): void {
     if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
     if (!state.referencedEventIds.has(String(event.event_id))) state.errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
     if (event.operation !== "resolve-critique" || !state.projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
+    else if (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
     else if (createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex") !== event.authorization_sha256) state.errors.push("critique resolution signed authorization does not match its event");
     else if (!state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
     if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");

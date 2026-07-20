@@ -13,7 +13,7 @@ npm run build --silent
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
 ln -s "$PWD/node_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
-if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$bad_modules" kontourai-lifecycle-operator; then
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$bad_modules" kontourai-lifecycle-operator >/tmp/rejected-staged-reducer.log 2>&1; then
   echo "symlinked staged reducer unexpectedly installed" >&2; exit 1
 fi
 scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs node_modules kontourai-lifecycle-operator
@@ -45,6 +45,11 @@ chmod 755 /etc/kontourai "$CONFIG"
 chmod 700 "$STATE" /root/lifecycle-authorizations
 chmod 600 "$CONFIG/completion-signing-key.pem" /root/lifecycle-authorizations/authority-private.pem
 chmod 644 "$CONFIG/keys.json" "$CONFIG/completion-verification-key.pem"
+mkdir -p /tmp/lifecycle-root-target
+printf 'root-owned sentinel\n' > /tmp/lifecycle-root-target/sentinel
+chown -R root:root /tmp/lifecycle-root-target
+chmod 755 /tmp/lifecycle-root-target
+chmod 644 /tmp/lifecycle-root-target/sentinel
 
 set +e
 helper_output=$(su -s /bin/bash node -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null" 2>&1)
@@ -67,6 +72,7 @@ const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: t
 async function makeSession(slug) {
   const session = path.join(project, '.kontourai', 'flow-agents', slug);
   write(path.join(session, 'state.json'), { schema_version: '1.0', task_slug: slug, status: 'planned', phase: 'planning', updated_at: new Date().toISOString(), work_item_refs: [subject], next_action: { status: 'continue', summary: 'Fixture lifecycle operation.' } });
+  write(path.join(session, 'acceptance.json'), { schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'The signed lifecycle transition is accepted by Builder.', status: 'pending', evidence_refs: [] }], goal_fit: { status: 'pending', summary: 'Fixture acceptance is pending.' } });
   await startBuilderFlowSession({ sessionDir: session });
   performLocalClaim(path.join(project, '.kontourai', 'flow-agents'), slug, actor, { ttlSeconds: 1800, actorKey, branch: `fixture/${slug}`, artifactDir: slug, workItemRef: subject, reason: 'container lifecycle fixture' });
   return session;
@@ -74,6 +80,7 @@ async function makeSession(slug) {
 fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(project, 'review-target'), { recursive: true });
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
+fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
 for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e']) await makeSession(slug);
 write(path.join(project, 'fixture.json'), { project, subject, actor, actorKey });
 NODE
@@ -82,10 +89,27 @@ node /work/setup-fixture.mjs
 PROJECT=/tmp/lifecycle-authority-e2e
 RESOLVE_SESSION="$PROJECT/.kontourai/flow-agents/resolve-e2e"
 DELIVERY="$PROJECT/review-target/delivery.md"
-node build/src/cli/workflow-sidecar.js record-evidence "$RESOLVE_SESSION" --verdict pass --check-json '{"id":"fixture-check","kind":"test","status":"pass","summary":"Fixture check passed."}' --timestamp "2026-07-20T00:00:00Z" >/dev/null
+node - "$PROJECT" "$RESOLVE_SESSION" <<'NODE'
+const fs = require('node:fs'), path = require('node:path'); const [project, session] = process.argv.slice(2);
+const flowFile = path.join(project, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'state.json');
+const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8')); flow.current_step = 'verify'; fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
+const sidecarFile = path.join(session, 'state.json'); const sidecar = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
+if (sidecar.flow_run) sidecar.flow_run.current_step = 'verify'; fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
+NODE
+node build/src/cli/workflow-sidecar.js record-evidence "$RESOLVE_SESSION" --verdict pass --check-json '{"id":"fixture-check","kind":"test","status":"pass","summary":"Fixture check passed."}' --command 'node --test review-target/fixture.test.mjs' --evidence-ref-json '{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"Runs the lifecycle fixture test."}' --criterion-json '{"id":"AC-1","status":"pass","evidence_refs":[{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"Runs the lifecycle fixture test."}]}' --timestamp "2026-07-20T00:00:00Z" >/dev/null
+node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const acceptance = bundle.claims.find((claim) => claim.claimType === 'workflow.acceptance.criterion'); if (!acceptance) throw new Error('fixture acceptance claim is missing');
+acceptance.value = 'pass'; acceptance.status = 'verified'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
 node build/src/cli/workflow-sidecar.js record-critique "$RESOLVE_SESSION" --id failed-review --reviewer reviewer-one --verdict fail --summary "Fixture defect." --artifact-ref "$DELIVERY" --lane-json '{"id":"code","status":"fail","summary":"Fixture defect remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Fixture delivery review."}]}' --finding-json '{"id":"fixture-defect","severity":"high","status":"open","description":"Repair required."}' --timestamp "2026-07-20T00:01:00Z" >/dev/null
 printf 'fixture delivery repaired\n' > "$DELIVERY"
 node build/src/cli/workflow-sidecar.js record-critique "$RESOLVE_SESSION" --id repaired-review --reviewer reviewer-two --verdict pass --summary "Fixture repair verified." --artifact-ref "$DELIVERY" --lane-json '{"id":"code","status":"pass","summary":"Fixture repair verified.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Fixture delivery review."}]}' --finding-json '{"id":"fixture-defect","severity":"high","status":"fixed","description":"Repair verified."}' --timestamp "2026-07-20T00:02:00Z" >/dev/null
+node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const acceptance = bundle.claims.find((claim) => claim.claimType === 'workflow.acceptance.criterion'); if (!acceptance) throw new Error('fixture acceptance claim is missing after critique rebuild');
+acceptance.value = 'pass'; acceptance.status = 'verified'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
 mapfile -t CRITIQUE_IDS < <(node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
 const fs = require('node:fs'); for (const claim of JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique')) console.log(claim.metadata.critique_record_id);
 NODE
@@ -147,6 +171,7 @@ chown -R node:node "$PROJECT"
 cat > /work/operator-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { invokeExternalLifecycleAuthority, verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
+import { syncBuilderFlowSession } from './build/src/builder-flow-runtime.js';
 const project = '/tmp/lifecycle-authority-e2e'; const session = (slug) => path.join(project, '.kontourai', 'flow-agents', slug);
 const invoke = (action, slug, authorization_file, extra = {}) => invokeExternalLifecycleAuthority({ action, project_root: project, session_dir: session(slug), authorization_file, ...extra });
 const expectReject = (fn, pattern) => { try { fn(); } catch (error) { if (pattern.test(String(error))) return; throw error; } throw new Error(`expected rejection: ${pattern}`); };
@@ -165,6 +190,8 @@ if (resolutionEvents.length !== 1 || !bundle.claims.some((claim) => claim.status
 const completion = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'lifecycle-authority.completion.json'), 'utf8'));
 const forged = structuredClone(completion); forged.signature.value = Buffer.alloc(64).toString('base64'); expectReject(() => verifyLifecycleAuthorityCompletion(forged), /completion signature is invalid/);
 const validation = spawnSync(process.execPath, ['./build/src/cli/validate-workflow-artifacts.js', '--require-critique', session('resolve-e2e')], { cwd: '/work', encoding: 'utf8' }); if (validation.status !== 0) throw new Error(`repaired critique history did not validate: ${validation.stdout}${validation.stderr}`);
+const gated = await syncBuilderFlowSession({ sessionDir: session('resolve-e2e') }); if (!gated.run.manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('Builder runtime did not consume the signed lifecycle attestation');
+const copiedRuntimeProject = '/tmp/lifecycle-runtime-copied-project'; fs.rmSync(copiedRuntimeProject, { recursive: true, force: true }); fs.cpSync(project, copiedRuntimeProject, { recursive: true }); try { await syncBuilderFlowSession({ sessionDir: path.join(copiedRuntimeProject, '.kontourai', 'flow-agents', 'resolve-e2e') }); throw new Error('copied lifecycle attestation was accepted for another project'); } catch (error) { if (!/trusted project and run/.test(String(error))) throw error; }
 const copied = '/tmp/lifecycle-authority-copied-completion'; fs.rmSync(copied, { recursive: true, force: true }); fs.cpSync(session('resolve-e2e'), copied, { recursive: true }); const copiedBundle = JSON.parse(fs.readFileSync(path.join(copied, 'trust.bundle'), 'utf8')); copiedBundle.claims.find((claim) => claim.status === 'superseded').metadata.superseded_by = 'forged-record'; fs.writeFileSync(path.join(copied, 'trust.bundle'), JSON.stringify(copiedBundle)); const copiedValidation = spawnSync(process.execPath, ['./build/src/cli/validate-workflow-artifacts.js', '--require-critique', copied], { cwd: '/work', encoding: 'utf8' }); if (copiedValidation.status === 0) throw new Error('copied completion blessed an edited critique graph');
 fs.writeFileSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt'), 'still writable by project owner\n'); if (fs.statSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt')).uid !== process.getuid()) throw new Error('post-resolution artifacts are not owned by the non-root workflow user');
 const run = path.join(project, '.kontourai', 'flow', 'runs', 'resolve-e2e'); for (const file of ['evidence/manifest.json', 'state.json', 'report.json', 'report.md']) if (!fs.existsSync(path.join(run, file))) throw new Error(`missing canonical Flow write ${file}`); if (!JSON.parse(fs.readFileSync(path.join(run, 'evidence/manifest.json'), 'utf8')).evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest missing authority attachment');
@@ -175,7 +202,7 @@ const staleAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignm
 const concurrentCode = `import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js'; import path from 'node:path'; const project = process.argv[1], auth = process.argv[2]; invokeExternalLifecycleAuthority({ action: 'cancel', project_root: project, session_dir: path.join(project, '.kontourai', 'flow-agents', 'concurrent-e2e'), authorization_file: auth });`;
 const concurrent = (auth) => new Promise((resolve) => { const child = spawn(process.execPath, ['--input-type=module', '-e', concurrentCode, project, auth], { cwd: '/work', stdio: 'ignore' }); child.on('exit', (status) => resolve(status)); });
 const concurrentResults = await Promise.all([concurrent('/root/lifecycle-authorizations/concurrent-a.json'), concurrent('/root/lifecycle-authorizations/concurrent-b.json')]); if (concurrentResults.filter((status) => status === 0).length !== 1 || concurrentResults.filter((status) => status !== 0).length !== 1) throw new Error(`same-run lock did not serialize distinct nonces: ${concurrentResults}`); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'concurrent-e2e', 'state.json'), 'utf8')).status !== 'canceled' || JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'concurrent-e2e.json'), 'utf8')).status !== 'released') throw new Error('concurrent lifecycle mutation lost canonical state');
-const swapped = session('symlink-e2e'), rootSentinel = '/root/lifecycle-authorizations/symlink-sentinel'; fs.writeFileSync(rootSentinel, 'root-owned sentinel\n', { mode: 0o600 }); fs.rmSync(swapped, { recursive: true, force: true }); fs.symlinkSync('/root/lifecycle-authorizations', swapped); expectReject(() => invoke('cancel', 'symlink-e2e', '/root/lifecycle-authorizations/symlink.json'), /session_dir must identify/); if (fs.readFileSync(rootSentinel, 'utf8') !== 'root-owned sentinel\n') throw new Error('symlink swap escaped into a root-owned path');
+const swapped = session('symlink-e2e'), rootSentinel = '/tmp/lifecycle-root-target/sentinel'; fs.rmSync(swapped, { recursive: true, force: true }); fs.symlinkSync('/tmp/lifecycle-root-target', swapped); expectReject(() => invoke('cancel', 'symlink-e2e', '/root/lifecycle-authorizations/symlink.json'), /session_dir must identify/); if (fs.readFileSync(rootSentinel, 'utf8') !== 'root-owned sentinel\n') throw new Error('symlink swap escaped into a root-owned path');
 expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authorizations/unauthorized.json'), /authorization signature is invalid/);
 expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
 console.log('PASS: signed resolve/cancel/archive E2E, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');

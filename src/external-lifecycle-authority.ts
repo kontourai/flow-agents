@@ -28,6 +28,11 @@ function canonical(value: unknown): string {
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
+
+/** Canonical digest used by the coordinator to bind a completed mutation result. */
+export function lifecycleAuthorityResultDigest(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
 function digest(value: unknown): string { return createHash("sha256").update(canonical(value)).digest("hex"); }
 
 /**
