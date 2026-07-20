@@ -22,6 +22,12 @@ node --test \
 # Adapter coverage supplies the deterministic fake-provider matrix: exact argv,
 # authenticated observation, create/recover/no-duplicate behavior, stale/wrong
 # observations, malformed output, provider failure, and auth failure.
-node --test src/cli/change-provider.test.mjs src/cli/github-change-provider.test.mjs
+# Effective-settings coverage owns the consumer-safe fixtures under
+# evals/fixtures/change-provider-settings and proves malformed or secret-bearing
+# inputs fail closed before an adapter can execute.
+node --test \
+  src/cli/change-provider.test.mjs \
+  src/cli/effective-change-provider-settings.test.mjs \
+  src/cli/github-change-provider.test.mjs
 
 echo 'Publish-change operation integration checks passed'
