@@ -28,7 +28,7 @@ import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecor
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, withStableDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, stageDeliveryDestination, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
@@ -73,6 +73,58 @@ test("public delivery refuses a concurrent source mutation during checkpoint sea
     ),
     /source snapshot changed while sealing/,
   );
+});
+
+test("public delivery carries one snapshot when source mutates during freshness reads", async () => {
+  const snapshotA = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "1".repeat(40) };
+  const snapshotB = { ...snapshotA, digest: "b".repeat(64), head_sha: "2".repeat(40) };
+  let current = snapshotA;
+  let captures = 0;
+  await assert.rejects(
+    () => withStableDeliverySnapshot(
+      () => {
+        captures += 1;
+        const captured = structuredClone(current);
+        if (captures === 1) current = snapshotB;
+        return captured;
+      },
+      async () => ({ sealed: true }),
+    ),
+    /source snapshot changed while sealing/,
+  );
+  assert.equal(captures, 2);
+});
+
+test("public delivery restores the exact prior destination when source mutates during copy", async () => {
+  const snapshotA = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "1".repeat(40) };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-delivery-rollback-"));
+  const session = path.join(root, ".kontourai", "flow-agents", "owned");
+  const destination = path.join(root, "delivery", "owned");
+  const sibling = path.join(root, "delivery", "other", "trust.bundle");
+  fs.mkdirSync(destination, { recursive: true });
+  fs.mkdirSync(path.dirname(sibling), { recursive: true });
+  fs.mkdirSync(session, { recursive: true });
+  fs.writeFileSync(path.join(destination, "trust.bundle"), "prior exact contents");
+  fs.writeFileSync(sibling, "unrelated sibling");
+  const transaction = stageDeliveryDestination(root, "owned", session);
+  let current = snapshotA;
+  await assert.rejects(
+    () => withStablePublishedDeliverySnapshot(
+      snapshotA,
+      () => structuredClone(current),
+      async () => {
+        fs.mkdirSync(destination, { recursive: true });
+        fs.writeFileSync(path.join(destination, "trust.bundle"), "new partial delivery");
+        current = { ...snapshotA, digest: "b".repeat(64) };
+      },
+      transaction.rollback,
+      transaction.commit,
+    ),
+    /source snapshot changed while copying delivery evidence/,
+  );
+  assert.equal(fs.readFileSync(path.join(destination, "trust.bundle"), "utf8"), "prior exact contents");
+  assert.equal(fs.readFileSync(sibling, "utf8"), "unrelated sibling");
+  assert.deepEqual(fs.readdirSync(session), []);
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;

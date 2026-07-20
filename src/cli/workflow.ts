@@ -120,13 +120,22 @@ async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boole
       throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
     }
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
-    await publishDelivery(sessionDir, projectRoot);
     const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
     const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
     const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
-    if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
-      throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
-    }
+    const transaction = stageDeliveryDestination(projectRoot, slug, sessionDir);
+    await withStablePublishedDeliverySnapshot(
+      verifiedSnapshot,
+      () => assertCurrentVerifiedWorkspaceEvidence(sessionDir),
+      async () => {
+        await publishDelivery(sessionDir, projectRoot);
+        if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
+          throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
+        }
+      },
+      transaction.rollback,
+      transaction.commit,
+    );
     return immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, published: true });
   });
   if (json) console.log(JSON.stringify(report));
@@ -142,6 +151,55 @@ export async function withStableDeliverySnapshot<T>(capture: () => JsonRecord, s
     throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
   }
   return { snapshot: before, result };
+}
+
+export async function withStablePublishedDeliverySnapshot(
+  expected: JsonRecord,
+  capture: () => JsonRecord,
+  publish: () => Promise<void>,
+  rollback: () => void,
+  commit: () => void,
+): Promise<void> {
+  try {
+    await publish();
+    if (!isDeepStrictEqual(expected, capture())) {
+      throw new Error("workflow publish-delivery source snapshot changed while copying delivery evidence; the prior delivery was restored");
+    }
+    commit();
+  } catch (error) {
+    rollback();
+    throw error;
+  }
+}
+
+export function stageDeliveryDestination(projectRoot: string, slug: string, sessionDir: string): { rollback: () => void; commit: () => void } {
+  const deliveryRoot = path.join(projectRoot, "delivery");
+  if (fs.existsSync(deliveryRoot)) {
+    const rootStat = fs.lstatSync(deliveryRoot);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("workflow publish-delivery requires delivery to be a non-symlink directory");
+  }
+  const destination = path.join(deliveryRoot, slug);
+  let backup: string | null = null;
+  if (fs.existsSync(destination)) {
+    const destinationStat = fs.lstatSync(destination);
+    if (destinationStat.isSymbolicLink() || !destinationStat.isDirectory()) throw new Error("workflow publish-delivery requires its delivery destination to be a non-symlink directory");
+    backup = path.join(sessionDir, `.delivery-publish-backup-${randomBytes(16).toString("hex")}`);
+    fs.renameSync(destination, backup);
+  }
+  let settled = false;
+  return {
+    rollback: () => {
+      if (settled) return;
+      fs.rmSync(destination, { recursive: true, force: true });
+      if (backup) fs.renameSync(backup, destination);
+      settled = true;
+    },
+    commit: () => {
+      if (settled) return;
+      if (backup) fs.rmSync(backup, { recursive: true, force: true });
+      settled = true;
+    },
+  };
 }
 
 function validateFreshCheckpointSeal(sessionDir: string, seal: TrustCheckpointSealResult): void {

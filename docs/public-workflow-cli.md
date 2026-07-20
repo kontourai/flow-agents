@@ -93,7 +93,9 @@ exact current workspace; a commit or worktree change must go back through canoni
 verification rather than rebinding either old evidence slice to a new checkpoint. Sessions whose
 older test evidence lacks this snapshot fail closed on public publishing until verification is
 rerun. The publisher holds the session subject lock and rechecks the identical snapshot after
-sealing and immediately before copying. It then seals against the derived target checkout's current
+sealing, immediately before copying, and after the copy. A post-copy source change restores the
+exact prior `delivery/<session>/` destination (if any) and leaves every sibling delivery untouched
+before failing. It then seals against the derived target checkout's current
 `HEAD`, replaces stale
 companions with one newly emitted signed or in-toto companion, and verifies that companion binds
 both the checkpoint digest and current trust bundle before copying the set into

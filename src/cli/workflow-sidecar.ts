@@ -6180,8 +6180,26 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
   const fail = (): never => {
     throw new Error("workflow publish-delivery requires current canonical review and test verification evidence bound to the exact same source snapshot; re-run critique and verification after any HEAD or workspace change");
   };
-  if (!critiqueClean(dir) || !evidenceClean(dir)) fail();
+  if (!evidenceClean(dir)) fail();
   const bundle = loadTrustBundleForTrustMachinery(dir);
+  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
+  if (current.kind !== "git-worktree" || typeof current.head_sha !== "string") fail();
+  const critiqueClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "critique")
+    : [];
+  if (critiqueClaims.length === 0) fail();
+  const state = loadJson(path.join(dir, "state.json"));
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+    ? state.work_item_refs[0]
+    : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+  if (!graph.valid) fail();
+  const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+  if (!graph.live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return critique && critiqueIsSubstantivePass(critique)
+      && isDeepStrictEqual(critique.review_target?.workspace_snapshot, current);
+  })) fail();
   const testsClaims = Array.isArray(bundle.claims)
     ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
       && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
@@ -6195,7 +6213,6 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
     || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
     || !expected || typeof expected !== "object" || Array.isArray(expected)
     || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
-  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
   if (!isDeepStrictEqual(expected, current)) fail();
   return structuredClone(current);
 }
