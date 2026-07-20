@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RUNNER="$ROOT/evals/reference/reviewed-grounding-workflow/run.mjs"
+TELEMETRY="$ROOT/evals/fixtures/reviewed-grounding-workflow/live-telemetry.json"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+node "$RUNNER" >"$TMP/first.json"
+node "$RUNNER" >"$TMP/second.json"
+cmp -s "$TMP/first.json" "$TMP/second.json"
+node "$RUNNER" --live-telemetry "$TELEMETRY" >"$TMP/live.json"
+node --input-type=module - "$TMP/first.json" "$TMP/live.json" <<'NODE'
+import { readFileSync } from "node:fs";
+const deterministic = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const live = JSON.parse(readFileSync(process.argv[3], "utf8"));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+assert(deterministic.acquisition.repeated === "unchanged", "unchanged observation was not replayed");
+assert(deterministic.extraction.unchangedProviderCalls === 0, "unchanged observation called the provider");
+assert(deterministic.review.semanticItemCount > 0 && deterministic.review.semanticKinds.includes("proposal-value-changed"), "semantic change did not route to review");
+assert(deterministic.action.beforeReview.outcome === "refused" && deterministic.failures.missingEvidence.some((gap) => gap.kind === "missing-reviewed-evidence"), "missing evidence did not produce a typed refusal");
+assert(deterministic.action.afterReview.outcome === "allowed", "reviewed grounding did not allow the action");
+assert(deterministic.action.drifted.outcome === "refused" && deterministic.action.drifted.gaps.some((gap) => gap.kind === "source-not-current") && deterministic.action.drifted.dimensions[0].sourceState.extractedValueChanged === false, "unchanged-value drift was not a typed visible refusal");
+assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && deterministic.failures.tamperedPreparedContent.diagnostics[0].kind === "digest-mismatch", "tampered content did not fail at a typed boundary");
+assert(Object.values(deterministic.revisions).join(",") === "0.19.0,1.18.0,0.3.2,2.13.0", "public revisions are not pinned");
+assert(live.liveTelemetry.provider && live.liveTelemetry.model && live.liveTelemetry.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs === 125 && live.liveTelemetry.fixtureRevision, "optional live telemetry is incomplete");
+NODE
+echo "Reviewed grounding reference workflow passed"
