@@ -364,7 +364,7 @@ require_text "$KIT_REPOSITORY_DOC" 'Flow validates Flow Definition semantics' "k
 require_text "$KIT_REPOSITORY_DOC" 'schema_version' "kit repository doc defines schema version"
 require_text "$KIT_REPOSITORY_DOC" 'flows' "kit repository doc defines declared Flow Definitions"
 require_text "$KIT_REPOSITORY_DOC" '[Aa]bsolute paths are rejected' "kit repository doc defines path safety"
-require_text "$KIT_REPOSITORY_DOC" 'does not install remote kits' "kit repository doc states remote install non-goal"
+require_text "$KIT_REPOSITORY_DOC" 'Git sources are shallow-cloned' "kit repository doc defines explicit Git installation"
 require_text "$ROOT/docs/kit-authoring-guide.md" 'uses_flow' "kit authoring guide documents Flow Definition composition"
 require_text "$ROOT/docs/kit-authoring-guide.md" 'builder.publish-learn' "kit authoring guide documents composed publish-learn example"
 require_text "$PAGES_INDEX" 'Quick Start' "docs index presents product quick start"
