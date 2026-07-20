@@ -205,6 +205,54 @@ test("F4: symlink-aliased tmpdir spelling cannot bypass a declared workspace roo
   }
 });
 
+// --- confirmation-review variants ---
+
+test("F1 variants: case-folded profiles and settings.local block", () => {
+  const scratch = tmpdir();
+  assert.ok(hook.checkRedirectToProtected("echo x > ~/.BASHRC", scratch));
+  const localSettings = [".claude/", "settings.local.json"].join("");
+  assert.ok(hook.checkRedirectToProtected(`echo x > ${localSettings}`, scratch));
+  assert.ok(
+    hook.checkInterpreterWriteToProtected(
+      `node -e "require('fs').writeFileSync('${localSettings}','x')"`,
+      scratch,
+    ),
+  );
+});
+
+test("F2 variant: quote-concatenated cd cannot dodge the directory-change guard", () => {
+  const outside = path.join(tmpdir(), ".kontourai", "flow-agents", "s", "state.json");
+  assert.ok(hook.checkRedirectToProtected(`c""d src && echo x > ${outside}`, packageRoot));
+});
+
+test("F3 variant: a git-file worktree marker 45 directories deep still blocks", () => {
+  const base = tmpdir();
+  fs.writeFileSync(path.join(base, ".git"), "gitdir: /nonexistent\n");
+  const deep = path.join(base, ...Array.from({ length: 45 }, (_, i) => `d${i}`));
+  fs.mkdirSync(deep, { recursive: true });
+  const target = path.join(deep, ".kontourai", "flow-agents", "s", "state.json");
+  assert.ok(hook.checkRedirectToProtected(`echo x > ${target}`, packageRoot));
+  assert.throws(() => runFixture(["write", path.dirname(target), "--malformed", "--content", "x"], packageRoot));
+});
+
+test("F4 variant: a symlink hiding the artifact-root spelling from the token still blocks", () => {
+  const scratch = tmpdir();
+  const workspace = path.join(tmpdir(), "ws");
+  const artifactRoot = path.join(workspace, ".kontourai", "flow-agents");
+  fs.mkdirSync(artifactRoot, { recursive: true });
+  const hop = path.join(scratch, "hop");
+  fs.symlinkSync(artifactRoot, hop);
+  const laundered = path.join(hop, "slug", "state.json"); // spelling shows no .kontourai
+  const origEnv = process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+  process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
+  try {
+    assert.ok(hook.checkRedirectToProtected(`echo x > ${laundered}`, scratch));
+  } finally {
+    if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+    else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
+  }
+});
+
 test("JS/TS twin parity over a shared case table", async () => {
   const tsLib = await import(path.join(packageRoot, "build", "src", "lib", "declared-artifact-roots.js"));
   const jsLib = require_(path.join(packageRoot, "scripts", "hooks", "lib", "declared-artifact-roots.js"));
