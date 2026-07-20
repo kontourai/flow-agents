@@ -57,6 +57,14 @@ export function loadCritiqueResolutionAuthorization(fileInput: string, expected:
   resolvingRecordHash: string; now?: string; allowExpired?: boolean;
 }): CritiqueResolutionAuthorization {
   const value = readRegularJson(fileInput, "critique resolution authorization", true);
+  return validateCritiqueResolutionAuthorization(value, expected);
+}
+
+export function validateCritiqueResolutionAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
+  priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
+  resolvingRecordHash: string; now?: string; allowExpired?: boolean;
+}): CritiqueResolutionAuthorization {
   const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at", "signature"];
   assertExactKeys(value, fields, "authorization");
   if (value.schema_version !== "1.0" || value.operation !== "resolve-critique") throw new Error("critique resolution authorization identity is invalid");

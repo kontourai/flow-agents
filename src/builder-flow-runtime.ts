@@ -753,7 +753,7 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   // during this visit describe the implementation snapshot currently being verified. Within a
   // visit every live reviewer slice still participates, so changing reviewers cannot bury a
   // disputed finding.
-  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents);
+  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
   const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)

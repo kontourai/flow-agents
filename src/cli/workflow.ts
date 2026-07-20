@@ -506,7 +506,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
       recordAuthorizationConsumed(path.dirname(sessionDir), authorization);
     }
     const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
-    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", authorization.expected_resolver, "--authorization-digest", authorizationDigest(authorization), "--authorization-key-id", authorization.signature.key_id, "--authorization-nonce", authorization.nonce, "--preimage-digest", beforeTrustBundle]);
+    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", authorization.expected_resolver, "--authorization-digest", authorizationDigest(authorization), "--authorization-key-id", authorization.signature.key_id, "--authorization-nonce", authorization.nonce, "--preimage-digest", beforeTrustBundle, "--authorization-base64", Buffer.from(JSON.stringify(authorization)).toString("base64")]);
     const result = await recoverBuilderFlowSession({ sessionDir });
     const afterTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
     if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {

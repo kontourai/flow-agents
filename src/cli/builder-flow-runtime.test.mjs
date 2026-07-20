@@ -1660,6 +1660,14 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   forgedHistory.metadata.critique_resolution.resolving_record_id = "critique:missing";
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedBundle, null, 2)}\n`);
   assert.notEqual(validateCritiques().status, 0, "a forged resolution edge must not validate");
+  const forgedEventBundle = JSON.parse(resolvedBytes);
+  const forgedEvent = forgedEventBundle.critique_resolution_events[0];
+  forgedEvent.resolver = "forged-reviewer";
+  forgedEvent.edge.resolver = "forged-reviewer";
+  const { event_hash: _oldEventHash, ...forgedUnsignedEvent } = forgedEvent;
+  forgedEvent.event_hash = createHash("sha256").update(JSON.stringify(forgedUnsignedEvent)).digest("hex");
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedEventBundle, null, 2)}\n`);
+  assert.notEqual(validateCritiques().status, 0, "a coherently rehashed event without matching signed authority must not validate");
   const cyclicBundle = JSON.parse(resolvedBytes);
   const cyclicResolver = cyclicBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId);
   cyclicResolver.metadata.superseded_by = priorRecordId;

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { authorizationDigest, validateCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -71,7 +72,7 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
-export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = []): { valid: boolean; errors: string[]; live: AnyRecord[] } {
+export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   const errors: string[] = [];
   if (records.length === 0) return { valid: false, errors: ["critique graph has no records"], live: [] };
@@ -120,6 +121,15 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
         || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id
         || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer
         || event.authorization_sha256 !== resolution.authorization_sha256) errors.push("critique resolution authorization event does not bind the exact edge");
+      if (!projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") errors.push("critique resolution event requires a verifiable signed authorization");
+      else try {
+        const authorization = validateCritiqueResolutionAuthorization(event.signed_authorization, {
+          projectRoot, runId: String(event.run_id), subject: String(event.subject),
+          priorBundleSha256: String(event.preimage_bundle_sha256), priorRecordId: String(event.prior_record_id), priorRecordHash: String(event.prior_record_hash),
+          resolvingRecordId: String(event.resolving_record_id), resolvingRecordHash: String(event.resolving_record_hash), allowExpired: true,
+        });
+        if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
+      } catch { errors.push("critique resolution signed authorization is invalid"); }
     }
     let cursor: AnyRecord | undefined = resolving;
     let reachesPrior = false;

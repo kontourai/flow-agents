@@ -4457,6 +4457,9 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const authorizationKeyId = requiredResolutionRecordId(p, "authorization-key-id");
   const authorizationNonce = requiredResolutionRecordId(p, "authorization-nonce");
   const preimageDigest = requiredResolutionRecordId(p, "preimage-digest");
+  let signedAuthorization: AnyObj;
+  try { signedAuthorization = JSON.parse(Buffer.from(opt(p, "authorization-base64"), "base64").toString("utf8")); }
+  catch { die("resolve-critique requires the verified signed authorization payload"); }
   if (!hasNonEmptyString(resolver)) die("resolve-critique requires an authenticated resolver");
   if (priorRecordId === resolvingRecordId) die("resolve-critique rejects circular prior and resolving critique references");
   const sidecarState = loadJson(path.join(dir, "state.json"));
@@ -4551,15 +4554,16 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const eventWithoutHash = {
     schema_version: "1.0", sequence: resolutionEvents.length + 1,
     predecessor_hash: resolutionEvents.length ? resolutionEvents.at(-1)?.event_hash : CRITIQUE_CHAIN_GENESIS,
-    event_id: resolution.resolution_event_id, operation: "resolve-critique", subject: workflowSubjectRef,
+    event_id: resolution.resolution_event_id, operation: "resolve-critique", run_id: slug, subject: workflowSubjectRef,
     preimage_bundle_sha256: preimageDigest, prior_record_id: priorRecordId, prior_record_hash: prior.critique_record_hash,
     resolving_record_id: resolvingRecordId, resolving_record_hash: resolving.critique_record_hash,
     resolver, authorization_sha256: authorizationDigest, authorization_key_id: authorizationKeyId,
     authorization_nonce: authorizationNonce, edge: resolution, resulting_core_sha256: createHash("sha256").update(JSON.stringify(candidateBundle)).digest("hex"),
+    signed_authorization: signedAuthorization,
   };
   const resolutionEvent = { ...eventWithoutHash, event_hash: createHash("sha256").update(JSON.stringify(eventWithoutHash)).digest("hex") };
   const nextResolutionEvents = [...resolutionEvents, resolutionEvent];
-  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents);
+  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir));
   if (!graph.valid) die(`resolve-critique rejected invalid critique graph: ${graph.errors.join("; ")}`);
   assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, nextResolutionEvents));
   return 0;
@@ -6062,7 +6066,7 @@ function critiqueClean(dir: string): boolean {
     if (critiqueClaims.length === 0) return false; // no critique written yet
     const state = loadJson(path.join(dir, "state.json"));
     const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
-    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : []);
+    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
     if (!graph.valid) return false;
     const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
     return graph.live.every((record) => {

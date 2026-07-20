@@ -468,7 +468,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const stateResult = readJson(path.join(dir, "state.json"));
           const state = stateResult.value;
           const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
-          const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : []);
+          const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [], process.cwd());
           if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
         }
       }
