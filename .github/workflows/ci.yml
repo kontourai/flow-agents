@@ -149,6 +149,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
 
+      - name: Reviewed grounding reference integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check reviewed-grounding-reference-integration
+
       - name: Narrative source contract integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration

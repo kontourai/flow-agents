@@ -4,6 +4,8 @@
 
 This contract defines the provider-neutral vocabulary for selecting, planning, and handing off backlog work. It is the source shape for provider-backed workflows such as `pull-work`; provider-specific adapters map into this model without making GitHub, Jira, Linear, or any other provider the generic language.
 
+Native hosts should consume this vocabulary from `@kontourai/flow-agents` instead of hand-mirroring it: the package exports `workItemStatuses` (the ordered `WorkItemStatus` lifecycle array below) and the `WorkItem`, `SourceProvider`, and `BoardMembership` TypeScript interfaces from its library entry (`src/lib/work-item-vocabulary.ts`). The shipped JSON Schemas, including `backlog-provider-settings.schema.json` whose status enums this vocabulary summarizes, are also resolvable via the package's `./schemas/*` export subpath instead of `require.resolve` path math.
+
 ## Provider Roles
 
 - `WorkItemProvider`: supplies issue-like records that represent requested work, defects, chores, or decisions.
@@ -14,7 +16,7 @@ A single external system can implement both roles. For example, GitHub Issues is
 
 ## Work Item Shape
 
-Every provider-backed work item should preserve the stable fields below when the provider can supply them.
+Every provider-backed work item should preserve the stable fields below when the provider can supply them. `@kontourai/flow-agents` exports this shape as the `WorkItem` TypeScript interface (with `SourceProvider` and `BoardMembership` for the corresponding nested fields).
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -183,7 +185,7 @@ Capabilities are descriptive, not discovery settings. Provider settings and conf
 
 ## Status Guidance
 
-Adapters may keep the provider's original status in metadata, but workflow-facing status should be mapped to a small neutral category when possible:
+Adapters may keep the provider's original status in metadata, but workflow-facing status should be mapped to a small neutral category when possible. `@kontourai/flow-agents` exports this list as the ordered `workItemStatuses` array (and the `WorkItemStatus` type):
 
 - `todo`: known work that is not ready or started.
 - `ready`: scoped work that can be selected.

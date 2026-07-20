@@ -1,5 +1,75 @@
 # Changelog
 
+## [4.3.0](https://github.com/kontourai/flow-agents/compare/v4.2.1...v4.3.0) (2026-07-20)
+
+
+### Features
+
+* add authenticated change provider execution ([9c05e64](https://github.com/kontourai/flow-agents/commit/9c05e64da650b1e98467ec86f9cf07983e3ca722))
+* add authenticated change provider execution ([31a9783](https://github.com/kontourai/flow-agents/commit/31a9783f7dcb449b6f5d2158b31b0238cb685ba1))
+* add critique resolution coordinator runtime ([9ff554d](https://github.com/kontourai/flow-agents/commit/9ff554d1a19752862c127d4ff32a3ec6cb5e082e))
+* add lifecycle coordinator foundation ([caaa21f](https://github.com/kontourai/flow-agents/commit/caaa21ff2ad2fad99e45215da783e5155fe2591f))
+* add reviewed grounding reference workflow ([7d6f7ef](https://github.com/kontourai/flow-agents/commit/7d6f7ef748ce58ce9b5e0b19779677c4f8f0fc04))
+* authenticate cross-reviewer critique resolution ([8fee167](https://github.com/kontourai/flow-agents/commit/8fee1676d447dd0f51b1de2d36fc42a4ca6f885c))
+* export canonical work-item vocabulary, types, and schemas subpath ([#792](https://github.com/kontourai/flow-agents/issues/792)) ([367cf73](https://github.com/kontourai/flow-agents/commit/367cf731e0cb33c509a2a31dce7bda39152fdc8a))
+* pin lifecycle coordinator Flow reducer ([a360d2c](https://github.com/kontourai/flow-agents/commit/a360d2c8cab41a5a9d32f01d5743a55afa009f7f))
+* provision privileged lifecycle authority ([650fcae](https://github.com/kontourai/flow-agents/commit/650fcaeaa5a53f773e43e08688bc2dc0bfd93f08))
+* recover merged provider changes ([0fe4eec](https://github.com/kontourai/flow-agents/commit/0fe4eecfab8fcf7bc79ee9cfe26a33373457ab9c))
+* resolve repaired critique history ([3f8bd3d](https://github.com/kontourai/flow-agents/commit/3f8bd3d608c7caaccb94245c2a0d2910b9130d01))
+* track lifecycle authority trust roots ([07a8355](https://github.com/kontourai/flow-agents/commit/07a8355ab120f31bc5cac120155e0a74410b5c2a))
+
+
+### Fixes
+
+* allowlist provider execution environment ([11a4ae8](https://github.com/kontourai/flow-agents/commit/11a4ae864afd9f51d643ccc30d3ca6cde2a76060))
+* authenticate critique resolution graph ([dd46e46](https://github.com/kontourai/flow-agents/commit/dd46e4659ce62b8610f243026b847c043106d590))
+* authenticate recovery receipts end to end ([8f2f39b](https://github.com/kontourai/flow-agents/commit/8f2f39b10d072d4af6d47c24c5d5610c3644eecd))
+* bind Builder gates to lifecycle attestations ([7c5ed31](https://github.com/kontourai/flow-agents/commit/7c5ed3127320fd363fe80ed0e40717534542ea5d))
+* bind lifecycle recovery journals ([9d1b0d3](https://github.com/kontourai/flow-agents/commit/9d1b0d3aa5ebc30dae25a835926d7990106b6c02))
+* bind provider config to trusted account context ([425d17a](https://github.com/kontourai/flow-agents/commit/425d17abe0615354bb36ccb091dbcab620ac95b8))
+* bind provider execution to trusted identities ([a835ea4](https://github.com/kontourai/flow-agents/commit/a835ea4dafa3f60c94bf5b7a68cd06ef70ccbd3e))
+* **builder:** ignore stale passing critiques at verify ([e325de3](https://github.com/kontourai/flow-agents/commit/e325de39edf9eca33e6570f521294f9263525587))
+* **builder:** ignore stale passing critiques at verify ([d792d7c](https://github.com/kontourai/flow-agents/commit/d792d7ce46e23b9733515efd44cfc20fbe2b3759))
+* close lifecycle authority trust gaps ([1f34eca](https://github.com/kontourai/flow-agents/commit/1f34eca420aa3c134c7cbbb8f2e6c7ec8cd3f22d))
+* compose change provider with lifecycle authority ([3405093](https://github.com/kontourai/flow-agents/commit/3405093379094bdb82c89d13da092591ef94e51e))
+* **evals:** make Goal Fit escape hatch identity-hermetic ([#736](https://github.com/kontourai/flow-agents/issues/736)) ([6cfb808](https://github.com/kontourai/flow-agents/commit/6cfb808ae7b6726ae0378aa9f7989a958a3ad478))
+* expose node to lifecycle sudo helper ([d3d5fdc](https://github.com/kontourai/flow-agents/commit/d3d5fdcb640b81043d55b8db43194cd3d35a859b))
+* externalize critique resolution trust anchor ([9c10e6d](https://github.com/kontourai/flow-agents/commit/9c10e6d541f2ba6261aab456525bad507c7e4a58))
+* externalize lifecycle authority mutation ([a237d14](https://github.com/kontourai/flow-agents/commit/a237d14e61fc275ecd7d82ef8987b8507777cbd1))
+* fail closed for nested review roots ([9835822](https://github.com/kontourai/flow-agents/commit/98358220e4ddb92e9bd768635d37c65c4a9b9bd4))
+* harden authenticated change publication ([95dc168](https://github.com/kontourai/flow-agents/commit/95dc168e2c7286dc7e49858c83b62f8938e36a3e))
+* harden authenticated critique resolution ([33c69c5](https://github.com/kontourai/flow-agents/commit/33c69c58a97e2156ea3e8923698adb98c0d61e46))
+* harden critique resolution validation ([74c327f](https://github.com/kontourai/flow-agents/commit/74c327fe822ec206659f6b16eb48151ce935a431))
+* harden lifecycle authority mutations ([ce8c764](https://github.com/kontourai/flow-agents/commit/ce8c764741f38fe32c03a5eab291e737ce88d35e))
+* **installer:** trust canonical macOS temp aliases ([#747](https://github.com/kontourai/flow-agents/issues/747)) ([c8b40df](https://github.com/kontourai/flow-agents/commit/c8b40df37ca2ce4798057e871232ac648a6e0bc6))
+* isolate lifecycle authority verification ([485fd78](https://github.com/kontourai/flow-agents/commit/485fd7867dc5a1f6074fd7a2324daafde015d9ec))
+* isolate trusted command environments ([7cc475c](https://github.com/kontourai/flow-agents/commit/7cc475c8d2bb2d23d33a3e11fc7165cde6aeebc4))
+* keep lifecycle authority writes external ([40001df](https://github.com/kontourai/flow-agents/commit/40001df5397076dc83374bf6bc32557aef21c6be))
+* **kit:** make help side-effect-free ([#760](https://github.com/kontourai/flow-agents/issues/760)) ([12d2469](https://github.com/kontourai/flow-agents/commit/12d2469379e3d7ec08dfab4d6981b419be9b45d8))
+* migrate and resolve multi-review history ([2747772](https://github.com/kontourai/flow-agents/commit/274777239edd3899d9c7763c5ede354a5b7d3947))
+* normalize trusted environments across platforms ([15070b7](https://github.com/kontourai/flow-agents/commit/15070b76b006bc0e523786570f68ecce34339010))
+* observe live provider telemetry ([19033f7](https://github.com/kontourai/flow-agents/commit/19033f76e959e5b3fdbf9eb602e58c7556b4fc1c))
+* pin lifecycle authority protocol identity ([0059bf4](https://github.com/kontourai/flow-agents/commit/0059bf4f0c2ee6a8540fac5f46924c7069b84062))
+* preserve critique bundle compatibility ([cf11f5a](https://github.com/kontourai/flow-agents/commit/cf11f5a21fff1a087309533634e8d3ac401cdcb2))
+* preserve trusted Windows auth discovery ([6fc55b0](https://github.com/kontourai/flow-agents/commit/6fc55b0adfe16cb03b82d7c2cb032076f503a5ad))
+* reauthenticate final provider observation ([5804a2e](https://github.com/kontourai/flow-agents/commit/5804a2eaee2a1004c03dd4e8f0453f5a182b82f9))
+* reconcile lifecycle authority commits ([5ba3698](https://github.com/kontourai/flow-agents/commit/5ba36988daaa5e69a8f87973e8a5f7af8e1ad97d))
+* refresh lifecycle dependency closure pin ([a8baf65](https://github.com/kontourai/flow-agents/commit/a8baf6504a2e08ce237ac0cf2cf24a64e38ca090))
+* remove lifecycle authority test seam ([b29606e](https://github.com/kontourai/flow-agents/commit/b29606e2734a51d273115c8723980f8bfa2caf52))
+* seal authenticated observation artifacts ([08ad48d](https://github.com/kontourai/flow-agents/commit/08ad48db595e7d2ccb2c943ecbf5143c9753434b))
+* sign critique resolution authority ([ec10adb](https://github.com/kontourai/flow-agents/commit/ec10adb3b4382aa62fbb4788b8e710871f792e46))
+* trust local git resolution for change publication ([fefae0e](https://github.com/kontourai/flow-agents/commit/fefae0ec0e2a448f87ad31bab58729f0d299d216))
+* **trust-verify:** install action runtime dependencies ([#745](https://github.com/kontourai/flow-agents/issues/745)) ([f2efb33](https://github.com/kontourai/flow-agents/commit/f2efb33ef683793bbec01dcf7e909f3e1423c04d))
+* verify lifecycle authority completions ([f7edbee](https://github.com/kontourai/flow-agents/commit/f7edbeeabad2ae0b168a7d7757406f35b93b72dd))
+* verify signed critique event anchors ([1905135](https://github.com/kontourai/flow-agents/commit/1905135ff7a360a95f5c733451e552d423c8b850))
+* yield during async subject lock contention ([ab9c737](https://github.com/kontourai/flow-agents/commit/ab9c73777c50d370b600810452a529bf36c23128))
+
+
+### Documentation
+
+* close governance kit migration contract ([#730](https://github.com/kontourai/flow-agents/issues/730)) ([77c61ec](https://github.com/kontourai/flow-agents/commit/77c61ec02257090b3304e07ea1ad0dd808c50be9))
+* update Kontour UI package reference ([#728](https://github.com/kontourai/flow-agents/issues/728)) ([cc340af](https://github.com/kontourai/flow-agents/commit/cc340afd47ca0544ab2cfacd065ca76713dda6eb))
+
 ## [4.2.1](https://github.com/kontourai/flow-agents/compare/v4.2.0...v4.2.1) (2026-07-19)
 
 
