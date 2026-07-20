@@ -332,22 +332,27 @@ Reference implementation, provisioning, and positive platform conformance are tr
 
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
-the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback>`. The
-script preserves one previous executable for rollback and enforces root ownership and protected
-mode; it does not create registries, signing keys, or deployment-specific configuration. The
-coordinator fixes those administrator-owned inputs under
+the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
+The script stages the exact `@kontourai/flow` 3.5.0 package (once published) and its runtime dependencies
+under the root-owned coordinator directory, then checks the reducer's public artifact identity and
+hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
+pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not
+create registries, signing keys, or deployment-specific configuration. The coordinator fixes those
+administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
 Current implementation status is intentionally incremental and fail-closed. The separately installed
 `runtime-v1.mjs` artifact contains the pure, deterministic critique-resolution reducer; both its
-bytes and the signed completion bind a runtime digest. The coordinator implements locked preimage
-CAS, atomic fsync trust-bundle replacement, history-preserving critique supersession, immutable
-completion embedding, and durable replay for `resolve-critique`. Cancel and archive transition
+bytes and the signed completion bind a runtime digest. For critique resolution, the coordinator
+uses the staged, exact Flow trust-attachment reducer to attach the authoritative post-resolution
+bundle and synchronize the canonical Flow manifest, state, and reports. Flow attachment semantics
+therefore remain Flow-owned; the coordinator owns only locked CAS and writes described by the
+reducer. Package JavaScript validates the signed completion's immutable structural bindings
+read-only and never turns the response into a package-side mutation. Cancel and archive transition
 adapters remain unsupported and exit nonzero without emitting a completion. Positive root-owned
-installation, canonical Flow evidence attachment/synchronization, and package-side immutable
-completion verification remain `NOT_VERIFIED`; issue #744 stays open for those slices and the
-root-capable container lane.
+installation remains `NOT_VERIFIED` until the 3.5.0 package is published and provisioned; issue
+#744 stays open for that container lane.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

@@ -86,9 +86,10 @@ provisionedExternalAuthorityE2E("provisioned protocol-v1 helper returns the mini
   const authorizationFile = process.env.FLOW_AGENTS_TEST_EXTERNAL_AUTHORIZATION_FILE;
   assert.ok(sessionDir && authorizationFile, "platform lane must provide its provisioned session and signed authorization fixture");
   const result = await cancelBuilderFlowSession({ sessionDir, authorizationFile });
-  assert.deepEqual(Object.keys(result).sort(), ["operation_status", "run_id"]);
+  assert.deepEqual(Object.keys(result).sort(), ["completion", "operation_status", "run_id"]);
   assert.equal(result.run_id, path.basename(path.resolve(sessionDir)));
   assert.ok(["applied", "replayed"].includes(result.operation_status));
+  assert.equal(result.completion.run_id, result.run_id);
 });
 
 function makeSession(slug = "runtime-projection") {

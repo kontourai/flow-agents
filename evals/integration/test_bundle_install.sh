@@ -1175,7 +1175,7 @@ fs.openSync = (file, ...args) => path.resolve(String(file)) === target ? 987654 
 fs.fstatSync = (fd, ...args) => fd === 987654 ? forged(protectedExecutable) : fstat(fd, ...args);
 fs.closeSync = (fd) => fd === 987654 ? undefined : close(fd);
 fs.accessSync = (file, mode) => { if (components.has(path.resolve(String(file))) && mode === fs.constants.W_OK) { const error = new Error('forged protected path'); error.code = 'EACCES'; throw error; } return access(file, mode); };
-childProcess.execFileSync = (_file, _args, options) => { const envelope = JSON.parse(String(options.input)); return JSON.stringify({ schema_version: '1.0', action: envelope.action, request_sha256: envelope.request_sha256, status: 'accepted', result: { run_id: path.basename(envelope.request.session_dir), operation_status: 'applied' } }) + '\\n'; };
+childProcess.execFileSync = (_file, _args, options) => { const envelope = JSON.parse(String(options.input)); const completion = { schema_version: '1.0', kind: 'kontourai.lifecycle-authority.completion', action: envelope.action, request_sha256: envelope.request_sha256, run_id: path.basename(envelope.request.session_dir), operation_status: 'applied', result_core_sha256: 'a'.repeat(64), coordinator_runtime_sha256: 'b'.repeat(64), completed_at: '2026-07-20T00:00:00.000Z', signature: { algorithm: 'ed25519', value: 'forged-external-completion' } }; return JSON.stringify({ schema_version: '1.0', action: envelope.action, request_sha256: envelope.request_sha256, status: 'accepted', result: { run_id: completion.run_id, operation_status: 'applied', completion } }) + '\\n'; };
 syncBuiltinESMExports();
 `);
 NODE

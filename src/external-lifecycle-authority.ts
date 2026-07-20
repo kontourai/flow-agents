@@ -8,7 +8,12 @@ export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flo
 const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
-export interface ExternalLifecycleMutationResult { run_id: string; operation_status: "applied" | "replayed" }
+export interface ExternalLifecycleMutationResult {
+  run_id: string;
+  operation_status: "applied" | "replayed";
+  /** Immutable coordinator completion, structurally bound by the package without package-side writes. */
+  completion: JsonRecord;
+}
 type JsonRecord = Record<string, unknown>;
 
 function record(value: unknown): value is JsonRecord { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -21,6 +26,24 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 function digest(value: unknown): string { return createHash("sha256").update(canonical(value)).digest("hex"); }
+
+/**
+ * The package deliberately performs only read-only structural binding here.
+ * The root-owned coordinator owns signature verification and all mutations;
+ * this prevents an accepted response from being mistaken for an unsigned
+ * in-process authority result.
+ */
+function validateSignedCompletion(value: unknown, action: string, requestSha256: string, runId: string): JsonRecord {
+  if (!record(value)) throw new Error("lifecycle authority completion is missing");
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const observed = Object.keys(value).sort();
+  if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error("lifecycle authority completion contains unexpected or missing fields");
+  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || value.action !== action || value.request_sha256 !== requestSha256 || value.run_id !== runId || !["applied", "replayed"].includes(String(value.operation_status))) throw new Error("lifecycle authority completion does not bind the requested operation");
+  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`lifecycle authority completion ${key} is invalid`);
+  if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error("lifecycle authority completion timestamp is invalid");
+  if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !value.signature.value) throw new Error("lifecycle authority completion signature is invalid");
+  return value;
+}
 
 function trustedHelper(): string {
   if (process.platform === "win32") throw new Error("secure lifecycle authority helper ownership is unavailable without a platform adapter");
@@ -56,8 +79,10 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   if (parsed.request_sha256 !== requestSha256) throw new Error("lifecycle authority helper response request digest is invalid");
   if (parsed.status !== "accepted") throw new Error("lifecycle authority helper rejected the request");
   if (!record(parsed.result)) throw new Error("lifecycle authority helper response result must be an object");
-  exact(parsed.result, ["run_id", "operation_status"], "lifecycle authority mutation result");
+  exact(parsed.result, ["run_id", "operation_status", "completion"], "lifecycle authority mutation result");
   if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
+  const completion = validateSignedCompletion(parsed.result.completion, action, requestSha256, parsed.result.run_id);
+  if (completion.operation_status !== parsed.result.operation_status) throw new Error("lifecycle authority completion status does not match the response");
   return parsed.result;
 }
 
