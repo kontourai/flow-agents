@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-773",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-20T17:50:27.579Z",
+  "commit_sha": "062bfe244007227dbb445e5dc97c1bee57cb720a",
+  "checkpoint": {
+    "asOf": "2026-07-20T17:50:27.580Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-773-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-773-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-409cc82eb52bdc6d495582aeeb2e5057f1697b86f9a32e9c4388d8f12694bfd6-gate-visit-2026-07-20t17-22-29z": "verified",
+      "kontourai-flow-agents-773-gate-claim-pickup-probe-readiness.flow-agents-workflow.follow-up-ci-scope-and-assignment-are-ready-gate-visit-2026-07-20t17-23-35-195z": "verified",
+      "kontourai-flow-agents-773-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.git-backed-fixtures-and-runtime-ignore-boundary-are-explicit-gate-visit-2026-07-20t17-23-35-514z": "verified",
+      "kontourai-flow-agents-773-gate-claim-implementation-plan.flow-agents-workflow.plan-covers-the-three-failing-fixtures-and-focused-regressions-gate-visit-2026-07-20t17-23-35-974z": "verified",
+      "kontourai-flow-agents-773-gate-claim-implementation-scope.flow-agents-workflow.made-the-affected-consumer-fixtures-git-backed-and-preserved-lifecycle-assertions-gate-visit-2026-07-20t17-23-36-414z": "verified",
+      "kontourai-flow-agents-773-gate-claim-acceptance-criteria.flow-agents-workflow.acceptance-criterion-passed-all-three-corrected-git-backed-integration-fixtures-complete-successfully-including-the-bundle-installation-suite-with-a-positive-120-120-result-count-gate-visit-2026-07-20t17-27-18-066z": "verified",
+      "kontourai-flow-agents-773-gate-claim-tests-evidence.flow-agents-workflow.packed-consumer-and-complete-builder-runtime-suites-pass-the-two-additional-focused-fixture-scripts-also-passed-in-the-same-exact-head-verification-cycle-gate-visit-2026-07-20t17-39-30-734z": "verified",
+      "kontourai-flow-agents-773-gate-claim-merge-readiness.flow-agents-workflow.current-review-verification-scope-integrity-and-provider-checks-support-merge-review-gate-visit-2026-07-20t17-41-01-141z": "verified",
+      "kontourai-flow-agents-773-gate-claim-ci-merge-readiness.flow-agents-workflow.all-required-hosted-checks-passed-at-exact-pr-head-062bfe244007227dbb445e5dc97c1bee57cb720a-gate-visit-2026-07-20t17-48-34-150z": "verified",
+      "kontourai-flow-agents-773-all-three-previously-failing-integration-fixtures-pass-with-canonical-git-snapshots-and-ignored-runtime-state.flow-agents-workflow.all-three-previously-failing-integration-fixtures-pass-with-canonical-git-snapshots-and-ignored-runtime-state-verified-2026-07-20t17-39-30-734z": "verified",
+      "kontourai-flow-agents-773-final-code-review.flow-agents-workflow.report-only-review-approved-the-git-backed-snapshot-fixture-corrections-no-correctness-security-or-maintainability-findings-remain-reviewed-2026-07-20t17-24-10-915z-superseded-critique-d9cedac04df06f29ca8bf490633b346635687abb3790095643e5a58cb7ac2233": "proposed",
+      "kontourai-flow-agents-773-final-code-review.flow-agents-workflow.revised-report-only-review-approved-the-git-backed-fixtures-and-complete-critique-chain-validation-with-stable-order-critique-record-identity-and-exclusion-of-superseded-non-critique-evidence-no-open-correctness-or-security-findings-remain-reviewed-2026-07-20t17-37-42-532z": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-20T17:48:34.150Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-773-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-773-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-409cc82eb52bdc6d495582aeeb2e5057f1697b86f9a32e9c4388d8f12694bfd6-gate-visit-2026-07-20t17-22-29z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-pickup-probe-readiness.flow-agents-workflow.follow-up-ci-scope-and-assignment-are-ready-gate-visit-2026-07-20t17-23-35-195z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.git-backed-fixtures-and-runtime-ignore-boundary-are-explicit-gate-visit-2026-07-20t17-23-35-514z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-implementation-plan.flow-agents-workflow.plan-covers-the-three-failing-fixtures-and-focused-regressions-gate-visit-2026-07-20t17-23-35-974z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-implementation-scope.flow-agents-workflow.made-the-affected-consumer-fixtures-git-backed-and-preserved-lifecycle-assertions-gate-visit-2026-07-20t17-23-36-414z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-acceptance-criteria.flow-agents-workflow.acceptance-criterion-passed-all-three-corrected-git-backed-integration-fixtures-complete-successfully-including-the-bundle-installation-suite-with-a-positive-120-120-result-count-gate-visit-2026-07-20t17-27-18-066z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-tests-evidence.flow-agents-workflow.packed-consumer-and-complete-builder-runtime-suites-pass-the-two-additional-focused-fixture-scripts-also-passed-in-the-same-exact-head-verification-cycle-gate-visit-2026-07-20t17-39-30-734z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-merge-readiness.flow-agents-workflow.current-review-verification-scope-integrity-and-provider-checks-support-merge-review-gate-visit-2026-07-20t17-41-01-141z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-gate-claim-ci-merge-readiness.flow-agents-workflow.all-required-hosted-checks-passed-at-exact-pr-head-062bfe244007227dbb445e5dc97c1bee57cb720a-gate-visit-2026-07-20t17-48-34-150z": "2026-07-20T17:48:34.150Z",
+      "kontourai-flow-agents-773-all-three-previously-failing-integration-fixtures-pass-with-canonical-git-snapshots-and-ignored-runtime-state.flow-agents-workflow.all-three-previously-failing-integration-fixtures-pass-with-canonical-git-snapshots-and-ignored-runtime-state-verified-2026-07-20t17-39-30-734z": "2026-07-20T17:39:30.734Z",
+      "kontourai-flow-agents-773-final-code-review.flow-agents-workflow.report-only-review-approved-the-git-backed-snapshot-fixture-corrections-no-correctness-security-or-maintainability-findings-remain-reviewed-2026-07-20t17-24-10-915z-superseded-critique-d9cedac04df06f29ca8bf490633b346635687abb3790095643e5a58cb7ac2233": null,
+      "kontourai-flow-agents-773-final-code-review.flow-agents-workflow.revised-report-only-review-approved-the-git-backed-fixtures-and-complete-critique-chain-validation-with-stable-order-critique-record-identity-and-exclusion-of-superseded-non-critique-evidence-no-open-correctness-or-security-findings-remain-reviewed-2026-07-20t17-37-42-532z": "2026-07-20T17:48:34.150Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
