@@ -306,6 +306,32 @@ test("F4 third-pass: a fully-innocent symlink name pointing at a protected ancho
   }
 });
 
+test("F4 fifth-pass: option-form cp/mv/install destinations block; value flags are not destinations", () => {
+  const scratch = tmpdir();
+  const workspace = path.join(tmpdir(), "ws");
+  const deliveryRoot = path.join(workspace, "delivery");
+  fs.mkdirSync(deliveryRoot, { recursive: true });
+  fs.writeFileSync(path.join(deliveryRoot, "trust.bundle"), "{}");
+  const innocentDir = path.join(scratch, "innocent-dir");
+  fs.symlinkSync(deliveryRoot, innocentDir);
+  const innocentFile = path.join(scratch, "innocent-file");
+  fs.symlinkSync(path.join(deliveryRoot, "trust.bundle"), innocentFile);
+  const origEnv = process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+  process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
+  try {
+    assert.ok(hook.checkCopyMoveToProtected(`cp -t ${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`cp --target-directory=${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`install --target-directory=${innocentDir} /tmp/trust.bundle`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`install /tmp/forged.json ${innocentFile} -m 0644`, scratch));
+    // Ordinary forms stay allowed.
+    assert.equal(hook.checkCopyMoveToProtected(`cp -t ${path.join(scratch, "plain")} /tmp/a.txt`, scratch), null);
+    assert.equal(hook.checkCopyMoveToProtected(`install /tmp/a.txt ${path.join(scratch, "b.txt")} -m 0644`, scratch), null);
+  } finally {
+    if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+    else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
+  }
+});
+
 test("JS/TS twin parity over a shared case table", async () => {
   const tsLib = await import(path.join(packageRoot, "build", "src", "lib", "declared-artifact-roots.js"));
   const jsLib = require_(path.join(packageRoot, "scripts", "hooks", "lib", "declared-artifact-roots.js"));

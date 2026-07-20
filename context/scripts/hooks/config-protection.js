@@ -725,9 +725,32 @@ function checkCopyMoveToProtected(command, cwd) {
     const cmd = tokens[0];
     if (cmd !== "cp" && cmd !== "mv" && cmd !== "install") continue;
 
+    // #783 fifth-pass closure: option-aware destination parsing. `-t DIR` /
+    // `--target-directory[=DIR]` name the destination explicitly; value-taking flags
+    // (install -m 0644, cp --suffix .bak, ...) must not have their VALUES mistaken for the
+    // destination positional.
+    const VALUE_FLAGS = new Set(["-t", "-m", "-o", "-g", "-S", "--mode", "--owner", "--group", "--suffix", "--backup", "--target-directory", "--context"]);
     const positional = [];
+    let targetDir = null;
     for (let i = 1; i < tokens.length; i++) {
-      if (!tokens[i].startsWith("-")) positional.push(tokens[i]);
+      const tok = tokens[i];
+      if (tok === "--") { for (let j = i + 1; j < tokens.length; j++) positional.push(tokens[j]); break; }
+      if (tok.startsWith("--target-directory=")) { targetDir = tok.slice("--target-directory=".length); continue; }
+      if (tok === "-t" || tok === "--target-directory") { if (i + 1 < tokens.length) { targetDir = tokens[i + 1]; i++; } continue; }
+      if (tok.startsWith("--") && tok.includes("=")) continue;
+      if (tok.startsWith("-") && tok !== "-") { if (VALUE_FLAGS.has(tok) && i + 1 < tokens.length) i++; continue; }
+      positional.push(tok);
+    }
+    if (targetDir !== null) {
+      // Every positional is a SOURCE; effective destination = targetDir/<basename(src)>.
+      const dirClean = targetDir.replace(/\/+$/, "");
+      const candidates = [targetDir, ...positional.map((src) => `${dirClean}/${path.basename(src.replace(/\\/g, '/'))}`)];
+      for (const candidate of candidates) {
+        if (protectedTargetBlocks(candidate, cwd, command) || (matchesDeliveryProtected(candidate) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(candidate, cwd)))) {
+          return `${cmd} into ${targetDir} (delivery-protected destination)`;
+        }
+      }
+      continue;
     }
     if (positional.length === 0) continue;
 
