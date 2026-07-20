@@ -32,6 +32,13 @@ if node --test \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/promote/runtime-session.test.js \
   kits/knowledge/promote/store-target.test.js \
+  kits/knowledge/dream/brief.test.js \
+  kits/knowledge/dream/distiller.test.js \
+  kits/knowledge/dream/apply.test.js \
+  kits/knowledge/dream/fs-safe.test.js \
+  kits/knowledge/dream/dream.test.js \
+  kits/knowledge/dream/cli.test.js \
+  kits/knowledge/evals/brief-ranking/suite.test.js \
   kits/knowledge/adapters/shared/store-resolve.test.js \
   kits/knowledge/providers/neo4j/neo4j.test.js; then
   echo "  PASS: knowledge store provider conformance + health verbs + promote sub-flow"

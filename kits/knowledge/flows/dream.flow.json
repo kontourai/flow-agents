@@ -1,0 +1,18 @@
+{
+  "id": "knowledge.dream",
+  "version": "1.0",
+  "description": "Machine-local offline runtime-memory distillation over the registered personal store: preview ingest -> bounded unreviewed distill -> provenance/trust link -> provider-neutral health -> stage create proposals -> optional downstream auto enactment -> reviewed-only bounded briefs -> per-run success/noop report -> cursor commit last only when telemetry advances. It never enables scheduling or invokes a provider apply operation.",
+  "steps": [
+    { "id": "ingest", "next": "distill" },
+    { "id": "distill", "next": "link" },
+    { "id": "link", "next": "health" },
+    { "id": "health", "next": "propose" },
+    { "id": "propose", "next": "policy" },
+    { "id": "policy", "next": "brief" },
+    { "id": "brief", "next": "report" },
+    { "id": "report", "next": "cursor" },
+    { "id": "cursor", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": ["knowledge.dream.run", "knowledge.dream.link", "knowledge.dream.health"]
+}

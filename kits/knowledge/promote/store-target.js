@@ -8,9 +8,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-import { ensureGlobalStore, validateGlobalStoreLocation } from "../adapters/shared/store-resolve.js";
+import { ensureGlobalStore, isStoreRoot, validateGlobalStoreLocation } from "../adapters/shared/store-resolve.js";
 import { proposal, provenance, loadSchemas } from "../providers/lib/model.js";
 import { assertValid } from "../providers/lib/schema-validate.js";
 import { scrubRuntimeResidueText } from "./runtime-session-redaction.js";
@@ -66,6 +66,19 @@ function assertNoSymlinkAncestry(root, target) {
   }
 }
 
+function assertStoreRootSafe(root) {
+  const absolute = path.resolve(root); const parsed = path.parse(absolute); let current = parsed.root;
+  for (const segment of absolute.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment); if (!fs.existsSync(current)) continue;
+    if (fs.lstatSync(current).isSymbolicLink()) fail("personal store ancestry may not contain symlinks");
+  }
+  if (!isStoreRoot(absolute)) fail("personal store must be a complete existing store scaffold");
+  const alias = path.join(absolute, "alias-index.json"); const records = path.join(absolute, "records");
+  if (!fs.existsSync(alias) || !fs.lstatSync(alias).isFile() || fs.lstatSync(alias).isSymbolicLink() || !fs.existsSync(records) || !fs.lstatSync(records).isDirectory() || fs.lstatSync(records).isSymbolicLink()) fail("personal store must include safe alias and records shape");
+  let aliasValue; try { aliasValue = JSON.parse(fs.readFileSync(alias, "utf8")); } catch { fail("personal store alias index is malformed"); }
+  if (!aliasValue || typeof aliasValue.by_slug !== "object" || !aliasValue.by_slug || Array.isArray(aliasValue.by_slug)) fail("personal store alias index is invalid");
+}
+
 function stableRetrievedAt(linked) {
   const decided = linked.decisions && linked.decisions.find((decision) =>
     typeof decision.decided === "string" && /^\d{4}-\d{2}-\d{2}$/.test(decision.decided),
@@ -73,7 +86,7 @@ function stableRetrievedAt(linked) {
   return decided ? `${decided}T00:00:00.000Z` : STABLE_FALLBACK_TIMESTAMP;
 }
 
-function validateCreatePayload(payload, label) {
+export function validateStoreCreatePayload(payload, label = "create payload") {
   if (!CREATE_TYPES.has(payload.type)) fail(`${label} has unsupported create type`);
   if (typeof payload.title !== "string" || !payload.title.trim()) fail(`${label} requires a title`);
   if (typeof payload.body !== "string") fail(`${label} requires string content`);
@@ -108,7 +121,7 @@ function recordPayload({ title, body, category, agent, sessionId, transcriptRefs
       source_ids: transcriptRefs,
     },
   };
-  validateCreatePayload(payload, payload.title.slice(0, 128) || "record");
+  validateStoreCreatePayload(payload, payload.title.slice(0, 128) || "record");
   return payload;
 }
 
@@ -287,6 +300,28 @@ export function writeStoreProposals({ linked, residue, env = process.env, agent,
   const storeRoot = ensureGlobalStore(env);
   if (!storeRoot || !path.isAbsolute(storeRoot)) fail("resolver returned an invalid store root");
   return stageDrafts(storeRoot, slug, drafts);
+}
+
+/**
+ * Stage an already schema-valid generic batch of create-node proposals.
+ * Dream consumes this narrow seam without changing the promote renderer's bytes.
+ */
+export function stageCreateProposalBatch({ storeRoot, batch, proposals, write = true } = {}) {
+  if (!storeRoot || !path.isAbsolute(storeRoot)) fail("storeRoot must be an absolute path");
+  assertStoreRootSafe(storeRoot);
+  const slug = safeSegment(batch, "proposal batch");
+  if (!Array.isArray(proposals)) fail("proposals must be an array");
+  if (proposals.length === 0) return { outDir: null, written: [], inventory: [] };
+  const drafts = proposals.map((item, index) => {
+    if (!item || item.kind !== "create-node") fail("generic batch only accepts create-node proposals");
+    assertValid(item, PROPOSAL_SCHEMA, `generic store proposal ${index}`);
+    validateStoreCreatePayload(item.payload, `generic store proposal ${index}`);
+    const file = `${String(index).padStart(3, "0")}-${createHash("sha256").update(JSON.stringify(item)).digest("hex").slice(0, 16)}.json`;
+    return { file, content: `${JSON.stringify(item, null, 2)}\n` };
+  });
+  const { outDir } = proposalDestination(storeRoot, slug, drafts);
+  if (!write) return { outDir, written: [], inventory: drafts.map((draft) => draft.file) };
+  return { ...stageDrafts(storeRoot, slug, drafts), inventory: drafts.map((draft) => draft.file) };
 }
 
 export default writeStoreProposals;

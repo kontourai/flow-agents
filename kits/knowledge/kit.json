@@ -65,6 +65,11 @@
       "id": "knowledge.promote",
       "path": "flows/promote.flow.json",
       "description": "Knowledge promote sub-flow (issue #313, the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill schema-valid DRAFT decision/vocabulary/learning deltas per the decision-registry contract -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns + divergent content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: outputs land under <session>/proposals/ for the promote step to apply; the sub-flow never writes docs directly. Executable logic: promote/index.js."
+    },
+    {
+      "id": "knowledge.dream",
+      "path": "flows/dream.flow.json",
+      "description": "Offline machine-local runtime-memory dream transaction with cursor-last commit, optional auto create policy, bounded briefs, and reports."
     }
   ],
   "workflow_triggers": [
@@ -135,6 +140,16 @@
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
       "description": "Executable logic for the knowledge.promote sub-flow (issues #313, #669, and #670): runPromote({sessionDir, repoRoot, provenance}) preserves the workflow-sidecar ingest -> distill -> link -> health path. The byte-compatible repo-docs default writes DRAFT proposals only under <session>/proposals/; the explicit store target stages create-node drafts under the registered personal store repository's proposals/pending/<session>/ directory without applying records. The ingest layer also exposes provider-neutral workflow-sidecar and runtime-session sources; runtime-session projects canonical telemetry-referenced Claude Code/Codex transcripts into bounded, deterministically redacted residue under schemas/knowledge/residue.schema.json with a fail-closed dream-owned cursor."
+    },
+    {
+      "id": "knowledge.dream-runner",
+      "path": "dream/cli.js",
+      "description": "Kit-local WI-3 dream executable over the registered personal store: preview ingest -> bounded unreviewed distill -> link -> provider-neutral health -> create proposals -> pending/auto policy -> reviewed-only bounded briefs -> per-run success/noop report -> cursor-last commit when telemetry advances."
+    },
+    {
+      "id": "knowledge.dream-boo-recipe",
+      "path": "dream/boo-recipe.sh",
+      "description": "Syntax-checked, operator-run Boo shell add/disable recipe with absolute/control-safe path validation and robust command quoting. It is documentation only and is never activated by the kit."
     },
     {
       "id": "knowledge.global-store-resolver",
@@ -232,6 +247,16 @@
       "id": "knowledge.global-store-resolver-suite",
       "path": "adapters/shared/store-resolve.test.js",
       "description": "Hermetic WI-2 (#670) proof for XDG/HOME personal-store bootstrap, canonical scaffold shape, atomic stable roots.json persistence, idempotence, existing-root preservation, malformed/conflicting registry refusal, and symlink containment."
+    },
+    {
+      "id": "knowledge.dream-suite",
+      "path": "dream/dream.test.js",
+      "description": "WI-3 cursor-last transaction, failure recovery, and reconciled report suite."
+    },
+    {
+      "id": "knowledge.brief-ranking-suite",
+      "path": "evals/brief-ranking/suite.test.js",
+      "description": "WI-3 overfull ranking and hard brief budget eval."
     }
   ],
   "skills": [
