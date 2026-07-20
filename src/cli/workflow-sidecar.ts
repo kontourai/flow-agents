@@ -7473,6 +7473,7 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["liveness", "Claim/heartbeat/release or inspect session liveness/holder status."],
   ["claim", "Look up a claim's status, evidence, and how-to-verify guidance."],
   ["resolve-slug", "Resolve a work-item reference to its deterministic session slug."],
+  ["fixture", "Write a test fixture state.json OUTSIDE declared artifact roots (write <dir> --from-json <file> | --malformed --content <string|@file>)."],
   ["seal-checkpoint", "Seal a trust checkpoint snapshot for the current session state."],
   ["publish-delivery", "Publish a session's trust bundle to the repo's committed delivery/ path."],
   ["reconcile-preflight", "Run the same bundle shape check publish-delivery enforces, standalone."],
