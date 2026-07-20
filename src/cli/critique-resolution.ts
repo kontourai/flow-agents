@@ -40,9 +40,17 @@ export function critiqueRecordHash(record: AnyRecord): string {
 }
 
 export function normalizeCritiqueChainRecords(records: AnyRecord[]): { records: AnyRecord[]; migrated: boolean } {
-  const complete = records.map((record) => Number.isSafeInteger(record.critique_sequence)
-    && HASH_RE.test(String(record.critique_predecessor_hash)) && HASH_RE.test(String(record.critique_record_hash))
-    && typeof record.critique_record_id === "string");
+  const complete = records.map((record) => {
+    const anchorFields = [record.critique_sequence, record.critique_predecessor_hash, record.critique_record_hash];
+    const hasAnyAnchor = anchorFields.some((value) => value !== undefined && value !== null);
+    const validAnchors = Number.isSafeInteger(record.critique_sequence)
+      && HASH_RE.test(String(record.critique_predecessor_hash))
+      && HASH_RE.test(String(record.critique_record_hash));
+    if (hasAnyAnchor && (!validAnchors || typeof record.critique_record_id !== "string")) {
+      throw new Error("critique history has a partially migrated chain");
+    }
+    return validAnchors && typeof record.critique_record_id === "string";
+  });
   if (complete.every(Boolean)) return { records, migrated: false };
   if (complete.some(Boolean)) throw new Error("critique history has a partially migrated chain");
   let predecessor = CRITIQUE_CHAIN_GENESIS;
@@ -94,7 +102,7 @@ function isLegacyHistoricalCleanPass(record: AnyRecord): boolean {
     && record.superseded_by.length > 0
     && !record.critique_resolution
     && record.verdict === "pass"
-    && record.claim_status === "verified"
+    && record.claim_status === "superseded"
     && lanes.length > 0
     && lanes.every((lane: AnyRecord) => lane?.status === "pass" || lane?.verdict === "pass")
     && !findings.some((finding: AnyRecord) => finding?.status === "open");

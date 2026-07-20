@@ -181,6 +181,56 @@ test("pre-chain critique migration is deterministic and never rewrites legacy re
   assert.equal(first.records[1].critique_predecessor_hash, first.records[0].critique_record_hash);
 });
 
+test("legacy writer superseded clean PASS remains history beside a current pre-chain PASS", () => {
+  const base = (id, status, reviewedAt) => ({
+    id: `claim-${id}`,
+    value: "pass",
+    status,
+    fieldOrBehavior: `${id} review`,
+    metadata: {
+      origin: "critique",
+      reviewer: `${id}-reviewer`,
+      reviewed_at: reviewedAt,
+      workflow_subject_ref: SUBJECT,
+      lanes: [{ id: "code", status: "pass" }],
+      findings: [],
+      review_target: { artifacts: [] },
+    },
+  });
+  const historical = base("historical", "superseded", "2026-07-09T20:00:01.000Z");
+  historical.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  const current = base("current", "verified", "2026-07-09T20:00:02.000Z");
+
+  const graph = validateCritiqueResolutionGraph([historical, current], SUBJECT);
+
+  assert.equal(graph.valid, true, graph.errors.join("; "));
+  assert.deepEqual(graph.live.map((record) => record.source_claim_id), [current.id]);
+});
+
+test("a partially populated critique chain fails closed instead of being re-stamped", () => {
+  const claim = {
+    id: "claim-partial-chain",
+    value: "pass",
+    status: "verified",
+    fieldOrBehavior: "partial chain review",
+    metadata: {
+      origin: "critique",
+      reviewer: "partial-reviewer",
+      reviewed_at: "2026-07-09T20:00:01.000Z",
+      workflow_subject_ref: SUBJECT,
+      critique_sequence: 1,
+      lanes: [{ id: "code", status: "pass" }],
+      findings: [],
+      review_target: { artifacts: [] },
+    },
+  };
+
+  const graph = validateCritiqueResolutionGraph([claim], SUBJECT);
+
+  assert.equal(graph.valid, false);
+  assert.deepEqual(graph.errors, ["critique history has a partially migrated chain"]);
+});
+
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
@@ -2292,6 +2342,7 @@ test("stale passing critique remains audit history when a current exact-workspac
   const capturedAt = Date.now();
   const legacy = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "legacy-same-reviewer-pass");
   legacy.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  legacy.claim.status = "superseded";
   const stale = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "stale-other-reviewer-pass");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
