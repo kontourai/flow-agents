@@ -4334,6 +4334,12 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     const skipLearningProvided = p.flags.has("skip-learning") || opts(p, "skip-learning").length > 0;
     const skipLearningReason = opt(p, "skip-learning").trim();
     if (skipLearningProvided && !skipLearningReason) die('--skip-learning requires a non-empty reason, e.g. --skip-learning "customer escalation; learning-review deferred to next sprint"');
+    // Review-hardened (#798): ADR 0020's convention makes the approver a SEPARATE, mandatory
+    // argument (parseWaiver requires --waived-by distinct from --accepted-gap-reason). Mirror
+    // that forcing function here instead of silently deriving the approver from the invoking
+    // actor — the actor performing the skip must still name who approved it.
+    const skipWaivedBy = opt(p, "waived-by").trim();
+    if (skipLearningReason && !skipWaivedBy) die('--skip-learning also requires --waived-by <actor> (ADR 0020 accepted-gap convention: the approver is named explicitly, not derived from the invoking actor)');
     if (!skipLearningReason) diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
     // Mirrors the repo's existing accepted-gap convention (ADR 0020, parseWaiver/
     // --accepted-gap-reason/--waived-by): kind:"external" (session-local attestation — a
@@ -4351,11 +4357,11 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
       kind: "external",
       status: "not_verified",
       summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
-      _waiver: { reason: skipLearningReason, approved_by: _skipActor, approved_at: _skipTs },
+      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor },
     }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir));
     const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
     assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
-    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, waived by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
+    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, approved by ${skipWaivedBy}, recorded by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
   }
   const flow = opt(p, "flow-definition");
   // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).

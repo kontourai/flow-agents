@@ -89,8 +89,13 @@ test("advance-state rejects terminal jumps without --skip-learning and records a
   assert.notEqual(empty.code, 0);
   assert.match(empty.stderr + empty.stdout, /--skip-learning requires a non-empty reason/);
 
-  // With a reason: transition permitted, and the bundle carries the accepted-gap check.
-  const skipped = sidecar(root, ["advance-state", rel, "--status", "accepted", "--phase", "learning", "--skip-learning", "fixture: closeout deferred"]);
+  // Reason without a named approver: refused (ADR 0020 forcing function).
+  const noApprover = sidecar(root, ["advance-state", rel, "--status", "accepted", "--phase", "learning", "--skip-learning", "fixture: closeout deferred"]);
+  assert.notEqual(noApprover.code, 0);
+  assert.match(noApprover.stderr + noApprover.stdout, /--waived-by/);
+
+  // With a reason and approver: transition permitted, bundle carries the accepted-gap check.
+  const skipped = sidecar(root, ["advance-state", rel, "--status", "accepted", "--phase", "learning", "--skip-learning", "fixture: closeout deferred", "--waived-by", "fixture-approver"]);
   assert.equal(skipped.code, 0, `--skip-learning transition should succeed: ${skipped.stderr}`);
   assert.match(skipped.stderr, /recorded an accepted-gap "learning-evidence-skip"/);
   assert.match(skipped.stderr, /NOT a silent skip/);
@@ -106,4 +111,41 @@ test("advance-state rejects terminal jumps without --skip-learning and records a
   // And the stop-gate treats the recorded skip as satisfying the learning gate.
   assert.equal(hook.hasLearningEvidence(dir), true);
   assert.equal(hook.learningGateOutstandingWarning(root, dir, state), null);
+
+  // Approver is the named waiver actor, not silently the invoking actor.
+  assert.match(fs.readFileSync(path.join(dir, "trust.bundle"), "utf8"), /fixture-approver/);
+});
+
+test("review hardening: adversarial claims cannot silence the gate, and the warning never classifies hard (#798 findings)", () => {
+  const root = mkSessionRepo();
+  const { dir } = ensureSession(root, "hardened");
+  const state = { status: "delivered", phase: "release" };
+  const bundlePath = path.join(dir, "trust.bundle");
+  const claim = (subjectId, status) => JSON.stringify({ schemaVersion: 5, claims: [{ subjectId, status, value: status }] });
+
+  // A FAILING claim whose id merely contains the substring must not satisfy the gate.
+  fs.writeFileSync(bundlePath, claim("session/no-learning-evidence-recorded-for-this-task", "fail"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "failing substring-collision claim must not silence the gate");
+  assert.ok(hook.learningGateOutstandingWarning(root, dir, state), "gate stays flagged");
+
+  // Even a PASSING negative-marker id must not satisfy it.
+  fs.writeFileSync(bundlePath, claim("session/no-learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "negative-marker id must not silence the gate");
+
+  // A genuine learning-evidence claim with fail status must not satisfy it either.
+  fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "fail"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "failed learning evidence is not learning evidence");
+
+  // A genuine pass does satisfy it (end-anchored id).
+  fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), true);
+
+  // The warning text avoids FULL_BLOCK's bare "status:" token and never classifies hard,
+  // so the MAX_BLOCKS operator-release valve always applies — with or without an active
+  // turn authority (the second MEDIUM finding's exact scenario).
+  fs.rmSync(bundlePath);
+  const warn = hook.learningGateOutstandingWarning(root, dir, state);
+  assert.ok(warn && !/status:/.test(warn), "warning must not contain the FULL_BLOCK token 'status:'");
+  assert.equal(hook.isHardStopWarning(warn, path.relative(root, dir), true), false);
+  assert.equal(hook.isHardStopWarning(warn, path.relative(root, dir), false), false);
 });

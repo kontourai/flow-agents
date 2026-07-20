@@ -2129,7 +2129,19 @@ function hasLearningEvidence(artifactDir) {
   if (fs.existsSync(path.join(artifactDir, 'learning.json'))) return true;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
-  return claims.some(c => c && typeof c.subjectId === 'string' && /learning-evidence/i.test(claimCheckId(c.subjectId)));
+  // Review-hardened (#798): end-anchored id match (covers "learning-evidence",
+  // "learning-evidence-skip", and flow gate-claim ids ending in "-learning-evidence")
+  // instead of a bare substring, and a non-failing status — a claim that RECORDS the
+  // absence or failure of learning (e.g. id "no-learning-evidence-recorded", or any
+  // matching id with status fail) must not silence the gate.
+  return claims.some(c => {
+    if (!c || typeof c.subjectId !== 'string') return false;
+    const id = claimCheckId(c.subjectId);
+    if (!/(^|[-.:])learning-evidence(-skip)?$/i.test(id)) return false;
+    if (/(^|[-.:])no-learning-evidence(-skip)?$/i.test(id)) return false;
+    const status = String(c.status ?? c.value ?? '').toLowerCase();
+    return status !== 'fail' && status !== 'failed';
+  });
 }
 
 /**
@@ -2146,7 +2158,11 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   if (!RELEASE_OR_LATER_PHASES.has(phase)) return null;
   if (hasLearningEvidence(artifactDir)) return null;
   const base = relative(root, artifactDir);
-  return `${base} learning outstanding — status:${status} phase:${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>"\`.`;
+  // Review-hardened (#798): the message must not contain the bare token "status:" —
+  // FULL_BLOCK pattern-matches it, which would let isHardStopWarning classify this
+  // warning as hard under an active turn authority and defeat the MAX_BLOCKS release
+  // valve (the exact opposite of the design intent documented at LEARNING_GATE_PATTERN).
+  return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
 async function analyze(root, now = Date.now()) {
@@ -2418,6 +2434,10 @@ function isOrdinaryActiveGateWarning(warning, relPath) {
 
 function isHardStopWarning(warning, relPath, activeTurnAuthority) {
   if (/\[backstop in warn mode — not blocking\]/.test(warning)) return false;
+  // #798 review-hardened: the learning-outstanding warning is never hard — it must always
+  // remain eligible for the MAX_BLOCKS operator release valve (belt-and-braces with the
+  // message wording that avoids FULL_BLOCK tokens; see learningGateOutstandingWarning).
+  if (LEARNING_GATE_PATTERN.test(warning)) return false;
   if (!activeTurnAuthority) return HARD_BLOCK.test(warning);
   return FULL_BLOCK.test(warning) && !isOrdinaryActiveGateWarning(warning, relPath);
 }
