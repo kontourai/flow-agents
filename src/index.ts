@@ -255,6 +255,8 @@ export type {
 } from "./builder-flow-run-adapter.js";
 
 export {
+  archiveBuilderFlowSession,
+  cancelBuilderFlowSession,
   pauseBuilderFlowSession,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
@@ -311,7 +313,7 @@ export type {
 
 // Pure serialization contract used by external lifecycle authorities when
 // signing requests. This does not load, create, or mutate a Flow run.
-export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload } from "./builder-lifecycle-authority.js";
+export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 export type { BuilderLifecycleAuthorization, CritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
 
 export {
