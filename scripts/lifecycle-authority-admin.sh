@@ -46,7 +46,7 @@ case "$action" in
     test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file"
     test -f "$flow_node_modules/@kontourai/flow/package.json" && test -f "$flow_node_modules/@kontourai/flow/dist/index.js"
     node - "$flow_node_modules/@kontourai/flow/package.json" <<'NODE'
-const metadata = require(process.argv[2]);
+const metadata = require(require('node:path').resolve(process.argv[2]));
 if (metadata.name !== '@kontourai/flow' || metadata.version !== '3.5.0') process.exit(1);
 NODE
     mkdir -p "$install_dir"
