@@ -58,3 +58,24 @@ test("effective ChangeProvider settings default to the consumer repository conte
     fs.rmSync(consumer, { recursive: true, force: true });
   }
 });
+
+test("effective ChangeProvider settings do not trust ambient HOME or Git package metadata fallback", async () => {
+  const hostileHome = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-hostile-home-"));
+  const gitRepo = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provider-git-"));
+  const previousHome = process.env.HOME;
+  try {
+    process.env.HOME = hostileHome;
+    const module = await import(`../../build/src/cli/effective-change-provider-settings.js?authority=${Date.now()}`);
+    assert.equal(module.trustedGlobalChangeProviderSettingsPath().startsWith(hostileHome), false);
+
+    spawnSync("git", ["init", "-q"], { cwd: gitRepo });
+    fs.writeFileSync(path.join(gitRepo, "package.json"), JSON.stringify({ repository: "https://github.com/attacker/redirect.git" }));
+    const result = module.resolveEffectiveChangeProviderSettings(gitRepo, absent, absent);
+    assert.equal(result.status, "unconfigured");
+    assert.equal(result.reason, "could_not_identify_current_repo");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    fs.rmSync(hostileHome, { recursive: true, force: true });
+    fs.rmSync(gitRepo, { recursive: true, force: true });
+  }
+});

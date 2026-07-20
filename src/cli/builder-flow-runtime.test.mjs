@@ -2783,6 +2783,7 @@ function initializePublishChangeGitRepository(projectRoot) {
   execFileSync("git", ["add", "README.md"], { cwd: projectRoot });
   execFileSync("git", ["commit", "-m", "fixture"], { cwd: projectRoot, stdio: "ignore" });
   execFileSync("git", ["branch", "-M", "agent/publish-change"], { cwd: projectRoot });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/kontourai/flow-agents.git"], { cwd: projectRoot });
 }
 
 function configurePublishChangeProvider(projectRoot) {

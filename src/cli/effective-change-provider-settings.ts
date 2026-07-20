@@ -25,16 +25,32 @@ function repoFromText(text: string): Repo | null {
 }
 
 function currentRepo(repoPath: string): Repo | null {
+  let gitRoot: string | null = null;
   try {
+    gitRoot = String(execTrustedGitSync(repoPath, ["rev-parse", "--show-toplevel"], "utf8")).trim();
+  } catch {
+    // A real Git root whose trusted inspection fails must never fall back to
+    // caller-authored package metadata for provider authority.
+    if (fs.existsSync(path.join(repoPath, ".git"))) return null;
+  }
+  if (gitRoot !== null) {
+    try {
+      if (fs.realpathSync(gitRoot) !== fs.realpathSync(repoPath)) return null;
+    } catch { return null; }
+    try {
     const remote = String(execTrustedGitSync(repoPath, ["remote", "get-url", "origin"], "utf8"));
-    const repo = repoFromText(remote);
-    if (repo) return repo;
-  } catch {}
+      return repoFromText(remote);
+    } catch { return null; }
+  }
   const packagePath = path.join(repoPath, "package.json");
   if (!fs.existsSync(packagePath)) return null;
   const data = readJson(packagePath) as Record<string, unknown>;
   const repository = typeof data.repository === "object" && data.repository !== null ? (data.repository as Record<string, unknown>).url : data.repository;
   return typeof repository === "string" ? repoFromText(repository) : null;
+}
+
+export function trustedGlobalChangeProviderSettingsPath(): string {
+  return path.join(os.userInfo().homedir, ".config", "flow-agents", "change-provider-settings.json");
 }
 
 function merge(base: unknown, override: unknown): Record<string, unknown> | null {
@@ -62,7 +78,7 @@ function defaultProjectSettingsPath(repoPath: string): string {
   return path.join(path.resolve(repoPath), PROJECT_SETTINGS_RELATIVE_PATH);
 }
 
-export function resolveEffectiveChangeProviderSettings(repoPath: string, projectSettings = defaultProjectSettingsPath(repoPath), globalSettings = path.join(os.homedir(), ".config", "flow-agents", "change-provider-settings.json")): Record<string, unknown> {
+export function resolveEffectiveChangeProviderSettings(repoPath: string, projectSettings = defaultProjectSettingsPath(repoPath), globalSettings = trustedGlobalChangeProviderSettingsPath()): Record<string, unknown> {
   const repo = currentRepo(repoPath);
   const projectDoc = loadSettings(projectSettings);
   const globalDoc = loadSettings(globalSettings);
@@ -83,7 +99,7 @@ export function main(argv = process.argv.slice(2)): number {
     const result = resolveEffectiveChangeProviderSettings(
       repoPath,
       path.resolve(flagString(args.flags, "project-settings", defaultProjectSettingsPath(repoPath)) ?? ""),
-      path.resolve(flagString(args.flags, "global-settings", path.join(os.homedir(), ".config", "flow-agents", "change-provider-settings.json")) ?? ""),
+      path.resolve(flagString(args.flags, "global-settings", trustedGlobalChangeProviderSettingsPath()) ?? ""),
     );
     if (flagBool(args.flags, "json")) console.log(JSON.stringify(result, null, 2));
     else console.log(`status: ${String(result.status)}`);
