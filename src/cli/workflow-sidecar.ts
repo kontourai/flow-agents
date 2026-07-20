@@ -1357,12 +1357,16 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
 // fail-open write = SILENT DATA LOSS. Data-persisting writers must fail loudly when the
 // bundle was not written (Surface unavailable, validation, or I/O) instead of exiting 0
 // and dropping the record. (Was masked as a "flaky" concurrent-critique test.)
+function bundleNotWrittenMessage(errors: string[]): string {
+  const reason = errors.length
+    ? errors.join("; ")
+    : "@kontourai/surface is unavailable — it is REQUIRED to persist the trust.bundle (bundle-only workspace, ADR 0010 Phase 4c). Install it (>= 1.2) and retry.";
+  return `trust.bundle was NOT written — the record was not persisted: ${reason}`;
+}
+
 function assertBundleWritten(result: { written: boolean; errors: string[] }): void {
   if (result.written) return;
-  const reason = result.errors.length
-    ? result.errors.join("; ")
-    : "@kontourai/surface is unavailable — it is REQUIRED to persist the trust.bundle (bundle-only workspace, ADR 0010 Phase 4c). Install it (>= 1.2) and retry.";
-  die(`trust.bundle was NOT written — the record was not persisted: ${reason}`);
+  die(bundleNotWrittenMessage(result.errors));
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4545,7 +4549,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     exactFlowContext,
     resolutionEvents,
   );
-  if (!candidateBundle) die("record-critique could not build the candidate trust bundle");
+  if (!candidateBundle) die(bundleNotWrittenMessage([]));
   const candidateGraph = validateCritiqueResolutionGraph(
     Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [],
     workflowSubjectRef,
