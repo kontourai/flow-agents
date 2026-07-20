@@ -1,0 +1,15 @@
+{
+  "package": "@kontourai/flow",
+  "package_version": "3.5.0",
+  "release_commit": "871ed9c",
+  "closure_sha256": "d6fec9277a27df126a3005ce09068e65ab486ee641b4963c9f81043bcda77b0d",
+  "reducer": {
+    "artifact_id": "kontourai.flow.trust-attachment-reducer",
+    "version": "1.0.0",
+    "dependency_versions": {
+      "hachure": "0.15.0",
+      "surface": "2.12.0"
+    },
+    "hash": "sha256:389ef9d5d0995adcd74a8d51780b438e43d16a46dfb6d0882aad6010a1a2e0bd"
+  }
+}

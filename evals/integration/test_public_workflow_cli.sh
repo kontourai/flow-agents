@@ -377,8 +377,6 @@ const slug = path.basename(session);
 const assignment = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`), 'utf8'));
 const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
 const keys = generateKeyPairSync('ed25519');
-fs.mkdirSync(path.join(project, '.flow-agents'), { recursive: true });
-fs.writeFileSync(path.join(project, '.flow-agents', 'lifecycle-authority-keys.json'), JSON.stringify({ schema_version: '1.0', keys: [{ id: 'consumer', algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }] }, null, 2));
 for (const operation of ['cancel', 'archive']) {
   const requestedAt = new Date();
   const unsigned = {
@@ -393,10 +391,9 @@ for (const operation of ['cancel', 'archive']) {
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
 NODE
-run_candidate cancel --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/cancel.authorization.json" >/dev/null
-run_candidate archive --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/archive.authorization.json" >/dev/null
-[[ -f "$ARTIFACT_ROOT/archive/acme-widgets-102/state.json" && ! -e "$CANCEL_SESSION" ]] || fail "cancel/archive did not retain archived session"
-pass "signed cancel and archive execute through the public command"
+! run_candidate cancel --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/cancel.authorization.json" >/dev/null 2>&1 || fail "repository-local authority unexpectedly authorized cancellation"
+[[ -d "$CANCEL_SESSION" ]] || fail "failed-closed cancellation mutated the session"
+pass "public lifecycle commands reject repository-local authority without an external trust anchor"
 
 seed_pull_work acme/widgets#106
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#106 --assignment-provider local-file --summary "Command authority lock fixture" >/dev/null

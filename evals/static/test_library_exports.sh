@@ -56,8 +56,9 @@ const required = [
   "normalizeEvidenceRefs", "validateEvidenceRef", "validateLearningCorrection",
   "loadJson", "readSidecar", "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
   "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
-  "pauseBuilderFlowSession", "resumeBuilderFlowSession", "cancelBuilderFlowSession",
-  "archiveBuilderFlowSession", "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
+  "pauseBuilderFlowSession", "resumeBuilderFlowSession",
+  "cancelBuilderFlowSession", "archiveBuilderFlowSession",
+  "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
   "builderLifecycleAuthorizationPayload", "loadBuilderLifecycleAuthorization",
   "statuses", "phases", "checkKinds", "checkStatuses", "verdicts",
 ];

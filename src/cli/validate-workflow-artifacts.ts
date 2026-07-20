@@ -2,6 +2,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 
 type Issue = { path: string; message: string };
 
@@ -23,6 +28,17 @@ const sidecarSchemas: Record<string, string> = {
   "learning.json": "schemas/workflow-learning.schema.json",
   "waves.json": "schemas/workflow-waves.schema.json",
 };
+
+// Signed critique-resolution events are verified against the repository-owned
+// trust-root registry. Validation can be invoked from any working directory,
+// so process.cwd() is not an authority boundary: derive the owning repository
+// from the canonical runtime session path instead.
+function projectRootForSession(dir: string): string | undefined {
+  const marker = `${path.sep}.kontourai${path.sep}flow-agents${path.sep}`;
+  const resolved = path.resolve(dir);
+  const markerIndex = resolved.lastIndexOf(marker);
+  return markerIndex > 0 ? resolved.slice(0, markerIndex) : undefined;
+}
 // Runtime coordination records live below a session but are not workflow
 // sidecars. Recursing into them would validate continuation-driver/state.json
 // against the public workflow-state schema and turn an active driver into a
@@ -438,8 +454,11 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     const evidence = payloads.get("evidence.json");
     if (evidence?.verdict === "pass" && Array.isArray(evidence.checks) && evidence.checks.some((c: any) => c.status !== "pass" && c.status !== "skip")) issues.push({ path: path.join(dir, "evidence.json"), message: "pass verdict requires all non-skipped checks to pass" });
   }
-  if (requireSidecars) {
-    const dirs = new Set<string>(markdown.map((p) => path.dirname(p)));
+  if (requireSidecars || requireCritique) {
+    const dirs = new Set<string>([
+      ...markdown.map((p) => path.dirname(p)),
+      ...inputs.filter((p) => fs.existsSync(p) && fs.statSync(p).isDirectory()).map((p) => path.resolve(p)),
+    ]);
     for (const dir of dirs) {
       const deliver = markdown.find((p) => path.dirname(p) === dir && p.includes("deliver") && !p.includes("plan") && !p.includes("review"));
       const delivered = deliver ? /status:\s*(delivered|accepted|archived)/i.test(readText(deliver)) : true;
@@ -448,8 +467,10 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       // Hard-fail on evidence.json absence only when no trust.bundle exists for a delivered session.
       const hasTrustBundle = fs.existsSync(path.join(dir, "trust.bundle"));
       const evidenceRequired = delivered && !hasTrustBundle;
-      for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
-        if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+      if (requireSidecars) {
+        for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
+          if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+        }
       }
       // ADR 0010 Phase 4c: critique.json no longer written; trust.bundle carries critique claims. Accept either.
       if (requireCritique && !fs.existsSync(path.join(dir, "critique.json")) && !fs.existsSync(path.join(dir, "trust.bundle"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });
@@ -459,12 +480,46 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
         const { value: bundleValue } = readJson(trustBundlePath);
         if (bundleValue) {
           const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
-          const critiqueClaims = claims.filter((c: any) => c && c.claimType === "workflow.critique.review");
-          // #282: a historical fail/disputed critique that has been explicitly superseded by a later
-          // resolving write (metadata.superseded_by) is retained structurally as history and does NOT
-          // block a top-level pass — only a LIVE (non-superseded) fail/disputed critique blocks.
-          const isSuperseded = (c: any) => c && c.metadata && typeof c.metadata === "object" && c.metadata.superseded_by;
-          if (critiqueClaims.some((c: any) => (c.value === "fail" || c.status === "disputed") && !isSuperseded(c))) issues.push({ path: trustBundlePath, message: "required critique must pass" });
+          const stateResult = readJson(path.join(dir, "state.json"));
+          const state = stateResult.value;
+          const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1
+            ? state.work_item_refs[0]
+            : typeof state?.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+          const authorityEvents = readJson(path.join(dir, "lifecycle-authority.resolution-events.json")).value;
+          const resolutionEvents = Array.isArray(authorityEvents?.events)
+            ? authorityEvents.events
+            : Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [];
+          let externalCompletionVerified = false;
+          const completion = readJson(path.join(dir, "lifecycle-authority.completion.json")).value;
+          try {
+            const verified = verifyLifecycleAuthorityCompletion(completion);
+            externalCompletionVerified = verified.action === "resolve-critique"
+              && verified.run_id === path.basename(dir)
+              && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
+          } catch {
+            // A cross-reviewer edge remains NOT_VERIFIED without a root-signed completion.
+          }
+          const graph = validateCritiqueResolutionGraph(claims, subject, resolutionEvents, projectRootForSession(dir), externalCompletionVerified);
+          if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
+          const projectRoot = projectRootForSession(dir);
+          if (!projectRoot) {
+            issues.push({ path: trustBundlePath, message: "required critique project root could not be resolved" });
+            continue;
+          }
+          for (const critique of graph.live) {
+            const artifacts = Array.isArray(critique.review_target?.artifacts) ? critique.review_target.artifacts : [];
+            try {
+              const currentArtifacts = artifacts.map((artifact: any) => {
+                const file = path.resolve(projectRoot, String(artifact.file));
+                const relative = path.relative(fs.realpathSync(projectRoot), fs.realpathSync(file));
+                if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("artifact escapes project root");
+                const sha256 = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+                if (sha256 !== artifact.sha256) throw new Error("artifact digest changed");
+                return { file: String(artifact.file), sha256 };
+              });
+              if (currentArtifacts.length === 0 || !isDeepStrictEqual(critique.review_target?.workspace_snapshot, captureReviewWorkspaceSnapshot(projectRoot, currentArtifacts))) throw new Error("workspace snapshot changed");
+            } catch { issues.push({ path: trustBundlePath, message: "required critique resolver artifacts or workspace are no longer current" }); }
+          }
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

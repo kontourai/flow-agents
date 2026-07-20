@@ -130,6 +130,7 @@
     "eval": "bash evals/run.sh",
     "eval:static": "bash evals/run.sh static",
     "eval:integration": "bash evals/run.sh integration",
+    "eval:lifecycle-container": "bash evals/integration/test_lifecycle_authority_container.sh",
     "trust-reconcile-verify": "npm run build && npm run eval:static",
     "trust-reconcile-manifest": "bash evals/ci/run-baseline.sh --manifest-json",
     "eval:acceptance": "bash evals/run.sh acceptance",
@@ -155,7 +156,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/flow": "^3.1.4"
+    "@kontourai/flow": "3.5.0"
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.11.0",

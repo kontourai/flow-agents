@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -9,20 +8,22 @@ import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapsho
 import {
   evaluateGate,
   expectationsForGate,
-  lifecycleRequestMatches,
   openGates,
   type FlowGate,
   type FlowExpectation,
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
+import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
-  cancelBuilderFlowRun,
   evaluateBuilderFlowRun,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
@@ -41,6 +42,7 @@ export interface BuilderFlowSessionInput {
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
   authorizationFile: string;
 }
+
 
 export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput {
   reason: string;
@@ -181,22 +183,9 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
   return changeBuilderFlowSessionLifecycle(input, "resume");
 }
 
-export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
+export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-    const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
-    assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
-    const changed = await cancelBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
-    const released = performLocalReleaseUnderLock(prepared.context.artifactRoot, prepared.context.slug, prepared.authorization.assignment_actor, {
-      actorKey: prepared.authorization.assignment_actor_key,
-      reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
-      tolerateNoActiveClaim: true,
-    });
-    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
-    writeProjection(prepared.context, projection, prepared.sidecarSnapshot.raw, "cancellation projection");
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, progressSnapshot, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
-  });
+  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
 }
 
 export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
@@ -272,6 +261,7 @@ export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInp
 
   const { unsigned, signingPayload } = buildUnsignedLifecycleAuthorization({
     operation: "cancel",
+    project_root: context.projectRoot,
     run_id: context.slug,
     subject,
     assignment_actor_key: assignment.actor_key as string,
@@ -311,51 +301,9 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
   });
 }
 
-export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
+export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-  const prepared = await prepareAuthorizedLifecycleChange(input, "archive", context);
-  const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
-  const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
-  if (priorConsumption && !recoveringPreparedArchive) throw new Error("lifecycle authorization nonce has already been consumed");
-  const run = await loadBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
-  if (run.state.status !== "completed" && run.state.status !== "canceled") {
-    throw new BuilderBuildRunInputError("flow_run.status", "must be completed or canceled before archival");
-  }
-  const archiveRoot = path.join(prepared.context.artifactRoot, "archive");
-  const archiveDir = path.join(archiveRoot, prepared.context.slug);
-  if (pathExistsNoFollow(archiveDir)) throw new BuilderBuildRunInputError("archive", "destination already exists");
-  fs.mkdirSync(archiveRoot, { recursive: true });
-  assertSafeDirectory(archiveRoot, prepared.context.artifactRoot, "archive root");
-  assertSafeDirectory(prepared.context.sessionDir, prepared.context.artifactRoot, "sessionDir");
-  if (!recoveringPreparedArchive && fs.readFileSync(prepared.context.stateFile, "utf8") !== prepared.sidecarSnapshot.raw) {
-    throw new BuilderBuildRunInputError("state.json", "changed during archive preparation");
-  }
-  const archivedState = recoveringPreparedArchive ? prepared.sidecarSnapshot.state : {
-    ...prepared.sidecarSnapshot.state,
-    status: "archived",
-    phase: "done",
-    updated_at: new Date().toISOString(),
-    next_action: { status: "done", summary: "Builder session archived; canonical Flow artifacts remain retained." },
-  };
-  if (!recoveringPreparedArchive) {
-    writeExistingFileNoFollow(prepared.context.stateFile, `${JSON.stringify(archivedState, null, 2)}\n`);
-    clearCurrentPointers(prepared.context.artifactRoot, prepared.context.slug);
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-  }
-  const { progressSnapshot } = projectFlowRun(prepared.context, run, prepared.sidecarSnapshot.state);
-  fs.renameSync(prepared.context.sessionDir, archiveDir);
-  return {
-    sessionDir: archiveDir,
-    projectRoot: prepared.context.projectRoot,
-    run,
-    projection: archivedState,
-    gateActionEnvelope: null,
-    progressSnapshot,
-    attached: false,
-    archiveDir,
-  };
-  });
+  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
 }
 
 async function changeBuilderFlowSessionLifecycle(
@@ -386,48 +334,6 @@ async function changeBuilderFlowSessionLifecycle(
   });
 }
 
-async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLifecycleInput, operation: "cancel" | "archive", context: SessionContext): Promise<{
-  context: SessionContext;
-  sidecarSnapshot: SidecarSnapshot;
-  authorization: ReturnType<typeof loadBuilderLifecycleAuthorization>;
-}> {
-  const sidecarSnapshot = readSidecarSnapshot(context);
-  const subject = workflowSubject(sidecarSnapshot.state);
-  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
-  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
-  const persistedAssignment = pathExistsNoFollow(assignmentFile)
-    ? (assertSafeFile(assignmentFile, context.artifactRoot, "assignment record"), JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord)
-    : null;
-  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
-  const acceptsReleasedAssignment = (operation === "cancel" && canonicalRun.state.status === "canceled") || operation === "archive";
-  const assignment = activeAssignment ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
-  if (!assignment || (assignment.status !== "claimed" && !acceptsReleasedAssignment) || !assignment.actor_key) {
-    throw new BuilderBuildRunInputError("assignment", "must be actively held by a canonical actor before a lifecycle change");
-  }
-  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
-    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
-  }
-  const authorization = loadBuilderLifecycleAuthorization(input.authorizationFile, {
-    projectRoot: context.projectRoot,
-    operation,
-    runId: context.slug,
-    subject,
-    actorKey: assignment.actor_key,
-    ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
-    ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
-  });
-  if (operation === "cancel" && canonicalRun.state.status === "canceled") {
-    const terminalEvent = canonicalRun.state.lifecycle?.at(-1);
-    if (!terminalEvent || terminalEvent.action !== "cancel" || !lifecycleRequestMatches(terminalEvent, authorization.request)) {
-      throw new BuilderBuildRunInputError("authorization.request", "does not match the canonical cancellation being recovered");
-    }
-  }
-  if (!sameActor(authorization.assignment_actor, assignment.actor)) {
-    throw new BuilderBuildRunInputError("authorization.assignment_actor", "must match the active assignment holder");
-  }
-  return { context, sidecarSnapshot, authorization };
-}
-
 function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, context: SessionContext): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string } {
   if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
   const resolved = resolveCurrentAssignmentActor();
@@ -445,36 +351,13 @@ function sameActor(left: ActorStruct, right: ActorStruct): boolean {
   return isDeepStrictEqual({ ...left, human: left.human ?? null }, { ...right, human: right.human ?? null });
 }
 
-function clearCurrentPointers(artifactRoot: string, slug: string): void {
-  const candidates = [path.join(artifactRoot, "current.json")];
-  const actorRoot = path.join(artifactRoot, "current");
-  if (pathExistsNoFollow(actorRoot)) {
-    assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    candidates.push(...fs.readdirSync(actorRoot).filter((name) => name.endsWith(".json")).map((name) => path.join(actorRoot, name)));
-  }
-  for (const file of candidates) {
-    if (!pathExistsNoFollow(file) || !fs.lstatSync(file).isFile()) continue;
-    const root = file === candidates[0] ? artifactRoot : actorRoot;
-    if (root === actorRoot) assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    assertSafeFile(file, root, "current pointer");
-    let pointer: AnyRecord;
-    try {
-      pointer = JSON.parse(fs.readFileSync(file, "utf8")) as AnyRecord;
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      // Archival retains malformed unrelated pointers for explicit repair.
-      continue;
-    }
-    if (pointer.active_slug === slug) fs.unlinkSync(file);
-  }
-}
-
 async function syncAndProject(
   context: SessionContext,
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
+  assertLifecycleResolutionAttestation(context, run);
   let attached = false;
   const gates = openGatesForResult(run);
   if (run.state.status === "active" && gates.length !== 1) {
@@ -490,6 +373,7 @@ async function syncAndProject(
         run.state,
         run.state.subject,
         context.projectRoot,
+        context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
       );
@@ -528,6 +412,7 @@ async function syncAndProject(
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
+  assertLifecycleResolutionAttestation(context, run);
   const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "projection");
   return {
@@ -539,6 +424,25 @@ async function syncAndProject(
     progressSnapshot,
     attached,
   };
+}
+
+function assertLifecycleResolutionAttestation(context: SessionContext, run: BuilderFlowRunResult): void {
+  const attachments = manifestEvidence(run.manifest).filter((entry) => typeof entry.id === "string" && entry.id.startsWith("lifecycle-authority:") && typeof entry.superseded_by !== "string");
+  if (attachments.length === 0) return;
+  if (attachments.length !== 1) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must have exactly one live lifecycle resolution attachment");
+  const storedPath = attachments[0]!.stored_path;
+  if (typeof storedPath !== "string") throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must identify its immutable Flow evidence");
+  const evidenceFile = path.resolve(run.dir, storedPath);
+  assertSafeFile(evidenceFile, run.dir, "lifecycle authority Flow evidence");
+  const evidenceBytes = fs.readFileSync(evidenceFile);
+  if (typeof attachments[0]!.sha256 !== "string" || createHash("sha256").update(evidenceBytes).digest("hex") !== attachments[0]!.sha256) {
+    throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "immutable Flow evidence digest does not match its manifest");
+  }
+  const bundle = JSON.parse(evidenceBytes.toString("utf8"));
+  if (!isRecord(bundle) || !Array.isArray(bundle.claims)) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must attach a trust bundle");
+  const authority = verifiedResolutionAuthority(bundle, context.sessionDir);
+  const graph = validateCritiqueResolutionGraph(bundle.claims as AnyRecord[], run.state.subject, authority.events, context.projectRoot, authority.verified);
+  if (!graph.valid) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", graph.errors.join("; "));
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
@@ -627,6 +531,7 @@ async function bundleGateEvidence(
   state: FlowRunState,
   subject: string,
   projectRoot: string,
+  sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
@@ -710,7 +615,8 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
-    await assertVerifiedTestsTrust(relevant, projectRoot);
+    const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
+    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -739,7 +645,23 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string): Promise<void> {
+function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { events: AnyRecord[]; verified: boolean } {
+  const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+  if (!fs.existsSync(eventsFile)) return { events: [], verified: false };
+  assertSafeFile(eventsFile, sessionDir, "lifecycle-authority.resolution-events.json");
+  const payload = JSON.parse(fs.readFileSync(eventsFile, "utf8"));
+  const events = isRecord(payload) && Array.isArray(payload.events) ? payload.events as AnyRecord[] : [];
+  const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
+  assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
+  const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
+  const expectedCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events });
+  if (completion.action !== "resolve-critique" || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
+    throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
+  }
+  return { events, verified: true };
+}
+
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
@@ -752,10 +674,13 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   // during this visit describe the implementation snapshot currently being verified. Within a
   // visit every live reviewer slice still participates, so changing reviewers cannot bury a
   // disputed finding.
+  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
+  if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
+  const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
-    && typeof claim.metadata.superseded_by !== "string");
+    && liveRecordIds.has(claim.metadata.critique_record_id));
   if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
   }
@@ -851,46 +776,6 @@ function assertReviewedWorkspaceSnapshot(claim: AnyRecord, artifacts: AnyRecord[
   }
 }
 
-function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
-  const root = fs.realpathSync(projectRoot);
-  const hasGitMarker = fs.existsSync(path.join(root, ".git"));
-  try {
-    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
-    }
-    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
-    const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] })
-      .toString("utf8").split("\0").filter(Boolean).sort();
-    const hash = createHash("sha256");
-    hash.update("flow-agents:git-worktree:v1\0");
-    hash.update(headSha).update("\0");
-    hash.update(trackedDiff).update("\0");
-    for (const file of untracked) {
-      const absolute = path.resolve(root, file);
-      if (!pathIsWithin(absolute, root)) throw new Error("untracked file escapes repository root");
-      const stat = fs.lstatSync(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("untracked entry is not a regular file");
-      hash.update(file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-    }
-    return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: headSha };
-  } catch (error) {
-    if (hasGitMarker || error instanceof BuilderBuildRunInputError) {
-      if (error instanceof BuilderBuildRunInputError) throw error;
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", `could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return null;
-  }
-}
-
-export function captureReviewWorkspaceSnapshot(
-  projectRoot: string,
-  reviewedFiles: Array<{ file: string; sha256: string }>,
-): AnyRecord {
-  return gitWorktreeSnapshot(projectRoot) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
-}
-
 function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha256: string }> {
   if (!Array.isArray(snapshot.files) || snapshot.files.length === 0
     || !snapshot.files.every((file) => isRecord(file) && typeof file.file === "string" && /^[a-f0-9]{64}$/i.test(String(file.sha256)))) {
@@ -903,22 +788,26 @@ function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha2
   return files;
 }
 
-function reviewedFilesSnapshot(projectRoot: string, reviewedFiles: Array<{ file: string; sha256: string }>): AnyRecord {
-  const files = reviewedFiles.map((file) => ({ ...file }));
-  const hash = createHash("sha256");
-  hash.update("flow-agents:reviewed-files:v1\0");
-  for (const artifact of files) {
-    const absolute = safeReviewedArtifactPath(projectRoot, artifact.file);
-    hash.update(artifact.file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-  }
-  return { version: 1, kind: "reviewed-files", algorithm: "sha256", digest: hash.digest("hex"), files };
-}
-
 async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {
   const canonicalArtifact = safeReviewedArtifactPath(projectRoot, artifact.file);
   if (createHash("sha256").update(fs.readFileSync(canonicalArtifact)).digest("hex") !== artifact.sha256) {
     throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", `does not match ${artifact.file}`);
   }
+}
+
+/** Revalidate the current substantive PASS represented by one persisted critique claim. */
+export async function assertCurrentCritiqueClaim(claim: AnyRecord, projectRoot: string): Promise<void> {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : {};
+  if (claim.value !== "pass" || claim.status !== "verified"
+    || !Array.isArray(metadata.lanes) || metadata.lanes.length === 0 || metadata.lanes.some((lane: AnyRecord) => lane.status !== "pass")
+    || (Array.isArray(metadata.findings) && metadata.findings.some((finding: AnyRecord) => finding.status === "open"))) {
+    throw new BuilderBuildRunInputError("evidence.critique", "must remain a substantive current PASS");
+  }
+  const target = isRecord(metadata.review_target) ? metadata.review_target : {};
+  const artifacts = Array.isArray(target.artifacts) ? target.artifacts : [];
+  if (artifacts.length === 0) throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts", "must not be empty");
+  await Promise.all(artifacts.map((artifact: AnyRecord) => assertReviewedArtifactDigest(artifact, projectRoot)));
+  assertReviewedWorkspaceSnapshot({ metadata }, artifacts, projectRoot);
 }
 
 function safeReviewedArtifactPath(projectRoot: string, file: string): string {

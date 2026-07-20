@@ -102,6 +102,69 @@ cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
 
+## Resolving repaired critique history
+
+`workflow resolve-critique` closes a historical failing or not-verified review
+without deleting it or borrowing the earlier reviewer's identity. It is only
+available during `builder.build` verification. It requires an Ed25519-signed
+user/operator authorization handled by an externally provisioned lifecycle-authority helper.
+Administrators provision protocol v1 at the immutable path
+`/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1`; callers cannot select another
+executable. The helper must be outside the project, package, and worktree, OS-owned, executable, and
+non-writable by the runtime user, group, or world through every path component. Platforms without
+a supported ownership adapter fail closed. The helper—not package JavaScript—owns signature and
+registry verification, locking, nonce replay protection, preimage CAS, atomic bundle/history writes,
+canonical evidence attachment, and any Flow synchronization for the authorized transition.
+The authorization binds
+the exact canonical project root, run, subject, pre-mutation bundle digest, critique IDs and hashes,
+expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
+identity and actor overrides do not authorize this operation.
+
+Requests and responses use strict single-line JSON envelopes. A response is accepted only when its
+protocol version, action, canonical request SHA-256 digest, status, and exact action-specific result
+match the request. Empty, multi-line, malformed, or extended responses fail closed. The helper must
+independently reject unknown fields/actions, canonicalize and constrain every received path, derive
+the run/project/artifact roots rather than trusting claimed relationships, and perform mutation only
+after its own locked precondition and compare-and-swap checks.
+Package-side graph validation never invokes a live verification subprocess or treats a helper
+response as authorization. It verifies the coordinator's pinned Ed25519 completion receipt and
+requires its result digest to bind the exact resolved graph before Builder consumes the transition.
+
+The helper and its provider-neutral key registry are deployed and configured by runtime
+administrators outside source control. Flow Agents ships neither helper configuration nor keys.
+Missing, untrusted, repository-local, or writable helpers fail closed. The privileged
+coordinator only verifies authority, serializes and records the operation, then gives a
+one-use signed capability to a worker running as the invoking non-root user; repository
+artifacts are read and written only by that unprivileged worker.
+
+Use immutable `metadata.critique_record_id` values from the two trust-bundle
+critique records. The resolving critique must be verified, current against the
+workspace, later in the writer-issued predecessor hash chain, and cover every
+failed or not-verified lane plus every open finding from the earlier critique.
+When both reviews target Git worktrees, the resolving commit must descend from
+the earlier reviewed commit. The explicit per-lane and per-finding edges are
+the policy-defined relationship between the two reviews.
+
+```bash
+flow_agents workflow resolve-critique \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  --authorization-file critique-resolution.authorization.json
+```
+
+The earlier record remains in `trust.bundle` with its original reviewer,
+findings, timestamps, `superseded_by` reference, and `critique_resolution`
+audit record. Repeating the identical valid request is a no-op. Missing,
+ambiguous, circular, stale, equal-snapshot, wrong-subject, or unauthorized
+requests fail without changing the bundle.
+
+The signed authorization is consumed once under the subject lock. Resolution
+also appends a separately hashed event binding the authorization digest and
+exact edge. The local event chain is tamper-evident; deployments requiring
+non-repudiation should additionally retain the signed authorization and anchor
+the resulting state in their provider-neutral durable audit store.
+
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"
 flow_agents workflow resume --reason "Decision received"

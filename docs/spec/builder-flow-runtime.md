@@ -307,17 +307,68 @@ pause, resume, or release its own assignment with a reason. Cancellation and arc
 an Ed25519-signed authorization record conforming to
 `schemas/builder-lifecycle-authorization.schema.json`. The record is operation-bound and binds
 the request to the run id, selected Work Item, current assignment actor, immutable external
-request reference, nonce, and expiry. Its signing key must be pinned in the durable
-`.flow-agents/lifecycle-authority-keys.json` registry. Runtime or harness adapters hold the
-private key and capture the signed record from a user/operator channel they trust; agent-authored
-prose or an unsigned model-written file is not cancellation authority.
+request reference, nonce, and expiry. Flow Agents serializes the request to an independently
+provisioned protocol-v1 helper pinned at
+`/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1`. Callers cannot override that
+identity or select another root-owned executable. The helper and every
+path component must be OS-owned, outside the project/package/worktree, and non-writable by the
+runtime user, group, and world. The external helper owns verification, locking, nonce replay
+protection, compare-and-swap, critique edge/history persistence, canonical evidence attachment, Flow
+synchronization, and all other authoritative writes; package JavaScript never enacts a mutation from
+a helper return value. Flow Agents ships the public coordinator and installer, but no keys or deployment-specific configuration.
+Missing or untrusted helpers fail closed.
 
-This is an audit and policy boundary, not authentication against a process with unrestricted
-access as the same operating-system user. The harness must keep its signing key outside the
-agent process and enforce its own filesystem or process isolation when the agent is adversarial.
-The repository hooks protect the pinned public-key registry from ordinary agent writes, but are
-explicitly not an operating-system security boundary.
-Adversarial-runtime authentication is tracked separately in Flow Agents issue #545. Flow's
+The wire contract is one canonical JSON request line and exactly one JSON response line. Both bind
+protocol version, action, and canonical request SHA-256; accepted responses also carry an exact
+action-specific result. Unknown/extra fields, actions, versions, digests, statuses, empty output,
+multiple output records, and malformed JSON fail closed. The helper independently canonicalizes and
+constrains all received paths, derives root relationships itself, and never treats caller-provided
+paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
+`NOT_VERIFIED` when the administrator-owned helper and pinned verification key are absent.
+Package-side validation does not call a live verification action; it verifies the immutable signed
+completion locally and binds its result digest to the exact resolution graph before Builder consumes
+the transition.
+
+The public reference coordinator source is
+`packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
+the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
+The script stages the exact `@kontourai/flow` 3.5.0 package (once published) and its runtime dependencies
+under the root-owned coordinator directory, then checks the reducer's public artifact identity and
+hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
+pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not
+create registries, signing keys, or deployment-specific configuration. The coordinator fixes those
+administrator-owned inputs under
+`/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
+`/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
+
+The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
+the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
+a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
+`secure_path` apply to that command. The rule grants only execution of the fixed helper. It does
+not bypass the signed authorization, protected key registry, replay lock, preimage CAS, or any
+other operation checks in the helper.
+
+Current implementation status is intentionally incremental and fail-closed. The separately installed
+`runtime-v1.mjs` artifact contains the pure, deterministic critique-resolution reducer; both its
+bytes and the signed completion bind a runtime digest. For critique resolution, the coordinator
+uses the staged, exact Flow trust-attachment reducer to attach the authoritative post-resolution
+bundle and synchronize the canonical Flow manifest, state, and reports. Flow attachment semantics
+therefore remain Flow-owned; the coordinator owns only locked CAS and writes described by the
+reducer. The coordinator writes its signed completion as the separate session-relative
+`lifecycle-authority.completion.json` receipt and its append-only authorization events in
+`lifecycle-authority.resolution-events.json`, while both the session trust bundle and the
+Flow-attached bundle remain schema-valid Hachure bundles. Package JavaScript reads the pinned,
+root-owned Ed25519 public verification key and cryptographically validates that receipt's immutable
+bindings read-only; it never turns the response into a package-side mutation. The coordinator also invokes
+Flow's canonical cancellation transition, then releases the exact bound local assignment; archival
+requires a canceled or completed canonical Flow run and atomically relocates only the session to
+`.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains
+`NOT_VERIFIED` pending the root/container conformance lane.
+
+Runtime or harness adapters hold the private key and capture the signed record from a
+user/operator channel they trust; agent-authored prose or an unsigned model-written file is not
+cancellation authority. Repository files, package bytes, and Git refs are explicitly never
+authority roots. Flow's
 current lifecycle authority vocabulary also requires agent-owned pause/resume events to use the
 closest available `operator_request` shape; a distinct canonical runtime authority is tracked in
 Flow issue #118.
@@ -334,8 +385,8 @@ flow-agents builder-run archive --session-dir <dir> --authorization-file <record
 Pause and resume verify the live assignment actor under the assignment lock, and preserve the
 current Flow step and assignment. Assignment release does not
 change the Flow run. Cancellation changes Flow first and then idempotently releases the owning
-assignment while holding the same lock; a successfully consumed cancellation nonce cannot be
-replayed. Archive accepts only completed or canceled runs, moves the session under
+assignment while holding the same lock inside the external helper; a successfully consumed
+cancellation nonce cannot be replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
 

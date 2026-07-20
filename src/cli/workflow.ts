@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -9,11 +9,14 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { buildUnsignedCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
+import { invokeExternalLifecycleAuthority } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
+import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
@@ -25,7 +28,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -35,6 +38,7 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
+  resolve-critique    Resolve a repaired historical critique through a later review record.
   drive               Continue the canonical run through an explicit runtime adapter.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
@@ -65,6 +69,8 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
+  if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
@@ -417,7 +423,7 @@ function builderOperationForExpectation(flowId: string, expectationId: string): 
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json", "timestamp"]), "workflow critique");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]), "workflow critique");
   if (!flagString(parsed.flags, "summary")) throw new Error("workflow critique requires --summary <text>");
   if (Object.hasOwn(parsed.flags, "reviewer")) throw new Error("workflow critique derives reviewer identity from the authenticated assignment actor; --reviewer is not accepted");
   const { slug, projectRoot } = readBoundSession(sessionDir);
@@ -446,6 +452,80 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   if (json) console.log(JSON.stringify(report));
   else console.log("Recorded critique in the trust bundle.");
   return 0;
+}
+
+async function resolveCritique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow resolve-critique");
+  if (!flagString(parsed.flags, "prior-record-id") || !flagString(parsed.flags, "resolving-record-id")) {
+    throw new Error("workflow resolve-critique requires --prior-record-id <id> and --resolving-record-id <id>");
+  }
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!authorizationFile) throw new Error("workflow resolve-critique requires a signed --authorization-file <path>");
+  const { projectRoot } = readBoundSession(sessionDir);
+  const report = invokeExternalLifecycleAuthority({ action: "resolve-critique", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: flagString(parsed.flags, "prior-record-id")!, resolving_record_id: flagString(parsed.flags, "resolving-record-id")! });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
+  return 0;
+}
+
+async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), "workflow resolve-critique-request");
+  const priorRecordId = flagString(parsed.flags, "prior-record-id");
+  const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
+  if (!priorRecordId || !resolvingRecordId) throw new Error("workflow resolve-critique-request requires both critique record ids");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const bundleFile = path.join(sessionDir, "trust.bundle");
+  const bundleBytes = fs.readFileSync(bundleFile);
+  const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+  const claims = normalizedCritiqueClaims(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []);
+  const metadata = (id: string): JsonRecord => {
+    const matches = claims.filter((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === id);
+    if (matches.length !== 1) throw new Error(`critique record ${id} is missing or ambiguous`);
+    return matches[0]!.metadata as JsonRecord;
+  };
+  const prior = metadata(priorRecordId);
+  const resolving = metadata(resolvingRecordId);
+  const unresolvedLaneIds = (Array.isArray(prior.lanes) ? prior.lanes as JsonRecord[] : []).filter((lane) => lane.status !== "pass").map((lane) => String(lane.id)).sort();
+  const unresolvedFindingIds = (Array.isArray(prior.findings) ? prior.findings as JsonRecord[] : []).filter((finding) => finding.status === "open").map((finding) => String(finding.id)).sort();
+  const snapshot = (record: JsonRecord): JsonRecord => {
+    const target = record.review_target as JsonRecord | undefined;
+    return target?.workspace_snapshot && typeof target.workspace_snapshot === "object" ? target.workspace_snapshot as JsonRecord : {};
+  };
+  const priorWorkspace = snapshot(prior);
+  const resolvingWorkspace = snapshot(resolving);
+  const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+  if (!subject) throw new Error("workflow resolve-critique-request requires one bound subject");
+  const now = new Date();
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const request = buildUnsignedCritiqueResolutionAuthorization({
+    project_root: projectRoot, run_id: slug, subject, prior_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+    prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash),
+    resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash),
+    expected_resolver: String(resolving.reviewer), resolved_lane_ids: unresolvedLaneIds, resolved_finding_ids: unresolvedFindingIds,
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest),
+    prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
+    requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
+function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {
+  const critiqueClaims = claims.filter((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique");
+  const records = critiqueClaims.map((claim) => {
+    const metadata = claim.metadata as JsonRecord;
+    return { ...metadata, verdict: claim.value, summary: claim.fieldOrBehavior };
+  });
+  const normalized = normalizeCritiqueChainRecords(records).records;
+  let index = 0;
+  return claims.map((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
+    ? { ...claim, metadata: { ...(claim.metadata as JsonRecord), ...normalized[index++] } }
+    : claim);
 }
 
 function assertRunnableEvidenceCommands(commands: string[], projectRoot: string, requiresTestEvidence: boolean): void {
