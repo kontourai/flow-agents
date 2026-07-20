@@ -5326,7 +5326,19 @@ export function runReconcilePreflight(
   // package.json trust-reconcile-verify tiers apply locally; a repo with neither and no
   // manifest source resolves to the same empty legacy fallback CI itself would in that case.
   const canonicalCommands = tr.resolveCanonicalCommands({ commands: [] }, repoRoot) ?? [];
-  const manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  // A delivery published from a repository must be checked against the same
+  // repository-owned manifest that hosted CI will resolve.  In particular, do
+  // not let an ambient TRUST_RECONCILE_MANIFEST make a locally invalid bundle
+  // appear publishable; CI intentionally does not inherit the caller's shell.
+  const ambientManifest = process.env.TRUST_RECONCILE_MANIFEST;
+  delete process.env.TRUST_RECONCILE_MANIFEST;
+  let manifestResolution: AnyObj;
+  try {
+    manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  } finally {
+    if (ambientManifest === undefined) delete process.env.TRUST_RECONCILE_MANIFEST;
+    else process.env.TRUST_RECONCILE_MANIFEST = ambientManifest;
+  }
   const manifestByCmd = new Map<string, AnyObj>();
   for (const e of manifestResolution.entries) manifestByCmd.set(tr.normalizeCmd(e.command), e);
 

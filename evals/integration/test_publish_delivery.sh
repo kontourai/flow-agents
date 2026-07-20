@@ -350,10 +350,11 @@ FIXTURE6="$TMP/fixture6.json"
 write_bundle_to "$FIXTURE6" "node --version" "true"
 setup_session "$AROOT6" "$SLUG6" "$FIXTURE6"
 
-# Deliberately NO TRUST_RECONCILE_COMMANDS env var here — "node --version" resolves to no
-# manifest entry in this scratch repo (no run-baseline.sh/package.json manifest source
-# either), so the bundle is shape-invalid (not-run: command not in the reconcile manifest).
-shape_out=$(flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR6"   --repo-root "$REPO6" 2>&1)
+# An ambient manifest override must not authorize publication: hosted CI does not inherit
+# the publisher's shell, so "node --version" still resolves to no repository-owned manifest
+# entry in this scratch repo and the bundle remains shape-invalid.
+shape_out=$(TRUST_RECONCILE_MANIFEST='[{"id":"ambient-bypass","command":"node --version"}]' \
+  flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR6" --repo-root "$REPO6" 2>&1)
 shape_exit=$?
 
 if [[ $shape_exit -ne 0 ]]; then
