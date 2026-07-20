@@ -208,6 +208,15 @@ export interface WorkItem {
   status?: WorkItemStatus;
   /** Provider labels, tags, components, or categories used for filtering and triage. */
   labels?: string[];
+  /** Assignee login/display names, as emitted by the issue-listing path (`names(issue.assignees)`). */
+  assignees?: string[];
+  /**
+   * Raw provider milestone value passed through unnormalized by the reference
+   * adapter (`normalize()` assigns `issue.milestone` verbatim); shape is
+   * provider-specific, so it is deliberately typed `unknown` rather than
+   * inventing a structure the adapter does not enforce.
+   */
+  milestone?: unknown;
   /** Alias for `labels` some adapters use. */
   tags?: string[];
   /** Provider priority value mapped without changing meaning, such as `P0`, `P1`, or `high`. */
