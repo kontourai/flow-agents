@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.3.1](https://github.com/kontourai/flow-agents/compare/v4.3.0...v4.3.1) (2026-07-20)
+
+
+### Fixes
+
+* preserve critique predecessor chains in gate projection ([bb3d158](https://github.com/kontourai/flow-agents/commit/bb3d1580f3b09e38ebab42386308d00e659d3909))
+* preserve critique predecessor chains in gate projection ([a0f780a](https://github.com/kontourai/flow-agents/commit/a0f780add3a5a570a2856b97360208a277a7be64))
+* **sidecar:** loud publish-delivery preconditions and a help command ([#794](https://github.com/kontourai/flow-agents/issues/794)) ([a72d419](https://github.com/kontourai/flow-agents/commit/a72d4190b512f0315bed8966bb6788ef06fd6fa3))
+
 ## [4.3.0](https://github.com/kontourai/flow-agents/compare/v4.2.1...v4.3.0) (2026-07-20)
 
 
