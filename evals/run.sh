@@ -215,6 +215,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_reviewed_grounding_workflow.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_sidecar_writer.sh" || result=1
