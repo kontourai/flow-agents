@@ -131,6 +131,11 @@ A failed gate claim may include a Flow classifier through
 `flow-agents workflow evidence --status fail --route-reason <reason>`. Flow validates the reason
 against the gate's `on_route_back` map and owns both the destination and attempt
 budget. Flow Agents only projects the resulting attempt and maximum into `state.json`.
+`plan_gap` is therefore not a universal command: a Builder `execute` claim may use it
+only when that run's current `execute-gate` declares `plan_gap -> plan`. The Builder
+definition bounds that correction to three Flow-owned attempts and blocks on exhaustion;
+there is no default execute route. Status and sync are read-only/reprojection operations,
+not implicit backtracking or definition amendment.
 
 ## Agent Projection
 
@@ -163,6 +168,11 @@ to the installed Builder Kit's validated `flow_step_actions` record. It is an
 execution context, not a second gate evaluator: Flow remains the only authority
 that evaluates requirements, advances steps, routes back, or consumes attempt
 budget.
+
+Route-back changes the canonical head. A gate-action envelope derived before an
+`execute -> plan` correction is stale and cannot authorize evidence or progress for the
+new plan head; callers must obtain the newly projected envelope after Flow records the
+route.
 
 The envelope provides the current gate ids and claim shapes, including each
 expectation's required flag and `satisfied`, `accepted_exception`, or `unresolved`

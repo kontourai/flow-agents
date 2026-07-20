@@ -187,6 +187,20 @@ async function advanceParentPrefixThroughVerify(cwd, runId) {
   assert.equal(snapshotRun(cwd, runId).state.current_step, "verify", "sequential parent-prefix setup must reach verify");
 }
 
+async function advanceParentPrefixThroughExecute(cwd, runId) {
+  await startActiveRun(cwd, runId);
+  const steps = [
+    ["pull-work-gate", "builder.pull-work.selected", "work-item"],
+    ["design-probe-gate", "builder.design-probe.pickup-readiness", "work-item"],
+    ["design-probe-gate", "builder.design-probe.decisions", "decision"],
+    ["plan-gate", "builder.plan.implementation", "artifact"],
+  ];
+  for (const [gate, claimType, subjectType] of steps) {
+    await evaluateBuilderBuildRun({ cwd, runId, evidence: gateEvidence(cwd, { gate, claimType, subjectType, name: claimType }) });
+  }
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "execute", "sequential parent-prefix setup must reach execute");
+}
+
 test("start is creation-only and persists canonical id/version", async () => {
   const cwd = makeWorkspace();
   const runId = "start-creation-only";
@@ -494,4 +508,45 @@ test("failed verify evidence routes back only after sequential prefix advancemen
   assert.equal(transition.from_step, "verify");
   assert.equal(transition.to_step, "execute");
   assert.deepEqual(transition.expectation_ids, ["tests-evidence"]);
+});
+
+test("failed execute evidence routes declared plan_gap to plan without replacing the run", async () => {
+  const cwd = makeWorkspace();
+  const runId = "execute-plan-gap";
+  await advanceParentPrefixThroughExecute(cwd, runId);
+  const before = snapshotRun(cwd, runId);
+
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "execute-gate",
+      claimType: "builder.execute.scope",
+      subjectType: "change",
+      status: "failed",
+      routeReason: "plan_gap",
+      expectationIds: ["implementation-scope"],
+    }),
+  });
+
+  const persisted = snapshotRun(cwd, runId);
+  const outcome = persisted.state.gate_outcomes.at(-1);
+  const transition = persisted.state.transitions.at(-1);
+  assert.equal(persisted.state.current_step, "plan");
+  assert.equal(persisted.state.status, "active");
+  assert.equal(persisted.state.subject, SUBJECT);
+  assert.equal(persisted.state.run_id, before.state.run_id);
+  assert.equal(outcome.gate_id, "execute-gate");
+  assert.equal(outcome.status, "route-back");
+  assert.equal(outcome.route_reason, "plan_gap");
+  assert.equal(outcome.route_back_to, "plan");
+  assert.equal(outcome.attempt, 1);
+  assert.equal(outcome.max_attempts, 3);
+  assert.equal(transition.type, "route_back");
+  assert.equal(transition.from_step, "execute");
+  assert.equal(transition.to_step, "plan");
+  assert.equal(transition.route_reason, "plan_gap");
+  assert.equal(transition.gate_id, "execute-gate");
+  assert.deepEqual(transition.expectation_ids, ["implementation-scope"]);
+  assert.equal(persisted.state.transitions.length, before.state.transitions.length + 1);
 });

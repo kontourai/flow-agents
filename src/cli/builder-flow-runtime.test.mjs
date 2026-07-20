@@ -1627,6 +1627,52 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   ]);
 });
 
+test("execute plan_gap routes to plan and invalidates the execute action context", async () => {
+  const session = makeSession("execute-plan-gap-projection");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  const executing = await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  assert.equal(executing.run.state.current_step, "execute");
+  const executeEnvelope = executing.gateActionEnvelope;
+  assert.equal(executeEnvelope.flow.current_step, "execute");
+  assert.equal(executeEnvelope.action.implementation_allowed, true);
+
+  const routed = await writeAndSync(session, [bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+    status: "fail",
+    routeReason: "plan_gap",
+    timestamp: new Date().toISOString(),
+  })]);
+
+  assert.equal(routed.run.state.current_step, "plan");
+  assert.equal(routed.projection.flow_run.route_back_attempt, 1);
+  assert.equal(routed.projection.flow_run.route_back_max_attempts, 3);
+  assert.deepEqual(routed.projection.next_action.skills, ["plan-work"]);
+  assert.equal(routed.gateActionEnvelope.flow.current_step, "plan");
+  assert.equal(routed.gateActionEnvelope.action.implementation_allowed, false);
+  assert.notDeepEqual(routed.gateActionEnvelope.flow, executeEnvelope.flow, "a stale execute envelope cannot describe the routed plan head");
+
+  const flowDirectory = runDir(session.slug, session.projectRoot);
+  const beforeFlow = snapshotTree(flowDirectory);
+  const beforeProjection = snapshotProjectionTargets(session);
+  const stale = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+    timestamp: new Date().toISOString(),
+  }), "stale-execute")]);
+  assert.equal(stale.attached, false);
+  assert.equal(stale.run.state.current_step, "plan");
+  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow, "stale execute evidence cannot mutate the routed run");
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection, "stale execute evidence cannot mutate the routed projection");
+});
+
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
   const session = makeSession("same-visit-reviewer-handoff");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });

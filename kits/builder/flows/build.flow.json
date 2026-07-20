@@ -93,6 +93,13 @@
     },
     "execute-gate": {
       "step": "execute",
+      "on_route_back": {
+        "plan_gap": "plan"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
       "expects": [
         {
           "id": "implementation-scope",

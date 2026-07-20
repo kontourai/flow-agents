@@ -90,6 +90,7 @@ CHECKS=(
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
   "Builder step producers integration|bash evals/integration/test_builder_step_producers.sh"
   "Builder canonical Flow run integration|bash evals/integration/test_builder_entry_enforcement.sh"
+  "Builder execute plan-gap integration|bash evals/integration/test_builder_execute_plan_gap.sh"
   "Codex hook resolution integration|bash evals/integration/test_codex_hook_resolution.sh"
   "Critique supersession roundtrip integration|bash evals/integration/test_critique_supersession_roundtrip.sh"
   "Lifecycle authority container integration|bash evals/integration/test_lifecycle_authority_container.sh"
@@ -210,6 +211,7 @@ LANE_RUNTIME_AND_KIT=(
 LANE_INTEGRATION_COVERAGE=(
   "Builder step producers integration"
   "Builder canonical Flow run integration"
+  "Builder execute plan-gap integration"
   "Codex hook resolution integration"
   "Critique supersession roundtrip integration"
   "Lifecycle authority container integration"
