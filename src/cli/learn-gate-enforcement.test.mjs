@@ -177,8 +177,11 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   fs.writeFileSync(bundlePath, claim("hardened/learning-evidence-skip", "assumed", { waiver: { reason: "r", approved_by: "x", skip_learning: true } }));
   assert.equal(hook.hasLearningEvidence(dir), true, "stamped skip waiver satisfies the gate");
 
-  // Schema-conforming learning records (interpretation, no summary) are semantic evidence.
-  fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({ status: "learned", records: [{ id: "r1", outcome: "mixed", interpretation: "the gate works", facts: "", routing: [] }] }));
+  // Canonical-schema learning records (interpretation, no summary) are semantic evidence.
+  fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({
+    schema_version: "1.0", task_slug: "hardened", updated_at: "2026-07-20T00:00:00Z", status: "learned",
+    records: [{ id: "r1", recorded_at: "2026-07-20T00:00:00Z", outcome: "mixed", interpretation: "the gate works", facts: ["gate flagged the parked session"], source_refs: ["trust.bundle"], routing: [] }],
+  }));
   assert.equal(hook.hasLearningEvidence(dir), true, "canonical-schema records must count");
   fs.rmSync(path.join(dir, "learning.json"));
 
