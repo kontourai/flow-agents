@@ -35,8 +35,8 @@ test("public API retains the documented native-host compatibility surface", asyn
   const lib = await import("../../build/src/index.js");
   for (const name of [
     "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
-    "pauseBuilderFlowSession", "resumeBuilderFlowSession", "cancelBuilderFlowSession",
-    "archiveBuilderFlowSession", "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
+    "pauseBuilderFlowSession", "resumeBuilderFlowSession",
+    "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
     "ContinuationAdapterTimeoutError",
     "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
   ]) {
@@ -45,6 +45,9 @@ test("public API retains the documented native-host compatibility surface", asyn
   assert.equal(typeof lib.loadJson, "function");
   assert.equal(typeof lib.validateTrustBundle, "function");
   assert.equal(typeof lib.builderLifecycleAuthorizationPayload, "function");
+  for (const name of ["cancelBuilderFlowSession", "archiveBuilderFlowSession", "loadBuilderLifecycleAuthorization", "loadCritiqueResolutionAuthorization"]) {
+    assert.equal(lib[name], undefined, `${name} must remain CLI-only so untrusted in-process callers cannot bypass process isolation`);
+  }
 });
 
 test("public API exports the pure narrative source contract", async () => {

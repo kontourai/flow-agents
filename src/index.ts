@@ -255,8 +255,6 @@ export type {
 } from "./builder-flow-run-adapter.js";
 
 export {
-  archiveBuilderFlowSession,
-  cancelBuilderFlowSession,
   pauseBuilderFlowSession,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
@@ -264,7 +262,7 @@ export {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "./builder-flow-runtime.js";
-export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
+export type { BuilderFlowAgentLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
 export {
   deriveBuilderGateActionEnvelope,
@@ -313,7 +311,7 @@ export type {
 
 // Pure serialization contract used by external lifecycle authorities when
 // signing requests. This does not load, create, or mutate a Flow run.
-export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
+export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload } from "./builder-lifecycle-authority.js";
 export type { BuilderLifecycleAuthorization, CritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
 
 export {

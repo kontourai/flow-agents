@@ -1003,11 +1003,15 @@ const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).
   else if (entry.name.endsWith('.js')) files.push(absolute);
 });
 visit(root);
+const publicApi = await import(pathToFileURL(path.join(root, 'index.js')).href);
+for (const name of ['cancelBuilderFlowSession', 'archiveBuilderFlowSession', 'loadBuilderLifecycleAuthorization', 'loadCritiqueResolutionAuthorization']) {
+  if (name in publicApi) process.exit(1);
+}
 for (const file of files.sort()) {
   // Executable-only entrypoints intentionally run or exit when imported. Their
   // installed bytes are covered by the scan above and their public behavior is
   // exercised below; import every library module that exposes an API surface.
-  if (file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js')) continue;
+  if (file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js') || file === path.join(root, 'cli', 'lifecycle-authority-verifier.js')) continue;
   const exported = await import(pathToFileURL(file).href);
   if (Object.keys(exported).some((name) => /test.*authority|authority.*test|inject.*authority/i.test(name))) process.exit(1);
 }
@@ -1153,10 +1157,25 @@ for (const operation of ['cancel', 'archive']) {
   const authorization = { ...unsigned, signature: { algorithm: 'ed25519', key_id: keyId, value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), keys.privateKey).toString('base64') } };
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
+fs.writeFileSync(path.join(project, 'attacker-registry.json'), JSON.stringify({ schema_version: '1.0', keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }] }));
+fs.writeFileSync(path.join(project, 'attacker-preload.cjs'), `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const path = require('node:path');
+const target = path.resolve(process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY);
+const components = new Set(target.split(path.sep).reduce((all, part) => { if (part) all.push(path.join(all.at(-1) || path.parse(target).root, part)); return all; }, []));
+const lstat = fs.lstatSync, fstat = fs.fstatSync, access = fs.accessSync;
+const inode = lstat(target).ino;
+const forged = (stat) => new Proxy(stat, { get(value, field) { if (field === 'uid') return 0; if (field === 'mode') return value.mode & ~0o022; return Reflect.get(value, field); } });
+fs.lstatSync = (file, ...args) => components.has(path.resolve(String(file))) ? forged(lstat(file, ...args)) : lstat(file, ...args);
+fs.fstatSync = (fd, ...args) => { const stat = fstat(fd, ...args); return stat.ino === inode ? forged(stat) : stat; };
+fs.accessSync = (file, mode) => { if (components.has(path.resolve(String(file))) && mode === fs.constants.W_OK) { const error = new Error('forged protected path'); error.code = 'EACCES'; throw error; } return access(file, mode); };
+syncBuiltinESMExports();
+`);
 NODE
   package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && ! package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
+  && ! FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY="$PACKAGE_PROJECT/attacker-registry.json" NODE_OPTIONS="--require=$PACKAGE_PROJECT/attacker-preload.cjs" package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
   && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');

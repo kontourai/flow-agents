@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
 
@@ -252,66 +254,21 @@ export function authorizationDigest(authorization: SignedBuilderAuthorization): 
 }
 
 function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
-  const registry = readExternalAuthorityRegistry(projectRoot);
-  assertExactKeys(registry, ["schema_version", "keys"], "key registry");
-  if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
-  const seenKeyIds = new Set<string>();
-  for (const candidate of registry.keys) {
-    if (!isRecord(candidate)) throw new Error("lifecycle authority key registry entries must be objects");
-    assertExactKeys(candidate, ["id", "algorithm", "public_key_pem"], "key registry entry");
-    const id = boundedText(candidate.id, "key registry entry.id", 256);
-    if (seenKeyIds.has(id)) throw new Error(`lifecycle authority key registry contains duplicate key id ${id}`);
-    seenKeyIds.add(id);
-    if (candidate.algorithm !== "ed25519" || typeof candidate.public_key_pem !== "string" || !candidate.public_key_pem.includes("BEGIN PUBLIC KEY")
-      || /PRIVATE KEY/.test(candidate.public_key_pem)) throw new Error(`lifecycle authority key ${id} must contain only an Ed25519 public key`);
-  }
-  const key = registry.keys.find((candidate) => isRecord(candidate) && candidate.id === authorization.signature.key_id);
-  if (!isRecord(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || key.public_key_pem.trim().length === 0) {
-    throw new Error(`lifecycle authorization key ${authorization.signature.key_id} is not trusted`);
-  }
   const { signature: _signature, ...unsigned } = authorization;
-  let verified = false;
   try {
-    verified = verify(null, Buffer.from(payload(unsigned as Omit<T, "signature">)), createPublicKey(key.public_key_pem), Buffer.from(authorization.signature.value, "base64"));
-  } catch {
-    verified = false;
+    const verifier = fileURLToPath(new URL("./cli/lifecycle-authority-verifier.js", import.meta.url));
+    execFileSync(process.execPath, [verifier], {
+      input: JSON.stringify({ project_root: projectRoot, payload: payload(unsigned as Omit<T, "signature">), signature: authorization.signature }),
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY: process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY ?? "" },
+      timeout: 10_000,
+      maxBuffer: 128 * 1024,
+    });
+  } catch (error) {
+    const stderr = isRecord(error) && typeof error.stderr === "string" ? error.stderr.trim() : "";
+    throw new Error(stderr || "lifecycle authorization verification failed in the isolated verifier");
   }
-  if (!verified) throw new Error("lifecycle authorization signature is invalid");
-}
-
-function readExternalAuthorityRegistry(projectRoot: string): JsonRecord {
-  const configured = process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY;
-  if (!configured || !path.isAbsolute(configured)) throw new Error("lifecycle authority registry requires an absolute externally provisioned path");
-  const keysFile = path.resolve(configured);
-  const canonicalRoot = fs.realpathSync(projectRoot);
-  if (pathIsWithin(keysFile, canonicalRoot)) throw new Error("lifecycle authority registry must be outside the project and worktree");
-  if (process.platform === "win32") throw new Error("secure lifecycle authority ownership is unavailable without a platform adapter");
-  let cursor = path.parse(keysFile).root;
-  for (const component of keysFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, component);
-    const stat = fs.lstatSync(cursor);
-    if (stat.isSymbolicLink()) throw new Error("lifecycle authority key registry path must not contain symlinks");
-    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("lifecycle authority registry and every parent must be OS-owned and non-writable by group or world");
-    try {
-      fs.accessSync(cursor, fs.constants.W_OK);
-      throw new Error("lifecycle authority registry path must not be writable by the runtime user");
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("must not be writable")) throw error;
-    }
-  }
-  const canonicalKeysFile = path.join(fs.realpathSync(path.dirname(keysFile)), path.basename(keysFile));
-  if (pathIsWithin(canonicalKeysFile, canonicalRoot)) throw new Error("lifecycle authority registry canonical path must remain outside the project and worktree");
-  if (typeof process.getuid === "function" && process.getuid() === 0) throw new Error("lifecycle authority registry is unavailable to a root caller without a platform privilege adapter");
-  const registryDescriptor = fs.openSync(keysFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  let registryBytes: Buffer;
-  try {
-    const stat = fs.fstatSync(registryDescriptor);
-    if (!stat.isFile() || stat.size > 64 * 1024 || (stat.mode & 0o022) !== 0) throw new Error("lifecycle authority key registry must be a protected regular file of at most 64 KiB");
-    registryBytes = fs.readFileSync(registryDescriptor);
-  } finally { fs.closeSync(registryDescriptor); }
-  const parsed = JSON.parse(registryBytes.toString("utf8")) as unknown;
-  if (!isRecord(parsed)) throw new Error("lifecycle authority key registry must be a JSON object");
-  return parsed;
 }
 
 function readRegularJson(fileInput: string, label: string, requireProtected = false): JsonRecord {

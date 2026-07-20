@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
@@ -42,29 +42,21 @@ const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
 const TEST_AUTHORITY_REGISTRY = { schema_version: "1.0", keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }] };
 const TEST_AUTHORITY_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-os-authority-"))), "authority.json");
 fs.writeFileSync(TEST_AUTHORITY_FILE, `${JSON.stringify(TEST_AUTHORITY_REGISTRY)}\n`, { mode: 0o444 });
-const authorityPathComponents = new Set(TEST_AUTHORITY_FILE.split(path.sep).reduce((paths, component) => {
-  if (!component) return paths;
-  paths.push(path.join(paths.at(-1) ?? path.parse(TEST_AUTHORITY_FILE).root, component));
-  return paths;
-}, []));
-const originalLstatSync = fs.lstatSync;
-const originalFstatSync = fs.fstatSync;
-const originalAccessSync = fs.accessSync;
-const authorityInode = originalLstatSync(TEST_AUTHORITY_FILE).ino;
-const protectedStat = (stat) => new Proxy(stat, { get(target, property, receiver) { if (property === "uid") return 0; if (property === "mode") return target.mode & ~0o022; return Reflect.get(target, property, receiver); } });
-fs.lstatSync = ((candidate, ...args) => {
-  const stat = originalLstatSync(candidate, ...args);
-  return authorityPathComponents.has(path.resolve(String(candidate))) ? protectedStat(stat) : stat;
-});
-fs.fstatSync = ((descriptor, ...args) => {
-  const stat = originalFstatSync(descriptor, ...args);
-  return stat.ino === authorityInode ? protectedStat(stat) : stat;
-});
-fs.accessSync = ((candidate, mode) => {
-  if (authorityPathComponents.has(path.resolve(String(candidate))) && mode === fs.constants.W_OK) {
-    const error = new Error("test fixture is not writable"); error.code = "EACCES"; throw error;
+const realExecFileSync = childProcess.execFileSync;
+childProcess.execFileSync = ((file, args, options) => {
+  if (Array.isArray(args) && String(args[0]).endsWith("lifecycle-authority-verifier.js")) {
+    if (process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY !== TEST_AUTHORITY_FILE) return realExecFileSync(file, args, options);
+    const request = JSON.parse(String(options?.input));
+    const key = TEST_AUTHORITY_REGISTRY.keys.find((candidate) => candidate.id === request.signature.key_id);
+    if (!key || !verify(null, Buffer.from(request.payload), key.public_key_pem, Buffer.from(request.signature.value, "base64"))) {
+      const message = key ? "lifecycle authorization signature is invalid" : `lifecycle authorization key ${request.signature.key_id} is not trusted`;
+      const error = new Error(message);
+      error.stderr = `${message}\n`;
+      throw error;
+    }
+    return '{"verified":true}\n';
   }
-  return originalAccessSync(candidate, mode);
+  return realExecFileSync(file, args, options);
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
