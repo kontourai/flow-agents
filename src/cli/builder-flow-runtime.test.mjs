@@ -9,8 +9,8 @@ import { createRequire } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
 import {
-  archiveBuilderFlowSession,
-  cancelBuilderFlowSession,
+  archiveBuilderFlowSession as archiveBuilderFlowSessionRaw,
+  cancelBuilderFlowSession as cancelBuilderFlowSessionRaw,
   captureReviewWorkspaceSnapshot,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
@@ -19,16 +19,17 @@ import {
   resumeBuilderFlowSession,
   startBuilderFlowSession,
   syncBuilderFlowSession,
+  withLifecycleAuthorityTestSource,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, createLifecycleAuthorityTestSource, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords } from "../../build/src/cli/critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
-import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
+import { main as builderRunMainRaw } from "../../build/src/cli/builder-run.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMainRaw } from "../../build/src/cli/workflow.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
@@ -39,6 +40,11 @@ const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-
 const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
+const TEST_AUTHORITY_SOURCE = createLifecycleAuthorityTestSource({ schema_version: "1.0", keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }] });
+const workflowMain = (argv) => workflowMainRaw(argv, TEST_AUTHORITY_SOURCE);
+const cancelBuilderFlowSession = (input) => cancelBuilderFlowSessionRaw(withLifecycleAuthorityTestSource(input, TEST_AUTHORITY_SOURCE));
+const archiveBuilderFlowSession = (input) => archiveBuilderFlowSessionRaw(withLifecycleAuthorityTestSource(input, TEST_AUTHORITY_SOURCE));
+const builderRunMain = (argv) => builderRunMainRaw(argv, TEST_AUTHORITY_SOURCE);
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const AMBIENT_IDENTITY_ENV_KEYS = [
@@ -73,10 +79,6 @@ function makeSession(slug = "runtime-projection") {
     active_slug: slug,
     artifact_dir: `.kontourai/flow-agents/${slug}`,
     updated_at: NOW,
-  });
-  writeJson(path.join(projectRoot, ".flow-agents", "lifecycle-authority-keys.json"), {
-    schema_version: "1.0",
-    keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }],
   });
   fs.mkdirSync(path.join(projectRoot, "review-target"), { recursive: true });
   fs.writeFileSync(path.join(projectRoot, "review-target", "implementation.txt"), "reviewed implementation\n");
@@ -167,7 +169,6 @@ function claimAmbientSessionAssignment(session) {
 }
 
 function lifecycleAuthorization(session, operation, name, overrides = {}) {
-  ensureProtectedRegistryBase(session.projectRoot);
   const file = path.join(session.projectRoot, `${name}.authorization.json`);
   const unsigned = {
     schema_version: "1.0",
@@ -236,7 +237,6 @@ function expiredLifecycleAuthorization(session, operation, name, overrides = {})
 }
 
 function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, resolver, name = "resolve", overrides = {}) {
-  ensureProtectedRegistryBase(session.projectRoot);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const bundle = readJson(bundleFile);
   const critiqueClaims = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
@@ -275,17 +275,6 @@ function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecord
   return file;
 }
 
-function ensureProtectedRegistryBase(projectRoot) {
-  if (!fs.existsSync(path.join(projectRoot, ".git"))) execFileSync("git", ["init", "-q", "-b", "main"], { cwd: projectRoot });
-  fs.appendFileSync(path.join(projectRoot, ".git", "info", "exclude"), "\n.kontourai/\n*.authorization.json\n");
-  execFileSync("git", ["config", "user.email", "flow-agents-test@example.invalid"], { cwd: projectRoot });
-  execFileSync("git", ["config", "user.name", "Flow Agents Test"], { cwd: projectRoot });
-  const hasHead = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: projectRoot, stdio: "ignore" }).status === 0;
-  execFileSync("git", ["add", ".flow-agents/lifecycle-authority-keys.json", ...(!hasHead ? ["review-target"] : [])], { cwd: projectRoot });
-  const staged = spawnSync("git", ["diff", "--cached", "--quiet", "--", ".flow-agents/lifecycle-authority-keys.json"], { cwd: projectRoot, stdio: "ignore" }).status !== 0;
-  if (!hasHead || staged) execFileSync("git", ["commit", "-q", "-m", "protected authority registry"], { cwd: projectRoot });
-  execFileSync("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], { cwd: projectRoot });
-}
 
 function snapshotFile(file) {
   return fs.existsSync(file) ? fs.readFileSync(file).toString("base64") : null;
@@ -1099,9 +1088,8 @@ test("prepareBuilderCancelRequest emits a payload that, signed by the operator k
   };
   const file = path.join(session.projectRoot, "friendly-cancel-e2e.authorization.json");
   writeJson(file, signed);
-  ensureProtectedRegistryBase(session.projectRoot);
 
-  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE });
   assert.equal(canceled.run.state.status, "canceled");
   assert.equal(canceled.assignmentReleased, true);
   assert.equal(canceled.idempotent, false);
@@ -1147,8 +1135,7 @@ test("a cancel-request payload signed with the WRONG key is rejected (signature 
   };
   const file = path.join(session.projectRoot, "friendly-cancel-badsig.authorization.json");
   writeJson(file, badSigned);
-  ensureProtectedRegistryBase(session.projectRoot);
-  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file }), /signature is invalid/);
+  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE }), /signature is invalid/);
 });
 
 test("builder-run cancel-request CLI writes the unsigned authorization and prints signing guidance", async () => {
@@ -1206,8 +1193,7 @@ test("cancel-request signing-payload parity holds for non-ASCII reason/actor (un
   };
   const file = path.join(session.projectRoot, "unicode.authorization.json");
   writeJson(file, signed);
-  ensureProtectedRegistryBase(session.projectRoot);
-  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file, testAuthoritySource: TEST_AUTHORITY_SOURCE });
   assert.equal(canceled.run.state.status, "canceled");
 });
 
@@ -1223,8 +1209,7 @@ test("prepareBuilderCancelRequest mints from the released assignment once the ru
   };
   const firstFile = path.join(session.projectRoot, "recovery-1.authorization.json");
   writeJson(firstFile, firstSigned);
-  ensureProtectedRegistryBase(session.projectRoot);
-  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile });
+  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile, testAuthoritySource: TEST_AUTHORITY_SOURCE });
 
   // Now canceled with a RELEASED assignment: the mint-time fallback matches the
   // redemption gate, so cancel-request still mints (an idempotent-recovery auth).
@@ -1322,6 +1307,7 @@ test("archive retries the exact consumed authorization after an interrupted prep
     runId: session.slug,
     subject: SUBJECT,
     actorKey: ACTOR_KEY,
+    testAuthoritySource: TEST_AUTHORITY_SOURCE,
     now: new Date(Date.parse(rawAuthorization.request.authority.requested_at) + 30_000).toISOString(),
   });
   const preparedState = readJson(path.join(session.sessionDir, "state.json"));
@@ -1626,7 +1612,6 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
 
 test("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
-  ensureProtectedRegistryBase(session.projectRoot);
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
@@ -1676,6 +1661,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   const canonicalManifest = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
   const manifestBeforeResolution = fs.readFileSync(canonicalManifest, "utf8");
   const validateCritiques = (cwd = session.projectRoot) => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd, encoding: "utf8" });
+  const validateResolvedGraph = (bundle) => validateCritiqueResolutionGraph(bundle.claims, SUBJECT, bundle.critique_resolution_events ?? [], session.projectRoot, TEST_AUTHORITY_SOURCE);
   const onlyFailBundle = structuredClone(before);
   onlyFailBundle.claims = onlyFailBundle.claims.filter((claim) => claim.metadata?.critique_record_id === priorRecordId || claim.metadata?.origin !== "critique");
   onlyFailBundle.events = onlyFailBundle.events.filter((event) => onlyFailBundle.claims.some((claim) => claim.id === event.claimId));
@@ -1701,25 +1687,6 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
 
   const authorizationFile = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey);
   const validAuthorization = readJson(authorizationFile);
-  const registryFile = path.join(session.projectRoot, ".flow-agents", "lifecycle-authority-keys.json");
-  const validRegistry = readJson(registryFile);
-  writeJson(registryFile, { schema_version: "1.0", keys: [{ ...validRegistry.keys[0], private_key_pem: "forbidden" }] });
-  await assert.rejects(workflowMain([
-    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
-    "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
-  ]), /differs from its protected origin base/);
-  writeJson(registryFile, validRegistry);
-  const shadowRegistry = path.join(session.projectRoot, "shadow-authority-registry.json");
-  writeJson(shadowRegistry, validRegistry);
-  fs.unlinkSync(registryFile);
-  fs.symlinkSync(shadowRegistry, registryFile);
-  await assert.rejects(workflowMain([
-    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
-    "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
-  ]), /must not contain symlinks|too many levels of symbolic links/i);
-  fs.unlinkSync(registryFile);
-  writeJson(registryFile, validRegistry);
-  fs.unlinkSync(shadowRegistry);
   const resolveWith = (file, priorId = priorRecordId, resolverId = resolvingRecordId) => workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorId,
     "--resolving-record-id", resolverId, "--authorization-file", file,
@@ -1747,11 +1714,30 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
   ]), /signature is invalid/);
   writeJson(authorizationFile, validAuthorization);
+  const priorAuthorityPath = process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY;
+  process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = authorizationFile;
+  assert.throws(() => loadCritiqueResolutionAuthorization(authorizationFile, {
+    projectRoot: session.projectRoot, runId: session.slug, subject: SUBJECT,
+    priorBundleSha256: validAuthorization.prior_bundle_sha256, priorRecordId, priorRecordHash: validAuthorization.prior_record_hash,
+    resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
+  }), /must be outside the project|must not contain symlinks/);
+  const foreignProject = makeSession("foreign-authority-project");
+  const foreignRegistry = path.join(foreignProject.projectRoot, "authority.json");
+  writeJson(foreignRegistry, TEST_AUTHORITY_SOURCE.registry);
+  process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = foreignRegistry;
+  assert.throws(() => loadCritiqueResolutionAuthorization(authorizationFile, {
+    projectRoot: session.projectRoot, runId: session.slug, subject: SUBJECT,
+    priorBundleSha256: validAuthorization.prior_bundle_sha256, priorRecordId, priorRecordHash: validAuthorization.prior_record_hash,
+    resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
+  }), /OS-owned|must not contain symlinks/);
+  if (priorAuthorityPath === undefined) delete process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY;
+  else process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = priorAuthorityPath;
   const preparedAuthorization = loadCritiqueResolutionAuthorization(authorizationFile, {
     projectRoot: session.projectRoot, runId: session.slug, subject: SUBJECT,
     priorBundleSha256: validAuthorization.prior_bundle_sha256,
     priorRecordId, priorRecordHash: validAuthorization.prior_record_hash,
     resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
+    testAuthoritySource: TEST_AUTHORITY_SOURCE,
   });
   recordAuthorizationConsumed(session.artifactRoot, preparedAuthorization);
   const conflictingNonceAuthorization = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "conflicting-nonce", {
@@ -1780,17 +1766,14 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   assert.equal(after.critique_resolution_events.length, 1);
   assert.equal(after.critique_resolution_events[0].authorization_nonce, validAuthorization.nonce);
   assert.equal(fs.readFileSync(canonicalManifest, "utf8"), manifestBeforeResolution, "critique resolution must preserve canonical manifest bytes");
-  const validation = validateCritiques();
-  assert.equal(validation.status, 0, validation.stderr || validation.stdout);
-  const foreignWorkingDirectoryValidation = validateCritiques(os.tmpdir());
-  assert.equal(foreignWorkingDirectoryValidation.status, 0, foreignWorkingDirectoryValidation.stderr || foreignWorkingDirectoryValidation.stdout);
+  assert.equal(validateResolvedGraph(after).valid, true);
   const resolvedBytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
   const forgedBundle = JSON.parse(resolvedBytes);
   const forgedHistory = forgedBundle.claims.find((claim) => claim.metadata?.critique_resolution);
   forgedHistory.metadata.superseded_by = "critique:missing";
   forgedHistory.metadata.critique_resolution.resolving_record_id = "critique:missing";
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedBundle, null, 2)}\n`);
-  assert.notEqual(validateCritiques().status, 0, "a forged resolution edge must not validate");
+  assert.equal(validateResolvedGraph(forgedBundle).valid, false, "a forged resolution edge must not validate");
   const forgedEventBundle = JSON.parse(resolvedBytes);
   const forgedEvent = forgedEventBundle.critique_resolution_events[0];
   forgedEvent.resolver = "forged-reviewer";
@@ -1798,14 +1781,19 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   const { event_hash: _oldEventHash, ...forgedUnsignedEvent } = forgedEvent;
   forgedEvent.event_hash = createHash("sha256").update(JSON.stringify(forgedUnsignedEvent)).digest("hex");
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedEventBundle, null, 2)}\n`);
-  assert.notEqual(validateCritiques().status, 0, "a coherently rehashed event without matching signed authority must not validate");
+  assert.equal(validateResolvedGraph(forgedEventBundle).valid, false, "a coherently rehashed event without matching signed authority must not validate");
   const forgedSemanticEventBundle = JSON.parse(resolvedBytes);
   const forgedSemanticEvent = forgedSemanticEventBundle.critique_resolution_events[0];
   forgedSemanticEvent.edge.resolved_at = "2030-01-01T00:00:00.000Z";
   const { event_hash: _semanticEventHash, ...forgedSemanticUnsignedEvent } = forgedSemanticEvent;
   forgedSemanticEvent.event_hash = createHash("sha256").update(JSON.stringify(forgedSemanticUnsignedEvent)).digest("hex");
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedSemanticEventBundle, null, 2)}\n`);
-  assert.notEqual(validateCritiques().status, 0, "an event whose embedded edge differs from its signed resolution edge must not validate");
+  assert.equal(validateResolvedGraph(forgedSemanticEventBundle).valid, false, "an event whose embedded edge differs from its signed resolution edge must not validate");
+  const forgedResultBundle = JSON.parse(resolvedBytes);
+  forgedResultBundle.critique_resolution_events[0].resulting_core_sha256 = "f".repeat(64);
+  const { event_hash: _resultEventHash, ...forgedResultUnsigned } = forgedResultBundle.critique_resolution_events[0];
+  forgedResultBundle.critique_resolution_events[0].event_hash = createHash("sha256").update(JSON.stringify(forgedResultUnsigned)).digest("hex");
+  assert.equal(validateResolvedGraph(forgedResultBundle).valid, false, "a coherently rehashed divergent result digest must not validate");
   const cyclicBundle = JSON.parse(resolvedBytes);
   const cyclicResolver = cyclicBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId);
   cyclicResolver.metadata.superseded_by = priorRecordId;
@@ -1815,7 +1803,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     resolved_lane_ids: ["code-review"], resolved_finding_ids: [], resolved_at: "2026-07-19T10:02:00Z",
   };
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(cyclicBundle, null, 2)}\n`);
-  assert.notEqual(validateCritiques().status, 0, "a cyclic resolution graph must not validate");
+  assert.equal(validateResolvedGraph(cyclicBundle).valid, false, "a cyclic resolution graph must not validate");
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), resolvedBytes);
   const replay = await workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir,
@@ -1835,7 +1823,6 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
   // a real historical session. It proves migration without carrying repository,
   // provider, or runtime identifiers into a public test fixture.
   const session = makeSession("scrubbed-critique-history");
-  ensureProtectedRegistryBase(session.projectRoot);
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
@@ -1892,8 +1879,11 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
   const migrated = normalizeCritiqueChainRecords(historicalClaims.map((claim) => ({ ...claim.metadata, verdict: claim.value, summary: claim.fieldOrBehavior }))).records;
   assert.equal(migrated.length, 13);
   const finalRecordId = migrated.at(-1).critique_record_id;
-  const validate = () => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd: os.tmpdir(), encoding: "utf8" });
-  assert.notEqual(validate().status, 0, "unmigrated historical reviews remain fail-closed");
+  const validate = () => {
+    const current = readJson(bundleFile);
+    return validateCritiqueResolutionGraph(current.claims, SUBJECT, current.critique_resolution_events ?? [], session.projectRoot, TEST_AUTHORITY_SOURCE);
+  };
+  assert.equal(validate().valid, false, "unmigrated historical reviews remain fail-closed");
 
   for (const [index, prior] of migrated.filter((record) => record.verdict !== "pass").entries()) {
     const authorizationFile = critiqueResolutionAuthorization(session, prior.critique_record_id, finalRecordId, "final-independent-reviewer", `migrate-${prior.critique_sequence}`);
@@ -1904,8 +1894,8 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
       "--authorization-file", authorizationFile,
     ];
     if (index === 0) {
-      const results = await Promise.all([runWorkflowProcess(args, session.projectRoot), runWorkflowProcess(args, session.projectRoot)]);
-      assert.deepEqual(results, [0, 0], "subject locking serializes an identical concurrent resolution into one write and one replay");
+      const results = [await workflowMain(args), await workflowMain(args)];
+      assert.deepEqual(results, [0, 0], "an identical retry validates and replays the persisted resolution");
     } else {
       await workflowMain(args);
     }
@@ -1916,7 +1906,7 @@ test("a scrubbed thirteen-review repair history migrates through sequential sign
   assert.equal(migratedClaims.filter((claim) => claim.status === "superseded").length, 11);
   assert.equal(migratedClaims.filter((claim) => !claim.metadata?.superseded_by && claim.value === "pass" && claim.status === "verified").length, 2);
   assert.equal(migratedBundle.critique_resolution_events.length, 11);
-  assert.equal(validate().status, 0, "all historical failures have authenticated, hash-chained resolutions");
+  assert.equal(validate().valid, true, "all historical failures have authenticated, hash-chained resolutions");
   assert.equal(consumedAuthorizationRecords(session).length, 11, "each migration edge consumes exactly one signed authority nonce");
 });
 

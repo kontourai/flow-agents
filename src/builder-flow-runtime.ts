@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -16,7 +15,8 @@ import {
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization, type LifecycleAuthorityTestSource } from "./builder-lifecycle-authority.js";
+import { execTrustedGitSync } from "./lib/trusted-git.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import {
@@ -33,6 +33,7 @@ import {
 } from "./builder-flow-run-adapter.js";
 
 type AnyRecord = Record<string, any>;
+const TEST_AUTHORITY_SOURCE = Symbol("flow-agents-test-authority-source");
 
 export interface BuilderFlowSessionInput {
   sessionDir: string;
@@ -41,6 +42,11 @@ export interface BuilderFlowSessionInput {
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
   authorizationFile: string;
+}
+
+/** Internal hermetic-test seam. This module path is not a package export. */
+export function withLifecycleAuthorityTestSource(input: BuilderFlowAuthorizedLifecycleInput, source: LifecycleAuthorityTestSource): BuilderFlowAuthorizedLifecycleInput {
+  return Object.assign({ ...input }, { [TEST_AUTHORITY_SOURCE]: source });
 }
 
 export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput {
@@ -414,6 +420,7 @@ async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLife
     runId: context.slug,
     subject,
     actorKey: assignment.actor_key,
+    testAuthoritySource: (input as BuilderFlowAuthorizedLifecycleInput & { [TEST_AUTHORITY_SOURCE]?: LifecycleAuthorityTestSource })[TEST_AUTHORITY_SOURCE],
     ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
     ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
   });
@@ -859,13 +866,13 @@ function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
   const root = fs.realpathSync(projectRoot);
   const hasGitMarker = fs.existsSync(path.join(root, ".git"));
   try {
-    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const gitRoot = String(execTrustedGitSync(root, ["rev-parse", "--show-toplevel"])).trim();
     if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
       throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
     }
-    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
-    const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] })
+    const headSha = String(execTrustedGitSync(root, ["rev-parse", "HEAD"])).trim();
+    const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], "buffer") as Buffer;
+    const untracked = (execTrustedGitSync(root, ["ls-files", "--others", "--exclude-standard", "-z"], "buffer") as Buffer)
       .toString("utf8").split("\0").filter(Boolean).sort();
     const hash = createHash("sha256");
     hash.update("flow-agents:git-worktree:v1\0");

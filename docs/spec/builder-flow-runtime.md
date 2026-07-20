@@ -307,16 +307,16 @@ pause, resume, or release its own assignment with a reason. Cancellation and arc
 an Ed25519-signed authorization record conforming to
 `schemas/builder-lifecycle-authorization.schema.json`. The record is operation-bound and binds
 the request to the run id, selected Work Item, current assignment actor, immutable external
-request reference, nonce, and expiry. Its signing key must be pinned in the durable
-`.flow-agents/lifecycle-authority-keys.json` registry. Runtime or harness adapters hold the
+request reference, nonce, and expiry. Its signing key must be pinned in an administrator-provisioned,
+OS-owned registry outside the repository and selected by `FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY`.
+Every path component must be non-writable by the runtime user, group, and world. Runtime or harness adapters hold the
 private key and capture the signed record from a user/operator channel they trust; agent-authored
 prose or an unsigned model-written file is not cancellation authority.
 
 This is an audit and policy boundary, not authentication against a process with unrestricted
 access as the same operating-system user. The harness must keep its signing key outside the
 agent process and enforce its own filesystem or process isolation when the agent is adversarial.
-The repository hooks protect the pinned public-key registry from ordinary agent writes, but are
-explicitly not an operating-system security boundary.
+Repository files and Git refs are explicitly never authority roots.
 Adversarial-runtime authentication is tracked separately in Flow Agents issue #545. Flow's
 current lifecycle authority vocabulary also requires agent-owned pause/resume events to use the
 closest available `operator_request` shape; a distinct canonical runtime authority is tracked in

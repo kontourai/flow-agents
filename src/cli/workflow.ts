@@ -9,7 +9,7 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { assertCurrentCritiqueClaim, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { assertAuthorizationUnused, authorizationDigest, buildUnsignedCritiqueResolutionAuthorization, loadCritiqueResolutionAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "../builder-lifecycle-authority.js";
+import { assertAuthorizationUnused, authorizationDigest, buildUnsignedCritiqueResolutionAuthorization, loadCritiqueResolutionAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
@@ -49,7 +49,7 @@ Public workflow verbs:
 Use the isolated exact-package command emitted by workflow status and doctor in automation.`);
 }
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[], testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
   const parsed = parseArgs(argv);
   const verb = parsed.positionals[0];
   if (!verb || verb === "help" || verb === "--help" || verb === "-h") {
@@ -69,7 +69,7 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
-  if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"), testAuthoritySource);
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
@@ -453,7 +453,7 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   return 0;
 }
 
-async function resolveCritique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+async function resolveCritique(sessionDir: string, argv: string[], json: boolean, testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow resolve-critique");
   if (!flagString(parsed.flags, "prior-record-id") || !flagString(parsed.flags, "resolving-record-id")) {
@@ -497,6 +497,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
       resolvedLaneIds: requiredLaneIds, resolvedFindingIds: requiredFindingIds,
       priorSnapshotSha256: String(priorWorkspace.digest), resolvingSnapshotSha256: String(resolvingWorkspace.digest),
       priorHeadSha: String(priorWorkspace.head_sha ?? "none"), resolvingHeadSha: String(resolvingWorkspace.head_sha ?? "none"),
+      testAuthoritySource,
     });
     if (authorization.expected_resolver !== resolvingMetadata.reviewer) throw new Error("critique resolution authorization expected_resolver does not match the resolving reviewer");
     const priorConsumption = readAuthorizationConsumption(path.dirname(sessionDir), authorization);
@@ -505,7 +506,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
       const events = Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events as JsonRecord[] : [];
       const exactEvents = events.filter((event) => event.event_id === resolution?.resolution_event_id
         && event.authorization_sha256 === authorizationDigest(authorization));
-      const graph = validateCritiqueResolutionGraph(claims, subject, events, projectRoot);
+      const graph = validateCritiqueResolutionGraph(claims, subject, events, projectRoot, testAuthoritySource);
       const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
       const resolvingClaim = claims.find((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === resolvingRecordId);
       if (priorConsumption && blockingGraphErrors.length === 0 && exactEvents.length === 1 && resolvingClaim
@@ -521,7 +522,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
       recordAuthorizationConsumed(path.dirname(sessionDir), authorization);
     }
     const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
-    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", authorization.expected_resolver, "--authorization-digest", authorizationDigest(authorization), "--authorization-key-id", authorization.signature.key_id, "--authorization-nonce", authorization.nonce, "--preimage-digest", beforeTrustBundle, "--authorization-base64", Buffer.from(JSON.stringify(authorization)).toString("base64")]);
+    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", authorization.expected_resolver, "--authorization-digest", authorizationDigest(authorization), "--authorization-key-id", authorization.signature.key_id, "--authorization-nonce", authorization.nonce, "--preimage-digest", beforeTrustBundle, "--authorization-base64", Buffer.from(JSON.stringify(authorization)).toString("base64")], testAuthoritySource);
     const result = await recoverBuilderFlowSession({ sessionDir });
     const afterTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
     if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {

@@ -120,13 +120,6 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
-  if (/(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/.test(norm)) {
-    return {
-      name: '.flow-agents/lifecycle-authority-keys.json',
-      reason: 'an agent could replace the pinned lifecycle authority key and forge cancellation authority',
-    };
-  }
-
   // .kontourai/flow-agents/current.json — an agent could forge active_flow_id / active_step_id
   // to route the gate to a permissive or empty-expects FlowDefinition.
   // SAFE: the workflow CLI writes current.json via fs (writeJson → fs.writeFileSync),

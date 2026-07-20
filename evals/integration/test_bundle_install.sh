@@ -1112,11 +1112,6 @@ const packageEntry = path.join(consumer, 'node_modules', '@kontourai', 'flow-age
 const { builderLifecycleAuthorizationPayload } = await import(pathToFileURL(packageEntry).href);
 const keys = generateKeyPairSync('ed25519');
 const keyId = 'packed-consumer';
-fs.mkdirSync(path.join(project, '.flow-agents'), { recursive: true });
-fs.writeFileSync(path.join(project, '.flow-agents', 'lifecycle-authority-keys.json'), JSON.stringify({
-  schema_version: '1.0',
-  keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }],
-}, null, 2));
 for (const operation of ['cancel', 'archive']) {
   const requestedAt = new Date();
   const unsigned = {
@@ -1136,18 +1131,24 @@ for (const operation of ['cancel', 'archive']) {
   const authorization = { ...unsigned, signature: { algorithm: 'ed25519', key_id: keyId, value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), keys.privateKey).toString('base64') } };
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
+fs.writeFileSync(path.join(project, 'test-authority-source.json'), JSON.stringify({ registry: {
+  schema_version: '1.0', keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }],
+} }));
 NODE
-  git -C "$PACKAGE_PROJECT" init -q -b main \
-  && git -C "$PACKAGE_PROJECT" config user.email packed-fixture@example.invalid \
-  && git -C "$PACKAGE_PROJECT" config user.name "Packed Fixture" \
-  && git -C "$PACKAGE_PROJECT" add .flow-agents/lifecycle-authority-keys.json \
-  && git -C "$PACKAGE_PROJECT" commit -q -m "protect lifecycle authority registry" \
-  && git -C "$PACKAGE_PROJECT" update-ref refs/remotes/origin/main HEAD \
-  && package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
+  package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null \
-  && package_flow archive --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null \
-  && node - "$PACKAGE_PROJECT" <<'NODE'
+  && node --input-type=module - "$PACKAGE_PROJECT" "$PACKAGE_LIFECYCLE_SESSION" "$PACKAGE_CONSUMER" <<'NODE' &&
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [project, session, consumer] = process.argv.slice(2);
+const runtime = await import(pathToFileURL(path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'builder-flow-runtime.js')).href);
+const authority = await import(pathToFileURL(path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'builder-lifecycle-authority.js')).href);
+const testAuthoritySource = authority.createLifecycleAuthorityTestSource(JSON.parse(fs.readFileSync(path.join(project, 'test-authority-source.json'), 'utf8')).registry);
+await runtime.cancelBuilderFlowSession(runtime.withLifecycleAuthorityTestSource({ sessionDir: session, authorizationFile: path.join(project, 'cancel.authorization.json') }, testAuthoritySource));
+await runtime.archiveBuilderFlowSession(runtime.withLifecycleAuthorityTestSource({ sessionDir: session, authorizationFile: path.join(project, 'archive.authorization.json') }, testAuthoritySource));
+NODE
+  node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];

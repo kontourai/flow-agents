@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { authorizationDigest, validateCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
+import { authorizationDigest, validateCritiqueResolutionAuthorization, type LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
+import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -12,6 +13,16 @@ function canonical(value: unknown): string {
     return `{${Object.entries(value as AnyRecord).sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => `${JSON.stringify(key)}:${canonical(nested)}`).join(",")}}`;
   }
   return JSON.stringify(value) ?? "null";
+}
+
+export function critiqueResolutionResultCoreDigest(prior: AnyRecord, resolving: AnyRecord, edge: AnyRecord): string {
+  return createHash("sha256").update(canonical({
+    prior_record_id: prior.critique_record_id,
+    prior_record_hash: prior.critique_record_hash,
+    resolving_record_id: resolving.critique_record_id,
+    resolving_record_hash: resolving.critique_record_hash,
+    edge,
+  })).digest("hex");
 }
 
 export function critiqueRecordHash(record: AnyRecord): string {
@@ -72,7 +83,7 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
-export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string): { valid: boolean; errors: string[]; live: AnyRecord[] } {
+export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, testAuthoritySource?: LifecycleAuthorityTestSource): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   const errors: string[] = [];
   if (records.length === 0) return { valid: false, errors: ["critique graph has no records"], live: [] };
@@ -114,6 +125,13 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
       || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer)
       || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) errors.push("critique resolution actor binding is invalid");
     if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) errors.push("critique resolution crosses workflow subjects");
+    const priorWorkspace = prior.review_target?.workspace_snapshot;
+    const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
+    if (priorWorkspace?.kind === "git-worktree" || resolvingWorkspace?.kind === "git-worktree") {
+      if (!projectRoot || priorWorkspace?.kind !== "git-worktree" || resolvingWorkspace?.kind !== "git-worktree") errors.push("critique resolution Git snapshots require one trusted project context");
+      else try { assertTrustedGitAncestor(projectRoot, String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha)); }
+      catch { errors.push("critique resolver Git ancestry is invalid"); }
+    }
     const linkedEvents = resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
     if (resolution.kind === "cross-reviewer" && linkedEvents.length !== 1) errors.push("cross-reviewer critique resolution must link one append-only authorization event");
     else if (linkedEvents.length === 1) {
@@ -169,11 +187,14 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
         priorSnapshotSha256: String(eventPrior.review_target?.workspace_snapshot?.digest),
         resolvingSnapshotSha256: String(eventResolving.review_target?.workspace_snapshot?.digest),
         priorHeadSha: String(eventPrior.review_target?.workspace_snapshot?.head_sha ?? "none"),
-        resolvingHeadSha: String(eventResolving.review_target?.workspace_snapshot?.head_sha ?? "none"), allowExpired: true,
+        resolvingHeadSha: String(eventResolving.review_target?.workspace_snapshot?.head_sha ?? "none"), allowExpired: true, testAuthoritySource,
       });
       if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
     } catch { errors.push("critique resolution signed authorization is invalid"); }
     if (expectedSubject && event.subject !== expectedSubject) errors.push("critique resolution event has a mismatched workflow subject");
+    const eventPrior = byId.get(String(event.prior_record_id));
+    const eventResolving = byId.get(String(event.resolving_record_id));
+    if (!eventPrior || !eventResolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(eventPrior, eventResolving, event.edge)) errors.push("critique resolution event resulting bundle core digest is invalid");
   });
   if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) errors.push("critique graph requires a current verified PASS");
   if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) errors.push("critique graph has unresolved live critique records");

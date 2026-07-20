@@ -7,7 +7,6 @@ test-results/
 # .kontourai/flow-agents. Durable source belongs in docs/, context/,
 # integrations/, scripts/, or tracked bundle source directories.
 .flow-agents/*
-!.flow-agents/lifecycle-authority-keys.json
 .claude/
 /.codex/
 .ai/

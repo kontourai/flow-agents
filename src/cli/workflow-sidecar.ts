@@ -30,7 +30,8 @@ import {
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import type { LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
 
 type AnyObj = Record<string, any>;
 
@@ -4465,7 +4466,7 @@ function critiqueByRecordId(critiques: AnyObj[], recordId: string, label: string
   return matches[0]!;
 }
 
-async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function resolveCritique(p: ReturnType<typeof parseArgs>, testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const priorRecordId = requiredResolutionRecordId(p, "prior-record-id");
@@ -4583,12 +4584,12 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
     preimage_bundle_sha256: preimageDigest, prior_record_id: priorRecordId, prior_record_hash: prior.critique_record_hash,
     resolving_record_id: resolvingRecordId, resolving_record_hash: resolving.critique_record_hash,
     resolver, authorization_sha256: authorizationDigest, authorization_key_id: authorizationKeyId,
-    authorization_nonce: authorizationNonce, edge: resolution, resulting_core_sha256: createHash("sha256").update(JSON.stringify(candidateBundle)).digest("hex"),
+    authorization_nonce: authorizationNonce, edge: resolution, resulting_core_sha256: critiqueResolutionResultCoreDigest(prior, resolving, resolution),
     signed_authorization: signedAuthorization,
   };
   const resolutionEvent = { ...eventWithoutHash, event_hash: createHash("sha256").update(JSON.stringify(eventWithoutHash)).digest("hex") };
   const nextResolutionEvents = [...resolutionEvents, resolutionEvent];
-  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir));
+  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir), testAuthoritySource);
   // Multiple independent reviewers may have live failures after a route-back. Each signed
   // authorization binds one exact edge/preimage, so resolution is intentionally sequential.
   // Permit only the intermediate "other live critiques remain" condition here; every other
@@ -7205,11 +7206,11 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
-  return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
+export function mainFromPublicWorkflow(argv: string[], testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
+  return main(argv, PUBLIC_WORKFLOW_AUTHORITY, testAuthoritySource);
 }
 
-export async function main(argv: string[] = process.argv.slice(2), authority?: symbol): Promise<number> {
+export async function main(argv: string[] = process.argv.slice(2), authority?: symbol, testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
   const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
   // command to execute verbatim (never option-parsed: a command like `npm test -- --watch`
@@ -7261,7 +7262,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-critique": return recordCritique(p);
       case "resolve-critique": {
         if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("resolve-critique is available only through the authenticated public workflow interface");
-        return resolveCritique(p);
+        return resolveCritique(p, testAuthoritySource);
       }
       case "import-critique": return importCritique(p);
       case "record-release": return recordRelease(p);

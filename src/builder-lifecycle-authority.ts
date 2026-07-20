@@ -3,10 +3,17 @@ import * as path from "node:path";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
-import { durableFlowAgentsRoot } from "./lib/local-artifact-root.js";
-import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 
 type JsonRecord = Record<string, unknown>;
+const TEST_AUTHORITY_SOURCES = new WeakSet<object>();
+export type LifecycleAuthorityTestSource = Readonly<{ registry: JsonRecord }>;
+
+/** Internal hermetic-test seam. This module is not a package export. */
+export function createLifecycleAuthorityTestSource(registry: JsonRecord): LifecycleAuthorityTestSource {
+  const source = Object.freeze({ registry: structuredClone(registry) });
+  TEST_AUTHORITY_SOURCES.add(source);
+  return source;
+}
 export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
 
 export interface BuilderLifecycleAuthorization {
@@ -63,7 +70,7 @@ export function loadCritiqueResolutionAuthorization(fileInput: string, expected:
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
   resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
   priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
-  now?: string; allowExpired?: boolean;
+  now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource;
 }): CritiqueResolutionAuthorization {
   const value = readRegularJson(fileInput, "critique resolution authorization", true);
   return validateCritiqueResolutionAuthorization(value, expected);
@@ -74,7 +81,7 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
   resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
   priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
-  now?: string; allowExpired?: boolean;
+  now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource;
 }): CritiqueResolutionAuthorization {
   const fields = ["schema_version", "operation", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
   assertExactKeys(value, fields, "authorization");
@@ -102,7 +109,7 @@ export function validateCritiqueResolutionAuthorization(value: JsonRecord, expec
   if (requestedAt > now + 5 * 60_000) throw new Error("critique resolution authorization request time is in the future");
   const signature = validateSignature(value.signature);
   const authorization = { ...Object.fromEntries(fields.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionAuthorization;
-  verifySignedAuthorization(authorization, lifecycleAuthorityKeysPath(expected.projectRoot), critiqueResolutionAuthorizationPayload);
+  verifySignedAuthorization(authorization, expected.projectRoot, critiqueResolutionAuthorizationPayload, expected.testAuthoritySource);
   return authorization;
 }
 
@@ -113,13 +120,9 @@ function boundedStringArray(value: unknown, field: string): string[] {
   return result;
 }
 
-export function lifecycleAuthorityKeysPath(projectRoot: string): string {
-  return path.join(durableFlowAgentsRoot(projectRoot), "lifecycle-authority-keys.json");
-}
-
 export function loadBuilderLifecycleAuthorization(
   fileInput: string,
-  expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean },
+  expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean; testAuthoritySource?: LifecycleAuthorityTestSource },
 ): BuilderLifecycleAuthorization {
   const value = readRegularJson(fileInput, "lifecycle authorization");
   assertExactKeys(value, ["schema_version", "operation", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
@@ -150,7 +153,7 @@ export function loadBuilderLifecycleAuthorization(
     request,
     signature,
   } satisfies BuilderLifecycleAuthorization;
-  verifyAuthorizationSignature(authorization, lifecycleAuthorityKeysPath(expected.projectRoot));
+  verifySignedAuthorization(authorization, expected.projectRoot, builderLifecycleAuthorizationPayload, expected.testAuthoritySource);
   return authorization;
 }
 
@@ -257,12 +260,10 @@ export function authorizationDigest(authorization: SignedBuilderAuthorization): 
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
-function verifyAuthorizationSignature(authorization: BuilderLifecycleAuthorization, keysFile: string): void {
-  verifySignedAuthorization(authorization, keysFile, builderLifecycleAuthorizationPayload);
-}
-
-function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, keysFile: string, payload: (value: Omit<T, "signature">) => string): void {
-  const registry = readProtectedRegistry(keysFile);
+function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string, testAuthoritySource?: LifecycleAuthorityTestSource): void {
+  const registry = testAuthoritySource && TEST_AUTHORITY_SOURCES.has(testAuthoritySource)
+    ? testAuthoritySource.registry
+    : readExternalAuthorityRegistry(projectRoot);
   assertExactKeys(registry, ["schema_version", "keys"], "key registry");
   if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
   const seenKeyIds = new Set<string>();
@@ -289,19 +290,29 @@ function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authori
   if (!verified) throw new Error("lifecycle authorization signature is invalid");
 }
 
-function readProtectedRegistry(keysFile: string): JsonRecord {
-  const projectRoot = path.dirname(path.dirname(path.resolve(keysFile)));
+function readExternalAuthorityRegistry(projectRoot: string): JsonRecord {
+  const configured = process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY;
+  if (!configured || !path.isAbsolute(configured)) throw new Error("lifecycle authority registry requires an absolute externally provisioned path");
+  const keysFile = path.resolve(configured);
   const canonicalRoot = fs.realpathSync(projectRoot);
-  const canonicalKeysFile = path.join(fs.realpathSync(path.dirname(keysFile)), path.basename(keysFile));
-  const relative = path.relative(canonicalRoot, canonicalKeysFile);
-  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("lifecycle authority key registry is outside the project root");
-  let cursor = canonicalRoot;
-  for (const component of relative.split(path.sep)) {
+  if (pathIsWithin(keysFile, canonicalRoot)) throw new Error("lifecycle authority registry must be outside the project and worktree");
+  if (process.platform === "win32") throw new Error("secure lifecycle authority ownership is unavailable without a platform adapter");
+  let cursor = path.parse(keysFile).root;
+  for (const component of keysFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, component);
     const stat = fs.lstatSync(cursor);
     if (stat.isSymbolicLink()) throw new Error("lifecycle authority key registry path must not contain symlinks");
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("lifecycle authority registry and every parent must be OS-owned and non-writable by group or world");
+    try {
+      fs.accessSync(cursor, fs.constants.W_OK);
+      throw new Error("lifecycle authority registry path must not be writable by the runtime user");
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("must not be writable")) throw error;
+    }
   }
-  if (!pathIsWithin(fs.realpathSync(path.dirname(keysFile)), canonicalRoot)) throw new Error("lifecycle authority key registry canonical path escapes the project root");
+  const canonicalKeysFile = path.join(fs.realpathSync(path.dirname(keysFile)), path.basename(keysFile));
+  if (pathIsWithin(canonicalKeysFile, canonicalRoot)) throw new Error("lifecycle authority registry canonical path must remain outside the project and worktree");
+  if (typeof process.getuid === "function" && process.getuid() === 0) throw new Error("lifecycle authority registry is unavailable to a root caller without a platform privilege adapter");
   const registryDescriptor = fs.openSync(keysFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   let registryBytes: Buffer;
   try {
@@ -311,18 +322,6 @@ function readProtectedRegistry(keysFile: string): JsonRecord {
   } finally { fs.closeSync(registryDescriptor); }
   const parsed = JSON.parse(registryBytes.toString("utf8")) as unknown;
   if (!isRecord(parsed)) throw new Error("lifecycle authority key registry must be a JSON object");
-  let baseCommit = "";
-  for (const ref of ["refs/remotes/origin/main", "refs/remotes/origin/master"]) {
-    try { baseCommit = resolveTrustedLocalGitCommit(canonicalRoot, ref); break; } catch { /* next protected base */ }
-  }
-  if (!baseCommit) throw new Error("lifecycle authority key registry requires a trusted origin base ref");
-  let protectedBytes: Buffer;
-  try {
-    protectedBytes = execTrustedGitSync(canonicalRoot, ["show", `${baseCommit}:${relative.split(path.sep).join("/")}`], "buffer") as Buffer;
-    execTrustedGitSync(canonicalRoot, ["diff", "--quiet", "--", relative]);
-    execTrustedGitSync(canonicalRoot, ["diff", "--cached", "--quiet", "--", relative]);
-  } catch { throw new Error("lifecycle authority key registry differs from its protected origin base"); }
-  if (!registryBytes.equals(protectedBytes)) throw new Error("lifecycle authority key registry differs from its protected origin base");
   return parsed;
 }
 

@@ -3,12 +3,14 @@ import { flagString, parseArgs } from "../lib/args.js";
 import {
   cancelBuilderFlowSession,
   archiveBuilderFlowSession,
+  withLifecycleAuthorityTestSource,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
 } from "../builder-flow-runtime.js";
+import type { LifecycleAuthorityTestSource } from "../builder-lifecycle-authority.js";
 
 const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive> --session-dir <path> [--reason <text> | --authorization-file <path>]";
 const CANCEL_REQUEST_USAGE = "Usage: flow-agents builder-run cancel-request --session-dir <path> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]";
@@ -64,14 +66,14 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
       `Sign the exact bytes in "signing_payload" with your ed25519 lifecycle-authority key (base64).`,
       `Add a "signature" block: {"algorithm":"ed25519","key_id":"<your registry key id>","value":"<base64 signature>"} to ${outFile}, and save it as the signed authorization file.`,
       `Run: flow-agents builder-run cancel --session-dir ${sessionDir} --authorization-file <signed file>`,
-      `The signature is verified against .flow-agents/lifecycle-authority-keys.json; nothing here weakens that.`,
+      `The signature is verified against the externally provisioned lifecycle-authority registry; repository files and Git refs are never authority roots.`,
     ],
     ...(prepared.alreadyTerminal ? { note: `Run is already ${prepared.runStatus}; cancel would be a no-op.` } : {}),
   }, null, 2));
   return 0;
 }
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[], testAuthoritySource?: LifecycleAuthorityTestSource): Promise<number> {
   const parsed = parseArgs(argv);
   const action = parsed.positionals[0];
   const sessionDir = flagString(parsed.flags, "session-dir");
@@ -128,10 +130,10 @@ export async function main(argv: string[]): Promise<number> {
           : action === "resume"
             ? await resumeBuilderFlowSession({ sessionDir, reason: reason! })
             : action === "cancel"
-              ? await cancelBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! })
+              ? await cancelBuilderFlowSession(testAuthoritySource ? withLifecycleAuthorityTestSource({ sessionDir, authorizationFile: authorizationFile! }, testAuthoritySource) : { sessionDir, authorizationFile: authorizationFile! })
               : action === "release-assignment"
                 ? await releaseBuilderFlowAssignment({ sessionDir, reason: reason! })
-                : await archiveBuilderFlowSession({ sessionDir, authorizationFile: authorizationFile! });
+                : await archiveBuilderFlowSession(testAuthoritySource ? withLifecycleAuthorityTestSource({ sessionDir, authorizationFile: authorizationFile! }, testAuthoritySource) : { sessionDir, authorizationFile: authorizationFile! });
   console.log(JSON.stringify({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,

@@ -107,17 +107,19 @@ supplies a trusted delegation credential.
 `workflow resolve-critique` closes a historical failing or not-verified review
 without deleting it or borrowing the earlier reviewer's identity. It is only
 available during `builder.build` verification. It requires an Ed25519-signed
-user/operator authorization trusted by the protected
-`.flow-agents/lifecycle-authority-keys.json` registry. The authorization binds
+user/operator authorization trusted by an externally provisioned lifecycle-authority registry.
+Administrators select its absolute path with `FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY`; the
+registry must be outside the project/worktree, OS-owned, and non-writable by the runtime user,
+group, or world through every path component. Platforms without a supported ownership adapter
+fail closed. The authorization binds
 the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
 
-The registry is a tracked, provider-neutral trust-root contract containing
-Ed25519 public keys only. Each repository owns its registry; do not copy keys
-from another project or place private key material in it. Missing, malformed,
-duplicate, shadowed, or private-key-bearing entries fail closed. An empty
-registry intentionally authorizes no lifecycle or critique-resolution signer.
+The provider-neutral registry contains Ed25519 public keys only. CI and runtime administrators
+provision it outside source control and keep private keys in their authority service. Missing,
+malformed, duplicate, shadowed, repository-local, writable, or private-key-bearing registries
+fail closed. An empty registry intentionally authorizes no lifecycle or critique-resolution signer.
 
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the
