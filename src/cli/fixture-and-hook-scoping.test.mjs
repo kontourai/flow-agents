@@ -299,6 +299,7 @@ test("F4 third-pass: a fully-innocent symlink name pointing at a protected ancho
   process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
   try {
     assert.ok(hook.checkRedirectToProtected(`echo forged > ${innocent}`, scratch));
+    assert.ok(hook.checkCopyMoveToProtected(`cp forged.json ${innocent}`, scratch));
   } finally {
     if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
     else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
