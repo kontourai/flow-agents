@@ -66,6 +66,24 @@ test("lifecycle authority helper installation is hermetic when a protected helpe
   assert.equal(closed, true, "the helper descriptor is closed after validation");
 });
 
+test("lifecycle authority helper installation fails closed when writability cannot be determined", () => {
+  let opened = false;
+  const host = {
+    platform: "darwin",
+    getuid: () => 501,
+    lstatSync: (file) => file === LIFECYCLE_AUTHORITY_HELPER_PATH ? protectedExecutable() : protectedDirectory(),
+    accessSync: () => { const error = new Error("indeterminate filesystem state"); error.code = "EIO"; throw error; },
+    openSync: () => { opened = true; return 42; },
+    fstatSync: () => protectedExecutable(),
+    closeSync: () => {},
+  };
+  assert.throws(
+    () => validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH, host),
+    /writability could not be verified: indeterminate filesystem state/,
+  );
+  assert.equal(opened, false);
+});
+
 test("lifecycle authority completion key uses the platform-canonical protected root", () => {
   assert.equal(lifecycleAuthorityCompletionVerificationKeyPath("darwin"), "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem");
   assert.equal(lifecycleAuthorityCompletionVerificationKeyPath("linux"), "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem");
@@ -119,6 +137,23 @@ test("lifecycle authority completion key rejects a runtime-writable hierarchy be
   assert.throws(
     () => validateLifecycleAuthorityCompletionKeyInstallation(lifecycleAuthorityCompletionVerificationKeyPath("darwin"), host),
     /must not be writable by the runtime user/,
+  );
+  assert.equal(opened, false);
+});
+
+test("lifecycle authority completion key fails closed when writability cannot be determined", () => {
+  let opened = false;
+  const host = {
+    platform: "darwin",
+    lstatSync: (file) => file === lifecycleAuthorityCompletionVerificationKeyPath("darwin") ? protectedKey() : protectedDirectory(),
+    accessSync: () => { const error = new Error("indeterminate filesystem state"); error.code = "EIO"; throw error; },
+    openSync: () => { opened = true; return 42; },
+    fstatSync: () => protectedKey(),
+    closeSync: () => {},
+  };
+  assert.throws(
+    () => validateLifecycleAuthorityCompletionKeyInstallation(lifecycleAuthorityCompletionVerificationKeyPath("darwin"), host),
+    /writability could not be verified: indeterminate filesystem state/,
   );
   assert.equal(opened, false);
 });

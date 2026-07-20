@@ -41,6 +41,18 @@ export interface LifecycleAuthorityHelperHost {
   closeSync(descriptor: number): void;
 }
 
+function assertRuntimeCannotWrite(host: LifecycleAuthorityHelperHost, file: string, label: string): void {
+  try {
+    host.accessSync(file, fs.constants.W_OK);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (code === "EACCES" || code === "EPERM") return;
+    const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+    throw new Error(`${label} writability could not be verified${detail}`);
+  }
+  throw new Error(`${label} must not be writable by the runtime user`);
+}
+
 const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
   platform: process.platform,
   getuid: typeof process.getuid === "function" ? () => process.getuid!() : undefined,
@@ -112,8 +124,7 @@ export function validateLifecycleAuthorityCompletionKeyInstallation(
     try { stat = host.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
     if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
     if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
-    try { host.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
-    catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
+    assertRuntimeCannotWrite(host, cursor, "pinned lifecycle authority completion verification key path");
   }
   const descriptor = host.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
@@ -149,8 +160,7 @@ export function validateLifecycleAuthorityHelperInstallation(helper: string, hos
     try { stat = host.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority helper is not installed at ${helper}`); }
     if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority helper path must not contain symlinks");
     if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority helper and every parent must be OS-owned and non-writable by group or world");
-    try { host.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority helper path must not be writable by the runtime user"); }
-    catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
+    assertRuntimeCannotWrite(host, cursor, "pinned lifecycle authority helper path");
   }
   const descriptor = host.openSync(helper, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
