@@ -5142,6 +5142,37 @@ export class RepoHeadMismatchError extends Error {
 }
 
 /**
+ * Distinct, identifiable error for a publish attempt against a `dir` with no `trust.bundle` to
+ * publish — NOT a generic Error, and NOT one of the three tiers above (shape/hold/head-mismatch),
+ * so every publishDelivery() call site keeps its existing distinguishing behavior. This is the
+ * FIFTH tier, but unlike the other four it is deliberately positioned BEFORE any of them run
+ * (there is nothing to check the shape/hold/ancestry of when there is no bundle at all) and is
+ * the one tier every internal auto-publish call site (advanceState/recordRelease/promote) is
+ * EXPECTED to keep tolerating as best-effort: none of those catch handlers name this class, so it
+ * falls through to their existing generic `[caller] WARNING: publish-delivery failed: ...` swallow
+ * exactly like any other non-distinguished failure did before this class existed — advance-state's
+ * release path and record-release's own fail-soft behavior (a session that was never sealed
+ * must not block a release write) are both unaffected.
+ *
+ * The direct `publish-delivery` CLI subcommand (`publishDeliveryCmd`) has no such catch, so this
+ * error propagates all the way to the process exit code — the fix this class exists for: prior to
+ * it, a missing trust.bundle made `publishDeliveryCmd` return silently with exit 0 and no output,
+ * which was the real-world footgun of passing the OUTPUT dir (`delivery/<name>`) instead of the
+ * session artifact dir (`.kontourai/flow-agents/<slug>`), or invoking publish against a session
+ * that was never sealed (seal-checkpoint/record-release never ran). Both root causes manifest
+ * identically here (there is no trust.bundle at `dir`), so one error/one message covers both.
+ */
+export class SessionNotPublishableError extends Error {
+  readonly code = "PUBLISH_DELIVERY_NO_TRUST_BUNDLE" as const;
+  readonly dir: string;
+  constructor(dir: string) {
+    super(`no trust.bundle at ${dir} — pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint`);
+    this.name = "SessionNotPublishableError";
+    this.dir = dir;
+  }
+}
+
+/**
  * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
  * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
  * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
@@ -5919,7 +5950,14 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * trust.checkpoint.intoto.json / trust.checkpoint.sig.json / trust.checkpoint.attestation.json
  * from the session artifact dir to <repoRoot>/delivery/<slug>/.
  *
- * Fail-soft on a missing bundle: if trust.bundle is absent, returns without throwing.
+ * Fail-CLOSED on a missing bundle: if trust.bundle is absent at `dir`, throws
+ * `SessionNotPublishableError` naming the path and the fix (pass the session artifact dir;
+ * build it with record-evidence then seal-checkpoint) — see that class's own doc comment for
+ * why this positively-identifiable error is safe for the internal auto-publish call sites
+ * (advanceState/recordRelease/promote) to keep tolerating as best-effort (none of their catch
+ * handlers name it, so it falls through to their existing generic WARNING-and-swallow, same as
+ * before this became a throw) while still making the direct `publish-delivery` CLI subcommand
+ * (which has no such catch) fail loudly with a non-zero exit instead of silently exiting 0.
  * Fail-CLOSED on repo-root resolution: repoRoot must be a real, resolved kits/ ancestor
  * (see findRepoRootFromDirStrict) — null (no ancestor found) skips the publish with a
  * visible warning instead of writing to whatever process.cwd() happens to be. This
@@ -5969,18 +6007,29 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * protection for that case relies on the shape-check and verify-hold gates above, which correctly
  * no-op (allow) when there is no git repo to inspect, same as this gate.
  *
- * There are now FOUR fail-closed/fail-soft TIERS in this function, and they must never be
- * conflated in prose or in a call site's catch handler: (1) fail-SOFT bundle absence /
- * repo-root resolution (silent no-op / visible warning, unchanged from before #356), (2)
+ * There are now FIVE fail-closed/fail-soft TIERS in this function, and they must never be
+ * conflated in prose or in a call site's catch handler: (0) fail-CLOSED bundle absence
+ * (`SessionNotPublishableError` — loud for the direct CLI, but still tolerated as best-effort
+ * WARNING by the internal auto-publish call sites since none of their catches name it), (1)
+ * fail-SOFT repo-root resolution (visible warning, unchanged from before #356), (2)
  * fail-CLOSED bundle shape (#356, `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293,
  * `NotFreshHolderError`), (4) fail-CLOSED repo-HEAD-vs-checkpoint mismatch (#413 Facet A,
  * `RepoHeadMismatchError`) — see this tier's own gate below for the undeterminable-shallow
- * carve-out. Tiers run in this fixed order (shape, then verify-hold, then HEAD-mismatch); a
- * bundle that fails an earlier tier throws that tier's error specifically, never a later one's.
+ * carve-out. Tiers run in this fixed order (bundle absence, then repo-root, then shape, then
+ * verify-hold, then HEAD-mismatch); a bundle that fails an earlier tier throws that tier's error
+ * specifically, never a later one's.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundleSrc)) {
+    // Fail-CLOSED (tier 0): see SessionNotPublishableError's own doc comment above for why this
+    // is safe for the internal auto-publish call sites to keep tolerating as best-effort while
+    // making the direct `publish-delivery` CLI subcommand fail loudly instead of silently exiting
+    // 0 with no output — the real-world footgun this fixes (wrong dir passed, or a session that
+    // was never sealed via record-evidence + seal-checkpoint).
+    process.stderr.write(`[publish-delivery] REFUSING to publish — no trust.bundle at ${dir}: pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint.\n`);
+    throw new SessionNotPublishableError(dir);
+  }
 
   if (!repoRoot) {
     process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/ seal. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
@@ -6045,14 +6094,17 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
     "trust.checkpoint.sig.json",
     "trust.checkpoint.attestation.json",
   ];
+  const copiedCompanions: string[] = [];
   for (const filename of companions) {
     const src = path.join(dir, filename);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(sessionDeliveryDir, filename));
+      copiedCompanions.push(filename);
     }
   }
 
-  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${sessionDeliveryDir} (per-session path, #379)\n`);
+  const writtenFiles = ["trust.bundle", ...copiedCompanions].join(", ");
+  process.stderr.write(`[publish-delivery] published ${writtenFiles} to ${sessionDeliveryDir} (per-session path, #379)\n`);
 }
 
 /**
@@ -7331,6 +7383,58 @@ export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
   return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
 }
 
+/**
+ * Single source of truth for the `help` command's listing — one short line per subcommand
+ * dispatched by main()'s switch below, in the SAME order as those `case` labels. `help` itself
+ * is intercepted before dispatch (see main()) and is not a switch case, so it is listed last and
+ * excluded when workflow-sidecar-help.test.mjs greps this file's own source for main()'s `case
+ * "...":` labels and asserts they match this array's other keys exactly — an added, removed, or
+ * renamed command that forgets to update this list fails that test rather than silently
+ * drifting out of sync with the real dispatcher.
+ */
+const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
+  ["ensure-session", "Create or resume a workflow session's artifact directory and state."],
+  ["current", "Print the current session pointer (active flow/step) for an artifact root."],
+  ["record-agent-event", "Append a JSONL agent-activity event for an artifact root."],
+  ["init-plan", "Write the initial plan/handoff artifact for a session."],
+  ["record-evidence", "Record a verification check (pass/fail/waived) into the trust bundle."],
+  ["record-gate-claim", "Record a workflow gate claim (e.g. human-approval) into the trust bundle."],
+  ["record-check", "Run a command, capture its output, and record it as evidence."],
+  ["promote", "Record a durable-residue promotion claim (or none) for a session."],
+  ["advance-state", "Advance a session's status/phase; auto-seals and publishes on delivery."],
+  ["record-critique", "Record a review critique verdict into the trust bundle."],
+  ["resolve-critique", "Resolve a pending critique (public workflow interface only)."],
+  ["import-critique", "Import an externally-authored critique into the trust bundle."],
+  ["record-release", "Record a release-readiness decision; auto-seals and publishes."],
+  ["record-learning", "Record a post-delivery learning/follow-up entry."],
+  ["dogfood-pass", "Run the dogfood self-check pass for an artifact root."],
+  ["gate-review", "Review outstanding gate blocks/misses for a session."],
+  ["render-trust-panel", "Render a human-readable trust panel from a trust bundle."],
+  ["trust-mcp", "Serve trust-bundle explanations over the MCP protocol."],
+  ["liveness", "Claim/heartbeat/release or inspect session liveness/holder status."],
+  ["claim", "Look up a claim's status, evidence, and how-to-verify guidance."],
+  ["resolve-slug", "Resolve a work-item reference to its deterministic session slug."],
+  ["seal-checkpoint", "Seal a trust checkpoint snapshot for the current session state."],
+  ["publish-delivery", "Publish a session's trust bundle to the repo's committed delivery/ path."],
+  ["reconcile-preflight", "Run the same bundle shape check publish-delivery enforces, standalone."],
+  ["verify-hold", "Check whether the calling actor is the fresh holder of a subject."],
+  ["takeover-preflight", "Check whether a subject is safely takeable-over by a new actor."],
+  ["help", "Print this command list."],
+];
+
+function printHelp(): void {
+  const width = Math.max(...COMMAND_DESCRIPTIONS.map(([name]) => name.length));
+  const lines = [
+    "workflow-sidecar <command> [args...]",
+    "",
+    "Commands:",
+    ...COMMAND_DESCRIPTIONS.map(([name, description]) => `  ${name.padEnd(width)}  ${description}`),
+    "",
+    "Run `workflow-sidecar <command> --help` for per-command usage where supported.",
+  ];
+  console.log(lines.join("\n"));
+}
+
 export async function main(argv: string[] = process.argv.slice(2), authority?: symbol): Promise<number> {
   const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
@@ -7349,6 +7453,16 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     }
   }
   const p = parseArgs(_argvForParse);
+  // `help` / `--help` / `-h` as the command itself: print the command list and return, before
+  // any lock/artifact-dir resolution runs (this is not one of the dispatched subcommands, so it
+  // must never touch the filesystem — see workflow-sidecar-help.test.mjs's side-effect-free
+  // assertion). Scoped strictly to the top-level command position: a per-command `<cmd> --help`
+  // (e.g. reconcile-preflight/verify-hold/takeover-preflight already handle their own `--help`
+  // internally with tailored usage) is unaffected since those flags never reach `p.command`.
+  if (p.command === "help" || p.command === "--help" || p.command === "-h") {
+    printHelp();
+    return 0;
+  }
   if (!p.command) die("workflow-sidecar command is required");
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
