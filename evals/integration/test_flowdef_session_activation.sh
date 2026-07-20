@@ -209,6 +209,21 @@ else
   _fail "public workflow critique did not record a clean review before tests-evidence"
 fi
 
+# A same-reviewer revision must retain its predecessor for chain validation
+# while only the current critique participates in the clean-review decision.
+printf '\nClarified after the first review revision.\n' >> "$SESSION_DIR/$SLUG--deliver.md"
+if FLOW_AGENTS_ACTOR=activation-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+  --session-dir "$SESSION_DIR" \
+  --id "activation-review" \
+  --verdict pass \
+  --summary "The fixture reviewer verified the clarified bytes as a new review revision." \
+  --artifact-ref "$SESSION_DIR/$SLUG--deliver.md" \
+  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the clarified activation fixture.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION_DIR/$SLUG--deliver.md\",\"summary\":\"Reviewed current delivery artifact.\"}]}" >/dev/null 2>&1; then
+  _pass "public workflow critique records a superseding same-reviewer revision"
+else
+  _fail "public workflow critique did not record the superseding review revision"
+fi
+
 TEST_COMMAND="node --test checks/check-flow-step.test.mjs"
 CRITERION_JSON="$(node - "$TEST_COMMAND" <<'NODE'
 const command = process.argv[2];

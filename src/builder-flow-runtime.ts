@@ -981,6 +981,15 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
+  const currentGateClaimsForTrust = bundle.claims.filter((claim: unknown): claim is AnyRecord => {
+    if (!isRecord(claim) || !claimIsCurrent(claim)) return false;
+    return expectations.some((expectation) => {
+      const candidate = expectation.bundle_claim;
+      return candidate
+        && candidate.claimType === claim.claimType
+        && (!candidate.subjectType || candidate.subjectType === claim.subjectType);
+    });
+  });
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
@@ -1014,7 +1023,7 @@ async function bundleGateEvidence(
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
