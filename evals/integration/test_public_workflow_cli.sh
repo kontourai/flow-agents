@@ -52,7 +52,7 @@ snapshot_tree() {
 
 PRIMARY_HELP="$(cd "$CONSUMER" && "$FLOW_AGENTS_BIN" --help)"
 WORKFLOW_HELP="$(run_candidate --help)"
-[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits workflow"
+[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" == *"publish-delivery"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits the delivery publisher"
 pass "isolated packed install exposes the public workflow command without internal writer terminology"
 
 seed_pull_work() {
@@ -69,6 +69,28 @@ RELEASE_SESSION="$ARTIFACT_ROOT/acme-widgets-101"
 [[ -f "$RELEASE_SESSION/state.json" ]] || fail "packed start did not create a session"
 [[ ! -e "$CONSUMER/package.json" ]] || fail "consumer unexpectedly gained package.json"
 pass "packed start works in a non-Node consumer"
+set +e
+PUBLISH_PRIVATE_ARGS="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" --repo-root "$CONSUMER" 2>&1)"
+PUBLISH_PRIVATE_ARGS_RC=$?
+set -e
+[[ "$PUBLISH_PRIVATE_ARGS_RC" -ne 0 && "$PUBLISH_PRIVATE_ARGS" == *"does not support --repo-root"* ]] || fail "public delivery publishing accepted a caller-selected output repository"
+pass "public delivery publishing derives its repository from the bound session"
+set +e
+PARTIAL_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+PARTIAL_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$PARTIAL_BUNDLE_PUBLISH_RC" -ne 0 && "$PARTIAL_BUNDLE_PUBLISH" == *"requires a completed or release-ready canonical builder.build run"* && ! -e "$CONSUMER/delivery/acme-widgets-101/trust.bundle" ]] || fail "public delivery publishing accepted a partial Builder session"
+pass "public delivery publishing refuses partial Builder sessions even when selected-work created a trust bundle"
+seed_pull_work acme/widgets#108
+run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#108 --assignment-provider local-file --summary "Missing delivery bundle fixture" >/dev/null
+MISSING_BUNDLE_SESSION="$ARTIFACT_ROOT/acme-widgets-108"
+rm -f "$MISSING_BUNDLE_SESSION/trust.bundle"
+set +e
+MISSING_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$MISSING_BUNDLE_SESSION" 2>&1)"
+MISSING_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$MISSING_BUNDLE_PUBLISH_RC" -ne 0 && "$MISSING_BUNDLE_PUBLISH" == *"requires a current session trust.bundle"* && ! -e "$CONSUMER/delivery/acme-widgets-108/trust.bundle" ]] || fail "public delivery publishing did not fail closed for a missing session bundle"
+pass "public delivery publishing refuses a missing session bundle before writing delivery evidence"
 seed_pull_work provider:work-item-123
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:work-item-123 --assignment-provider local-file --summary "Provider-neutral fixture" >/dev/null
 PROVIDER_STATUS="$(run_candidate status --session-dir "$ARTIFACT_ROOT/provider-work-item-123" --json)"

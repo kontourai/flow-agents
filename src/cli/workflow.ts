@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
@@ -17,7 +18,7 @@ import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
-import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
@@ -28,7 +29,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -40,6 +41,7 @@ Public workflow verbs:
   critique            Record review critique directly into the current trust bundle.
   resolve-critique    Resolve a repaired historical critique through a later review record.
   drive               Continue the canonical run through an explicit runtime adapter.
+  publish-delivery    Publish the current session's verified trust bundle for CI reconciliation.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -72,10 +74,54 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "publish-delivery") {
+    assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
+    return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"));
+  }
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boolean): Promise<number> {
+  const { projectRoot, slug } = readBoundSession(sessionDir);
+  if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) {
+    throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
+  }
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const completed = inspected.run.definitionId === "builder.build" && inspected.run.state.status === "completed";
+  const release = readOptionalJson(path.join(sessionDir, "release.json"));
+  const releaseReady = inspected.run.definitionId === "builder.build"
+    && inspected.run.state.status === "active"
+    && inspected.run.state.current_step === "learn"
+    && ["merge", "release", "deploy"].includes(String(release?.decision));
+  if (!completed && !releaseReady) {
+    throw new Error("workflow publish-delivery requires a completed or release-ready canonical builder.build run; partial sessions cannot publish delivery evidence");
+  }
+  await sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot);
+  const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
+  const checkpoint = readJsonFile(checkpointPath, "workflow trust checkpoint");
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  if (checkpoint.commit_sha !== headSha) {
+    throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
+  }
+  const checkpointCompanions = ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"];
+  if (!fs.existsSync(path.join(sessionDir, "trust.checkpoint.attestation.json"))
+    || !checkpointCompanions.slice(1).some((name) => fs.existsSync(path.join(sessionDir, name)))) {
+    throw new Error("workflow publish-delivery requires the checkpoint attestation companions emitted by the checkpoint sealer");
+  }
+  await publishDelivery(sessionDir, projectRoot);
+  const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
+  const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
+  const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
+  if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
+    throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
+  }
+  const report = immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, published: true });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(`Published delivery trust bundle: ${deliveryBundle}`);
+  return 0;
 }
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {

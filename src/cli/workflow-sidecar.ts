@@ -4735,9 +4735,9 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
 // is skipped gracefully (no error surfaced to the caller).
 
 /** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
-function resolveCommitSha(): string | null {
+function resolveCommitSha(projectRoot?: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execFileSync("git", ["rev-parse", "HEAD"], { ...(projectRoot ? { cwd: projectRoot } : {}), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -4758,7 +4758,7 @@ function resolveCommitSha(): string | null {
  *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
-export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<void> {
   const bundlePath = path.join(dir, "trust.bundle");
   if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
   const surface = await tryLoadSurface();
@@ -4783,7 +4783,7 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     status,
     phase,
     sealed_at: sealedAt,
-    commit_sha: resolveCommitSha(),
+    commit_sha: resolveCommitSha(projectRoot),
     checkpoint,
   };
   writeJson(checkpointPath, envelope);
