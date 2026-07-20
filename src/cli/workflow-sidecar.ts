@@ -1011,6 +1011,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
+    // A passed execute scope is authority over the exact workspace bytes that
+    // were implemented. Preserve a previously recorded snapshot on rebuild;
+    // only a first public write is allowed to capture it.
+    const gateClaimWorkspaceSnapshot = check._gate_claim_workspace_snapshot && typeof check._gate_claim_workspace_snapshot === "object" && !Array.isArray(check._gate_claim_workspace_snapshot)
+      ? check._gate_claim_workspace_snapshot as AnyObj
+      : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1101,8 +1107,14 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
+      const executeWorkspaceSnapshot = declared.claimType === "builder.execute.scope" && effectiveStatus === "pass"
+        ? (gateClaimWorkspaceSnapshot ?? (() => {
+            if (!flowAgentsDir) die("passing implementation-scope requires a session workspace for its immutable snapshot");
+            return captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(path.join(flowAgentsDir, slug)), []);
+          })())
+        : null;
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(executeWorkspaceSnapshot ? { workspace_snapshot: executeWorkspaceSnapshot } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -3572,6 +3584,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
+    // Preserve the execute authority verbatim. It is compared by the Builder
+    // runtime, not regenerated during unrelated trust-bundle rebuilds.
+    if (gc.workspace_snapshot && typeof gc.workspace_snapshot === "object" && !Array.isArray(gc.workspace_snapshot)) {
+      check._gate_claim_workspace_snapshot = gc.workspace_snapshot;
+    }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape

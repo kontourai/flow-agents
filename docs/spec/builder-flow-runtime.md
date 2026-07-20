@@ -85,6 +85,23 @@ manufacture a fresh identity. Because those identities are embedded in TrustBund
 genuinely new identity necessarily changes the bundle SHA-256; byte-identical
 replay remains pending rather than consuming another attempt.
 
+### Execute workspace authority
+
+A passing `implementation-scope` claim records a versioned immutable
+`metadata.gate_claim.workspace_snapshot`. In a Git worktree it is a trusted Git
+snapshot of `HEAD`, tracked changes, and non-ignored untracked files; ignored
+runtime sidecars therefore do not create implementation drift. Flow Agents
+preserves that snapshot through every trust-bundle rebuild rather than
+recapturing it at a later step.
+
+Before Builder synchronizes any downstream gate evidence, it compares that
+stored snapshot with a fresh trusted capture. A missing, malformed, ambiguous,
+or different snapshot is not current execute authority. If downstream evidence
+is being synchronized, the runtime canonically evaluates that gate as failed
+with `implementation_defect`, so the same run routes to `execute`. Fresh
+implementation-scope evidence after re-entry captures a new snapshot. This is a
+runtime invariant; hooks are only defense in depth and cannot weaken it.
+
 Every gate visit has a canonical boundary: the latest Flow transition into the
 step, or the run's initial timestamp for its entry step. Claim creation and
 observation timestamps must fall within that visit and may not be more than 30
