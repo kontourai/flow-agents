@@ -330,6 +330,23 @@ immutable helper-produced attestation and pinned public verification contract it
 external resolution `NOT_VERIFIED`, and that verdict cannot unlock evidence attachment or Flow sync.
 Reference implementation, provisioning, and positive platform conformance are tracked in issue #744.
 
+The public reference coordinator source is
+`packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
+the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback>`. The
+script preserves one previous executable for rollback and enforces root ownership and protected
+mode; it does not create registries, signing keys, or deployment-specific configuration. The
+coordinator fixes those administrator-owned inputs under
+`/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
+`/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
+
+Current implementation status is intentionally fail-closed: strict protocol parsing, canonical
+path confinement, protected registry/signature verification, durable serialized locking, and the
+signed completion-record format are implemented. Canonical cancel, archive, and critique-resolution
+CAS/write adapters are not yet implemented, so a fresh operation exits nonzero and no completion is
+emitted. A previously completed operation can only replay an existing protected completion. Positive
+mutation and immutable-attestation E2E therefore remain `NOT_VERIFIED`; issue #744 stays open until
+the three transition adapters and a root-capable container lane land.
+
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not
 cancellation authority. Repository files, package bytes, and Git refs are explicitly never
