@@ -102,6 +102,33 @@ cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
 
+## Resolving repaired critique history
+
+`workflow resolve-critique` closes a historical failing or not-verified review
+without deleting it or borrowing the earlier reviewer's identity. It is only
+available during `builder.build` verification. The caller is authenticated from
+the runtime actor and must be the reviewer recorded on the later passing
+critique, while remaining distinct from the active implementation assignment.
+
+Use immutable `metadata.critique_record_id` values from the two trust-bundle
+critique records. The resolving critique must be verified, current against the
+workspace, strictly newer than the historical review, and cover at least one
+of the same lane IDs. This lane overlap is the policy-defined relationship
+between the two reviews.
+
+```bash
+flow_agents workflow resolve-critique \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>'
+```
+
+The earlier record remains in `trust.bundle` with its original reviewer,
+findings, timestamps, `superseded_by` reference, and `critique_resolution`
+audit record. Repeating the identical valid request is a no-op. Missing,
+ambiguous, circular, stale, equal-snapshot, wrong-subject, or unauthorized
+requests fail without changing the bundle.
+
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"
 flow_agents workflow resume --reason "Decision received"

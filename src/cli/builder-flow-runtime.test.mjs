@@ -1452,7 +1452,6 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-
   const timestamp = new Date().toISOString();
   const prerequisites = verifiedTestsPrerequisites(session, timestamp);
   prerequisites[0].claim.metadata.reviewer = "passing-reviewer";
@@ -1477,6 +1476,126 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
     ["disputed-reviewer", "fail"],
     ["passing-reviewer", "pass"],
   ]);
+});
+
+test("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
+  const session = makeSession("cross-reviewer-critique-resolution");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  // This test exercises the critique ledger independently of prior gate claims. The direct
+  // runtime fixture preserves historical step stamps that a writer rebuild at verify correctly
+  // treats as immutable producer history, so begin the ledger scenario with a clean bundle.
+  fs.rmSync(path.join(session.sessionDir, "trust.bundle"));
+
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const lane = (status) => JSON.stringify({
+    id: "code-review",
+    status,
+    summary: status === "pass" ? "Repair was independently reviewed." : "Review found a blocking defect.",
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "ephemeral-failure", "--reviewer", "ephemeral-reviewer", "--verdict", "fail",
+    "--summary", "The original review found a blocking defect.",
+    "--artifact-ref", delivery, "--lane-json", lane("fail"),
+    "--finding-json", JSON.stringify({ id: "blocking-defect", severity: "high", status: "open", description: "Requires repair." }),
+    "--timestamp", "2026-07-19T10:00:00.000Z",
+  ]);
+  fs.writeFileSync(delivery, "repaired delivery artifact\n");
+  const finalReviewer = resolveCurrentAssignmentActor();
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "final-repair-review", "--reviewer", finalReviewer.actorKey, "--verdict", "pass",
+    "--summary", "An independent final reviewer verified the repair.",
+    "--artifact-ref", delivery, "--lane-json", lane("pass"),
+    "--timestamp", "2026-07-19T10:01:00.000Z",
+  ]);
+
+  const before = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const critiques = before.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const prior = critiques.find((claim) => claim.metadata?.reviewer === "ephemeral-reviewer");
+  const resolving = critiques.find((claim) => claim.metadata?.reviewer === finalReviewer.actorKey);
+  assert.ok(prior, "fixture must retain the earlier failing critique");
+  assert.ok(resolving, "fixture must retain the final resolving critique");
+  const priorRecordId = prior.metadata.critique_record_id ?? prior.id;
+  const resolvingRecordId = resolving.metadata.critique_record_id ?? resolving.id;
+  const beforeRejectedResolution = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
+  await assert.rejects(
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", "missing-record", "--resolving-record-id", resolvingRecordId]),
+    /missing or ambiguous/,
+  );
+  await assert.rejects(
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", priorRecordId]),
+    /circular/,
+  );
+  fs.writeFileSync(delivery, "post-review mutation must make the resolver stale\n");
+  await assert.rejects(
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+    /verified, current passing critique/,
+  );
+  fs.writeFileSync(delivery, "repaired delivery artifact\n");
+  const originalActor = process.env.FLOW_AGENTS_ACTOR;
+  try {
+    process.env.FLOW_AGENTS_ACTOR = "unauthorized-reviewer";
+    await assert.rejects(
+      workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+      /resolver must match/,
+    );
+  } finally {
+    if (originalActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = originalActor;
+  }
+  const wrongSubjectBundle = structuredClone(before);
+  wrongSubjectBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId).metadata.workflow_subject_ref = "other:work-item";
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(wrongSubjectBundle, null, 2)}\n`);
+  await assert.rejects(
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+    /workflow subject/,
+  );
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), beforeRejectedResolution);
+  const equalSnapshotBundle = structuredClone(before);
+  const equalPrior = equalSnapshotBundle.claims.find((claim) => claim.metadata?.critique_record_id === priorRecordId);
+  const equalResolving = equalSnapshotBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId);
+  equalPrior.metadata.review_target.workspace_snapshot = structuredClone(equalResolving.metadata.review_target.workspace_snapshot);
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(equalSnapshotBundle, null, 2)}\n`);
+  await assert.rejects(
+    workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),
+    /newer immutable workspace snapshot/,
+  );
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), beforeRejectedResolution);
+  assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), beforeRejectedResolution, "rejected resolution attempts must not mutate history");
+
+  const result = await workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir,
+    "--prior-record-id", priorRecordId,
+    "--resolving-record-id", resolvingRecordId,
+    "--json",
+  ]);
+  assert.equal(result, 0);
+  const after = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const history = after.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.reviewer === "ephemeral-reviewer");
+  assert.equal(history.status, "superseded");
+  assert.equal(history.value, "fail");
+  assert.deepEqual(history.metadata.findings, [{ id: "blocking-defect", severity: "high", status: "open", description: "Requires repair." }]);
+  assert.equal(history.metadata.critique_resolution.resolving_record_id, resolvingRecordId);
+  assert.equal(history.metadata.critique_resolution.resolver, finalReviewer.actorKey);
+  const resolvedBytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
+  const replay = await workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir,
+    "--prior-record-id", priorRecordId,
+    "--resolving-record-id", resolvingRecordId,
+    "--json",
+  ]);
+  assert.equal(replay, 0);
+  assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), resolvedBytes, "a valid resolution replay is idempotent");
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {

@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
@@ -1187,6 +1188,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       artifact_refs: Array.isArray(c.artifact_refs) ? c.artifact_refs : [],
       ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(supersededBy ? { superseded_by: supersededBy } : {}),
+      ...(c.critique_resolution && typeof c.critique_resolution === "object" && !Array.isArray(c.critique_resolution)
+        ? { critique_resolution: c.critique_resolution }
+        : {}),
     };
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
     // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
@@ -1195,6 +1199,13 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
       : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
+    // A critique claim's physical id changes when it becomes history because its supersession
+    // metadata is part of the claim identity. Preserve an immutable logical record id so an
+    // authenticated resolver can refer to the original review without relying on a mutable
+    // physical claim id.
+    critMeta.critique_record_id = typeof c.critique_record_id === "string" && c.critique_record_id.length > 0
+      ? c.critique_record_id
+      : claimId;
     const legacyClaimType = "workflow.critique.review";
     const policy = ensurePolicy(legacyClaimType, "medium", []);
     // A superseded write emits NO verification event (its status is "superseded" directly).
@@ -3135,6 +3146,31 @@ function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
   if (Array.isArray(critique.findings) && critique.findings.some((finding: AnyObj) => finding.status === "open")) return false;
   return reviewTargetArtifactsMatch(dir, critique.review_target);
 }
+
+function critiqueWorkspaceSnapshotIsCurrent(dir: string, critique: AnyObj): boolean {
+  if (!reviewTargetArtifactsMatch(dir, critique.review_target)) return false;
+  const reviewTarget = critique.review_target;
+  if (!reviewTarget || typeof reviewTarget !== "object" || Array.isArray(reviewTarget)) return false;
+  const expected = (reviewTarget as AnyObj).workspace_snapshot;
+  const artifacts = (reviewTarget as AnyObj).artifacts;
+  if (!expected || typeof expected !== "object" || Array.isArray(expected) || !Array.isArray(artifacts) || artifacts.length === 0) return false;
+  try {
+    const projectRoot = canonicalProjectRootForSession(dir);
+    const reviewedFiles = artifacts.map((artifact: AnyObj) => ({ file: String(artifact.file), sha256: String(artifact.sha256) }));
+    return isDeepStrictEqual(expected, captureReviewWorkspaceSnapshot(projectRoot, reviewedFiles));
+  } catch { return false; }
+}
+
+function critiqueSnapshotDigest(critique: AnyObj): string | null {
+  const target = critique.review_target;
+  const snapshot = target && typeof target === "object" && !Array.isArray(target)
+    ? (target as AnyObj).workspace_snapshot
+    : null;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    && typeof (snapshot as AnyObj).digest === "string" && /^[a-f0-9]{64}$/i.test((snapshot as AnyObj).digest)
+    ? (snapshot as AnyObj).digest
+    : null;
+}
 // #270 HIGH fix (iteration 3): the `gate-claim-` check-id prefix is RESERVED for
 // record-gate-claim's own internally-constructed ids (`id: \`gate-claim-${checkId}\`` — see
 // recordGateClaim below). Every OTHER writer of check ids (record-evidence --check-json,
@@ -3655,8 +3691,14 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
+      critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
+      claim_status: c.status,
       artifact_refs: Array.isArray(md.artifact_refs) ? md.artifact_refs : [],
+      ...(typeof md.workflow_subject_ref === "string" ? { workflow_subject_ref: md.workflow_subject_ref } : {}),
       ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
+      ...(md.critique_resolution && typeof md.critique_resolution === "object" && !Array.isArray(md.critique_resolution)
+        ? { critique_resolution: md.critique_resolution }
+        : {}),
     };
   });
 }
@@ -4346,6 +4388,93 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // already exists to share; recordLearning uses it directly (see below) and recordCritique
   // previously duplicated it by hand for no reason.
   assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext));
+  return 0;
+}
+
+function requiredResolutionRecordId(p: ReturnType<typeof parseArgs>, flag: string): string {
+  const value = opt(p, flag);
+  if (!/^[A-Za-z0-9._:-]{1,256}$/.test(value)) die(`resolve-critique requires a safe --${flag}`);
+  return value;
+}
+
+function critiqueByRecordId(critiques: AnyObj[], recordId: string, label: string): AnyObj {
+  const matches = critiques.filter((critique) => critique.critique_record_id === recordId);
+  if (matches.length !== 1) die(`resolve-critique ${label} critique record ${recordId} is missing or ambiguous`);
+  return matches[0]!;
+}
+
+function critiqueLaneIds(critique: AnyObj): Set<string> {
+  return new Set((Array.isArray(critique.lanes) ? critique.lanes : [])
+    .flatMap((lane: AnyObj) => typeof lane?.id === "string" && lane.id.length > 0 ? [lane.id] : []));
+}
+
+async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const priorRecordId = requiredResolutionRecordId(p, "prior-record-id");
+  const resolvingRecordId = requiredResolutionRecordId(p, "resolving-record-id");
+  const resolver = opt(p, "resolver");
+  if (!hasNonEmptyString(resolver)) die("resolve-critique requires an authenticated resolver");
+  if (priorRecordId === resolvingRecordId) die("resolve-critique rejects circular prior and resolving critique references");
+  const sidecarState = loadJson(path.join(dir, "state.json"));
+  const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
+  if (workItemRefs.length !== 1 || !hasNonEmptyString(workItemRefs[0])) die("resolve-critique requires one bound workflow subject");
+  const workflowSubjectRef = String(workItemRefs[0]);
+  const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
+    ? sidecarState.flow_run as AnyObj
+    : null;
+  const exactFlowContext = projectedRun
+    && typeof projectedRun.definition_id === "string"
+    && typeof projectedRun.current_step === "string"
+    ? { flowId: projectedRun.definition_id, stepId: projectedRun.current_step }
+    : undefined;
+  const existing = readBundleState(dir);
+  const prior = critiqueByRecordId(existing.critiques, priorRecordId, "prior");
+  const resolving = critiqueByRecordId(existing.critiques, resolvingRecordId, "resolving");
+  if (prior.superseded_by) {
+    const priorResolution = prior.critique_resolution;
+    if (prior.superseded_by === resolvingRecordId
+      && priorResolution && typeof priorResolution === "object"
+      && priorResolution.resolver === resolver
+      && priorResolution.resolving_record_id === resolvingRecordId) return 0;
+    die("resolve-critique prior critique is already superseded by a different resolution");
+  }
+  if (prior.verdict === "pass") die("resolve-critique prior critique must be a live failing or not-verified critique");
+  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || !critiqueIsCleanAndCurrent(dir, resolving) || !critiqueWorkspaceSnapshotIsCurrent(dir, resolving)) {
+    die("resolve-critique resolving critique must be a verified, current passing critique");
+  }
+  if (resolving.reviewer !== resolver) die("resolve-critique resolver must match the authenticated resolving critique reviewer");
+  if (prior.reviewer === resolver) die("resolve-critique cross-reviewer resolution requires a distinct reviewer");
+  if (prior.workflow_subject_ref !== workflowSubjectRef || resolving.workflow_subject_ref !== workflowSubjectRef) {
+    die("resolve-critique critiques must be bound to this session's workflow subject");
+  }
+  const priorSnapshot = critiqueSnapshotDigest(prior);
+  const resolvingSnapshot = critiqueSnapshotDigest(resolving);
+  if (!priorSnapshot || !resolvingSnapshot || priorSnapshot === resolvingSnapshot) {
+    die("resolve-critique resolving critique must reference a newer immutable workspace snapshot");
+  }
+  const priorReviewedAt = Date.parse(String(prior.reviewed_at));
+  const resolvingReviewedAt = Date.parse(String(resolving.reviewed_at));
+  if (!Number.isFinite(priorReviewedAt) || !Number.isFinite(resolvingReviewedAt) || resolvingReviewedAt <= priorReviewedAt) {
+    die("resolve-critique resolving critique must be newer than the prior critique");
+  }
+  const priorLanes = critiqueLaneIds(prior);
+  const resolvingLanes = critiqueLaneIds(resolving);
+  if (priorLanes.size === 0 || ![...priorLanes].some((laneId) => resolvingLanes.has(laneId))) {
+    die("resolve-critique requires the resolving critique to cover a prior review lane");
+  }
+  const resolvedAt = now();
+  const resolution = {
+    schema_version: "1.0",
+    prior_record_id: priorRecordId,
+    resolving_record_id: resolvingRecordId,
+    resolver,
+    resolved_at: resolvedAt,
+  };
+  const critiques = existing.critiques.map((critique) => critique.critique_record_id === priorRecordId
+    ? { ...critique, superseded_by: resolvingRecordId, critique_resolution: resolution }
+    : critique);
+  assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -7007,6 +7136,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
+      case "resolve-critique": return resolveCritique(p);
       case "import-critique": return importCritique(p);
       case "record-release": return recordRelease(p);
       case "record-learning": return recordLearning(p);

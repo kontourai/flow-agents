@@ -25,7 +25,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -35,6 +35,7 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
+  resolve-critique    Resolve a repaired historical critique through a later review record.
   drive               Continue the canonical run through an explicit runtime adapter.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
@@ -65,6 +66,7 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
@@ -445,6 +447,39 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   });
   if (json) console.log(JSON.stringify(report));
   else console.log("Recorded critique in the trust bundle.");
+  return 0;
+}
+
+async function resolveCritique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id"]), "workflow resolve-critique");
+  if (!flagString(parsed.flags, "prior-record-id") || !flagString(parsed.flags, "resolving-record-id")) {
+    throw new Error("workflow resolve-critique requires --prior-record-id <id> and --resolving-record-id <id>");
+  }
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const caller = assertDistinctReviewActor(sessionDir, slug);
+    const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+    if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") {
+      throw new Error("workflow resolve-critique is allowed only for the canonical builder.build verify step");
+    }
+    const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
+    const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
+    const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
+    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", caller.actorKey]);
+    const result = await recoverBuilderFlowSession({ sessionDir });
+    const afterTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
+    if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {
+      throw new Error("workflow resolve-critique must not attach or otherwise mutate the Flow manifest");
+    }
+    if (legacySidecars.some(({ name, digest }) => optionalFileDigest(path.join(sessionDir, name)) !== digest)) {
+      throw new Error("workflow resolve-critique must persist only through trust.bundle");
+    }
+    return immutableReport({ run_id: slug, resolved: beforeTrustBundle !== afterTrustBundle, replayed: beforeTrustBundle === afterTrustBundle });
+  });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.replayed ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
   return 0;
 }
 
