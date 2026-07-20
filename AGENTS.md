@@ -44,3 +44,8 @@ Confirmed agreements for developing this repo — the *kit-discipline* bucket of
 - `tool-security-reviewer` — Delegate to me for security analysis. Checks OWASP Top 10, secrets detection, input validation, injection vulnerabilities, auth/authz, and rate limiting. Read-only analysis with shell for scanning tools.
 - `tool-verifier` — Delegate to me for implementation verification. Read-only + shell for source code; writes review/evidence artifacts under .kontourai/flow-agents. Verifies acceptance criteria and produces PASS/FAIL/NOT_VERIFIED verdicts with evidence. No production file modifications.
 - `tool-worker` — Delegate to me for writing and developing source code for a project. Works best when a detailed plan can be provided. NO access to web tools. Can be used in parallel for any coding tasks that require trusted access to the write and shell tools. WARNING: May spawn a `git worktree`
+
+<!-- veritas:governance-block:start -->
+This repo uses Veritas for AI governance. Read `.veritas/GOVERNANCE.md` before making changes.
+After changes, run `npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness` and address any FAIL lines before finishing.
+<!-- veritas:governance-block:end -->

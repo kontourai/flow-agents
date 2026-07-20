@@ -981,6 +981,7 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
+  const currentGateClaimsForTrust = mergeGateClaimsWithCritiqueHistory(relevant, bundle.claims, claimIsCurrent);
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
@@ -1014,9 +1015,41 @@ async function bundleGateEvidence(
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+export function mergeGateClaimsWithCritiqueHistory(
+  relevant: AnyRecord[],
+  bundleClaims: unknown[],
+  claimIsCurrent: (claim: AnyRecord) => boolean,
+): AnyRecord[] {
+  const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const merged: AnyRecord[] = [];
+  const seen = new Set<string>();
+  const seenCritiques = new Set<string>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim)) continue;
+    const id = String(claim.id);
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (claimIsCurrent(claim) && metadata?.origin === "critique") {
+      const recordId = String(metadata.critique_record_id);
+      if (!seenCritiques.has(recordId)) merged.push(claim);
+      seenCritiques.add(recordId);
+      seen.add(id);
+      continue;
+    }
+    const selected = relevantById.get(id) ?? null;
+    if (!selected || seen.has(id)) continue;
+    merged.push(selected);
+    seen.add(id);
+  }
+  for (const claim of relevant) {
+    const id = String(claim.id);
+    if (!seen.has(id)) merged.push(claim);
+  }
+  return merged;
 }
 
 function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {

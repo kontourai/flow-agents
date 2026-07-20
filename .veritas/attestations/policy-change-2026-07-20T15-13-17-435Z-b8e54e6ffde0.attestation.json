@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0",
+  "kind": "policy-change",
+  "actor": {
+    "id": "briananderson1222",
+    "displayName": "Brian Anderson",
+    "identityEvidence": {
+      "gitEmail": "brian.anderson1222@gmail.com",
+      "signingKeyFingerprint": null
+    }
+  },
+  "attestedAt": "2026-07-20T15:13:17.435Z",
+  "repoStandardsHash": "sha256:f817da36459341be0352b8f7f87a2ffa1996c8d9339b7e77fe22f66c0d15d552",
+  "repoMapHash": "sha256:42dc732ce535f2af422d257464d9006ec8f172dd6a5003649e7e317c96913774",
+  "authoritySettingsHash": "sha256:429472c4c5c6802d85c72eb161f403eef06c73849475ee533fead481db9d39f2",
+  "priorAttestationId": "bootstrap-2026-07-20T14-45-10-928Z-5e138e85153b",
+  "validUntilDays": 90,
+  "notes": "Correct attestation identity and incorporate rollout review feedback.",
+  "metadata": {
+    "protectedStandardsPaths": {
+      "repoStandardsPath": ".veritas/repo-standards/default.repo-standards.json",
+      "repoMapPath": ".veritas/repo-map.json",
+      "authoritySettingsPath": ".veritas/authority/default.authority-settings.json"
+    },
+    "supersedes": "bootstrap-2026-07-20T14-45-10-928Z-5e138e85153b",
+    "approvalRef": "https://github.com/kontourai/veritas/issues/135#issuecomment-5023543387",
+    "approvalRefPolicy": {
+      "mode": "reference-only",
+      "matchedPrefix": null,
+      "requiresResolution": false
+    },
+    "approvalResolution": null
+  },
+  "surface": {
+    "claim": {
+      "id": "veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0",
+      "subjectType": "veritas-protected-standards",
+      "subjectId": "protected-standards",
+      "facet": "veritas.attestations",
+      "claimType": "veritas-human-attestation",
+      "fieldOrBehavior": "policy-change",
+      "value": {
+        "contentHash": "9703c4893231eb9734c9ac0951c333d6b5f5b49bd23ef0d913854308c241414c",
+        "validUntil": "2026-10-18T15:13:17.435Z"
+      },
+      "createdAt": "2026-07-20T15:13:17.435Z",
+      "updatedAt": "2026-07-20T15:13:17.435Z",
+      "status": "verified",
+      "impactLevel": "high",
+      "confidenceBasis": {
+        "sourceQuality": "strong",
+        "reviewerAuthority": "human",
+        "evidenceStrength": "strong",
+        "impactLevel": "high"
+      }
+    },
+    "evidence": {
+      "id": "evidence.attestation.veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0",
+      "claimId": "veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "veritas:protected-standards",
+      "excerptOrSummary": "Correct attestation identity and incorporate rollout review feedback.",
+      "observedAt": "2026-07-20T15:13:17.435Z",
+      "collectedBy": "briananderson1222",
+      "integrityRef": "9703c4893231eb9734c9ac0951c333d6b5f5b49bd23ef0d913854308c241414c",
+      "metadata": {
+        "actor": {
+          "id": "briananderson1222",
+          "displayName": "Brian Anderson"
+        },
+        "attestedAt": "2026-07-20T15:13:17.435Z",
+        "validUntil": "2026-10-18T15:13:17.435Z",
+        "contentHash": "9703c4893231eb9734c9ac0951c333d6b5f5b49bd23ef0d913854308c241414c"
+      },
+      "sourceLocator": ".veritas/attestations"
+    },
+    "event": {
+      "id": "veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0.verified",
+      "claimId": "veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0",
+      "status": "verified",
+      "actor": "briananderson1222",
+      "method": "human attestation",
+      "evidenceIds": [
+        "evidence.attestation.veritas.attestation.policy-change-2026-07-20T15-13-17-435Z-b8e54e6ffde0"
+      ],
+      "createdAt": "2026-07-20T15:13:17.435Z",
+      "verifiedAt": "2026-07-20T15:13:17.435Z"
+    }
+  }
+}

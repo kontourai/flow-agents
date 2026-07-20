@@ -13,7 +13,12 @@ test-results/
 .omx/
 .telemetry/
 .promptfoo/
-.veritas/
+.veritas/claims/
+.veritas/evidence/
+.veritas/eval-drafts/
+.veritas/init-plans/
+.veritas/runs/
+.veritas/standards-feedback-drafts/
 .surface/
 .kontourai/
 

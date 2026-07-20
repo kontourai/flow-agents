@@ -34,6 +34,8 @@ printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; tou
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
 chmod +x "$CONSUMER/checks/check-success-background.sh"
+printf '.kontourai/\n' > "$CONSUMER/.gitignore"
+(cd "$CONSUMER" && git init -q && git config user.email public-workflow@example.invalid && git config user.name 'Public Workflow Eval' && git add . && git commit -qm 'seed public workflow consumer')
 
 run_candidate() {
   (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow "$@")
@@ -52,7 +54,7 @@ snapshot_tree() {
 
 PRIMARY_HELP="$(cd "$CONSUMER" && "$FLOW_AGENTS_BIN" --help)"
 WORKFLOW_HELP="$(run_candidate --help)"
-[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits workflow"
+[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" == *"publish-delivery"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits the delivery publisher"
 pass "isolated packed install exposes the public workflow command without internal writer terminology"
 
 seed_pull_work() {
@@ -69,6 +71,28 @@ RELEASE_SESSION="$ARTIFACT_ROOT/acme-widgets-101"
 [[ -f "$RELEASE_SESSION/state.json" ]] || fail "packed start did not create a session"
 [[ ! -e "$CONSUMER/package.json" ]] || fail "consumer unexpectedly gained package.json"
 pass "packed start works in a non-Node consumer"
+set +e
+PUBLISH_PRIVATE_ARGS="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" --repo-root "$CONSUMER" 2>&1)"
+PUBLISH_PRIVATE_ARGS_RC=$?
+set -e
+[[ "$PUBLISH_PRIVATE_ARGS_RC" -ne 0 && "$PUBLISH_PRIVATE_ARGS" == *"does not support --repo-root"* ]] || fail "public delivery publishing accepted a caller-selected output repository"
+pass "public delivery publishing derives its repository from the bound session"
+set +e
+PARTIAL_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+PARTIAL_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$PARTIAL_BUNDLE_PUBLISH_RC" -ne 0 && "$PARTIAL_BUNDLE_PUBLISH" == *"requires a completed or release-ready canonical builder.build run"* && ! -e "$CONSUMER/delivery/acme-widgets-101/trust.bundle" ]] || fail "public delivery publishing accepted a partial Builder session"
+pass "public delivery publishing refuses partial Builder sessions even when selected-work created a trust bundle"
+seed_pull_work acme/widgets#108
+run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#108 --assignment-provider local-file --summary "Missing delivery bundle fixture" >/dev/null
+MISSING_BUNDLE_SESSION="$ARTIFACT_ROOT/acme-widgets-108"
+rm -f "$MISSING_BUNDLE_SESSION/trust.bundle"
+set +e
+MISSING_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$MISSING_BUNDLE_SESSION" 2>&1)"
+MISSING_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$MISSING_BUNDLE_PUBLISH_RC" -ne 0 && "$MISSING_BUNDLE_PUBLISH" == *"requires a current session trust.bundle"* && ! -e "$CONSUMER/delivery/acme-widgets-108/trust.bundle" ]] || fail "public delivery publishing did not fail closed for a missing session bundle"
+pass "public delivery publishing refuses a missing session bundle before writing delivery evidence"
 seed_pull_work provider:work-item-123
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:work-item-123 --assignment-provider local-file --summary "Provider-neutral fixture" >/dev/null
 PROVIDER_STATUS="$(run_candidate status --session-dir "$ARTIFACT_ROOT/provider-work-item-123" --json)"
@@ -308,6 +332,119 @@ if (!claim || claim.metadata?.output_digest?.algorithm !== 'sha256' || typeof cl
 NODE
 [[ "$(wc -l < "$MULTI_COMMAND_ONE" | tr -d ' ')" == 1 && "$(wc -l < "$MULTI_COMMAND_TWO" | tr -d ' ')" == 1 ]] || fail "public evidence did not execute every repeated --command exactly once"
 pass "tests-evidence executes every repeated command once and records matching observations"
+
+# The remaining provider operations are independently covered by their authenticated
+# operation E2Es. Put this already-verified canonical fixture at the supported release-ready
+# boundary so this test can exercise the public publisher itself, including its exact actor,
+# freshness, and fresh-companion invariants.
+FLOW_STATE="$CONSUMER/.kontourai/flow/runs/$(basename "$RELEASE_SESSION")/state.json"
+node - "$FLOW_STATE" "$RELEASE_SESSION/release.json" "$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const [stateFile, releaseFile, slug] = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+fs.writeFileSync(releaseFile, `${JSON.stringify({ schema_version: '1.0', task_slug: slug, decision: 'merge' }, null, 2)}\n`);
+NODE
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.sig.json"
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.intoto.json"
+printf '{"status":"signed","path":"trust.checkpoint.sig.json"}\n' > "$RELEASE_SESSION/trust.checkpoint.attestation.json"
+set +e
+ACTOR_MISMATCH_PUBLISH="$(run_candidate_as unrelated-publisher publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+ACTOR_MISMATCH_RC=$?
+set -e
+[[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
+pass "public delivery publishing requires the exact ordinary assignment actor"
+printf 'source snapshot B\n' > "$CONSUMER/source-b.txt"
+(cd "$CONSUMER" && git add source-b.txt && git commit -qm 'source snapshot B after initial verification')
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+# Reset only the prior review slice so this fixture can record an independent
+# canonical review at B while deliberately retaining the tests-evidence from A.
+node - "$RELEASE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const removed = new Set(bundle.claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.id));
+bundle.claims = bundle.claims.filter((claim) => !removed.has(claim.id));
+bundle.evidence = bundle.evidence.filter((entry) => !removed.has(entry.claimId));
+bundle.events = bundle.events.filter((entry) => !removed.has(entry.claimId));
+bundle.critique_resolution_events = [];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+run_candidate_as public-reviewer critique --session-dir "$RELEASE_SESSION" --id public-review --verdict pass --summary "Review source snapshot B." --artifact-ref "$DELIVER_REPORT" --lane-json "$CODE_LANE" --lane-json "$SECURITY_LANE" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+set +e
+STALE_TESTS_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_TESTS_RC=$?
+set -e
+[[ "$STALE_TESTS_RC" -ne 0 && "$STALE_TESTS_PUBLISH" == *"test verification evidence bound to the exact same source snapshot"* ]] || fail "a fresh critique rebound tests from source snapshot A onto source snapshot B"
+pass "fresh critique at source snapshot B cannot reuse tests recorded at snapshot A"
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation tests-evidence --status pass --summary "Re-run verification for source snapshot B." --command "$TEST_COMMAND" --command "$TEST_COMMAND_TWO" --command "$TEST_COMMAND_THREE" --evidence-ref-json "$COMMAND_REF" --evidence-ref-json "$COMMAND_REF_TWO" --evidence-ref-json "$COMMAND_REF_THREE" --criterion-json "$CRITERION_JSON" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+pass "canonical verification rerun binds tests to source snapshot B"
+PUBLISH_JSON="$(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval \
+  TRUST_RECONCILE_COMMANDS="$TEST_COMMAND
+$TEST_COMMAND_TWO
+$TEST_COMMAND_THREE" "$FLOW_AGENTS_BIN" workflow publish-delivery --session-dir "$RELEASE_SESSION" --json)"
+node - "$PUBLISH_JSON" "$RELEASE_SESSION" "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [reportText, session, delivery] = process.argv.slice(2);
+const report = JSON.parse(reportText);
+const attestation = JSON.parse(fs.readFileSync(`${session}/trust.checkpoint.attestation.json`, 'utf8'));
+const companion = `${session}/${attestation.path}`;
+const stale = attestation.status === 'signed' ? `${session}/trust.checkpoint.intoto.json` : `${session}/trust.checkpoint.sig.json`;
+const statement = attestation.status === 'signed'
+  ? JSON.parse(Buffer.from(JSON.parse(fs.readFileSync(companion, 'utf8')).payload, 'base64').toString('utf8'))
+  : JSON.parse(fs.readFileSync(companion, 'utf8'));
+const checkpointDigest = crypto.createHash('sha256').update(fs.readFileSync(`${session}/trust.checkpoint.json`)).digest('hex');
+const subject = statement.subject?.find((entry) => entry.name === 'trust.checkpoint.json');
+if (!report.published || !fs.existsSync(`${delivery}/trust.bundle`) || !fs.existsSync(`${delivery}/${attestation.path}`)
+  || fs.existsSync(stale) || subject?.digest?.sha256 !== checkpointDigest
+  || JSON.stringify(statement.predicate) !== JSON.stringify(JSON.parse(fs.readFileSync(`${session}/trust.bundle`, 'utf8')))) process.exit(1);
+NODE
+pass "release-ready public publishing emits and copies only newly digest-bound checkpoint companions"
+(cd "$CONSUMER" && git add "delivery/$(basename "$RELEASE_SESSION")" && git commit -qm 'commit public delivery evidence')
+[[ -f "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")/trust.bundle" ]] || fail "tracked public delivery output did not remain available after commit"
+pass "public publishing supports tracked delivery evidence"
+printf 'post-verification source change\n' > "$CONSUMER/source-change.txt"
+(cd "$CONSUMER" && git add source-change.txt && git commit -qm 'post verification source change')
+set +e
+STALE_EVIDENCE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_EVIDENCE_RC=$?
+set -e
+[[ "$STALE_EVIDENCE_RC" -ne 0 && "$STALE_EVIDENCE_PUBLISH" == *"exact same source snapshot"* ]] || fail "public delivery publishing rebound old verification evidence onto a newer HEAD"
+pass "public delivery publishing requires canonical re-verification after HEAD changes"
 
 ASSIGNMENT="$ARTIFACT_ROOT/assignment/$(basename "$RELEASE_SESSION").json"
 ASSIGNMENT_TARGET="$TMP/assignment-target.json"

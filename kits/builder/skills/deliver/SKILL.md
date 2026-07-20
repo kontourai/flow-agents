@@ -109,6 +109,15 @@ Do not describe delivery as complete while required behavior, evidence, or
 follow-up remains unresolved. Route eligible outcomes into publish/readiness and
 learning through their owning Builder skills.
 
+When an eligible code-host change needs its verified trust state committed for
+CI reconciliation, use the public `flow-agents workflow publish-delivery
+--session-dir <session>` command after release readiness while the assignment actor
+and reviewed source snapshot still exactly match. A later source change requires
+canonical review and verification again; older sessions without a verification
+workspace snapshot must also rerun verification before public publishing. Do not manufacture a
+prior session, invoke a private writer, or use a `delivery/DECLARED` exemption
+for agent-delivered work.
+
 ## Standalone and No-Active-Run Behavior
 
 If no active run exists, require a selected Work Item and start
