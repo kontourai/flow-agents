@@ -1082,14 +1082,28 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
   }
+  const currentCritiques = liveCritiques.flatMap((claim) => {
+    const artifacts = reviewedArtifacts(claim);
+    try {
+      assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
+      return [{ claim, artifacts }];
+    } catch (error) {
+      if (error instanceof BuilderBuildRunInputError && [
+        "evidence.critique.review_target.workspace_snapshot.digest",
+        "evidence.critique.review_target.workspace_snapshot.head_sha",
+      ].includes(error.field)) return [];
+      throw error;
+    }
+  });
+  if (currentCritiques.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a clean critique of the current implementation workspace");
+  }
   const implementationActors = new Set(testClaims.map((claim) => claim.metadata.recorded_by).filter((actor): actor is string => typeof actor === "string" && actor.length > 0));
-  if (implementationActors.size !== 1 || liveCritiques.some((claim) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
+  if (implementationActors.size !== 1 || currentCritiques.some(({ claim }) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
     throw new BuilderBuildRunInputError("evidence.critique.reviewer", "must identify a reviewer distinct from the tests-evidence implementation actor");
   }
-  await Promise.all(liveCritiques.flatMap(async (claim) => {
-    const artifacts = reviewedArtifacts(claim);
+  await Promise.all(currentCritiques.flatMap(async ({ artifacts }) => {
     await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
-    assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
   }));
   const criteria = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
   if (criteria.length === 0 || criteria.some((claim) => {
@@ -1132,7 +1146,7 @@ function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]
 }
 
 function isSubstantivePassingCritique(claim: AnyRecord): boolean {
-  if (claim.value !== "pass" || (Array.isArray(claim.metadata.findings) && claim.metadata.findings.some((finding: unknown) => isRecord(finding) && finding.status === "open"))) return false;
+  if (claim.value !== "pass" || claim.status !== "verified" || (Array.isArray(claim.metadata.findings) && claim.metadata.findings.some((finding: unknown) => isRecord(finding) && finding.status === "open"))) return false;
   const lanes = claim.metadata.lanes;
   return Array.isArray(lanes)
     && lanes.length > 0

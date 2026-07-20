@@ -499,6 +499,13 @@ function restampCritiqueClaim(claim) {
   return claim;
 }
 
+function appendCritiqueAfter(prior, current) {
+  restampCritiqueClaim(prior);
+  current.claim.metadata.critique_sequence = prior.claim.metadata.critique_sequence + 1;
+  current.claim.metadata.critique_predecessor_hash = prior.claim.metadata.critique_record_hash;
+  return restampCritiqueClaim(current);
+}
+
 function writeBundle(sessionDir, entries) {
   writeJson(path.join(sessionDir, "trust.bundle"), {
     schemaVersion: 5,
@@ -2263,6 +2270,88 @@ test("passing tests-evidence rejects a critique whose reviewed artifact changed"
   );
 });
 
+test("stale passing critique remains audit history when a current exact-workspace critique passes", async () => {
+  const session = makeSession("stale-passing-current-clean");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  const [current, criterion] = verifiedTestsPrerequisites(session);
+  appendCritiqueAfter(stale, current);
+
+  const result = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    stale,
+    current,
+    criterion,
+  ]);
+
+  assert.equal(result.run.state.current_step, "merge-ready");
+});
+
+test("stale open critique remains blocking even when a different reviewer supplies a current clean critique", async () => {
+  const session = makeSession("stale-open-current-clean");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
+  stale.claim.metadata.findings = [{ id: "old-open-finding", status: "open", summary: "Must not be buried." }];
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  const [current, criterion] = verifiedTestsPrerequisites(session);
+  appendCritiqueAfter(stale, current);
+
+  await assert.rejects(
+    () => writeAndSync(session, [
+      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+      stale,
+      current,
+      criterion,
+    ]),
+    /requires a current clean critique/,
+  );
+});
+
+test("malformed stale passing critique remains blocking when a current clean critique exists", async () => {
+  const session = makeSession("malformed-stale-current-clean");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
+  stale.claim.metadata.review_target.workspace_snapshot.files = [];
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  const [current, criterion] = verifiedTestsPrerequisites(session);
+  appendCritiqueAfter(stale, current);
+
+  await assert.rejects(
+    () => writeAndSync(session, [
+      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+      stale,
+      current,
+      criterion,
+    ]),
+    /workspace_snapshot\.files.*must list explicitly reviewed files/,
+  );
+});
+
 test("passing tests-evidence rejects a successful command that executed zero tests", async () => {
   const session = makeSession("zero-test-evidence");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -2296,7 +2385,7 @@ test("passing tests-evidence rejects a critique after implementation source chan
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "source changed after review\n");
   await assert.rejects(
     () => writeAndSync(session, [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...prerequisites]),
-    /review_target\.workspace_snapshot\.digest.*does not match/,
+    /requires a clean critique of the current implementation workspace/,
   );
 });
 
