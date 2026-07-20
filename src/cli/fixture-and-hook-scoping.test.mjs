@@ -282,6 +282,29 @@ test("F4 second-pass variants: laundered per-actor current and cp/mv destination
   }
 });
 
+test("F4 third-pass: cp/mv of a trust-anchor source into a delivery directory blocks", () => {
+  assert.ok(hook.checkCopyMoveToProtected(`cp /tmp/trust.bundle ${path.join(packageRoot, "delivery")}/`, packageRoot));
+  assert.ok(hook.checkCopyMoveToProtected(`mv /tmp/trust.checkpoint.json ${path.join(packageRoot, "delivery")}`, packageRoot));
+});
+
+test("F4 third-pass: a fully-innocent symlink name pointing at a protected anchor blocks", () => {
+  const scratch = tmpdir();
+  const workspace = path.join(tmpdir(), "ws");
+  const deliveryRoot = path.join(workspace, "delivery");
+  fs.mkdirSync(deliveryRoot, { recursive: true });
+  fs.writeFileSync(path.join(deliveryRoot, "trust.bundle"), "{}");
+  const innocent = path.join(scratch, "innocent-file");
+  fs.symlinkSync(path.join(deliveryRoot, "trust.bundle"), innocent);
+  const origEnv = process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+  process.env.SA_PROTECTED_WORKSPACE_ROOTS = workspace;
+  try {
+    assert.ok(hook.checkRedirectToProtected(`echo forged > ${innocent}`, scratch));
+  } finally {
+    if (origEnv === undefined) delete process.env.SA_PROTECTED_WORKSPACE_ROOTS;
+    else process.env.SA_PROTECTED_WORKSPACE_ROOTS = origEnv;
+  }
+});
+
 test("JS/TS twin parity over a shared case table", async () => {
   const tsLib = await import(path.join(packageRoot, "build", "src", "lib", "declared-artifact-roots.js"));
   const jsLib = require_(path.join(packageRoot, "scripts", "hooks", "lib", "declared-artifact-roots.js"));
