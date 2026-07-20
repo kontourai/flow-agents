@@ -91,6 +91,76 @@ schedule, layer, or fan out proposals, and it does not change the external MCP
 tool implementation. Inspect the pending JSON plus `roots.json`; proposal
 review/apply policy is owned by the next unified-memory work item.
 
+## Dream runtime memory
+
+`knowledge.dream` is the offline, machine-local continuation of runtime residue
+capture. Invoke the kit-local executable explicitly; it never enables a job:
+
+```bash
+node kits/knowledge/dream/cli.js --telemetry /private/telemetry.jsonl \
+  --transcript-root /private/transcripts --store personal \
+  --apply-policy pending
+```
+
+`--store personal` is the only accepted store target. Real runs resolve,
+bootstrap, and register the WI-2 XDG/HOME personal store; dry runs validate the
+same registered location without creating or repairing it. Direct orchestration,
+apply, and generic staging refuse arbitrary, missing, incomplete, or symlinked
+store roots before changing permissions or writing bytes. The cursor defaults
+under that resolved store and an explicit `--cursor` must remain contained there.
+
+`auto` remains the recommended machine-local default; `pending` stages
+schema-valid `create-node` proposals only. Auto calls
+`DefaultKnowledgeStore.create` downstream of the proposal boundary and never
+calls a provider `apply`. Unattended recipes must spell out the policy instead
+of relying on that default. `--dry-run` produces
+the intended result without creating a store, lock, report, proposal, brief,
+or cursor file. Every real run reconciles reviewed records into briefs before
+its report and any cursor commit: no-new-telemetry writes a `noop` report
+without rewriting the cursor, while skipped-only telemetry records brief
+digests/sizes/write flags and stale-file removals before advancing the cursor.
+If a brief set fails partway, its failure report includes every completed brief
+write and stale deletion so durable mutations remain reconciled. Briefs are
+private files under `dream/briefs/`, use the shared
+UTF-8-byte conservative upper bound, and cannot exceed 2,048 global or 512
+project units. Runtime-derived raw records carry `source:runtime-session` and
+`trust:unreviewed` and are quarantined from briefs unless an owned downstream
+review adds `brief-approved`; compiled/concept records remain eligible. Before
+proposal staging, dream links provenance/trust tags and runs the existing
+provider-neutral duplicate-health verb. The report is written before the cursor; the cursor is the final
+commit operation, so any prior failure leaves it unchanged.
+
+An optional trusted ESM adapter may be passed with `--distiller` plus a required
+containing `--distiller-root`; the real root directory and adapter file must be
+owner-controlled and non-group/world-writable, with safe ancestry. Adapters
+export `distill(request)` and cannot emit `brief-approved` or the dream-owned
+`trust:`, `source:`, `confidence:`, or `runtime:` tag namespaces. Project scope
+flows only through the validated `record.project` field. The default is deterministic and conservative. No vendor,
+shell command, raw transcript archive, or live Boo schedule is included.
+
+For Boo, the syntax-checked operator recipe is
+[`dream/boo-recipe.sh`](../dream/boo-recipe.sh). It requires explicit absolute
+paths and the `add` action deliberately spells out `--apply-policy auto`:
+
+```bash
+FLOW_AGENTS_ROOT=/absolute/flow-agents \
+KNOWLEDGE_TELEMETRY=/absolute/telemetry.jsonl \
+KNOWLEDGE_TRANSCRIPT_ROOT=/absolute/transcripts \
+sh kits/knowledge/dream/boo-recipe.sh add
+
+sh kits/knowledge/dream/boo-recipe.sh disable
+```
+
+The recipe rejects non-absolute or control-character-bearing configured paths
+and uses a tested shell-command builder that quotes embedded single quotes. It
+still resolves only the registered `personal` store at runtime.
+
+This WI does not run either command, install Boo, or enable a job. Live
+scheduler evidence is **NOT_VERIFIED** because `boo` is unavailable in the
+implementation environment. Disabling the external job stops new runs;
+applied records retain provenance and are reversible through the normal store
+lifecycle, while briefs are regenerable.
+
 ---
 
 ## Contract Summary

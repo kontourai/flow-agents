@@ -81,6 +81,11 @@ _Avoid_: Promotion gate as a synonym (the gate is the recorded promote claim; th
 A schema-valid, bounded, deterministically redacted projection of a real Claude Code or Codex transcript referenced by canonical telemetry. It is an input candidate for offline Knowledge distillation, not a transcript archive or a trust claim. A dream-owned byte-offset cursor advances only through successfully handled telemetry records and stops before unreadable or drifted content.
 _Avoid_: Runtime transcript (the raw transcript remains runtime-owned and is never copied verbatim into residue)
 
+### Knowledge Dream
+
+The Knowledge Kit's machine-local, offline transaction over the registered WI-2 `personal` store that previews bounded Runtime Session Residue, distills unreviewed candidates, links source/trust provenance, runs provider-neutral health, stages schema-valid create proposals, optionally enacts those proposals through `DefaultKnowledgeStore.create`, compiles reviewed-only hard-bounded briefs, writes a reconciliation report, and commits its ingest cursor last. A no-new-telemetry run still reconciles downstream review changes into briefs and records a `noop` report without rewriting the cursor. Runtime-derived raw records cannot self-approve and remain excluded from briefs unless explicitly approved by a separate downstream store edit. It is not a hook, a prompt-time retrieval path, or an enabled schedule. `pending` stages proposals; `auto` is the recommended machine-local downstream policy but unattended recipes must select it explicitly.
+_Avoid_: Scheduled memory system (scheduling is an owner-controlled external Boo recipe)
+
 ### Kontour Resource Contract
 
 A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.
