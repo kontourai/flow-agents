@@ -1034,6 +1034,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
       ...(Array.isArray(check._producer_self_produced_trust_slices) ? { self_produced_trust_slices: check._producer_self_produced_trust_slices } : {}),
       ...(waiver ? { waiver } : {}),
+      ...(Array.isArray(check._waiver_history) && check._waiver_history.length ? { waiver_history: check._waiver_history } : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
@@ -3637,6 +3638,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
@@ -3659,6 +3664,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
@@ -4352,12 +4361,21 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     const _skipSlug = taskSlugFor(dir, opt(p, "task-slug"));
     const _skipActor = resolveReadActorKey(p);
     const _skipExistingState = readBundleState(dir);
+    // Codex-review-hardened (#798): "learning-evidence-skip" is a RESERVED id. If a check
+    // with that id already exists and is not itself a skip-waiver, refuse — mergeChecksById
+    // is last-writer-wins and would destroy genuine evidence. Repeated skips supersede the
+    // gate-facing check but preserve every prior waiver in an append-only history so the
+    // audit trail (each reason, approver, recorder) survives.
+    const _skipPrior = (_skipExistingState.checks as any[]).find((c) => c && c.id === "learning-evidence-skip");
+    if (_skipPrior && !_skipPrior._waiver) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" without a waiver record — resolve that collision instead of overwriting evidence');
+    const _skipHistory = [...(Array.isArray(_skipPrior?._waiver_history) ? _skipPrior._waiver_history : []), ...(_skipPrior?._waiver ? [_skipPrior._waiver] : [])];
     const skipCheck = normalizeCheck({
       id: "learning-evidence-skip",
       kind: "external",
       status: "not_verified",
       summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
       _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor },
+      ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
     }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir));
     const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
     assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));

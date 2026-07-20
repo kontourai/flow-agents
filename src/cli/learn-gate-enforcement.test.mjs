@@ -64,8 +64,12 @@ test("stop-gate flags parked delivered/release sessions without learning evidenc
   assert.equal(hook.learningGateOutstandingWarning(root, dir, { ...state, status: "in_progress", phase: "execution" }), null);
   assert.equal(hook.learningGateOutstandingWarning(root, dir, { ...state, status: "accepted", phase: "learning" }), null);
 
-  // learning.json satisfies the gate.
+  // A bare placeholder learning.json is NOT evidence (Codex finding: existence != learning).
   fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({ schema_version: "1.0" }));
+  assert.equal(hook.hasLearningEvidence(dir), false, "empty learning.json must not silence the gate");
+
+  // Semantic learning.json (status learned / non-empty records) satisfies it.
+  fs.writeFileSync(path.join(dir, "learning.json"), JSON.stringify({ schema_version: "1.0", status: "learned", records: [{ id: "r1", summary: "x" }] }));
   assert.equal(hook.hasLearningEvidence(dir), true);
   assert.equal(hook.learningGateOutstandingWarning(root, dir, { ...state, status: "delivered", phase: "release" }), null);
 });
@@ -123,21 +127,27 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   const bundlePath = path.join(dir, "trust.bundle");
   const claim = (subjectId, status) => JSON.stringify({ schemaVersion: 5, claims: [{ subjectId, status, value: status }] });
 
-  // A FAILING claim whose id merely contains the substring must not satisfy the gate.
+  // Codex attack matrix — no non-authoritative id may satisfy the gate:
   fs.writeFileSync(bundlePath, claim("session/no-learning-evidence-recorded-for-this-task", "fail"));
   assert.equal(hook.hasLearningEvidence(dir), false, "failing substring-collision claim must not silence the gate");
   assert.ok(hook.learningGateOutstandingWarning(root, dir, state), "gate stays flagged");
 
-  // Even a PASSING negative-marker id must not satisfy it.
+  fs.writeFileSync(bundlePath, claim("session/foo/no-learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "path-segment bypass (Codex) must not silence the gate");
+
   fs.writeFileSync(bundlePath, claim("session/no-learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), false, "negative-marker id must not silence the gate");
 
-  // A genuine learning-evidence claim with fail status must not satisfy it either.
+  fs.writeFileSync(bundlePath, claim("totally-my-learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), false, "suffix forgery must not silence the gate — exact producer ids only");
+
   fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "fail"));
   assert.equal(hook.hasLearningEvidence(dir), false, "failed learning evidence is not learning evidence");
 
-  // A genuine pass does satisfy it (end-anchored id).
+  // Genuine producer ids with non-failing status do satisfy it.
   fs.writeFileSync(bundlePath, claim("policy:learning-evidence", "pass"));
+  assert.equal(hook.hasLearningEvidence(dir), true);
+  fs.writeFileSync(bundlePath, claim("session/gate-claim-learning-evidence", "pass"));
   assert.equal(hook.hasLearningEvidence(dir), true);
 
   // The warning text avoids FULL_BLOCK's bare "status:" token and never classifies hard,
@@ -148,4 +158,40 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   assert.ok(warn && !/status:/.test(warn), "warning must not contain the FULL_BLOCK token 'status:'");
   assert.equal(hook.isHardStopWarning(warn, path.relative(root, dir), true), false);
   assert.equal(hook.isHardStopWarning(warn, path.relative(root, dir), false), false);
+});
+
+test("skip id is reserved and repeated skips preserve waiver history (#798 Codex findings)", async () => {
+  // Collision: a genuine check already using the reserved id refuses the skip.
+  const rootA = mkSessionRepo();
+  ensureSession(rootA, "collide");
+  const relA = path.join(".kontourai", "flow-agents", "collide");
+  sidecar(rootA, ["record-evidence", relA, "--verdict", "pass", "--check-json", JSON.stringify({ id: "learning-evidence-skip", kind: "external", status: "pass", summary: "genuine check that happens to use the reserved id" })]);
+  sidecar(rootA, ["advance-state", relA, "--status", "delivered", "--phase", "release"]);
+  const collided = sidecar(rootA, ["advance-state", relA, "--status", "accepted", "--phase", "learning", "--skip-learning", "should refuse", "--waived-by", "a"]);
+  assert.notEqual(collided.code, 0, "reserved-id collision must refuse the skip");
+  assert.match(collided.stderr + collided.stdout, /reserved id/);
+  const bundleA = fs.readFileSync(path.join(rootA, relA, "trust.bundle"), "utf8");
+  assert.match(bundleA, /genuine check that happens to use the reserved id/, "genuine check must survive untouched");
+
+  // History: a second skip supersedes the gate-facing check but keeps the first waiver.
+  const rootB = mkSessionRepo();
+  const { dir: dirB } = ensureSession(rootB, "history");
+  const relB = path.join(".kontourai", "flow-agents", "history");
+  sidecar(rootB, ["advance-state", relB, "--status", "delivered", "--phase", "release"]);
+  assert.equal(sidecar(rootB, ["advance-state", relB, "--status", "accepted", "--phase", "learning", "--skip-learning", "first reason", "--waived-by", "approver-one"]).code, 0);
+  const st = JSON.parse(fs.readFileSync(path.join(dirB, "state.json"), "utf8"));
+  fs.writeFileSync(path.join(dirB, "state.json"), JSON.stringify({ ...st, status: "delivered", phase: "release" }, null, 2));
+  assert.equal(sidecar(rootB, ["advance-state", relB, "--status", "accepted", "--phase", "learning", "--skip-learning", "second reason", "--waived-by", "approver-two"]).code, 0);
+  const bundleB = fs.readFileSync(path.join(dirB, "trust.bundle"), "utf8");
+  assert.match(bundleB, /first reason/, "prior waiver reason must be preserved in history");
+  assert.match(bundleB, /approver-one/, "prior approver must be preserved in history");
+  assert.match(bundleB, /second reason/);
+
+  // analyze()-level: the warning reaches the real analysis output for a parked session.
+  const rootC = mkSessionRepo();
+  ensureSession(rootC, "analyzed");
+  const relC = path.join(".kontourai", "flow-agents", "analyzed");
+  sidecar(rootC, ["advance-state", relC, "--status", "delivered", "--phase", "release"]);
+  const analysis = await hook.analyze(rootC);
+  assert.match(JSON.stringify(analysis), /learning outstanding/, "analyze() must surface the warning");
 });

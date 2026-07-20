@@ -2125,20 +2125,26 @@ const LEARNING_GATE_PATTERN = / learning outstanding — /;
  * on the check id substring "learning-evidence" rather than an exact id so either producer
  * satisfies it without this file needing to know both ids by name.
  */
+// Codex-review-hardened (#798, second pass): authoritative producer ids ONLY — no suffix
+// inference. Suffix/regex matching was bypassable via path segments ("foo/no-learning-evidence"
+// defeats a boundary regex because claimCheckId strips only the first segment) and via
+// deliberately-suffixed forgeries. The leaf of the check id must equal a known producer id
+// exactly: learning-review's record-evidence check, advance-state's reserved skip check, or
+// the flow-bound gate-claim producer.
+const LEARNING_EVIDENCE_CHECK_IDS = new Set(['learning-evidence', 'learning-evidence-skip', 'gate-claim-learning-evidence']);
+
 function hasLearningEvidence(artifactDir) {
-  if (fs.existsSync(path.join(artifactDir, 'learning.json'))) return true;
+  // learning.json must be SEMANTIC evidence, not a mere file: parseable, and either
+  // status "learned" or at least one record. An empty/placeholder file is not learning.
+  const lj = readJsonFile(path.join(artifactDir, 'learning.json'));
+  if (lj && (String(lj.status || '') === 'learned' || (Array.isArray(lj.records) && lj.records.length > 0))) return true;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
-  // Review-hardened (#798): end-anchored id match (covers "learning-evidence",
-  // "learning-evidence-skip", and flow gate-claim ids ending in "-learning-evidence")
-  // instead of a bare substring, and a non-failing status — a claim that RECORDS the
-  // absence or failure of learning (e.g. id "no-learning-evidence-recorded", or any
-  // matching id with status fail) must not silence the gate.
   return claims.some(c => {
     if (!c || typeof c.subjectId !== 'string') return false;
-    const id = claimCheckId(c.subjectId);
-    if (!/(^|[-.:])learning-evidence(-skip)?$/i.test(id)) return false;
-    if (/(^|[-.:])no-learning-evidence(-skip)?$/i.test(id)) return false;
+    const raw = String(claimCheckId(c.subjectId) || '');
+    const leaf = raw.split('/').pop().split(':').pop().trim().toLowerCase();
+    if (!LEARNING_EVIDENCE_CHECK_IDS.has(leaf)) return false;
     const status = String(c.status ?? c.value ?? '').toLowerCase();
     return status !== 'fail' && status !== 'failed';
   });
