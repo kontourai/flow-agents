@@ -229,7 +229,7 @@ if node -e '
   const pkg=JSON.parse(fs.readFileSync(path.join(root,"package.json"),"utf8"));
   const lock=JSON.parse(fs.readFileSync(path.join(root,"package-lock.json"),"utf8"));
   const installsAtActionRoot=/ACTION_REPO_ROOT="\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\."/.test(action)
-    && /npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
+    && /npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
   const surfaceDeclared=Boolean(pkg.optionalDependencies && pkg.optionalDependencies["@kontourai/surface"]);
   const surfaceLocked=Boolean(lock.packages && lock.packages["node_modules/@kontourai/surface"]);
   if(!installsAtActionRoot) console.error("trust-verify action does not install locked runtime dependencies at the action root");

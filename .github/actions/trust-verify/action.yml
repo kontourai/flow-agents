@@ -105,7 +105,7 @@ runs:
       shell: bash
       run: |
         ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
-        npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
+        npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
 
     # Resolve the bundle path: use the input value if the file exists, otherwise
     # pass an empty string (trust-reconcile.js auto-discovers or operates fail-open).
