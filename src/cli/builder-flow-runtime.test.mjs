@@ -20,7 +20,7 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
@@ -735,7 +735,10 @@ test("public workflow evidence accepts only live signed turn authority after ord
     "--adapter-command-file", commandFile,
     "--context-policy", "fresh",
     "--max-turns", "2",
-    "--turn-timeout-ms", "5000",
+    // This adapter recursively launches several signed CLI operations plus a Stop hook.
+    // Five seconds flakes under concurrent CI load and can kill the adapter before its
+    // authority report is atomically written, obscuring the actual assertion.
+    "--turn-timeout-ms", "30000",
     "--barrier-wait-ms", "0",
     "--json",
   ]);
@@ -1630,6 +1633,13 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
   ]), /signature is invalid/);
   writeJson(authorizationFile, validAuthorization);
+  const preparedAuthorization = loadCritiqueResolutionAuthorization(authorizationFile, {
+    projectRoot: session.projectRoot, runId: session.slug, subject: SUBJECT,
+    priorBundleSha256: validAuthorization.prior_bundle_sha256,
+    priorRecordId, priorRecordHash: validAuthorization.prior_record_hash,
+    resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
+  });
+  recordAuthorizationConsumed(session.artifactRoot, preparedAuthorization);
   const result = await workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir,
     "--prior-record-id", priorRecordId,
