@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+  isAllowedLifecycleAuthoritySystemAlias,
   invokeExternalLifecycleAuthority,
   validateLifecycleAuthorityResponse,
 } from "../../build/src/external-lifecycle-authority.js";
@@ -17,10 +18,18 @@ test("lifecycle authority helper identity is immutable and ignores caller execut
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/usr/bin/true";
   assert.equal(LIFECYCLE_AUTHORITY_HELPER_PATH, "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1");
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);
-  assert.throws(() => invokeExternalLifecycleAuthority({ action: "cancel", project_root: "/tmp/project", session_dir: "/tmp/project/session", authorization_file: "/tmp/auth.json" }), /pinned lifecycle authority helper|root caller/);
+  assert.throws(() => invokeExternalLifecycleAuthority({ action: "cancel", project_root: "/tmp/project", session_dir: "/tmp/project/session", authorization_file: "/tmp/auth.json" }), /pinned lifecycle authority helper|root caller|auth\.json/);
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/bin/echo";
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER, "an arbitrary protected executable is never the pinned authority");
   delete process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER;
+});
+
+test("completion verification permits only the exact Apple-managed /etc system alias", () => {
+  const key = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
+  assert.equal(isAllowedLifecycleAuthoritySystemAlias(key, `/private${key}`, "darwin"), true);
+  assert.equal(isAllowedLifecycleAuthoritySystemAlias(key, `/tmp${key}`, "darwin"), false);
+  assert.equal(isAllowedLifecycleAuthoritySystemAlias(key, `/private${key}`, "linux"), false);
+  assert.equal(isAllowedLifecycleAuthoritySystemAlias("/usr/local/key.pem", "/private/usr/local/key.pem", "darwin"), false);
 });
 
 test("lifecycle authority response requires one non-empty response", () => {

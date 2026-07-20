@@ -35,6 +35,26 @@ export function assertTrustedGitAncestor(cwd: string, ancestor: string, descenda
   execTrustedGitSync(cwd, ["merge-base", "--is-ancestor", ancestor, descendant]);
 }
 
+/**
+ * Accept a direct ancestor, or a commit whose complete repository tree was
+ * preserved exactly by a rebase into the descendant's bounded history.
+ */
+export function assertTrustedGitAncestorOrEquivalentTree(cwd: string, ancestor: string, descendant: string): void {
+  const trustedAncestor = resolveTrustedLocalGitCommit(cwd, ancestor);
+  const trustedDescendant = resolveTrustedLocalGitCommit(cwd, descendant);
+  try {
+    assertTrustedGitAncestor(cwd, trustedAncestor, trustedDescendant);
+    return;
+  } catch { /* prove exact rebase equivalence below */ }
+  const ancestorTree = String(execTrustedGitSync(cwd, ["rev-parse", "--verify", `${trustedAncestor}^{tree}`])).trim().toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/u.test(ancestorTree)) throw new Error("trusted Git returned an invalid ancestor tree");
+  const descendantTrees = String(execTrustedGitSync(cwd, ["log", "--format=%T", "--max-count=10000", trustedDescendant]))
+    .split(/\r?\n/u)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (!descendantTrees.includes(ancestorTree)) throw new Error("reviewed commit is neither an ancestor nor an exact tree-equivalent rebase ancestor");
+}
+
 function trustedGitEnvironment(): NodeJS.ProcessEnv {
   return {
     GIT_CONFIG_NOSYSTEM: "1",

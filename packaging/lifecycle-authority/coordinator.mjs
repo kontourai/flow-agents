@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
-import { coordinatorRuntimeSha256, resolveCritiqueTransition } from "./runtime-v1.mjs";
+import { coordinatorRuntimeSha256, critiqueResolutionAuthorityDigest, reconcileCritiqueResolutionEvent, resolveCritiqueTransition } from "./runtime-v1.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
@@ -314,9 +314,15 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
       const before = JSON.parse(beforeBytes.toString("utf8"));
+      const resolutionEventsFile = path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json");
+      const priorResolutionEvents = fs.existsSync(resolutionEventsFile)
+        ? JSON.parse(protectedRegularFile(resolutionEventsFile, "critique resolution events", 4 * 1024 * 1024).toString("utf8")).events
+        : [];
+      if (!Array.isArray(priorResolutionEvents)) throw new Error("critique resolution events are invalid");
+      before.critique_resolution_events = priorResolutionEvents;
       if (sha256(beforeBytes) !== authorization.prior_bundle_sha256) throw new Error("critique resolution preimage bundle digest changed");
       const reduced = resolveCritiqueTransition({ bundle: before, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id });
-      const resultCoreSha256 = sha256(reduced);
+      const resultCoreSha256 = critiqueResolutionAuthorityDigest(reduced.claims, reduced.critique_resolution_events);
       // Coordinator receipts and append-only resolution authorizations live
       // beside, never inside, the upstream Hachure trust bundle.
       const sessionBundle = { ...reduced };
@@ -371,7 +377,11 @@ async function processRootOperation(envelope) {
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "completion record");
       if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256) throw new Error("consumed lifecycle authorization record does not match the exact request");
-      const completionRecord = completion(envelope, { runId: identity.runId }, "replayed", prior.result_core_sha256);
+      const replayResult = envelope.action === "resolve-critique"
+        ? childInvocation({ kind: "reconcile-resolution-event", capability: signedCapability("reconcile-resolution-event-capability", { request: envelope.request, authorization }) }, caller)
+        : { result_core_sha256: prior.result_core_sha256 };
+      if (!record(replayResult) || typeof replayResult.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(replayResult.result_core_sha256)) throw new Error("replayed lifecycle mutation result is invalid");
+      const completionRecord = completion(envelope, { runId: identity.runId }, "replayed", replayResult.result_core_sha256);
       if (envelope.action === "resolve-critique") childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
@@ -408,6 +418,19 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       const paths = canonicalMutationPaths(value.request);
       atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(value.completion, null, 2)}\n`, 0o644);
       return { run_id: paths.runId, receipt: "written" };
+    }
+    if (payload.kind === "reconcile-resolution-event") {
+      const value = verifiedCapability(payload.capability, "reconcile-resolution-event-capability");
+      if (!record(value.request) || !record(value.authorization)) throw new Error("resolution-event reconciliation request is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      const bundle = JSON.parse(protectedRegularFile(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024).toString("utf8"));
+      const eventsFile = path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json");
+      const existing = fs.existsSync(eventsFile)
+        ? JSON.parse(protectedRegularFile(eventsFile, "critique resolution events", 4 * 1024 * 1024).toString("utf8")).events
+        : [];
+      const events = reconcileCritiqueResolutionEvent({ bundle, authorization: value.authorization, existing_events: existing, prior_record_id: value.request.prior_record_id, resolving_record_id: value.request.resolving_record_id });
+      atomicWrite(eventsFile, `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events }, null, 2)}\n`, 0o644);
+      return { run_id: paths.runId, reconciled_event_count: events.length, result_core_sha256: critiqueResolutionAuthorityDigest(bundle.claims, events) };
     }
     if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");
     const value = verifiedCapability(payload.capability, "mutation-capability");

@@ -17,9 +17,9 @@ import {
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
-import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { critiqueResolutionAuthorityDigest, validateCritiqueResolutionGraph, validateExternalCritiqueResolutionAuthority } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
@@ -635,9 +635,19 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
   }
   const bundle = JSON.parse(evidenceBytes.toString("utf8"));
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must attach a trust bundle");
-  const authority = verifiedResolutionAuthority(bundle, context.sessionDir);
-  const graph = validateCritiqueResolutionGraph(bundle.claims as AnyRecord[], run.state.subject, authority.events, context.projectRoot, authority.verified);
-  if (!graph.valid) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", graph.errors.join("; "));
+  assertSafeFile(context.bundleFile, context.sessionDir, "trust.bundle");
+  const currentBundle = JSON.parse(fs.readFileSync(context.bundleFile, "utf8"));
+  if (!isRecord(currentBundle) || !Array.isArray(currentBundle.claims)) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "requires the current session trust bundle");
+  const authority = verifiedResolutionAuthority(currentBundle, context.sessionDir);
+  if (attachments[0]!.id !== `lifecycle-authority:${authority.requestSha256}`) {
+    throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "immutable Flow evidence must bind the signed lifecycle request");
+  }
+  const authorityGraph = validateExternalCritiqueResolutionAuthority(currentBundle.claims as AnyRecord[], run.state.subject, authority.events, context.projectRoot, authority.verified);
+  if (!authorityGraph.valid) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", authorityGraph.errors.join("; "));
+  // This boundary authenticates the lifecycle mutation, not the current verify
+  // verdict. A later unresolved critique must remain routable as failed gate
+  // evidence; full graph policy is enforced when passing tests evidence is
+  // evaluated and by artifact verification.
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
@@ -1043,20 +1053,20 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { events: AnyRecord[]; verified: boolean } {
+function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { events: AnyRecord[]; verified: boolean; requestSha256: string } {
   const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
-  if (!fs.existsSync(eventsFile)) return { events: [], verified: false };
+  if (!fs.existsSync(eventsFile)) return { events: [], verified: false, requestSha256: "" };
   assertSafeFile(eventsFile, sessionDir, "lifecycle-authority.resolution-events.json");
   const payload = JSON.parse(fs.readFileSync(eventsFile, "utf8"));
   const events = isRecord(payload) && Array.isArray(payload.events) ? payload.events as AnyRecord[] : [];
   const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
   assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
   const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
-  const expectedCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events });
+  const expectedCore = critiqueResolutionAuthorityDigest(Array.isArray(bundle.claims) ? bundle.claims : [], events);
   if (completion.action !== "resolve-critique" || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
     throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
   }
-  return { events, verified: true };
+  return { events, verified: true, requestSha256: String(completion.request_sha256) };
 }
 
 async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {

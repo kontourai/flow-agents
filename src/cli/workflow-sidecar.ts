@@ -14,7 +14,7 @@ import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestorOrEquivalentTree } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -4635,7 +4635,7 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
   if (priorWorkspace?.kind === "git-worktree" && resolvingWorkspace?.kind === "git-worktree") {
     try {
-      assertTrustedGitAncestor(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
+      assertTrustedGitAncestorOrEquivalentTree(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
     } catch { die("resolve-critique resolving Git snapshot must descend from the prior reviewed commit"); }
   }
   const requiredLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();

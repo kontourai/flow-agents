@@ -32,7 +32,7 @@ import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
-import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
+import { assertTrustedGitAncestor, assertTrustedGitAncestorOrEquivalentTree } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -2194,6 +2194,11 @@ test("trusted Git ancestry rejects a divergent repair snapshot", () => {
   git(["replace", divergentHead, maliciousReplacement]);
   assert.equal(spawnSync("/usr/bin/git", ["merge-base", "--is-ancestor", repairHead, divergentHead], { cwd: projectRoot }).status, 0, "hostile replacement makes ordinary Git accept false ancestry");
   assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, divergentHead));
+  assert.throws(() => assertTrustedGitAncestorOrEquivalentTree(projectRoot, repairHead, divergentHead));
+
+  const equivalentRebase = git(["commit-tree", `${repairHead}^{tree}`, "-p", divergentHead, "-m", "rebased equivalent repair"]);
+  assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, equivalentRebase));
+  assert.doesNotThrow(() => assertTrustedGitAncestorOrEquivalentTree(projectRoot, repairHead, equivalentRebase));
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {

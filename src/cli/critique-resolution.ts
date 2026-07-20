@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestorOrEquivalentTree } from "../lib/trusted-git.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -13,6 +13,20 @@ function canonical(value: unknown): string {
   }
   return JSON.stringify(value) ?? "null";
 }
+function canonicalJsonValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as AnyRecord).sort().map((key) => `${JSON.stringify(key)}:${canonicalJsonValue((value as AnyRecord)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function protocolCanonical(value: unknown): string {
+  // Match the persisted JSON protocol exactly: object properties whose value is
+  // undefined are omitted and undefined array members become null. This keeps a
+  // receipt computed before persistence identical to one verified after reload.
+  return canonicalJsonValue(JSON.parse(JSON.stringify(value) ?? "null"));
+}
 
 export function critiqueResolutionResultCoreDigest(prior: AnyRecord, resolving: AnyRecord, edge: AnyRecord): string {
   return createHash("sha256").update(canonical({
@@ -22,6 +36,14 @@ export function critiqueResolutionResultCoreDigest(prior: AnyRecord, resolving: 
     resolving_record_hash: resolving.critique_record_hash,
     edge,
   })).digest("hex");
+}
+
+export function critiqueResolutionAuthorityDigest(claims: AnyRecord[], events: AnyRecord[]): string {
+  const referencedIds = new Set(events.flatMap((event) => [event?.prior_record_id, event?.resolving_record_id]).filter((value) => typeof value === "string"));
+  const referencedClaims = claims
+    .filter((claim) => claim?.metadata?.origin === "critique" && referencedIds.has(claim.metadata.critique_record_id))
+    .sort((a, b) => String(a.metadata.critique_record_id).localeCompare(String(b.metadata.critique_record_id)));
+  return createHash("sha256").update(protocolCanonical({ critique_claims: referencedClaims, critique_resolution_events: events })).digest("hex");
 }
 
 export function critiqueRecordHash(record: AnyRecord): string {
@@ -143,7 +165,11 @@ function validateCoverage(prior: AnyRecord, resolving: AnyRecord, resolution: An
   const findings = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyRecord) => finding.status === "open").map((finding: AnyRecord) => finding.id).sort();
   const coveredFindings = Array.isArray(resolution.resolved_finding_ids) ? [...resolution.resolved_finding_ids].sort() : [];
   const resolverFindings = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyRecord) => [finding.id, finding.status]));
-  if (canonical(findings) !== canonical(coveredFindings) || findings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
+  const resolverMustRestateClosure = resolution.kind === "cross-reviewer";
+  if (canonical(findings) !== canonical(coveredFindings)
+    || (resolverMustRestateClosure && findings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id))))) {
+    errors.push("critique resolution does not cover every open finding");
+  }
 }
 
 function validateResolution(prior: AnyRecord, state: GraphState): void {
@@ -163,7 +189,7 @@ function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, sta
   const first = prior.review_target?.workspace_snapshot; const second = resolving.review_target?.workspace_snapshot;
   if (first?.kind !== "git-worktree" && second?.kind !== "git-worktree") return;
   if (!state.projectRoot || first?.kind !== "git-worktree" || second?.kind !== "git-worktree") { state.errors.push("critique resolution Git snapshots require one trusted project context"); return; }
-  try { assertTrustedGitAncestor(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid"); }
+  try { assertTrustedGitAncestorOrEquivalentTree(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid"); }
 }
 
 function validateResolutionEvent(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {
@@ -221,4 +247,32 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
   if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) state.errors.push("critique graph requires a current verified PASS");
   if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) state.errors.push("critique graph has unresolved live critique records");
   return { valid: state.errors.length === 0, errors: [...new Set(state.errors)], live };
+}
+
+/**
+ * Validate the externally authorized resolution subgraph without turning a
+ * later unresolved review into a lifecycle-attestation failure. Same-reviewer
+ * rechecks are ordinary review history; cross-reviewer edges and their signed
+ * event chain remain fully validated here.
+ */
+export function validateExternalCritiqueResolutionAuthority(
+  claims: AnyRecord[],
+  expectedSubject: string | undefined,
+  resolutionEvents: AnyRecord[],
+  projectRoot: string,
+  externalCompletionVerified: boolean,
+): { valid: boolean; errors: string[] } {
+  const authorityClaims = claims.map((claim) => {
+    const metadata = claim?.metadata;
+    if (metadata?.origin !== "critique" || metadata?.critique_resolution?.kind === "cross-reviewer" || !metadata?.superseded_by) return claim;
+    const { superseded_by: _supersededBy, critique_resolution: _resolution, ...rest } = metadata;
+    return { ...claim, status: claim.value === "pass" ? "verified" : "disputed", metadata: rest };
+  });
+  const graph = validateCritiqueResolutionGraph(authorityClaims, expectedSubject, resolutionEvents, projectRoot, externalCompletionVerified);
+  const policyOnly = new Set([
+    "critique graph requires a current verified PASS",
+    "critique graph has unresolved live critique records",
+  ]);
+  const errors = graph.errors.filter((error) => !policyOnly.has(error));
+  return { valid: errors.length === 0, errors };
 }

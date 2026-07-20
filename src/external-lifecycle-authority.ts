@@ -35,6 +35,12 @@ export function lifecycleAuthorityResultDigest(value: unknown): string {
 }
 function digest(value: unknown): string { return createHash("sha256").update(canonical(value)).digest("hex"); }
 
+export function isAllowedLifecycleAuthoritySystemAlias(requestedPath: string, canonicalPath: string, platform = process.platform): boolean {
+  return platform === "darwin"
+    && requestedPath.startsWith("/etc/")
+    && canonicalPath === `/private${requestedPath}`;
+}
+
 /**
  * The package performs read-only binding and verifies the coordinator's
  * immutable completion with the independently provisioned public key. The
@@ -71,8 +77,20 @@ export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
 function trustedCompletionVerificationKey() {
   if (process.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
   const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
-  let cursor = path.parse(keyFile).root;
-  for (const component of keyFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
+  let canonicalKeyFile: string;
+  try { canonicalKeyFile = (fs.realpathSync.native ?? fs.realpathSync)(keyFile); }
+  catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
+  if (canonicalKeyFile !== keyFile) {
+    if (!isAllowedLifecycleAuthoritySystemAlias(keyFile, canonicalKeyFile)) {
+      throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
+    }
+    const alias = fs.lstatSync("/etc");
+    if (!alias.isSymbolicLink() || alias.uid !== 0 || fs.readlinkSync("/etc") !== "private/etc") {
+      throw new Error("pinned lifecycle authority completion verification key path uses an untrusted system alias");
+    }
+  }
+  let cursor = path.parse(canonicalKeyFile).root;
+  for (const component of canonicalKeyFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, component);
     let stat: fs.Stats;
     try { stat = fs.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
@@ -81,7 +99,7 @@ function trustedCompletionVerificationKey() {
     try { fs.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
     catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
   }
-  const descriptor = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const descriptor = fs.openSync(canonicalKeyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");

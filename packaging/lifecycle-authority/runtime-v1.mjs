@@ -6,6 +6,8 @@ export const COORDINATOR_RUNTIME_VERSION = "1.0";
 export const COORDINATOR_RUNTIME_ID = "kontourai.lifecycle-authority.runtime";
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const canonical = (value) => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : record(value) ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
+const canonicalJsonValue = (value) => Array.isArray(value) ? `[${value.map(canonicalJsonValue).join(",")}]` : record(value) ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJsonValue(value[key])}`).join(",")}}` : JSON.stringify(value) ?? "null";
+const protocolCanonical = (value) => canonicalJsonValue(JSON.parse(JSON.stringify(value) ?? "null"));
 export const coordinatorRuntimeSha256 = () => crypto.createHash("sha256").update(fs.readFileSync(fileURLToPath(import.meta.url))).digest("hex");
 export const bundleDigest = (bundle) => crypto.createHash("sha256").update(JSON.stringify(bundle)).digest("hex");
 function critiqueResolutionResultCoreDigest(prior, resolving, edge) {
@@ -16,6 +18,13 @@ function critiqueResolutionResultCoreDigest(prior, resolving, edge) {
     resolving_record_hash: resolving.critique_record_hash,
     edge,
   })).digest("hex");
+}
+export function critiqueResolutionAuthorityDigest(claims, events) {
+  const referencedIds = new Set(events.flatMap((event) => [event?.prior_record_id, event?.resolving_record_id]).filter((value) => typeof value === "string"));
+  const referencedClaims = claims
+    .filter((claim) => claim?.metadata?.origin === "critique" && referencedIds.has(claim.metadata.critique_record_id))
+    .sort((a, b) => String(a.metadata.critique_record_id).localeCompare(String(b.metadata.critique_record_id)));
+  return crypto.createHash("sha256").update(protocolCanonical({ critique_claims: referencedClaims, critique_resolution_events: events })).digest("hex");
 }
 function exact(value, fields, label) {
   if (!record(value) || canonical(Object.keys(value).sort()) !== canonical([...fields].sort())) throw new Error(`${label} contains unexpected or missing fields`);
@@ -58,6 +67,23 @@ function assertAuthorizationPreimage(authorization, prior, resolving, claims) {
   if (resolving.critique_sequence <= prior.critique_sequence) throw new Error("resolving critique is not later than the prior critique");
   assertDescends(claims, prior, resolving);
 }
+function resolutionEvent(authorization, priorMetadata, resolvingMetadata, resolution, priorEvents) {
+  const authorizationSha256 = crypto.createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
+  const unsignedEvent = {
+    schema_version: "1.0", event_id: `critique-resolution:${authorizationSha256}`, sequence: priorEvents.length + 1,
+    predecessor_hash: priorEvents.at(-1)?.event_hash ?? "0".repeat(64), operation: "resolve-critique",
+    run_id: authorization.run_id, subject: authorization.subject,
+    preimage_bundle_sha256: authorization.prior_bundle_sha256,
+    prior_record_id: authorization.prior_record_id, prior_record_hash: priorMetadata.critique_record_hash,
+    resolving_record_id: authorization.resolving_record_id, resolving_record_hash: resolvingMetadata.critique_record_hash,
+    resolver: resolvingMetadata.reviewer, authorization_sha256: authorizationSha256,
+    authorization_key_id: authorization.signature.key_id, authorization_nonce: authorization.nonce,
+    edge: resolution,
+    resulting_core_sha256: critiqueResolutionResultCoreDigest(priorMetadata, resolvingMetadata, resolution),
+    signed_authorization: authorization,
+  };
+  return { ...unsignedEvent, event_hash: crypto.createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex") };
+}
 
 /** Pure deterministic critique-resolution transition. Performs no I/O. */
 export function resolveCritiqueTransition(input) {
@@ -92,19 +118,30 @@ export function resolveCritiqueTransition(input) {
     authorization_sha256: authorizationSha256, resolution_event_id: eventId,
   };
   const claims = input.bundle.claims.map((claim) => claim === prior ? { ...claim, status: "superseded", metadata: { ...priorMetadata, superseded_by: input.resolving_record_id, critique_resolution: resolution } } : claim);
-  const unsignedEvent = {
-    schema_version: "1.0", event_id: eventId, sequence: priorEvents.length + 1,
-    predecessor_hash: priorEvents.at(-1)?.event_hash ?? "0".repeat(64), operation: "resolve-critique",
-    run_id: authorization.run_id, subject: authorization.subject,
-    preimage_bundle_sha256: authorization.prior_bundle_sha256,
-    prior_record_id: input.prior_record_id, prior_record_hash: priorMetadata.critique_record_hash,
-    resolving_record_id: input.resolving_record_id, resolving_record_hash: resolvingMetadata.critique_record_hash,
-    resolver: resolvingMetadata.reviewer, authorization_sha256: authorizationSha256,
-    authorization_key_id: authorization.signature.key_id, authorization_nonce: authorization.nonce,
-    edge: resolution,
-    resulting_core_sha256: critiqueResolutionResultCoreDigest(priorMetadata, resolvingMetadata, resolution),
-    signed_authorization: authorization,
-  };
-  const event = { ...unsignedEvent, event_hash: crypto.createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex") };
+  const event = resolutionEvent(authorization, priorMetadata, resolvingMetadata, resolution, priorEvents);
   return { ...input.bundle, claims, critique_resolution_events: [...priorEvents, event] };
+}
+
+/** Restore a missing append-only event for an already-applied, durably completed resolution. */
+export function reconcileCritiqueResolutionEvent(input) {
+  exact(input, ["bundle", "authorization", "existing_events", "prior_record_id", "resolving_record_id"], "critique event reconciliation input");
+  if (!record(input.bundle) || !Array.isArray(input.bundle.claims) || !Array.isArray(input.existing_events)) throw new Error("critique event reconciliation inputs are invalid");
+  const authorization = input.authorization;
+  if (!record(authorization) || authorization.operation !== "resolve-critique" || authorization.prior_record_id !== input.prior_record_id || authorization.resolving_record_id !== input.resolving_record_id) throw new Error("critique event reconciliation authorization identity is invalid");
+  const prior = oneClaim(input.bundle.claims, input.prior_record_id, "prior");
+  const resolving = oneClaim(input.bundle.claims, input.resolving_record_id, "resolving");
+  const priorMetadata = prior.metadata, resolvingMetadata = resolving.metadata;
+  const edge = priorMetadata.critique_resolution;
+  const authorizationSha256 = crypto.createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
+  if (prior.status !== "superseded" || priorMetadata.superseded_by !== input.resolving_record_id || !record(edge)
+    || edge.kind !== "cross-reviewer" || edge.prior_record_id !== input.prior_record_id || edge.resolving_record_id !== input.resolving_record_id
+    || edge.resolver !== resolvingMetadata.reviewer || edge.authorization_sha256 !== authorizationSha256
+    || edge.resolution_event_id !== `critique-resolution:${authorizationSha256}`) throw new Error("applied critique resolution does not bind the replayed authorization");
+  assertAuthorizationPreimage(authorization, priorMetadata, resolvingMetadata, input.bundle.claims);
+  const lanes = failedLaneIds(priorMetadata), findings = openFindingIds(priorMetadata);
+  if (canonical(edge.resolved_lane_ids) !== canonical(lanes) || canonical(edge.resolved_finding_ids) !== canonical(findings)
+    || canonical(authorization.resolved_lane_ids) !== canonical(lanes) || canonical(authorization.resolved_finding_ids) !== canonical(findings)) throw new Error("applied critique resolution coverage does not bind the replayed authorization");
+  const existing = input.existing_events.find((event) => event?.event_id === edge.resolution_event_id);
+  if (existing) return input.existing_events;
+  return [...input.existing_events, resolutionEvent(authorization, priorMetadata, resolvingMetadata, edge, input.existing_events)];
 }

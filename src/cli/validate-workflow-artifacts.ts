@@ -4,9 +4,9 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { critiqueResolutionAuthorityDigest, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 
 type Issue = { path: string; message: string };
 
@@ -495,7 +495,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
             const verified = verifyLifecycleAuthorityCompletion(completion);
             externalCompletionVerified = verified.action === "resolve-critique"
               && verified.run_id === path.basename(dir)
-              && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
+              && verified.result_core_sha256 === critiqueResolutionAuthorityDigest(claims, resolutionEvents);
           } catch {
             // A cross-reviewer edge remains NOT_VERIFIED without a root-signed completion.
           }
