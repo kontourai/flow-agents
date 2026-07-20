@@ -55,6 +55,12 @@ const path = require('path');
 // #783: root-scoping for the Bash-command detectors below (redirect / interpreter-write /
 // cp-move) -- see that module's header comment for the full fail-closed contract.
 const { isCandidateWithinDeclaredRoots, resolveCandidatePath, canonicalize } = require('./lib/declared-artifact-roots.js');
+// #799: narrow, conservative allowlist for interpreter one-liners that are PROVABLY read-only
+// (e.g. `python3 -c "print(json.load(open('trust.bundle'))['claims'][0])"`) -- see that
+// module's header comment for the full grammar and fail-closed contract. Consulted ONLY by
+// checkInterpreterWriteToProtected; the redirect/tee and cp/mv/install detectors key off an
+// actual write TARGET and have no read-only false-positive class to fix.
+const { isProvablyReadOnlyCommand } = require('./lib/read-only-grammar.js');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -69,6 +75,16 @@ const FIXTURE_AFFORDANCE_HINT =
   '`npm run workflow:sidecar -- fixture write <dir> --from-json <file>` for a schema-valid ' +
   'fixture, or `... fixture write <dir> --malformed --content <string|@file>` for an ' +
   'intentionally-invalid one (negative-test fixtures). Both refuse to write inside a declared root.';
+
+// #799: named once so every Bash-detector block message below can point a legitimate READ
+// attempt at a command shape that is never blocked, instead of leaving the agent to guess (or
+// to construct a runtime path to evade the hook, which is the false-positive cost #799 exists
+// to cut). `cat <file> | python3 -m json.tool` / `python3 -m json.tool <file>` is a recognized
+// fast-pass grammar (see lib/read-only-grammar.js) and is never blocked by this hook.
+const READ_REMEDIATION_HINT =
+  'If you only need to READ this file: `python3 -m json.tool <file>` (or `cat <file> | python3 ' +
+  '-m json.tool`) is never blocked by this hook; for a trust.bundle specifically, ' +
+  '`npm run workflow:sidecar -- render-trust-panel <dir>` renders a human-readable summary.';
 
 const PROTECTED_FILES = new Set([
   '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
@@ -644,6 +660,14 @@ const INTERPRETER_GLOBAL_TOKENS = new Set([
  * tokens that already carry directory context (the settings file under a dotdir, the
  * delivery trust-anchor paths) scoping applies normally.
  *
+ * #799: BEFORE any block decision, checks isProvablyReadOnlyCommand(command, {tokenize,
+ * splitSegments}) -- a narrow, POSITIVE-match grammar (see lib/read-only-grammar.js) that
+ * recognizes only `python(2|3)? -m json.tool <path>` and single `python -c` / `node -e` bodies
+ * whose ONLY file interaction is a read (open/json.load/readFileSync) followed by output
+ * (print/console.log), with no write indicator and no escape hatch (eval/exec/subprocess/...)
+ * anywhere. Anything else -- multi-statement bodies, heredocs, ambiguous parses -- is NOT
+ * fast-passed and falls through to the substring-match detection below exactly as before.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
 function checkInterpreterWriteToProtected(command, cwd) {
@@ -651,6 +675,12 @@ function checkInterpreterWriteToProtected(command, cwd) {
   // Fast path: skip if no interpreter keywords present.
   if (!command.includes('node') && !command.includes(_PY_CMD) &&
       !command.includes('sed') && !command.includes('perl')) return null;
+
+  // #799: a command that is PROVABLY read-only (see lib/read-only-grammar.js) never blocks
+  // here, regardless of which protected-path token it happens to mention as a literal
+  // substring below. Ambiguous/unparseable commands are NOT covered by this grammar and fall
+  // through to the substring-match detection unchanged.
+  if (isProvablyReadOnlyCommand(command, { tokenize, splitSegments })) return null;
 
   const segments = splitSegments(command);
   for (const seg of segments) {
@@ -895,7 +925,7 @@ function run(inputOrRaw, options = {}) {
           'disable or tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught). ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down: check for interpreter invocations (node -e, py3 -c, sed -i,
@@ -911,7 +941,7 @@ function run(inputOrRaw, options = {}) {
           'protected gate files could tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it. ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
@@ -926,7 +956,7 @@ function run(inputOrRaw, options = {}) {
           'could forge the CI trust anchor. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check covers cp/mv/install only -- other copy tools may evade it. ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
   }
