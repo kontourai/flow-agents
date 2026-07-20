@@ -7206,6 +7206,7 @@ Available claim ids:
 
 
 export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
+  if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
   return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
 }
 

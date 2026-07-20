@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   attachEvidence,
-  cancelRun,
   evaluateRun,
   expectationsForGate,
   loadRun,
@@ -251,22 +250,12 @@ export async function resumeBuilderBuildRun(input: ChangeBuilderBuildRunLifecycl
   return asBuilderBuildResult(result, input.runId);
 }
 
-export async function cancelBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult & { idempotent: boolean }> {
-  const changed = await changeBuilderFlowRunLifecycleResult(input, cancelRun);
-  return { ...asBuilderBuildResult(resultFromRun(changed, input.runId), input.runId), idempotent: changed.idempotent };
-}
-
 export async function pauseBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult> {
   return changeBuilderFlowRunLifecycle(input, pauseRun);
 }
 
 export async function resumeBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult> {
   return changeBuilderFlowRunLifecycle(input, resumeRun);
-}
-
-export async function cancelBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult & { idempotent: boolean }> {
-  const changed = await changeBuilderFlowRunLifecycleResult(input, cancelRun);
-  return { ...resultFromRun(changed, input.runId), idempotent: changed.idempotent };
 }
 
 async function changeBuilderFlowRunLifecycle(
@@ -279,7 +268,7 @@ async function changeBuilderFlowRunLifecycle(
 
 async function changeBuilderFlowRunLifecycleResult(
   input: ChangeBuilderBuildRunLifecycleInput,
-  operation: typeof pauseRun | typeof resumeRun | typeof cancelRun,
+  operation: typeof pauseRun | typeof resumeRun,
 ) {
   assertRuntimeInput(input, []);
   if (!isRecord(input.request)) throw new BuilderBuildRunInputError("request", "must be a lifecycle request object");

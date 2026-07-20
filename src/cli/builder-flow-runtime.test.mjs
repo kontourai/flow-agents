@@ -20,12 +20,12 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
-import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
+import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
@@ -76,6 +76,9 @@ const AMBIENT_IDENTITY_ENV_KEYS = [
   "TF_BUILD",
   "BUILDKITE",
 ];
+// Positive mutation E2E requires an independently provisioned OS-owned helper.
+// Ordinary developer/CI checkouts cannot safely manufacture that trust anchor.
+const externalAuthorityE2E = process.env.FLOW_AGENTS_TEST_EXTERNAL_AUTHORITY === "1" ? test : test.skip;
 
 function makeSession(slug = "runtime-projection") {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
@@ -1044,7 +1047,7 @@ test("pause and resume preserve the current Flow step and active assignment", as
   assert.equal(readLocalAssignmentStatus(session.artifactRoot, session.slug).record.status, "claimed");
 });
 
-test("authorized cancellation is canonical, terminal, and releases the assignment exactly once", async () => {
+externalAuthorityE2E("authorized cancellation is canonical, terminal, and releases the assignment exactly once", async () => {
   const session = makeSession("lifecycle-cancel");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1073,7 +1076,7 @@ test("authorized cancellation is canonical, terminal, and releases the assignmen
 // prepareBuilderCancelRequest, once signed by the operator key, must verify and
 // cancel the run. If buildUnsignedLifecycleAuthorization's signing payload
 // diverged by even one byte from what the verifier recomputes, this fails.
-test("prepareBuilderCancelRequest emits a payload that, signed by the operator key, cancels the run end-to-end", async () => {
+externalAuthorityE2E("prepareBuilderCancelRequest emits a payload that, signed by the operator key, cancels the run end-to-end", async () => {
   const session = makeSession("friendly-cancel-e2e");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1136,7 +1139,7 @@ test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry wi
   assert.equal(req.authorization.expires_at, "2026-07-15T14:00:00.000Z");
 });
 
-test("a cancel-request payload signed with the WRONG key is rejected (signature lock intact)", async () => {
+externalAuthorityE2E("a cancel-request payload signed with the WRONG key is rejected (signature lock intact)", async () => {
   const session = makeSession("friendly-cancel-badsig");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1192,7 +1195,7 @@ test("builder-run cancel-request CLI writes the unsigned authorization and print
   assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "100000"]), 64);
 });
 
-test("cancel-request signing-payload parity holds for non-ASCII reason/actor (unicode regression)", async () => {
+externalAuthorityE2E("cancel-request signing-payload parity holds for non-ASCII reason/actor (unicode regression)", async () => {
   const session = makeSession("friendly-cancel-unicode");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1212,7 +1215,7 @@ test("cancel-request signing-payload parity holds for non-ASCII reason/actor (un
   assert.equal(canceled.run.state.status, "canceled");
 });
 
-test("prepareBuilderCancelRequest mints from the released assignment once the run is canceled (redemption-gate aligned)", async () => {
+externalAuthorityE2E("prepareBuilderCancelRequest mints from the released assignment once the run is canceled (redemption-gate aligned)", async () => {
   const session = makeSession("friendly-cancel-recovery");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1250,7 +1253,7 @@ test("assignment release is independent of Flow lifecycle", async () => {
   assert.equal(readJson(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)).status, "released");
 });
 
-test("archive rejects active runs and retains canceled Flow and session artifacts", async () => {
+externalAuthorityE2E("archive rejects active runs and retains canceled Flow and session artifacts", async () => {
   const session = makeSession("lifecycle-archive");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1283,7 +1286,7 @@ test("archive rejects active runs and retains canceled Flow and session artifact
   assert.deepEqual(consumedAuthorizationRecords(session).map((record) => record.operation).sort(), ["archive", "cancel"]);
 });
 
-test("archive rejects a symlinked archive root without moving the session", async () => {
+externalAuthorityE2E("archive rejects a symlinked archive root without moving the session", async () => {
   const session = makeSession("lifecycle-archive-symlink");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1306,7 +1309,7 @@ test("archive rejects a symlinked archive root without moving the session", asyn
   assert.deepEqual(fs.readdirSync(outside), []);
 });
 
-test("archive retries the exact consumed authorization after an interrupted prepared move", async () => {
+externalAuthorityE2E("archive retries the exact consumed authorization after an interrupted prepared move", async () => {
   const session = makeSession("lifecycle-archive-recovery");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1346,7 +1349,7 @@ test("archive retries the exact consumed authorization after an interrupted prep
   assert.equal(consumedAuthorizationRecords(session).length, 2);
 });
 
-test("mismatched and expired cancellation authority fail before Flow or sidecar mutation", async (t) => {
+externalAuthorityE2E("mismatched and expired cancellation authority fail before Flow or sidecar mutation", async (t) => {
   for (const [name, overrides, pattern] of [
     ["wrong-run", { run_id: "another-run" }, /run_id does not match/],
     ["wrong-subject", { subject: "local:other" }, /subject does not match/],
@@ -1375,7 +1378,7 @@ test("mismatched and expired cancellation authority fail before Flow or sidecar 
   }
 });
 
-test("conflicting cancellation request replay is rejected without a second transition or release", async () => {
+externalAuthorityE2E("conflicting cancellation request replay is rejected without a second transition or release", async () => {
   const session = makeSession("lifecycle-conflicting-replay");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1394,7 +1397,7 @@ test("conflicting cancellation request replay is rejected without a second trans
   assert.equal(snapshotFile(assignmentFile), beforeAssignment);
 });
 
-test("tampered or unsigned cancellation authority fails before mutation", async () => {
+externalAuthorityE2E("tampered or unsigned cancellation authority fails before mutation", async () => {
   const session = makeSession("lifecycle-signature-reject");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1410,7 +1413,7 @@ test("tampered or unsigned cancellation authority fails before mutation", async 
   assert.equal(snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)), beforeAssignment);
 });
 
-test("expired authority can finish side effects for its matching canonical cancellation", async () => {
+externalAuthorityE2E("expired authority can finish side effects for its matching canonical cancellation", async () => {
   const session = makeSession("lifecycle-cancel-recovery");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1433,7 +1436,7 @@ test("expired authority can finish side effects for its matching canonical cance
   assert.equal(consumedAuthorizationRecords(session).length, 1);
 });
 
-test("builder-run exposes lifecycle actions without caller-selected Flow identity", async () => {
+externalAuthorityE2E("builder-run exposes lifecycle actions without caller-selected Flow identity", async () => {
   const session = makeSession("lifecycle-cli");
   const ambient = resolveCurrentAssignmentActor();
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, { actorKey: ambient.actorKey, ttlSeconds: 1800, branch: `agent/${session.slug}`, artifactDir: session.sessionDir, workItemRef: SUBJECT, reason: "test" });
@@ -1624,7 +1627,7 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
   ]);
 });
 
-test("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
+externalAuthorityE2E("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1831,7 +1834,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   else process.env.CODEX_THREAD_ID = originalCodexThread;
 });
 
-test("a scrubbed thirteen-review repair history migrates through sequential signed resolutions", async () => {
+externalAuthorityE2E("a scrubbed thirteen-review repair history migrates through sequential signed resolutions", async () => {
   // This is deliberately synthetic but mirrors the cardinality and review-shape of
   // a real historical session. It proves migration without carrying repository,
   // provider, or runtime identifiers into a public test fixture.

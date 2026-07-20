@@ -1,8 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { invokeExternalLifecycleAuthority } from "./external-lifecycle-authority.js";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
 
@@ -202,73 +201,13 @@ export function buildUnsignedLifecycleAuthorization(fields: {
   return { unsigned, signingPayload: builderLifecycleAuthorizationPayload(unsigned) };
 }
 
-export function assertAuthorizationUnused(artifactRoot: string, authorization: SignedBuilderAuthorization): void {
-  if (!readAuthorizationConsumption(artifactRoot, authorization)) return;
-  throw new Error("lifecycle authorization nonce has already been consumed");
-}
-
-export function readAuthorizationConsumption(artifactRoot: string, authorization: SignedBuilderAuthorization): JsonRecord | null {
-  const file = consumedAuthorizationPath(artifactRoot, authorization);
-  if (!pathExistsNoFollow(file)) return null;
-  const record = readRegularJson(file, "consumed lifecycle authorization record");
-  if (record.run_id !== authorization.run_id
-    || record.operation !== authorization.operation
-    || record.nonce !== authorization.nonce
-    || record.key_id !== authorization.signature.key_id
-    || record.authorization_sha256 !== authorizationDigest(authorization)) {
-    throw new Error("consumed lifecycle authorization record does not match its integrity key");
-  }
-  return record;
-}
-
-export function recordAuthorizationConsumed(artifactRoot: string, authorization: SignedBuilderAuthorization, at = new Date().toISOString()): void {
-  const file = consumedAuthorizationPath(artifactRoot, authorization);
-  const directory = path.dirname(file);
-  fs.mkdirSync(directory, { recursive: true });
-  const stat = fs.lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !pathIsWithin(fs.realpathSync(directory), fs.realpathSync(artifactRoot))) throw new Error("lifecycle authorization registry directory is unsafe");
-  const temporary = path.join(directory, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
-  const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-  try {
-    fs.writeFileSync(descriptor, `${JSON.stringify({ run_id: authorization.run_id, operation: authorization.operation, nonce: authorization.nonce, key_id: authorization.signature.key_id, authorization_sha256: authorizationDigest(authorization), at })}\n`);
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  try {
-    fs.linkSync(temporary, file);
-    const directoryDescriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
-}
-
-function consumedAuthorizationPath(artifactRoot: string, authorization: SignedBuilderAuthorization): string {
-  const integrityKey = createHash("sha256").update(authorization.run_id).update("\0").update(authorization.nonce).digest("hex");
-  return path.join(artifactRoot, "lifecycle-authority", "consumed", `${integrityKey}.json`);
-}
-
 export function authorizationDigest(authorization: SignedBuilderAuthorization): string {
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
 function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
   const { signature: _signature, ...unsigned } = authorization;
-  try {
-    const verifier = fileURLToPath(new URL("./cli/lifecycle-authority-verifier.js", import.meta.url));
-    execFileSync(process.execPath, [verifier], {
-      input: JSON.stringify({ project_root: projectRoot, payload: payload(unsigned as Omit<T, "signature">), signature: authorization.signature }),
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY: process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY ?? "" },
-      timeout: 10_000,
-      maxBuffer: 128 * 1024,
-    });
-  } catch (error) {
-    const stderr = isRecord(error) && typeof error.stderr === "string" ? error.stderr.trim() : "";
-    throw new Error(stderr || "lifecycle authorization verification failed in the isolated verifier");
-  }
+  invokeExternalLifecycleAuthority({ action: "verify-authorization", project_root: projectRoot, payload: payload(unsigned as Omit<T, "signature">), signature: authorization.signature });
 }
 
 function readRegularJson(fileInput: string, label: string, requireProtected = false): JsonRecord {
@@ -342,13 +281,4 @@ function nonEmpty(value: unknown): value is string {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function pathExistsNoFollow(candidate: string): boolean {
-  try { fs.lstatSync(candidate); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
-}
-
-function pathIsWithin(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }

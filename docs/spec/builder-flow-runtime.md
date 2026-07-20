@@ -307,17 +307,18 @@ pause, resume, or release its own assignment with a reason. Cancellation and arc
 an Ed25519-signed authorization record conforming to
 `schemas/builder-lifecycle-authorization.schema.json`. The record is operation-bound and binds
 the request to the run id, selected Work Item, current assignment actor, immutable external
-request reference, nonce, and expiry. Its signing key must be pinned in an administrator-provisioned,
-OS-owned registry outside the repository and selected by `FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY`.
-Every path component must be non-writable by the runtime user, group, and world. Runtime or harness adapters hold the
-private key and capture the signed record from a user/operator channel they trust; agent-authored
-prose or an unsigned model-written file is not cancellation authority.
+request reference, nonce, and expiry. Flow Agents serializes the request to an independently
+provisioned helper selected by `FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER`. That executable and every
+path component must be OS-owned, outside the project/package/worktree, and non-writable by the
+runtime user, group, and world. The external helper owns verification, locking, nonce replay
+protection, compare-and-swap, and all persistent writes; package JavaScript never enacts a mutation
+from a helper return value. Flow Agents ships no helper, keys, or deployment-specific configuration.
+Missing or untrusted helpers fail closed.
 
-This is an audit and policy boundary, not authentication against a process with unrestricted
-access as the same operating-system user. The harness must keep its signing key outside the
-agent process and enforce its own filesystem or process isolation when the agent is adversarial.
-Repository files and Git refs are explicitly never authority roots.
-Adversarial-runtime authentication is tracked separately in Flow Agents issue #545. Flow's
+Runtime or harness adapters hold the private key and capture the signed record from a
+user/operator channel they trust; agent-authored prose or an unsigned model-written file is not
+cancellation authority. Repository files, package bytes, and Git refs are explicitly never
+authority roots. Flow's
 current lifecycle authority vocabulary also requires agent-owned pause/resume events to use the
 closest available `operator_request` shape; a distinct canonical runtime authority is tracked in
 Flow issue #118.
@@ -334,8 +335,8 @@ flow-agents builder-run archive --session-dir <dir> --authorization-file <record
 Pause and resume verify the live assignment actor under the assignment lock, and preserve the
 current Flow step and assignment. Assignment release does not
 change the Flow run. Cancellation changes Flow first and then idempotently releases the owning
-assignment while holding the same lock; a successfully consumed cancellation nonce cannot be
-replayed. Archive accepts only completed or canceled runs, moves the session under
+assignment while holding the same lock inside the external helper; a successfully consumed
+cancellation nonce cannot be replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
 

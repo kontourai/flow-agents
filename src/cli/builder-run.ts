@@ -45,7 +45,7 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
   });
   const outFile = flagString(flags, "out") ?? prepared.suggestedOutFile;
   // Symlink-safe write, matching this codebase's O_NOFOLLOW pattern for writes
-  // into session dirs (recordAuthorizationConsumed / writeExistingFileNoFollow):
+  // into session directories:
   // never follow a symlink planted at the target and clobber it.
   const fd = fs.openSync(outFile, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
   try {

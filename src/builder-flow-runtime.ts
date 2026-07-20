@@ -8,22 +8,21 @@ import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapsho
 import {
   evaluateGate,
   expectationsForGate,
-  lifecycleRequestMatches,
   openGates,
   type FlowGate,
   type FlowExpectation,
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { execTrustedGitSync } from "./lib/trusted-git.js";
+import { invokeExternalLifecycleAuthority } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
-  cancelBuilderFlowRun,
   evaluateBuilderFlowRun,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
@@ -185,20 +184,7 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
 
 export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-    const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
-    assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
-    const changed = await cancelBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
-    const released = performLocalReleaseUnderLock(prepared.context.artifactRoot, prepared.context.slug, prepared.authorization.assignment_actor, {
-      actorKey: prepared.authorization.assignment_actor_key,
-      reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
-      tolerateNoActiveClaim: true,
-    });
-    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
-    writeProjection(prepared.context, projection, prepared.sidecarSnapshot.raw, "cancellation projection");
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, progressSnapshot, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
-  });
+  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean };
 }
 
 export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
@@ -315,49 +301,7 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
 
 export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-  const prepared = await prepareAuthorizedLifecycleChange(input, "archive", context);
-  const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
-  const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
-  if (priorConsumption && !recoveringPreparedArchive) throw new Error("lifecycle authorization nonce has already been consumed");
-  const run = await loadBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
-  if (run.state.status !== "completed" && run.state.status !== "canceled") {
-    throw new BuilderBuildRunInputError("flow_run.status", "must be completed or canceled before archival");
-  }
-  const archiveRoot = path.join(prepared.context.artifactRoot, "archive");
-  const archiveDir = path.join(archiveRoot, prepared.context.slug);
-  if (pathExistsNoFollow(archiveDir)) throw new BuilderBuildRunInputError("archive", "destination already exists");
-  fs.mkdirSync(archiveRoot, { recursive: true });
-  assertSafeDirectory(archiveRoot, prepared.context.artifactRoot, "archive root");
-  assertSafeDirectory(prepared.context.sessionDir, prepared.context.artifactRoot, "sessionDir");
-  if (!recoveringPreparedArchive && fs.readFileSync(prepared.context.stateFile, "utf8") !== prepared.sidecarSnapshot.raw) {
-    throw new BuilderBuildRunInputError("state.json", "changed during archive preparation");
-  }
-  const archivedState = recoveringPreparedArchive ? prepared.sidecarSnapshot.state : {
-    ...prepared.sidecarSnapshot.state,
-    status: "archived",
-    phase: "done",
-    updated_at: new Date().toISOString(),
-    next_action: { status: "done", summary: "Builder session archived; canonical Flow artifacts remain retained." },
-  };
-  if (!recoveringPreparedArchive) {
-    writeExistingFileNoFollow(prepared.context.stateFile, `${JSON.stringify(archivedState, null, 2)}\n`);
-    clearCurrentPointers(prepared.context.artifactRoot, prepared.context.slug);
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-  }
-  const { progressSnapshot } = projectFlowRun(prepared.context, run, prepared.sidecarSnapshot.state);
-  fs.renameSync(prepared.context.sessionDir, archiveDir);
-  return {
-    sessionDir: archiveDir,
-    projectRoot: prepared.context.projectRoot,
-    run,
-    projection: archivedState,
-    gateActionEnvelope: null,
-    progressSnapshot,
-    attached: false,
-    archiveDir,
-  };
-  });
+  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) }) as BuilderFlowSessionResult & { archiveDir: string };
 }
 
 async function changeBuilderFlowSessionLifecycle(
@@ -388,48 +332,6 @@ async function changeBuilderFlowSessionLifecycle(
   });
 }
 
-async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLifecycleInput, operation: "cancel" | "archive", context: SessionContext): Promise<{
-  context: SessionContext;
-  sidecarSnapshot: SidecarSnapshot;
-  authorization: ReturnType<typeof loadBuilderLifecycleAuthorization>;
-}> {
-  const sidecarSnapshot = readSidecarSnapshot(context);
-  const subject = workflowSubject(sidecarSnapshot.state);
-  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
-  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
-  const persistedAssignment = pathExistsNoFollow(assignmentFile)
-    ? (assertSafeFile(assignmentFile, context.artifactRoot, "assignment record"), JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord)
-    : null;
-  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
-  const acceptsReleasedAssignment = (operation === "cancel" && canonicalRun.state.status === "canceled") || operation === "archive";
-  const assignment = activeAssignment ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
-  if (!assignment || (assignment.status !== "claimed" && !acceptsReleasedAssignment) || !assignment.actor_key) {
-    throw new BuilderBuildRunInputError("assignment", "must be actively held by a canonical actor before a lifecycle change");
-  }
-  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
-    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
-  }
-  const authorization = loadBuilderLifecycleAuthorization(input.authorizationFile, {
-    projectRoot: context.projectRoot,
-    operation,
-    runId: context.slug,
-    subject,
-    actorKey: assignment.actor_key,
-    ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
-    ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
-  });
-  if (operation === "cancel" && canonicalRun.state.status === "canceled") {
-    const terminalEvent = canonicalRun.state.lifecycle?.at(-1);
-    if (!terminalEvent || terminalEvent.action !== "cancel" || !lifecycleRequestMatches(terminalEvent, authorization.request)) {
-      throw new BuilderBuildRunInputError("authorization.request", "does not match the canonical cancellation being recovered");
-    }
-  }
-  if (!sameActor(authorization.assignment_actor, assignment.actor)) {
-    throw new BuilderBuildRunInputError("authorization.assignment_actor", "must match the active assignment holder");
-  }
-  return { context, sidecarSnapshot, authorization };
-}
-
 function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, context: SessionContext): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string } {
   if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
   const resolved = resolveCurrentAssignmentActor();
@@ -445,30 +347,6 @@ function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, cont
 
 function sameActor(left: ActorStruct, right: ActorStruct): boolean {
   return isDeepStrictEqual({ ...left, human: left.human ?? null }, { ...right, human: right.human ?? null });
-}
-
-function clearCurrentPointers(artifactRoot: string, slug: string): void {
-  const candidates = [path.join(artifactRoot, "current.json")];
-  const actorRoot = path.join(artifactRoot, "current");
-  if (pathExistsNoFollow(actorRoot)) {
-    assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    candidates.push(...fs.readdirSync(actorRoot).filter((name) => name.endsWith(".json")).map((name) => path.join(actorRoot, name)));
-  }
-  for (const file of candidates) {
-    if (!pathExistsNoFollow(file) || !fs.lstatSync(file).isFile()) continue;
-    const root = file === candidates[0] ? artifactRoot : actorRoot;
-    if (root === actorRoot) assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    assertSafeFile(file, root, "current pointer");
-    let pointer: AnyRecord;
-    try {
-      pointer = JSON.parse(fs.readFileSync(file, "utf8")) as AnyRecord;
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      // Archival retains malformed unrelated pointers for explicit repair.
-      continue;
-    }
-    if (pointer.active_slug === slug) fs.unlinkSync(file);
-  }
 }
 
 async function syncAndProject(

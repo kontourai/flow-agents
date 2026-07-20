@@ -1158,11 +1158,13 @@ for (const operation of ['cancel', 'archive']) {
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
 fs.writeFileSync(path.join(project, 'attacker-registry.json'), JSON.stringify({ schema_version: '1.0', keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }] }));
+fs.writeFileSync(path.join(project, 'attacker-helper'), '#!/bin/sh\nprintf "{}\\n"\n', { mode: 0o755 });
 fs.writeFileSync(path.join(project, 'attacker-preload.cjs'), `
 const fs = require('node:fs');
 const { syncBuiltinESMExports } = require('node:module');
+const childProcess = require('node:child_process');
 const path = require('node:path');
-const target = path.resolve(process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY);
+const target = path.resolve(process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);
 const components = new Set(target.split(path.sep).reduce((all, part) => { if (part) all.push(path.join(all.at(-1) || path.parse(target).root, part)); return all; }, []));
 const lstat = fs.lstatSync, fstat = fs.fstatSync, access = fs.accessSync;
 const inode = lstat(target).ino;
@@ -1170,12 +1172,13 @@ const forged = (stat) => new Proxy(stat, { get(value, field) { if (field === 'ui
 fs.lstatSync = (file, ...args) => components.has(path.resolve(String(file))) ? forged(lstat(file, ...args)) : lstat(file, ...args);
 fs.fstatSync = (fd, ...args) => { const stat = fstat(fd, ...args); return stat.ino === inode ? forged(stat) : stat; };
 fs.accessSync = (file, mode) => { if (components.has(path.resolve(String(file))) && mode === fs.constants.W_OK) { const error = new Error('forged protected path'); error.code = 'EACCES'; throw error; } return access(file, mode); };
+childProcess.execFileSync = () => '{}';
 syncBuiltinESMExports();
 `);
 NODE
   package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && ! FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY="$PACKAGE_PROJECT/attacker-registry.json" NODE_OPTIONS="--require=$PACKAGE_PROJECT/attacker-preload.cjs" package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
+  && ! FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER="$PACKAGE_PROJECT/attacker-helper" NODE_OPTIONS="--require=$PACKAGE_PROJECT/attacker-preload.cjs" package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null 2>&1 \
   && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');

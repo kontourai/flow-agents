@@ -107,19 +107,20 @@ supplies a trusted delegation credential.
 `workflow resolve-critique` closes a historical failing or not-verified review
 without deleting it or borrowing the earlier reviewer's identity. It is only
 available during `builder.build` verification. It requires an Ed25519-signed
-user/operator authorization trusted by an externally provisioned lifecycle-authority registry.
-Administrators select its absolute path with `FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY`; the
-registry must be outside the project/worktree, OS-owned, and non-writable by the runtime user,
-group, or world through every path component. Platforms without a supported ownership adapter
-fail closed. The authorization binds
+user/operator authorization handled by an externally provisioned lifecycle-authority helper.
+Administrators select its absolute path with `FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER`; the
+executable must be outside the project, package, and worktree, OS-owned, executable, and
+non-writable by the runtime user, group, or world through every path component. Platforms without
+a supported ownership adapter fail closed. The helper—not package JavaScript—owns signature and
+registry verification, locking, nonce replay protection, preimage CAS, and the atomic mutation.
+The authorization binds
 the exact run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
 
-The provider-neutral registry contains Ed25519 public keys only. CI and runtime administrators
-provision it outside source control and keep private keys in their authority service. Missing,
-malformed, duplicate, shadowed, repository-local, writable, or private-key-bearing registries
-fail closed. An empty registry intentionally authorizes no lifecycle or critique-resolution signer.
+The helper and its provider-neutral key registry are deployed and configured by runtime
+administrators outside source control. Flow Agents ships neither helper configuration nor keys.
+Missing, untrusted, repository-local, or writable helpers fail closed.
 
 Use immutable `metadata.critique_record_id` values from the two trust-bundle
 critique records. The resolving critique must be verified, current against the

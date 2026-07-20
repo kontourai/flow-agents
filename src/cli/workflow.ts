@@ -8,14 +8,15 @@ import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { assertCurrentCritiqueClaim, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { assertAuthorizationUnused, authorizationDigest, buildUnsignedCritiqueResolutionAuthorization, loadCritiqueResolutionAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "../builder-lifecycle-authority.js";
+import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { buildUnsignedCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
+import { invokeExternalLifecycleAuthority } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
@@ -461,79 +462,10 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
   }
   const authorizationFile = flagString(parsed.flags, "authorization-file");
   if (!authorizationFile) throw new Error("workflow resolve-critique requires a signed --authorization-file <path>");
-  const { slug, projectRoot } = readBoundSession(sessionDir);
-  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "authorization-file"]));
-  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
-    const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
-    if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") {
-      throw new Error("workflow resolve-critique is allowed only for the canonical builder.build verify step");
-    }
-    const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
-    const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
-    if (!beforeTrustBundle) throw new Error("workflow resolve-critique requires trust.bundle");
-    const bundle = readJsonFile(path.join(sessionDir, "trust.bundle"), "trust bundle");
-    const claims = normalizedCritiqueClaims(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []);
-    const metadataFor = (recordId: string) => {
-      const matches = claims.filter((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === recordId);
-      if (matches.length !== 1) throw new Error(`critique record ${recordId} is missing or ambiguous`);
-      return matches[0]!.metadata as JsonRecord;
-    };
-    const priorRecordId = flagString(parsed.flags, "prior-record-id")!;
-    const resolvingRecordId = flagString(parsed.flags, "resolving-record-id")!;
-    const priorMetadata = metadataFor(priorRecordId);
-    const resolvingMetadata = metadataFor(resolvingRecordId);
-    const requiredLaneIds = (Array.isArray(priorMetadata.lanes) ? priorMetadata.lanes as JsonRecord[] : []).filter((lane) => lane.status !== "pass").map((lane) => String(lane.id)).sort();
-    const requiredFindingIds = (Array.isArray(priorMetadata.findings) ? priorMetadata.findings as JsonRecord[] : []).filter((finding) => finding.status === "open").map((finding) => String(finding.id)).sort();
-    const workspace = (metadata: JsonRecord) => ((metadata.review_target as JsonRecord | undefined)?.workspace_snapshot ?? {}) as JsonRecord;
-    const priorWorkspace = workspace(priorMetadata);
-    const resolvingWorkspace = workspace(resolvingMetadata);
-    const subject = Array.isArray((readJsonFile(path.join(sessionDir, "state.json"), "workflow state").work_item_refs))
-      ? String((readJsonFile(path.join(sessionDir, "state.json"), "workflow state").work_item_refs as unknown[])[0]) : "";
-    const authorizationInput = readJsonFile(authorizationFile, "critique resolution authorization");
-    const authorization = loadCritiqueResolutionAuthorization(authorizationFile, {
-      projectRoot, runId: slug, subject, priorBundleSha256: String(authorizationInput.prior_bundle_sha256),
-      priorRecordId, priorRecordHash: String(priorMetadata.critique_record_hash),
-      resolvingRecordId, resolvingRecordHash: String(resolvingMetadata.critique_record_hash),
-      resolvedLaneIds: requiredLaneIds, resolvedFindingIds: requiredFindingIds,
-      priorSnapshotSha256: String(priorWorkspace.digest), resolvingSnapshotSha256: String(resolvingWorkspace.digest),
-      priorHeadSha: String(priorWorkspace.head_sha ?? "none"), resolvingHeadSha: String(resolvingWorkspace.head_sha ?? "none"),
-    });
-    if (authorization.expected_resolver !== resolvingMetadata.reviewer) throw new Error("critique resolution authorization expected_resolver does not match the resolving reviewer");
-    const priorConsumption = readAuthorizationConsumption(path.dirname(sessionDir), authorization);
-    if (beforeTrustBundle !== authorization.prior_bundle_sha256) {
-      const resolution = priorMetadata.critique_resolution as JsonRecord | undefined;
-      const events = Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events as JsonRecord[] : [];
-      const exactEvents = events.filter((event) => event.event_id === resolution?.resolution_event_id
-        && event.authorization_sha256 === authorizationDigest(authorization));
-      const graph = validateCritiqueResolutionGraph(claims, subject, events, projectRoot);
-      const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
-      const resolvingClaim = claims.find((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === resolvingRecordId);
-      if (priorConsumption && blockingGraphErrors.length === 0 && exactEvents.length === 1 && resolvingClaim
-        && priorMetadata.superseded_by === resolvingRecordId
-        && resolution?.authorization_sha256 === authorizationDigest(authorization)) {
-        await assertCurrentCritiqueClaim(resolvingClaim, projectRoot);
-        return immutableReport({ run_id: slug, resolved: false, replayed: true });
-      }
-      throw new Error("critique resolution authorization prior_bundle_sha256 does not match the current resolution preimage");
-    }
-    if (!priorConsumption) {
-      assertAuthorizationUnused(path.dirname(sessionDir), authorization);
-      recordAuthorizationConsumed(path.dirname(sessionDir), authorization);
-    }
-    const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
-    await mainFromPublicWorkflow(["resolve-critique", sessionDir, ...forwarded, "--resolver", authorization.expected_resolver, "--authorization-digest", authorizationDigest(authorization), "--authorization-key-id", authorization.signature.key_id, "--authorization-nonce", authorization.nonce, "--preimage-digest", beforeTrustBundle, "--authorization-base64", Buffer.from(JSON.stringify(authorization)).toString("base64")]);
-    const result = await recoverBuilderFlowSession({ sessionDir });
-    const afterTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
-    if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {
-      throw new Error("workflow resolve-critique must not attach or otherwise mutate the Flow manifest");
-    }
-    if (legacySidecars.some(({ name, digest }) => optionalFileDigest(path.join(sessionDir, name)) !== digest)) {
-      throw new Error("workflow resolve-critique must persist only through trust.bundle");
-    }
-    return immutableReport({ run_id: slug, resolved: beforeTrustBundle !== afterTrustBundle, replayed: beforeTrustBundle === afterTrustBundle });
-  });
+  const { projectRoot } = readBoundSession(sessionDir);
+  const report = invokeExternalLifecycleAuthority({ action: "resolve-critique", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: flagString(parsed.flags, "prior-record-id")!, resolving_record_id: flagString(parsed.flags, "resolving-record-id")! }) as JsonRecord;
   if (json) console.log(JSON.stringify(report));
-  else console.log(report.replayed ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
+  else console.log(report?.replayed ? "Critique resolution was already recorded." : "Resolved historical critique in the trust bundle.");
   return 0;
 }
 
