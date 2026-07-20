@@ -73,7 +73,7 @@ _Avoid_: Graph database as the default store (it is opt-in and a view, not the s
 
 ### Knowledge Promote Sub-Flow
 
-The Knowledge Kit's codebase-facing pipeline (the "flow within a flow") that a delivered session's promotion runs through: ingest the session artifacts, distill schema-valid draft decision/vocabulary/learning deltas, link their provenance (PR, merge SHA, session archive, touched topics), and health-check the registry for contradictions with a merge-repair proposal. It is proposals-only — every output is a draft under the session's proposals directory that the promote step applies; the sub-flow never writes docs directly. Invokable standalone and composable from the Builder promote step. See docs/decisions/knowledge-promote-sub-flow.md.
+The Knowledge Kit's codebase-facing pipeline (the "flow within a flow") that a delivered session's promotion runs through: ingest the session artifacts, distill schema-valid draft decision/vocabulary/learning deltas, link their provenance (PR, merge SHA, session archive, touched topics), and health-check the registry for contradictions with a merge-repair proposal. It is proposals-only: the default `repo-docs` target writes drafts under the session's proposals directory, while the explicit `store` target stages `create-node` drafts under the registered machine-local `personal` store repository's `proposals/pending/<session>/` directory. Neither target writes docs or applies Knowledge records directly. Invokable standalone and composable from the Builder promote step. See docs/decisions/knowledge-promote-sub-flow.md.
 _Avoid_: Promotion gate as a synonym (the gate is the recorded promote claim; this is the assisted pipeline)
 
 ### Runtime Session Residue

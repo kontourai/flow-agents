@@ -46,6 +46,51 @@ This slice supplies residue to later offline distillation. It does not schedule
 dreaming, write a Knowledge store, parse OpenCode/pi transcripts, or change the
 telemetry schema.
 
+## Promote proposal destinations
+
+`runPromote` keeps `repo-docs` as its default proposal destination. Omit
+`target`, or pass `target: "repo-docs"`, to retain the established byte-identical
+draft tree under `<session>/proposals/`.
+
+Pass `target: "store"` to stage the same distilled decisions, vocabulary, and
+learnings as `create-node` JSON proposals for the machine-local personal store:
+
+```js
+await runPromote({ sessionDir, repoRoot, target: "store", agent: "dream" });
+```
+
+The first store-target run scaffolds
+`$XDG_DATA_HOME/knowledge-store/knowledge` (falling back to
+`$HOME/.local/share/knowledge-store/knowledge`) and atomically registers that
+exact root as `personal` in `$XDG_DATA_HOME/knowledge-store/roots.json`.
+Existing valid roots and `default_write` are preserved. A private writer lock
+serializes cooperating updates; capture-and-merge installation also preserves
+an update from an older writer that does not use that lock. Concurrent changes
+to the same root fail as a conflict instead of choosing a winner. A malformed
+registry, conflicting `personal` root, symlinked ancestry,
+unsafe session slug, active writer, or write failure stops the run instead of
+selecting or repairing a surprising store.
+
+The lock records its PID and creation time in `.roots.json.lock/owner.json`.
+After an interrupted process, confirm that PID is no longer active before
+removing the lock directory; the resolver intentionally fails closed rather
+than guessing that a lock is stale. If interruption occurs during installation,
+the next registry read serves or restores the last complete private capture
+before any consumer can interpret the registry as empty. `write: false`
+performs the same registry,
+destination, and symlink validation without scaffolding the store or staging
+proposals.
+
+Proposals land under
+`knowledge/proposals/pending/<session>/`; they never land in `knowledge/records`.
+Each proposal carries the session id and all ingested transcript references,
+uses the runtime residue scrubber on secret-shaped content, and has a payload
+that can be passed unchanged to `DefaultKnowledgeStore.create` after an
+explicit downstream review. This slice stages only: it does not apply,
+schedule, layer, or fan out proposals, and it does not change the external MCP
+tool implementation. Inspect the pending JSON plus `roots.json`; proposal
+review/apply policy is owned by the next unified-memory work item.
+
 ---
 
 ## Contract Summary

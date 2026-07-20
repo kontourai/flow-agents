@@ -134,7 +134,12 @@
     {
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
-      "description": "Executable logic for the knowledge.promote sub-flow (issues #313 and #669): runPromote({sessionDir, repoRoot, provenance}) preserves the workflow-sidecar ingest -> distill -> link -> health path and writes DRAFT proposals ONLY under <session>/proposals/. The ingest layer also exposes provider-neutral workflow-sidecar and runtime-session sources; runtime-session projects canonical telemetry-referenced Claude Code/Codex transcripts into bounded, deterministically redacted residue under schemas/knowledge/residue.schema.json with a fail-closed dream-owned cursor. Proposals-only by construction; never mutates docs/, CONTEXT.md, a Knowledge store, or any path outside the explicit proposal/cursor targets."
+      "description": "Executable logic for the knowledge.promote sub-flow (issues #313, #669, and #670): runPromote({sessionDir, repoRoot, provenance}) preserves the workflow-sidecar ingest -> distill -> link -> health path. The byte-compatible repo-docs default writes DRAFT proposals only under <session>/proposals/; the explicit store target stages create-node drafts under the registered personal store repository's proposals/pending/<session>/ directory without applying records. The ingest layer also exposes provider-neutral workflow-sidecar and runtime-session sources; runtime-session projects canonical telemetry-referenced Claude Code/Codex transcripts into bounded, deterministically redacted residue under schemas/knowledge/residue.schema.json with a fail-closed dream-owned cursor."
+    },
+    {
+      "id": "knowledge.global-store-resolver",
+      "path": "adapters/shared/store-resolve.js",
+      "description": "Flow Agents-owned global store/root-registry primitive (#670): hermetically resolves the XDG/HOME personal store location, scaffolds the canonical empty default-store shape, and atomically/idempotently registers it as personal in the established MCP-compatible roots.json shape. Malformed, conflicting, uncontained, or symlinked state fails closed."
     }
   ],
   "evals": [
@@ -217,6 +222,16 @@
       "id": "knowledge.runtime-session-residue-suite",
       "path": "promote/runtime-session.test.js",
       "description": "Eval cases for unified agentic memory WI-1 (#669): pins the workflow-sidecar residue hash, rejects partial source variants, exercises Claude Code and Codex fixtures, proves prefix-bound continuity by blocking copy-truncate gaps and draining the native .1 rotation predecessor, verifies cross-invocation deduplication, rejects mixed-format, out-of-root, over-limit, unsafe-cursor, and uncommitted-cursor input, and seeds credential/path/email/identifier canaries for deterministic scrub evidence."
+    },
+    {
+      "id": "knowledge.store-target-suite",
+      "path": "promote/store-target.test.js",
+      "description": "Eval cases for unified agentic memory WI-2 (#670): explicit store proposal staging, proposal-schema and DefaultKnowledgeStore.create payload compatibility, mandatory session/transcript provenance, deterministic retry/collision behavior, containment and write boundaries, and omitted/explicit repo-doc byte parity."
+    },
+    {
+      "id": "knowledge.global-store-resolver-suite",
+      "path": "adapters/shared/store-resolve.test.js",
+      "description": "Hermetic WI-2 (#670) proof for XDG/HOME personal-store bootstrap, canonical scaffold shape, atomic stable roots.json persistence, idempotence, existing-root preservation, malformed/conflicting registry refusal, and symlink containment."
     }
   ],
   "skills": [

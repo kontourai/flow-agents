@@ -2,11 +2,10 @@
  * Knowledge promote sub-flow — orchestrator (the "flow within a flow").
  *
  * Runs ingest -> distill -> link -> health over a completed session directory
- * and lands every output as a DRAFT under `<session>/proposals/` for the promote
- * step's human/agent to apply. PROPOSALS-ONLY (R4): this module writes ONLY under
- * `outDir` (default `<session>/proposals`) — never into docs/, CONTEXT.md, or any
- * path outside the session directory. The Builder promote step names this sub-flow
- * as its assisted path; the `promote` CLI stays the recording mechanism.
+ * and lands every output as a DRAFT for the promote step's human/agent to apply.
+ * PROPOSALS-ONLY (R4): the default target writes under `<session>/proposals/`;
+ * the explicit store target stages under the personal store's pending area.
+ * Neither target writes docs, CONTEXT.md, or live Knowledge records.
  *
  * FlowDefinition: kits/knowledge/flows/promote.flow.json (id `knowledge.promote`).
  * See context/contracts/knowledge-store-contract.md and
@@ -21,6 +20,7 @@ import { ingestSession } from "./ingest.js";
 import { distill } from "./distill.js";
 import { link } from "./link.js";
 import { health } from "./health.js";
+import { sanitizeStoreResult, writeStoreProposals } from "./store-target.js";
 
 export {
   ingestFromSource,
@@ -133,28 +133,31 @@ function writeProposals(outDir, linked, healthResult, result) {
  * @param {string} opts.repoRoot              repo root (registry + CONTEXT.md live here).
  * @param {object} [opts.provenance]          { pr, mergeSha, sessionArchivePath }.
  * @param {string} [opts.outDir]              proposals dir (default <sessionDir>/proposals).
+ * @param {"repo-docs"|"store"} [opts.target="repo-docs"] proposal destination.
+ * @param {object} [opts.env=process.env]      environment used to resolve a store target.
  * @param {string} [opts.decided]             ISO date stamped on drafts.
  * @param {string} [opts.agent]
- * @param {boolean} [opts.write=true]         write drafts to disk (still only under outDir).
+ * @param {boolean} [opts.write=true]         stage drafts; false validates and reports paths only.
  * @returns {Promise<object>} the promote result.
  */
-export async function runPromote(opts = {}) {
-  const { sessionDir, repoRoot, provenance = {}, decided, agent, write = true } = opts;
-  if (!sessionDir) throw new Error("runPromote requires { sessionDir }");
-  if (!repoRoot) throw new Error("runPromote requires { repoRoot }");
-  const outDir = opts.outDir || path.join(sessionDir, "proposals");
+function targetOptions(opts, sessionDir) {
+  const target = opts.target || "repo-docs";
+  if (!new Set(["repo-docs", "store"]).has(target)) {
+    throw new Error(`runPromote: unknown target '${target}'; expected repo-docs or store`);
+  }
+  if (target === "store" && opts.outDir) {
+    throw new Error("runPromote: { outDir } is only valid for the repo-docs target");
+  }
+  return { target, repoDocsOutDir: opts.outDir || path.join(sessionDir, "proposals") };
+}
 
-  const residue = ingestSession(sessionDir, { agent });
-  const distilled = distill(residue, { repoRoot, decided });
-  const linked = await link(distilled, provenance, { repoRoot, agent });
-  const healthResult = await health({ repoRoot, draftDecisions: linked.decisions, agent });
-
-  const result = {
+function promoteResult(residue, linked, healthResult, repoDocsOutDir, distilled) {
+  return {
     schema_version: "1.0",
     flow: "knowledge.promote",
     slug: residue.slug,
     repo: residue.repo,
-    out_dir: outDir,
+    out_dir: repoDocsOutDir,
     ingested: {
       session_markdown: residue.sessionMarkdown,
       status: residue.status,
@@ -173,10 +176,33 @@ export async function runPromote(opts = {}) {
     },
     warnings: distilled.warnings,
   };
+}
 
-  const written = write ? writeProposals(outDir, linked, healthResult, result) : [];
-  result.written = written;
+function finishPromote({ target, write, linked, residue, result, env, agent, repoDocsOutDir, healthResult }) {
+  if (target === "store") {
+    const staged = writeStoreProposals({ linked, residue, env, agent: agent || "knowledge.promote", write });
+    result.out_dir = staged.outDir;
+    result.written = staged.written;
+    return sanitizeStoreResult(result);
+  }
+  result.written = write ? writeProposals(repoDocsOutDir, linked, healthResult, result) : [];
   return result;
+}
+
+export async function runPromote(opts = {}) {
+  const { sessionDir, repoRoot, provenance = {}, decided, agent, write = true } = opts;
+  if (!sessionDir) throw new Error("runPromote requires { sessionDir }");
+  if (!repoRoot) throw new Error("runPromote requires { repoRoot }");
+  const { target, repoDocsOutDir } = targetOptions(opts, sessionDir);
+  const residue = ingestSession(sessionDir, { agent });
+  const distilled = distill(residue, { repoRoot, decided });
+  const linked = await link(distilled, provenance, { repoRoot, agent });
+  const healthResult = await health({ repoRoot, draftDecisions: linked.decisions, agent });
+  const result = promoteResult(residue, linked, healthResult, repoDocsOutDir, distilled);
+  return finishPromote({
+    target, write, linked, residue, result, env: opts.env || process.env,
+    agent, repoDocsOutDir, healthResult,
+  });
 }
 
 export default runPromote;

@@ -220,6 +220,22 @@ Create a new record. The adapter assigns `id`, `created_at`, and `updated_at`.
 
 **Post-conditions:** Record is retrievable by `get(id)`. Links in `links` array are indexed.
 
+#### Staged create proposals
+
+`knowledge.promote` may stage a `schemas/knowledge/proposal.schema.json`
+`create-node` artifact whose `payload` is this exact `create` input. The payload
+is not a second record contract and needs no translation before an authorized
+caller passes it to `create`. Store-target memory proposals use `raw` records,
+`memory.decision`, `memory.vocabulary`, or `memory.learning` categories, and
+must carry `provenance.agent`, `provenance.session_id`, and non-empty transcript
+references in `provenance.source_ids`. The renderer applies the established
+deterministic runtime-residue scrubber before title/body enter the payload.
+
+Staging is not mutation. Pending artifacts live outside `records/`, under the
+personal store repository's `proposals/pending/<session>/` directory. Creating,
+reviewing, rejecting, or applying those files is a downstream policy concern;
+the promote renderer never invokes `create` itself.
+
 ### 6.2 `update`
 
 Update mutable fields of an existing record. Immutable fields (`id`, `type`, `created_at`,
