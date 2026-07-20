@@ -29,7 +29,8 @@
       "types": "./build/src/index.d.ts",
       "import": "./build/src/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./schemas/*.json": "./schemas/*.json"
   },
   "repository": {
     "type": "git",
