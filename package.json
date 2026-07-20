@@ -150,9 +150,14 @@
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit",
-    "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources"
+    "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
+    "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs"
   },
   "devDependencies": {
+    "@kontourai/lookout": "0.3.2",
+    "@kontourai/surface": "2.13.0",
+    "@kontourai/survey": "1.18.0",
+    "@kontourai/traverse": "0.19.0",
     "@types/node": "^26.1.1",
     "gcp-metadata": "7.0.1",
     "promptfoo": "^0.121.18",
