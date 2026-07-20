@@ -96,6 +96,17 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    # Composite-action checkouts contain source files but not node_modules. Install the
+    # anchor's locked runtime dependencies at its own repository root so helpers such as
+    # derive-claim-status.mjs can resolve @kontourai/surface without depending on the
+    # consumer repository's package graph. Lifecycle scripts stay disabled because this
+    # action only needs the published runtime modules.
+    - name: Install trust verifier dependencies
+      shell: bash
+      run: |
+        ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
+        npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
+
     # Resolve the bundle path: use the input value if the file exists, otherwise
     # pass an empty string (trust-reconcile.js auto-discovers or operates fail-open).
     - name: Trust verify
