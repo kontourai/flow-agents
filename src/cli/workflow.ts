@@ -13,6 +13,7 @@ import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSe
 import { buildUnsignedCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
@@ -120,13 +121,19 @@ async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boole
       throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
     }
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    const ownedDeliveryRoot = `delivery/${slug}`;
+    const sourceSnapshot = captureReviewWorkspaceSnapshot(projectRoot, [], [ownedDeliveryRoot]);
+    const afterSourceSnapshot = assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    if (!isDeepStrictEqual(verifiedSnapshot, afterSourceSnapshot)) {
+      throw new Error("workflow publish-delivery source snapshot changed before copying delivery evidence; re-run canonical review and verification");
+    }
     const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
     const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
     const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
     const transaction = stageDeliveryDestination(projectRoot, slug, sessionDir);
     await withStablePublishedDeliverySnapshot(
-      verifiedSnapshot,
-      () => assertCurrentVerifiedWorkspaceEvidence(sessionDir),
+      sourceSnapshot,
+      () => captureReviewWorkspaceSnapshot(projectRoot, [], [ownedDeliveryRoot]),
       async () => {
         await publishDelivery(sessionDir, projectRoot);
         if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {

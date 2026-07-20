@@ -34,7 +34,7 @@ printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; tou
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
 chmod +x "$CONSUMER/checks/check-success-background.sh"
-printf '.kontourai/\ndelivery/\n' > "$CONSUMER/.gitignore"
+printf '.kontourai/\n' > "$CONSUMER/.gitignore"
 (cd "$CONSUMER" && git init -q && git config user.email public-workflow@example.invalid && git config user.name 'Public Workflow Eval' && git add . && git commit -qm 'seed public workflow consumer')
 
 run_candidate() {
@@ -434,6 +434,9 @@ if (!report.published || !fs.existsSync(`${delivery}/trust.bundle`) || !fs.exist
   || JSON.stringify(statement.predicate) !== JSON.stringify(JSON.parse(fs.readFileSync(`${session}/trust.bundle`, 'utf8')))) process.exit(1);
 NODE
 pass "release-ready public publishing emits and copies only newly digest-bound checkpoint companions"
+(cd "$CONSUMER" && git add "delivery/$(basename "$RELEASE_SESSION")" && git commit -qm 'commit public delivery evidence')
+[[ -f "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")/trust.bundle" ]] || fail "tracked public delivery output did not remain available after commit"
+pass "public publishing supports tracked delivery evidence"
 printf 'post-verification source change\n' > "$CONSUMER/source-change.txt"
 (cd "$CONSUMER" && git add source-change.txt && git commit -qm 'post verification source change')
 set +e
