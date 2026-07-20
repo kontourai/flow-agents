@@ -10,6 +10,12 @@ apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
 npm ci --ignore-scripts --silent
 npm run build --silent
+bad_modules="$(mktemp -d)"
+mkdir -p "$bad_modules/@kontourai"
+ln -s "$PWD/node_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$bad_modules" kontourai-lifecycle-operator; then
+  echo "symlinked staged reducer unexpectedly installed" >&2; exit 1
+fi
 scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs node_modules kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node
 test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
@@ -68,7 +74,7 @@ async function makeSession(slug) {
 fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(project, 'review-target'), { recursive: true });
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
-for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e']) await makeSession(slug);
+for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e']) await makeSession(slug);
 write(path.join(project, 'fixture.json'), { project, subject, actor, actorKey });
 NODE
 node /work/setup-fixture.mjs
@@ -86,6 +92,21 @@ NODE
 )
 test "${#CRITIQUE_IDS[@]}" -eq 2
 node build/src/cli.js workflow resolve-critique-request --session-dir "$RESOLVE_SESSION" --prior-record-id "${CRITIQUE_IDS[0]}" --resolving-record-id "${CRITIQUE_IDS[1]}" > /tmp/resolve-request.json
+COPIED_PROJECT=/tmp/lifecycle-authority-copied-project
+rm -rf "$COPIED_PROJECT"
+cp -a "$PROJECT" "$COPIED_PROJECT"
+chown -R node:node "$COPIED_PROJECT"
+node build/src/cli.js workflow resolve-critique-request --session-dir "$COPIED_PROJECT/.kontourai/flow-agents/resolve-e2e" --prior-record-id "${CRITIQUE_IDS[0]}" --resolving-record-id "${CRITIQUE_IDS[1]}" > /tmp/copied-project-request.json
+WRONG_STEP_PROJECT=/tmp/lifecycle-authority-wrong-step
+rm -rf "$WRONG_STEP_PROJECT"
+cp -a "$PROJECT" "$WRONG_STEP_PROJECT"
+chown -R node:node "$WRONG_STEP_PROJECT"
+node build/src/cli.js workflow resolve-critique-request --session-dir "$WRONG_STEP_PROJECT/.kontourai/flow-agents/resolve-e2e" --prior-record-id "${CRITIQUE_IDS[0]}" --resolving-record-id "${CRITIQUE_IDS[1]}" > /tmp/wrong-step-request.json
+WRONG_FLOW_PROJECT=/tmp/lifecycle-authority-wrong-flow
+rm -rf "$WRONG_FLOW_PROJECT"
+cp -a "$PROJECT" "$WRONG_FLOW_PROJECT"
+chown -R node:node "$WRONG_FLOW_PROJECT"
+node build/src/cli.js workflow resolve-critique-request --session-dir "$WRONG_FLOW_PROJECT/.kontourai/flow-agents/resolve-e2e" --prior-record-id "${CRITIQUE_IDS[0]}" --resolving-record-id "${CRITIQUE_IDS[1]}" > /tmp/wrong-flow-request.json
 
 cat > /work/sign-authorization.mjs <<'NODE'
 import fs from 'node:fs'; import crypto from 'node:crypto';
@@ -95,6 +116,10 @@ const signed = { ...unsigned, signature: { algorithm: 'ed25519', key_id: 'fixtur
 fs.writeFileSync(output, `${JSON.stringify(signed)}\n`, { mode: 0o600 });
 NODE
 node /work/sign-authorization.mjs /tmp/resolve-request.json /root/lifecycle-authorizations/resolve.json
+cp /root/lifecycle-authorizations/resolve.json /root/lifecycle-authorizations/resolve-copied-path.json
+node /work/sign-authorization.mjs /tmp/copied-project-request.json /root/lifecycle-authorizations/copied-project.json
+node /work/sign-authorization.mjs /tmp/wrong-step-request.json /root/lifecycle-authorizations/wrong-step.json
+node /work/sign-authorization.mjs /tmp/wrong-flow-request.json /root/lifecycle-authorizations/wrong-flow.json
 
 cat > /work/make-lifecycle-authorization.mjs <<'NODE'
 import fs from 'node:fs'; import crypto from 'node:crypto';
@@ -109,6 +134,10 @@ node /work/make-lifecycle-authorization.mjs cancel archive-e2e /root/lifecycle-a
 node /work/make-lifecycle-authorization.mjs archive archive-e2e /root/lifecycle-authorizations/archive.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel stale-e2e /root/lifecycle-authorizations/stale.json "$PAST"
 node /work/make-lifecycle-authorization.mjs cancel unauthorized-e2e /root/lifecycle-authorizations/unauthorized.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel stale-e2e /root/lifecycle-authorizations/stale-holder.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-a.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-b.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel symlink-e2e /root/lifecycle-authorizations/symlink.json "$FUTURE"
 node - /root/lifecycle-authorizations/unauthorized.json <<'NODE'
 const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...unsigned } = value;
 value.signature.value = crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64'); fs.writeFileSync(file, JSON.stringify(value));
@@ -116,7 +145,7 @@ NODE
 chown -R node:node "$PROJECT"
 
 cat > /work/operator-e2e.mjs <<'NODE'
-import fs from 'node:fs'; import path from 'node:path'; import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs'; import path from 'node:path'; import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { invokeExternalLifecycleAuthority, verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
 const project = '/tmp/lifecycle-authority-e2e'; const session = (slug) => path.join(project, '.kontourai', 'flow-agents', slug);
 const invoke = (action, slug, authorization_file, extra = {}) => invokeExternalLifecycleAuthority({ action, project_root: project, session_dir: session(slug), authorization_file, ...extra });
@@ -126,16 +155,27 @@ const resolve = invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-autho
 if (resolve.operation_status !== 'applied') throw new Error('resolve was not applied');
 const replay = invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve.json', { prior_record_id: ids[0], resolving_record_id: ids[1] });
 if (replay.operation_status !== 'replayed') throw new Error('resolve did not replay');
+expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve-copied-path.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /consumed lifecycle authorization record does not match the exact request/);
+expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/copied-project.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /canonical project root/);
+const wrongStepProject = '/tmp/lifecycle-authority-wrong-step', wrongStepSession = path.join(wrongStepProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongStepState = path.join(wrongStepProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'state.json'); const wrongState = JSON.parse(fs.readFileSync(wrongStepState, 'utf8')); wrongState.current_step = 'execute'; fs.writeFileSync(wrongStepState, JSON.stringify(wrongState)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongStepProject, session_dir: wrongStepSession, authorization_file: '/root/lifecycle-authorizations/wrong-step.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
+const wrongFlowProject = '/tmp/lifecycle-authority-wrong-flow', wrongFlowSession = path.join(wrongFlowProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongDefinition = path.join(wrongFlowProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'definition.json'); const foreign = JSON.parse(fs.readFileSync(wrongDefinition, 'utf8')); foreign.id = 'builder.shape'; fs.writeFileSync(wrongDefinition, JSON.stringify(foreign)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongFlowProject, session_dir: wrongFlowSession, authorization_file: '/root/lifecycle-authorizations/wrong-flow.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
 const bundle = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'trust.bundle'), 'utf8'));
 const resolutionEvents = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'lifecycle-authority.resolution-events.json'), 'utf8')).events;
 if (resolutionEvents.length !== 1 || !bundle.claims.some((claim) => claim.status === 'superseded' && claim.value === 'fail')) throw new Error('historical critique was not preserved exactly once');
 const completion = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'lifecycle-authority.completion.json'), 'utf8'));
 const forged = structuredClone(completion); forged.signature.value = Buffer.alloc(64).toString('base64'); expectReject(() => verifyLifecycleAuthorityCompletion(forged), /completion signature is invalid/);
 const validation = spawnSync(process.execPath, ['./build/src/cli/validate-workflow-artifacts.js', '--require-critique', session('resolve-e2e')], { cwd: '/work', encoding: 'utf8' }); if (validation.status !== 0) throw new Error(`repaired critique history did not validate: ${validation.stdout}${validation.stderr}`);
+const copied = '/tmp/lifecycle-authority-copied-completion'; fs.rmSync(copied, { recursive: true, force: true }); fs.cpSync(session('resolve-e2e'), copied, { recursive: true }); const copiedBundle = JSON.parse(fs.readFileSync(path.join(copied, 'trust.bundle'), 'utf8')); copiedBundle.claims.find((claim) => claim.status === 'superseded').metadata.superseded_by = 'forged-record'; fs.writeFileSync(path.join(copied, 'trust.bundle'), JSON.stringify(copiedBundle)); const copiedValidation = spawnSync(process.execPath, ['./build/src/cli/validate-workflow-artifacts.js', '--require-critique', copied], { cwd: '/work', encoding: 'utf8' }); if (copiedValidation.status === 0) throw new Error('copied completion blessed an edited critique graph');
+fs.writeFileSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt'), 'still writable by project owner\n'); if (fs.statSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt')).uid !== process.getuid()) throw new Error('post-resolution artifacts are not owned by the non-root workflow user');
 const run = path.join(project, '.kontourai', 'flow', 'runs', 'resolve-e2e'); for (const file of ['evidence/manifest.json', 'state.json', 'report.json', 'report.md']) if (!fs.existsSync(path.join(run, file))) throw new Error(`missing canonical Flow write ${file}`); if (!JSON.parse(fs.readFileSync(path.join(run, 'evidence/manifest.json'), 'utf8')).evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest missing authority attachment');
 const canceled = invoke('cancel', 'archive-e2e', '/root/lifecycle-authorizations/cancel.json'); if (canceled.operation_status !== 'applied') throw new Error('cancel was not applied'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'archive-e2e.json'), 'utf8')).status !== 'released') throw new Error('cancel did not release assignment'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'archive-e2e', 'state.json'), 'utf8')).status !== 'canceled') throw new Error('cancel did not update canonical Flow state');
 const archived = invoke('archive', 'archive-e2e', '/root/lifecycle-authorizations/archive.json'); if (archived.operation_status !== 'applied' || fs.existsSync(session('archive-e2e')) || !fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'archive', 'archive-e2e', 'state.json'))) throw new Error('archive behavior is invalid');
 expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale.json'), /authorization is expired/);
+const staleAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'stale-e2e.json'); const staleRecord = JSON.parse(fs.readFileSync(staleAssignment, 'utf8')); staleRecord.actor_key = 'stale-holder'; fs.writeFileSync(staleAssignment, JSON.stringify(staleRecord)); expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale-holder.json'), /live canonical assignment holder/); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'stale-e2e', 'state.json'), 'utf8')).status !== 'active') throw new Error('stale assignment canceled Flow');
+const concurrentCode = `import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js'; import path from 'node:path'; const project = process.argv[1], auth = process.argv[2]; invokeExternalLifecycleAuthority({ action: 'cancel', project_root: project, session_dir: path.join(project, '.kontourai', 'flow-agents', 'concurrent-e2e'), authorization_file: auth });`;
+const concurrent = (auth) => new Promise((resolve) => { const child = spawn(process.execPath, ['--input-type=module', '-e', concurrentCode, project, auth], { cwd: '/work', stdio: 'ignore' }); child.on('exit', (status) => resolve(status)); });
+const concurrentResults = await Promise.all([concurrent('/root/lifecycle-authorizations/concurrent-a.json'), concurrent('/root/lifecycle-authorizations/concurrent-b.json')]); if (concurrentResults.filter((status) => status === 0).length !== 1 || concurrentResults.filter((status) => status !== 0).length !== 1) throw new Error(`same-run lock did not serialize distinct nonces: ${concurrentResults}`); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'concurrent-e2e', 'state.json'), 'utf8')).status !== 'canceled' || JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'concurrent-e2e.json'), 'utf8')).status !== 'released') throw new Error('concurrent lifecycle mutation lost canonical state');
+const swapped = session('symlink-e2e'), rootSentinel = '/root/lifecycle-authorizations/symlink-sentinel'; fs.writeFileSync(rootSentinel, 'root-owned sentinel\n', { mode: 0o600 }); fs.rmSync(swapped, { recursive: true, force: true }); fs.symlinkSync('/root/lifecycle-authorizations', swapped); expectReject(() => invoke('cancel', 'symlink-e2e', '/root/lifecycle-authorizations/symlink.json'), /session_dir must identify/); if (fs.readFileSync(rootSentinel, 'utf8') !== 'root-owned sentinel\n') throw new Error('symlink swap escaped into a root-owned path');
 expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authorizations/unauthorized.json'), /authorization signature is invalid/);
 expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
 console.log('PASS: signed resolve/cancel/archive E2E, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');

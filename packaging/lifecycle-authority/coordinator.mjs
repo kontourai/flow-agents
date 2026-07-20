@@ -94,20 +94,20 @@ function atomicWrite(file, bytes, mode = 0o600) {
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
 }
 function transactionJournal(paths) { return path.join(paths.sessionDir, ".lifecycle-authority.transaction.json"); }
-function snapshotTree(root, relative = "") {
+export function snapshotTree(root, relative = "") {
   const target = path.join(root, relative); const stat = fs.lstatSync(target);
   if (stat.isSymbolicLink()) throw new Error("lifecycle transaction refuses symlinked artifact paths");
   if (stat.isFile()) return [{ path: relative, bytes: fs.readFileSync(target).toString("base64"), mode: stat.mode & 0o777 }];
   if (!stat.isDirectory()) throw new Error("lifecycle transaction requires regular artifact paths");
   return fs.readdirSync(target).flatMap((entry) => entry === ".lifecycle-authority.transaction.json" ? [] : snapshotTree(root, path.join(relative, entry)));
 }
-function restoreTree(root, snapshot) {
+export function restoreTree(root, snapshot) {
   const original = new Map(snapshot.map((entry) => [entry.path, entry]));
   const current = snapshotTree(root);
   for (const entry of current.filter((entry) => !original.has(entry.path))) fs.unlinkSync(path.join(root, entry.path));
   for (const entry of snapshot) atomicWrite(path.join(root, entry.path), Buffer.from(entry.bytes, "base64"), entry.mode);
 }
-function recoverTransaction(paths) {
+export function recoverTransaction(paths) {
   const file = transactionJournal(paths); if (!fs.existsSync(file)) return;
   const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
   if (journal.status !== "prepared") return;
