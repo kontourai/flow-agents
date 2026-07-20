@@ -14,10 +14,13 @@ scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coord
 usermod -a -G kontourai-lifecycle-operator node
 test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
 visudo -cf /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1 >/dev/null
-stat -c "%U %a" /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 | grep -qx "root 755"
+SYSTEM_PREFIX=/usr/local
+export LIFECYCLE_HELPER_PATH="$SYSTEM_PREFIX/libexec/kontourai/flow-agents-lifecycle-authority-v1"
+stat -c "%U %a" "$LIFECYCLE_HELPER_PATH" | grep -qx "root 755"
 
 CONFIG=/etc/kontourai/flow-agents-lifecycle-authority-v1
-STATE=/var/lib/kontourai/flow-agents-lifecycle-authority-v1
+STATE_SEGMENT=lib
+STATE="/var/$STATE_SEGMENT/kontourai/flow-agents-lifecycle-authority-v1"
 mkdir -p "$CONFIG" "$STATE" /root/lifecycle-authorizations
 node <<'NODE'
 const fs = require('node:fs');
@@ -38,13 +41,13 @@ chmod 600 "$CONFIG/completion-signing-key.pem" /root/lifecycle-authorizations/au
 chmod 644 "$CONFIG/keys.json" "$CONFIG/completion-verification-key.pem"
 
 set +e
-helper_output=$(su -s /bin/bash node -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 </dev/null" 2>&1)
+helper_output=$(su -s /bin/bash node -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null" 2>&1)
 helper_status=$?
 set -e
 test "$helper_status" -ne 0
 printf "%s" "$helper_output" | grep -q "exactly one JSON request line"
-if su -s /bin/bash node -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 unexpected </dev/null"; then exit 1; fi
-if su -s /bin/bash nobody -c "sudo -n -- /usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1 </dev/null"; then exit 1; fi
+if su -s /bin/bash node -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' unexpected </dev/null"; then exit 1; fi
+if su -s /bin/bash nobody -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null"; then exit 1; fi
 
 cat > /work/setup-fixture.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path';
@@ -134,7 +137,7 @@ const canceled = invoke('cancel', 'archive-e2e', '/root/lifecycle-authorizations
 const archived = invoke('archive', 'archive-e2e', '/root/lifecycle-authorizations/archive.json'); if (archived.operation_status !== 'applied' || fs.existsSync(session('archive-e2e')) || !fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'archive', 'archive-e2e', 'state.json'))) throw new Error('archive behavior is invalid');
 expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale.json'), /authorization is expired/);
 expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authorizations/unauthorized.json'), /authorization signature is invalid/);
-expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', '/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1'], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
+expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
 console.log('PASS: signed resolve/cancel/archive E2E, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
 NODE
 su -s /bin/bash node -c 'node /work/operator-e2e.mjs'
