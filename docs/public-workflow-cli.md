@@ -269,6 +269,11 @@ active gate visit, exact request binding, and effective provider configuration; 
 only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
 and projects the resulting state.
 
+Every GitHub invocation is explicitly pinned to `github.com` and the configured repository, with
+an allowlisted environment and a revalidated trusted executable path. Recovery accepts only
+byte-identical result receipts, including their observation timestamp, and only when the matching
+canonical manifest claim references that receipt's exact SHA-256 digest.
+
 The general Builder runtime is intentionally only a public wrapper and Flow/projection composition
 point. The dedicated publish-change runtime owns receipt persistence and recovery, temporary
 evidence, the locked trusted-head rebind, and completed-run projection; it does not add those

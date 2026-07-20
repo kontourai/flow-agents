@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { deriveBuilderGateActionEnvelope, type GateActionEnvelope } from "./builder-gate-action-envelope.js";
 import type { BuilderFlowRunResult } from "./builder-flow-run-adapter.js";
@@ -156,7 +155,10 @@ function persistResult<Result, Run>(context: PublishChangeRuntimeContext, action
   if (payload.byteLength > 65_536) throw dependencies.error("publish-change.result", "exceeds the 65,536 byte operation bound");
   const existing = readResult(context, dependencies);
   if (existing) {
-    if (!existing.equals(payload) && !sameObservedResult(existing, payload, action.action_id)) {
+    // A provider observation is a receipt, not an equivalence class.  In
+    // particular, a different observed_at value proves this is a different
+    // observation and cannot replay a prior receipt.
+    if (!existing.equals(payload)) {
       throw dependencies.error("publish-change.result", "already exists with different authenticated operation bytes");
     }
     return { file, sha256: createHash("sha256").update(existing).digest("hex") };
@@ -180,29 +182,21 @@ function readResult<Result, Run>(context: PublishChangeRuntimeContext, dependenc
   } finally { fs.closeSync(descriptor); }
 }
 
-function sameObservedResult(existing: Buffer, current: Buffer, actionId: string): boolean {
-  try {
-    const left = JSON.parse(existing.toString("utf8")) as AnyRecord;
-    const right = JSON.parse(current.toString("utf8")) as AnyRecord;
-    if (left.operation_action_id !== actionId || right.operation_action_id !== actionId) return false;
-    delete left.observed_at; delete right.observed_at;
-    return isDeepStrictEqual(left, right);
-  } catch { return false; }
-}
-
 async function hasCommittedReceipt<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<boolean> {
   const bytes = readResult(context, dependencies);
   if (!bytes) return false;
   try { if ((JSON.parse(bytes.toString("utf8")) as AnyRecord).operation_action_id !== action.action_id) return false; } catch { return false; }
+  const resultSha256 = createHash("sha256").update(bytes).digest("hex");
   const run = await dependencies.loadRun(context);
   return dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority" && entry.authority_trace === action.action_id
-    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened");
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
+    && manifestReferencesResultDigest(entry, resultSha256));
 }
 
 async function recoverCommitted<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<Result | null> {
   const bytes = readResult(context, dependencies);
-  if (!bytes || !sameObservedResult(bytes, payloadFor(action, observation), action.action_id)) return null;
+  if (!bytes || !bytes.equals(payloadFor(action, observation))) return null;
   const run = await dependencies.loadRun(context);
   const attached = dependencies.manifestEvidence(run).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
@@ -210,6 +204,14 @@ async function recoverCommitted<Result, Run>(context: PublishChangeRuntimeContex
     && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
       && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`));
   return attached ? dependencies.project(context, action, observation, run, false, "publish-change recovery projection") : null;
+}
+
+function manifestReferencesResultDigest(entry: AnyRecord, resultSha256: string): boolean {
+  if (!isRecord(entry.bundle) || !Array.isArray(entry.bundle.claims)) return false;
+  return entry.bundle.claims.some((claim: unknown) => {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || !Array.isArray(claim.metadata.artifact_refs)) return false;
+    return claim.metadata.artifact_refs.some((reference: unknown) => isRecord(reference) && reference.sha256 === resultSha256);
+  });
 }
 
 async function advanceGate<Result, Run>(context: PublishChangeRuntimeContext, action: IssuedPublishChangeAction, observation: AuthenticatedPublishChangeObservation, resultSha256: string, dependencies: PublishChangeRuntimeDependencies<Result, Run>): Promise<Run> {

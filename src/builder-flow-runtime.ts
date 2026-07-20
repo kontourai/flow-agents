@@ -639,13 +639,21 @@ function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): vo
 }
 
 function resolveSessionContext(sessionDirInput: string): SessionContext {
-  const sessionDir = path.resolve(sessionDirInput);
-  const artifactRoot = path.dirname(sessionDir);
-  const kontouraiRoot = path.dirname(artifactRoot);
-  if (path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
+  const requestedSessionDir = path.resolve(sessionDirInput);
+  const requestedArtifactRoot = path.dirname(requestedSessionDir);
+  const requestedKontouraiRoot = path.dirname(requestedArtifactRoot);
+  const requestedProjectRoot = path.dirname(requestedKontouraiRoot);
+  if (path.basename(requestedArtifactRoot) !== "flow-agents" || path.basename(requestedKontouraiRoot) !== ".kontourai") {
     throw new BuilderBuildRunInputError("sessionDir", "must be .kontourai/flow-agents/<slug>");
   }
-  assertSafeDirectory(sessionDir, artifactRoot, "sessionDir");
+  assertArtifactSessionAncestors(requestedProjectRoot, requestedKontouraiRoot, requestedArtifactRoot, requestedSessionDir);
+  // The containment proof is canonical, while retained paths stay lexical so
+  // existing projection/archive contracts retain the caller's project spelling.
+  // A lexical containment check alone permits `.kontourai` or `flow-agents`
+  // itself to escape through a directory symlink.
+  const projectRoot = requestedProjectRoot;
+  const artifactRoot = requestedArtifactRoot;
+  const sessionDir = requestedSessionDir;
   const slug = path.basename(sessionDir);
   if (!slug || slug === "." || slug === "..") {
     throw new BuilderBuildRunInputError("sessionDir", "must name a session");
@@ -658,11 +666,27 @@ function resolveSessionContext(sessionDirInput: string): SessionContext {
   return {
     sessionDir,
     artifactRoot,
-    projectRoot: path.dirname(kontouraiRoot),
+    projectRoot,
     slug,
     stateFile,
     bundleFile: path.join(sessionDir, "trust.bundle"),
   };
+}
+
+function assertArtifactSessionAncestors(projectRoot: string, kontouraiRoot: string, artifactRoot: string, sessionDir: string): void {
+  const realProjectRoot = fs.realpathSync(projectRoot);
+  const projectStat = fs.statSync(realProjectRoot);
+  if (!projectStat.isDirectory()) throw new BuilderBuildRunInputError("sessionDir", "project root must be a directory");
+  for (const [directory, field] of [[kontouraiRoot, ".kontourai directory"], [artifactRoot, "flow-agents artifact root"], [sessionDir, "sessionDir"]] as const) {
+    if (!pathExistsNoFollow(directory)) throw new BuilderBuildRunInputError(field, "must exist");
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink()) throw new BuilderBuildRunInputError(field, "must not be a symbolic link");
+    if (!stat.isDirectory()) throw new BuilderBuildRunInputError(field, "must be a directory");
+    const realDirectory = fs.realpathSync(directory);
+    if (!pathIsWithin(realDirectory, realProjectRoot)) {
+      throw new BuilderBuildRunInputError(field, "must remain within the canonical project root");
+    }
+  }
 }
 
 function readSidecarSnapshot(context: SessionContext): SidecarSnapshot {

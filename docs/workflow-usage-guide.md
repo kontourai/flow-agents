@@ -560,6 +560,9 @@ configuration/provider condition. For a configured GitHub adapter, the local hea
 through fixed trusted absolute `git`, and `gh` is resolved from a fixed trusted absolute location,
 rather than caller-controlled `PATH`; its authentication and the exact
 repository/base/head/SHA/title/body/draft match are verified before Flow records the result.
+Every invocation is pinned to `github.com` with an allowlisted environment, so caller-provided
+GH host/config/proxy/socket overrides cannot redirect it. Recovery requires byte-identical result
+receipt bytes and the matching manifest SHA-256 provider-artifact reference.
 The adapter recovers one matching published pull request before creation and after an ambiguous
 create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
 Open records support the normal path; merged records support reconciliation after provider work

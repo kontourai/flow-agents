@@ -219,6 +219,9 @@ configuration identity, run identity, and gate-visit identity under the Flow sub
 It invokes the configured ChangeProvider outside that lock as necessary, then the
 Flow-owned completion transaction reacquires the lock, re-resolves the trusted local head ref/SHA,
 and re-reads canonical state.
+Trusted Git discards caller-provided `GIT_*` routing/configuration, disables system/global config,
+and requires a trusted executable and path ancestry. Session resolution rejects symlinked or
+non-directory `.kontourai`, `flow-agents`, and session ancestors before any runtime read or write.
 It rejects any assignment transfer, gate movement, replay, configuration change, or
 request/result mismatch before persisting the bounded result. Only an authenticated,
 fresh provider observation can write `publish-change.result.json`; it contains the
@@ -249,6 +252,9 @@ recovers one exact published record matching repository, base, head ref, immutab
 body, and draft state. Open records cover the normal path; merged records cover reconciliation
 after provider work completed ahead of the local run. After an ambiguous create failure it performs the same recovery
 query before reporting failure, so retry does not blindly duplicate a pull request.
+Every `gh` invocation is explicitly pinned to `github.com`; host/config/proxy/socket environment
+overrides are not inherited. Receipt recovery requires byte-identical result bytes and a matching
+manifest provider artifact-reference SHA-256 digest.
 Multiple exact matches, a closed-but-unmerged/stale/wrong record, malformed output, unavailable
 provider, or failed authentication leaves the canonical gate unresolved and requires
 the public operation to be retried only after the underlying condition is corrected.

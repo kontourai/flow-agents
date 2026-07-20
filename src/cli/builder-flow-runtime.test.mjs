@@ -31,6 +31,7 @@ import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { trustedGitEnvironment } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -104,6 +105,28 @@ test("shell output cannot spoof an executed-test count", () => {
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
   assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
   assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+});
+
+test("trusted Git drops every caller-controlled GIT override and disables ambient config", () => {
+  const names = ["GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "git_dir"];
+  const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  Object.assign(process.env, {
+    GIT_DIR: "/tmp/attacker-git-dir",
+    GIT_WORK_TREE: "/tmp/attacker-work-tree",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.hooksPath",
+    git_dir: "/tmp/lowercase-attacker-git-dir",
+  });
+  try {
+    const env = trustedGitEnvironment();
+    for (const name of names) assert.equal(Object.hasOwn(env, name), false, `${name} must not reach trusted Git`);
+    assert.equal(env.GIT_CONFIG_NOSYSTEM, "1");
+    assert.ok(typeof env.GIT_CONFIG_GLOBAL === "string" && env.GIT_CONFIG_GLOBAL.length > 0);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
 });
 
 function readJson(file) {
@@ -2004,16 +2027,18 @@ test("Flow completion authenticates the exact issued publish-change observation 
   assert.equal(fs.existsSync(path.join(session.sessionDir, "publish-change.result.json")), false);
 
   const transactionLock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
+  let stableObservation;
   const complete = createPublishChangeOperationCompleter(async (request) => {
     assert.equal(fs.existsSync(transactionLock), false, "provider observation starts without retaining the subject lock");
     await Promise.resolve();
     assert.equal(fs.existsSync(transactionLock), false, "provider observation settles outside the subject lock");
-    return {
+    stableObservation ??= {
     schema_version: "1.0", operation: "publish-change", binding: request.binding,
     provider: { kind: "github", configuration_id: request.provider.configuration_id, adapter: "fixture" }, repository: request.repository,
     change_ref: { provider_record_id: "PR_kwDOfixture", number: 604, url: "https://example.test/kontourai/flow-agents/pull/604", state: "open", base_ref: request.base_ref, head_ref: request.head_ref, head_sha: request.head_sha },
     assignment_actor: request.assignment_actor, provider_actor: "fixture-github-login", observed_at: new Date().toISOString(),
     };
+    return structuredClone(stableObservation);
   });
   const completed = await complete({ sessionDir: session.sessionDir, action });
   assert.notEqual(completed.run.state.current_step, "pr-open");
@@ -2106,6 +2131,30 @@ test("publish-change rejects symlinked and forged persisted results before canon
       /already exists with different authenticated operation bytes/,
     );
     assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
+    await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+  });
+
+  await t.test("a manifest receipt must name the exact persisted result digest", async () => {
+    const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-manifest-digest");
+    const observation = publishChangeObservation(action);
+    const complete = createPublishChangeOperationCompleter(() => structuredClone(observation));
+    await complete({ sessionDir: session.sessionDir, action });
+    const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+    const manifest = readJson(manifestFile);
+    const claim = manifest.evidence.find((entry) => entry.authority_trace === action.action_id).bundle.claims[0];
+    claim.metadata.artifact_refs[0].sha256 = "0".repeat(64);
+    writeJson(manifestFile, manifest);
+    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+    const state = readJson(path.join(session.sessionDir, "state.json"));
+    state.flow_run.current_step = "pr-open";
+    writeJson(path.join(session.sessionDir, "state.json"), state);
+    const beforeProjection = snapshotProjectionTargets(session);
+    await assert.rejects(
+      () => complete({ sessionDir: session.sessionDir, action }),
+      /requires the configured canonical publish-change operation|does not match the current canonical run/,
+    );
+    assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow, "forged manifest digest must not recover or mutate Flow");
+    assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 });
@@ -2679,6 +2728,22 @@ test("recovery parses every projection target before writing any target", async 
 });
 
 test("recovery rejects symlinked session and projection targets before writes", async (t) => {
+  for (const [label, target] of [[".kontourai directory", ".kontourai"], ["flow-agents artifact root", path.join(".kontourai", "flow-agents")]]) {
+    await t.test(label, async () => {
+      const session = makeSession(`recover-${label.replaceAll(/[^a-z]+/gi, "-").replace(/-+$/u, "")}-symlink`);
+      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      const source = path.join(session.projectRoot, target);
+      const outside = path.join(session.projectRoot, `outside-${path.basename(target)}`);
+      fs.renameSync(source, outside);
+      fs.symlinkSync(outside, source, "dir");
+      const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+      const beforeState = snapshotFile(path.join(outside, target === ".kontourai" ? "flow-agents" : "", session.slug, "state.json"));
+      await assert.rejects(() => recoverBuilderFlowSession({ sessionDir: session.sessionDir }), /must not be a symbolic link/);
+      assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+      assert.equal(snapshotFile(path.join(outside, target === ".kontourai" ? "flow-agents" : "", session.slug, "state.json")), beforeState);
+    });
+  }
+
   await t.test("session directory symlink", async () => {
     const session = makeSession("recover-session-symlink");
     await startBuilderFlowSession({ sessionDir: session.sessionDir });

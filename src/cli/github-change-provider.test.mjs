@@ -108,6 +108,35 @@ test("GitHub adapter checks authentication and repository capability, recovers e
   assert.equal(result.provider_actor, "briananderson1222");
   assert.notEqual(result.assignment_actor, result.provider_actor);
   assert.equal(JSON.stringify(result).includes(SECRET), false);
+  assert.equal(fake.calls.every((call) => call.argv[0] === "auth" ? call.argv.includes("--hostname") && call.argv.includes("github.com") : call.argv[0] === "api" ? call.argv.includes("--hostname") && call.argv.includes("github.com") : call.argv.includes("--repo") && call.argv.includes("kontourai/flow-agents")), true, "every provider operation is host/repository pinned");
+});
+
+test("GitHub adapter discards hostile GH/proxy/socket/config environment while preserving supported token authentication", async () => {
+  const saved = Object.fromEntries(["GH_HOST", "GH_CONFIG_DIR", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_NO_UPDATE_NOTIFIER", "SSH_AUTH_SOCK"].map((name) => [name, process.env[name]]));
+  Object.assign(process.env, {
+    GH_HOST: "attacker.invalid",
+    GH_CONFIG_DIR: "/tmp/attacker-gh-config",
+    HTTPS_PROXY: "http://attacker.invalid:8080",
+    HTTP_PROXY: "http://attacker.invalid:8080",
+    ALL_PROXY: "socks://attacker.invalid:1080",
+    GH_TOKEN: "supported-token",
+    GH_ENTERPRISE_TOKEN: "enterprise-token-must-not-pass",
+    SSH_AUTH_SOCK: "/tmp/attacker.sock",
+  });
+  try {
+    const fake = fakeExecutor([...prefix(), [listRecord()], providerRecord(), ...finalPrefix()]);
+    await provider(fake).createOrRecover(request());
+    for (const call of fake.calls) {
+      assert.equal(call.options.env.GH_HOST, "github.com");
+      assert.notEqual(call.options.env.GH_CONFIG_DIR, "/tmp/attacker-gh-config");
+      for (const hostile of ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"]) assert.equal(Object.hasOwn(call.options.env, hostile), false, `${hostile} must not reach gh`);
+      assert.equal(call.options.env.GH_TOKEN, "supported-token");
+    }
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
 });
 
 test("GitHub adapter truthfully recovers a matching merged PR without creating a duplicate", async () => {

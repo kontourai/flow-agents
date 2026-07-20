@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   assertRequestMatchesProvider,
@@ -21,7 +22,7 @@ export type ArgvExecutionResult = Readonly<{ stdout: string }>;
 export type ArgvExecutor = (
   executable: string,
   argv: readonly string[],
-  options: Readonly<{ timeoutMs: number; maxOutputBytes: number }>,
+  options: Readonly<{ timeoutMs: number; maxOutputBytes: number; env: NodeJS.ProcessEnv }>,
 ) => Promise<ArgvExecutionResult>;
 
 export type GithubChangeProviderDependencies = Readonly<{
@@ -79,9 +80,9 @@ async function checkGithubCapability(settings: ChangeProviderSettings, dependenc
   // bind that session to a usable actor and the configured repository. Neither
   // command output is exposed outside this module.
   await invoke(dependencies, ["auth", "status", "--hostname", "github.com"], "provider_auth_failed");
-  const user = plainObject(parseProviderJson(await invoke(dependencies, ["api", "user"], "provider_auth_failed"), "authenticated actor"), "authenticated actor");
+  const user = plainObject(parseProviderJson(await invoke(dependencies, ["api", "user", "--hostname", "github.com"], "provider_auth_failed"), "authenticated actor"), "authenticated actor");
   const actor = providerString(user.login, "authenticated actor login", 512);
-  const repo = plainObject(parseProviderJson(await invoke(dependencies, ["api", `repos/${repoSlug(settings)}`]), "configured repository"), "configured repository");
+  const repo = plainObject(parseProviderJson(await invoke(dependencies, ["api", `repos/${repoSlug(settings)}`, "--hostname", "github.com"]), "configured repository"), "configured repository");
   if (repo.full_name !== repoSlug(settings)) {
     throw new ChangeProviderError("provider_observation_mismatch", "configured repository observation did not match provider settings");
   }
@@ -156,7 +157,7 @@ function selectExactChange(records: GithubListRecord[], request: ChangeProviderR
 }
 
 async function observeExactChange(request: ChangeProviderRequest, number: number, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
-  const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`]);
+  const output = await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${number}`, "--hostname", "github.com"]);
   const record = parseProviderRecord(parseProviderJson(output, "provider record output"), request);
   // Reject malformed or mismatched records before making a further provider
   // call. The preflight result is deliberately discarded: only the actor
@@ -195,7 +196,11 @@ function repoSlug(value: Pick<ChangeProviderRequest, "repository"> | ChangeProvi
 async function invoke(dependencies: GithubExecutionDependencies, argv: readonly string[], failureCode: "provider_auth_failed" | "provider_failure" = "provider_failure"): Promise<string> {
   try {
     if (dependencies.trustedExecutable) revalidateTrustedGithubExecutable(dependencies.trustedExecutable);
-    const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), { timeoutMs: EXECUTION_TIMEOUT_MS, maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES });
+    const result = await dependencies.executor(dependencies.executable, Object.freeze([...argv]), {
+      timeoutMs: EXECUTION_TIMEOUT_MS,
+      maxOutputBytes: MAX_PROVIDER_OUTPUT_BYTES,
+      env: githubExecutionEnvironment(),
+    });
     if (!result || typeof result.stdout !== "string") malformed("provider executor returned an invalid result");
     if (Buffer.byteLength(result.stdout, "utf8") > MAX_PROVIDER_OUTPUT_BYTES) {
       throw new ChangeProviderError("oversized_provider_output", "provider output exceeded the configured size limit");
@@ -335,7 +340,71 @@ function trustedExecutableIdentity(candidate: string): TrustedExecutable {
   if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o111) === 0)) {
     throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI executable is unavailable");
   }
+  assertTrustedPathAncestors(candidate, resolved);
   return Object.freeze({ candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode });
+}
+
+/**
+ * `gh` accepts host/config/proxy settings from its inherited environment.  The
+ * provider is GitHub.com only, so pass a deliberately small environment on
+ * every invocation.  Tokens remain supported, but neither token is copied
+ * into an artifact or an error.
+ */
+function githubExecutionEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    GH_HOST: "github.com",
+    GH_CONFIG_DIR: trustedGithubConfigDirectory(),
+    PATH: process.env.PATH,
+    HOME: os.homedir(),
+    LANG: process.env.LANG,
+    LC_ALL: process.env.LC_ALL,
+  };
+  for (const name of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    if (typeof process.env[name] === "string") env[name] = process.env[name];
+  }
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
+}
+
+function trustedGithubConfigDirectory(): string {
+  // Match gh's platform default while refusing caller-controlled GH_CONFIG_DIR
+  // and XDG overrides.  This preserves `gh auth login` credentials on macOS
+  // without permitting a hostile process to choose another configuration root.
+  const directory = process.platform === "darwin"
+    ? path.join(os.homedir(), "Library", "Application Support", "gh")
+    : process.platform === "win32"
+      ? path.join(os.homedir(), "AppData", "Local", "gh")
+      : path.join(os.homedir(), ".config", "gh");
+  const existing = nearestExistingDirectory(directory);
+  assertTrustedPathAncestors(existing, fs.realpathSync(existing));
+  return directory;
+}
+
+function nearestExistingDirectory(candidate: string): string {
+  let cursor = candidate;
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) throw new ChangeProviderError("provider_unavailable", "trusted GitHub configuration directory is unavailable");
+    cursor = parent;
+  }
+  if (!fs.statSync(cursor).isDirectory()) throw new ChangeProviderError("provider_unavailable", "trusted GitHub configuration directory is unavailable");
+  return cursor;
+}
+
+function assertTrustedPathAncestors(candidate: string, resolved: string): void {
+  if (process.platform === "win32") return;
+  for (const start of [path.dirname(candidate), path.dirname(resolved)]) {
+    for (let cursor = start;; cursor = path.dirname(cursor)) {
+      const stat = fs.statSync(cursor);
+      if (!stat.isDirectory() || (stat.mode & 0o022) !== 0 || !trustedOwner(stat.uid)) {
+        throw new ChangeProviderError("provider_unavailable", "trusted GitHub CLI path has unsafe ownership or permissions");
+      }
+      if (path.dirname(cursor) === cursor) break;
+    }
+  }
+}
+
+function trustedOwner(uid: number): boolean {
+  return uid === 0 || (typeof process.getuid !== "function" ? false : uid === process.getuid());
 }
 
 function revalidateTrustedGithubExecutable(identity: TrustedExecutable): void {
@@ -363,6 +432,7 @@ const execFileArgv: ArgvExecutor = (executable, argv, options) => new Promise((r
     maxBuffer: options.maxOutputBytes,
     shell: false,
     windowsHide: true,
+    env: options.env,
   }, (error, stdout) => {
     if (error) reject(error);
     else resolve({ stdout });
