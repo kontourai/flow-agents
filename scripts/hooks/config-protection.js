@@ -115,7 +115,9 @@ const PROTECTED_FILES = new Set([
 function checkProtectedPathPattern(filePath) {
   if (!filePath || typeof filePath !== 'string') return null;
   // Normalize: forward-slashes, strip leading ~/
-  const norm = filePath.replace(/\\/g, '/').replace(/^~\//, '');
+  // Confirmation-review F1 variant: defended filesystems are commonly case-insensitive,
+  // so compare a lowercased normalization (patterns below are written lowercase).
+  const norm = filePath.replace(/\\/g, '/').replace(/^~\//, '').toLowerCase();
 
   // .claude/settings.json — an agent could add an env block or delete the Stop
   // hook to disable gate enforcement for the entire session.
@@ -455,7 +457,7 @@ const REDIRECT_ARTIFACT_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)
 // through a symlink (confirmation-review F4 variant): a token like /tmp/hop/slug/state.json
 // carries none of the .kontourai spelling, so the shape regex alone cannot see it — but its
 // basename justifies one canonicalization + re-test.
-const ARTIFACT_BASENAME_RE = /(?:^|\/)(state\.json|current\.json|trust\.bundle|trust\.checkpoint\.json|\.goal-fit-block-streak\.json)$/i;
+const ARTIFACT_BASENAME_RE = /(?:^|\/)(state\.json|current\.json|trust\.bundle|trust\.checkpoint\.json|\.goal-fit-block-streak\.json)$|(?:^|\/)current\/[^/]+\.json$/i;
 
 function matchesRedirectGlobal(token) {
   if (!token || typeof token !== 'string') return false;
@@ -678,7 +680,7 @@ function checkInterpreterWriteToProtected(command, cwd) {
  * #379: the optional (?:[^/]+\/)? segment also catches the per-session path
  * `cp forged.json delivery/<slug>/trust.bundle`.
  */
-const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/i;
 
 /**
  * Return true when a normalized token matches a delivery-protected path.
@@ -708,7 +710,10 @@ function matchesDeliveryProtected(token) {
 function checkCopyMoveToProtected(command, cwd) {
   if (typeof command !== "string" || !command) return null;
   if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
-  if (!command.includes("delivery/")) return null;
+  // Fast path: proceed when either the delivery/ spelling OR a trust-anchor basename appears —
+  // the basename alone matters when a symlink launders the directory spelling (F4 variant).
+  const lowerCommand = command.toLowerCase();
+  if (!lowerCommand.includes("delivery/") && !/trust\.(bundle|checkpoint\.json)/.test(lowerCommand)) return null;
 
   const segments = splitSegments(command);
   for (const seg of segments) {
@@ -724,7 +729,7 @@ function checkCopyMoveToProtected(command, cwd) {
     if (positional.length === 0) continue;
 
     const dest = positional[positional.length - 1];
-    if (matchesDeliveryProtected(dest) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(dest, cwd))) {
+    if (protectedTargetBlocks(dest, cwd, command) || (matchesDeliveryProtected(dest) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(dest, cwd)))) {
       return `${cmd} to ${dest} (delivery-protected path)`;
     }
   }
@@ -803,7 +808,7 @@ function run(inputOrRaw, options = {}) {
   // Read-only tools never mutate a file, so path-based protection must not block them.
   // (Bash is NOT read-only and stays fully covered by the command-based checks below.)
   if (filePath && !READ_ONLY_TOOL_NAMES.has(toolName)) {
-    const basename = path.basename(filePath);
+    const basename = path.basename(filePath).toLowerCase();
     if (PROTECTED_FILES.has(basename)) {
       return {
         exitCode: 2,
