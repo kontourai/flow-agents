@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
@@ -30,6 +30,7 @@ import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, reso
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -86,6 +87,14 @@ function makeSession(slug = "runtime-projection") {
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function runWorkflowProcess(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", ...args], { cwd, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("close", (code) => resolve(code));
+  });
 }
 
 test("shell output cannot spoof an executed-test count", () => {
@@ -223,10 +232,20 @@ function expiredLifecycleAuthorization(session, operation, name, overrides = {})
   });
 }
 
-function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, resolver, name = "resolve") {
+function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, resolver, name = "resolve", overrides = {}) {
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const bundle = readJson(bundleFile);
-  const metadata = (id) => bundle.claims.find((claim) => claim.metadata?.critique_record_id === id)?.metadata;
+  const critiqueClaims = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const normalized = normalizeCritiqueChainRecords(critiqueClaims.map((claim) => ({
+    ...claim.metadata,
+    verdict: claim.value,
+    summary: claim.fieldOrBehavior,
+  }))).records;
+  const metadata = (id) => {
+    const existing = critiqueClaims.find((claim) => claim.metadata?.critique_record_id === id)?.metadata;
+    if (existing) return existing;
+    return normalized.find((record) => record.critique_record_id === id);
+  };
   const now = new Date();
   const unsigned = {
     schema_version: "1.0", operation: "resolve-critique", run_id: session.slug, subject: SUBJECT,
@@ -235,6 +254,7 @@ function critiqueResolutionAuthorization(session, priorRecordId, resolvingRecord
     resolving_record_id: resolvingRecordId, resolving_record_hash: metadata(resolvingRecordId).critique_record_hash,
     expected_resolver: resolver, nonce: `${name}-${Date.now()}-${Math.random()}`,
     expires_at: new Date(now.getTime() + 60_000).toISOString(), requested_at: now.toISOString(),
+    ...overrides,
   };
   const value = { ...unsigned, signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(critiqueResolutionAuthorizationPayload(unsigned)), AUTHORITY_KEYS.privateKey).toString("base64") } };
   const file = path.join(session.sessionDir, `${name}.authorization.json`);
@@ -1625,7 +1645,7 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   const beforeRejectedResolution = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
   const canonicalManifest = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
   const manifestBeforeResolution = fs.readFileSync(canonicalManifest, "utf8");
-  const validateCritiques = () => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd: session.projectRoot, encoding: "utf8" });
+  const validateCritiques = (cwd = session.projectRoot) => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd, encoding: "utf8" });
   const onlyFailBundle = structuredClone(before);
   onlyFailBundle.claims = onlyFailBundle.claims.filter((claim) => claim.metadata?.critique_record_id === priorRecordId || claim.metadata?.origin !== "critique");
   onlyFailBundle.events = onlyFailBundle.events.filter((event) => onlyFailBundle.claims.some((claim) => claim.id === event.claimId));
@@ -1659,6 +1679,25 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     "--resolving-record-id", resolvingRecordId, "--authorization-file", authorizationFile,
   ]), /unsupported field private_key_pem/);
   writeJson(registryFile, validRegistry);
+  const resolveWith = (file, priorId = priorRecordId, resolverId = resolvingRecordId) => workflowMain([
+    "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorId,
+    "--resolving-record-id", resolverId, "--authorization-file", file,
+  ]);
+  const expiredAt = new Date(Date.now() - 60_000).toISOString();
+  const futureAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-run", { run_id: "other-run" })), /run_id does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-subject", { subject: "local:work-item/other" })), /subject does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-preimage", { prior_bundle_sha256: "0".repeat(64) })), /prior_bundle_sha256 does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "wrong-record-hash", { prior_record_hash: "1".repeat(64) })), /prior_record_hash does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, "wrong-resolver", "wrong-resolver")), /expected_resolver does not match/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "expired", { requested_at: new Date(Date.now() - 120_000).toISOString(), expires_at: expiredAt })), /is expired/);
+  await assert.rejects(() => resolveWith(critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "future", { requested_at: futureAt, expires_at: new Date(Date.now() + 20 * 60_000).toISOString() })), /request time is in the future/);
+  const unknownKeyAuthorization = structuredClone(validAuthorization);
+  unknownKeyAuthorization.signature.key_id = "untrusted-authority";
+  const unknownKeyFile = path.join(session.sessionDir, "untrusted-key.authorization.json");
+  writeJson(unknownKeyFile, unknownKeyAuthorization);
+  await assert.rejects(() => resolveWith(unknownKeyFile), /is not trusted/);
+  await assert.rejects(() => resolveWith(authorizationFile, "critique:missing"), /missing or ambiguous/);
   writeJson(authorizationFile, { ...validAuthorization, signature: { ...validAuthorization.signature, value: Buffer.alloc(64).toString("base64") } });
   await assert.rejects(workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId,
@@ -1672,6 +1711,11 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
     resolvingRecordId, resolvingRecordHash: validAuthorization.resolving_record_hash,
   });
   recordAuthorizationConsumed(session.artifactRoot, preparedAuthorization);
+  const conflictingNonceAuthorization = critiqueResolutionAuthorization(session, priorRecordId, resolvingRecordId, finalReviewer.actorKey, "conflicting-nonce", {
+    nonce: validAuthorization.nonce,
+    expires_at: new Date(Date.now() + 120_000).toISOString(),
+  });
+  await assert.rejects(() => resolveWith(conflictingNonceAuthorization), /consumed lifecycle authorization record does not match/);
   const result = await workflowMain([
     "resolve-critique", "--session-dir", session.sessionDir,
     "--prior-record-id", priorRecordId,
@@ -1695,6 +1739,8 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   assert.equal(fs.readFileSync(canonicalManifest, "utf8"), manifestBeforeResolution, "critique resolution must preserve canonical manifest bytes");
   const validation = validateCritiques();
   assert.equal(validation.status, 0, validation.stderr || validation.stdout);
+  const foreignWorkingDirectoryValidation = validateCritiques(os.tmpdir());
+  assert.equal(foreignWorkingDirectoryValidation.status, 0, foreignWorkingDirectoryValidation.stderr || foreignWorkingDirectoryValidation.stdout);
   const resolvedBytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
   const forgedBundle = JSON.parse(resolvedBytes);
   const forgedHistory = forgedBundle.claims.find((claim) => claim.metadata?.critique_resolution);
@@ -1710,6 +1756,13 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   forgedEvent.event_hash = createHash("sha256").update(JSON.stringify(forgedUnsignedEvent)).digest("hex");
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedEventBundle, null, 2)}\n`);
   assert.notEqual(validateCritiques().status, 0, "a coherently rehashed event without matching signed authority must not validate");
+  const forgedSemanticEventBundle = JSON.parse(resolvedBytes);
+  const forgedSemanticEvent = forgedSemanticEventBundle.critique_resolution_events[0];
+  forgedSemanticEvent.edge.resolved_at = "2030-01-01T00:00:00.000Z";
+  const { event_hash: _semanticEventHash, ...forgedSemanticUnsignedEvent } = forgedSemanticEvent;
+  forgedSemanticEvent.event_hash = createHash("sha256").update(JSON.stringify(forgedSemanticUnsignedEvent)).digest("hex");
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(forgedSemanticEventBundle, null, 2)}\n`);
+  assert.notEqual(validateCritiques().status, 0, "an event whose embedded edge differs from its signed resolution edge must not validate");
   const cyclicBundle = JSON.parse(resolvedBytes);
   const cyclicResolver = cyclicBundle.claims.find((claim) => claim.metadata?.critique_record_id === resolvingRecordId);
   cyclicResolver.metadata.superseded_by = priorRecordId;
@@ -1732,6 +1785,119 @@ test("an authenticated final reviewer resolves an earlier repaired critique with
   assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), resolvedBytes, "a valid resolution replay is idempotent");
   if (originalCodexThread === undefined) delete process.env.CODEX_THREAD_ID;
   else process.env.CODEX_THREAD_ID = originalCodexThread;
+});
+
+test("a scrubbed thirteen-review repair history migrates through sequential signed resolutions", async () => {
+  // This is deliberately synthetic but mirrors the cardinality and review-shape of
+  // a real historical session. It proves migration without carrying repository,
+  // provider, or runtime identifiers into a public test fixture.
+  const session = makeSession("scrubbed-critique-history");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const lane = (status) => JSON.stringify({
+    id: "repair-review", status, summary: "Independent repair review.",
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  const reviewerCount = 4;
+  for (let index = 0; index < 11; index += 1) {
+    await workflowSidecarMain([
+      "record-critique", session.sessionDir,
+      "--id", `ephemeral-history-${index + 1}`, "--reviewer", `ephemeral-reviewer-${(index % reviewerCount) + 1}`, "--verdict", "fail",
+      "--summary", `Synthetic historical finding ${index + 1}.`, "--artifact-ref", delivery,
+      "--lane-json", lane("fail"),
+      "--finding-json", JSON.stringify({ id: `finding-${index + 1}`, severity: "high", status: "open", description: `Repair ${index + 1} required.` }),
+      "--timestamp", `2026-07-19T10:${String(index).padStart(2, "0")}:00.000Z`,
+    ]);
+  }
+  fs.writeFileSync(delivery, "repaired delivery artifact after every historical finding\n");
+  const fixedFindingArgs = () => Array.from({ length: 11 }, (_, index) => "--finding-json")
+    .flatMap((flag, index) => [flag, JSON.stringify({ id: `finding-${index + 1}`, severity: "high", status: "fixed", description: `Repair ${index + 1} verified.` })]);
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "independent-repair-observation", "--reviewer", "independent-repair-reviewer", "--verdict", "pass",
+    "--summary", "Independent repair observation passed.", "--artifact-ref", delivery, "--lane-json", lane("pass"),
+    ...fixedFindingArgs(), "--timestamp", "2026-07-19T10:11:00.000Z",
+  ]);
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "final-migration-review", "--reviewer", "final-independent-reviewer", "--verdict", "pass",
+    "--summary", "Final independent repair review passed.", "--artifact-ref", delivery, "--lane-json", lane("pass"),
+    ...fixedFindingArgs(),
+    "--timestamp", "2026-07-19T10:12:00.000Z",
+  ]);
+
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const preChain = readJson(bundleFile);
+  const historicalClaims = preChain.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.equal(historicalClaims.length, 13, "fixture has eleven disputed reviews plus two independent passing observations");
+  for (const claim of historicalClaims) {
+    delete claim.metadata.critique_sequence;
+    delete claim.metadata.critique_predecessor_hash;
+    delete claim.metadata.critique_record_hash;
+    delete claim.metadata.critique_record_id;
+  }
+  fs.writeFileSync(bundleFile, `${JSON.stringify(preChain, null, 2)}\n`);
+  const migrated = normalizeCritiqueChainRecords(historicalClaims.map((claim) => ({ ...claim.metadata, verdict: claim.value, summary: claim.fieldOrBehavior }))).records;
+  assert.equal(migrated.length, 13);
+  const finalRecordId = migrated.at(-1).critique_record_id;
+  const validate = () => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"), "--require-critique", session.sessionDir], { cwd: os.tmpdir(), encoding: "utf8" });
+  assert.notEqual(validate().status, 0, "unmigrated historical reviews remain fail-closed");
+
+  for (const [index, prior] of migrated.filter((record) => record.verdict !== "pass").entries()) {
+    const authorizationFile = critiqueResolutionAuthorization(session, prior.critique_record_id, finalRecordId, "final-independent-reviewer", `migrate-${prior.critique_sequence}`);
+    const args = [
+      "resolve-critique", "--session-dir", session.sessionDir,
+      "--prior-record-id", prior.critique_record_id,
+      "--resolving-record-id", finalRecordId,
+      "--authorization-file", authorizationFile,
+    ];
+    if (index === 0) {
+      const results = await Promise.all([runWorkflowProcess(args, session.projectRoot), runWorkflowProcess(args, session.projectRoot)]);
+      assert.deepEqual(results, [0, 0], "subject locking serializes an identical concurrent resolution into one write and one replay");
+    } else {
+      await workflowMain(args);
+    }
+  }
+
+  const migratedBundle = readJson(bundleFile);
+  const migratedClaims = migratedBundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.equal(migratedClaims.filter((claim) => claim.status === "superseded").length, 11);
+  assert.equal(migratedClaims.filter((claim) => !claim.metadata?.superseded_by && claim.value === "pass" && claim.status === "verified").length, 2);
+  assert.equal(migratedBundle.critique_resolution_events.length, 11);
+  assert.equal(validate().status, 0, "all historical failures have authenticated, hash-chained resolutions");
+  assert.equal(consumedAuthorizationRecords(session).length, 11, "each migration edge consumes exactly one signed authority nonce");
+});
+
+test("trusted Git ancestry rejects a divergent repair snapshot", () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-git-"));
+  const git = (args) => {
+    const result = spawnSync("/usr/bin/git", args, { cwd: projectRoot, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git(["init", "--initial-branch=main"]);
+  git(["config", "user.email", "fixture@example.test"]);
+  git(["config", "user.name", "Fixture"]);
+  fs.writeFileSync(path.join(projectRoot, "review.txt"), "base\n");
+  git(["add", "review.txt"]);
+  git(["commit", "-m", "base"]);
+  git(["checkout", "-b", "repair"]);
+  fs.writeFileSync(path.join(projectRoot, "review.txt"), "repair\n");
+  git(["commit", "-am", "repair"]);
+  const repairHead = git(["rev-parse", "HEAD"]);
+  git(["checkout", "main"]);
+  fs.writeFileSync(path.join(projectRoot, "review.txt"), "other\n");
+  git(["commit", "-am", "other"]);
+  const divergentHead = git(["rev-parse", "HEAD"]);
+  assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, divergentHead));
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {

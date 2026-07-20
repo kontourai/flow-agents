@@ -79,6 +79,7 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
   const byId = new Map<string, AnyRecord>();
   const byHash = new Map<string, AnyRecord>();
   const bySequence = new Map<number, AnyRecord>();
+  const referencedEventIds = new Set<string>();
   for (const record of records) {
     if (typeof record.critique_record_id !== "string" || !record.critique_record_id || byId.has(record.critique_record_id)) errors.push("critique record ids must be present and unique");
     else byId.set(record.critique_record_id, record);
@@ -117,19 +118,12 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
     if (resolution.kind === "cross-reviewer" && linkedEvents.length !== 1) errors.push("cross-reviewer critique resolution must link one append-only authorization event");
     else if (linkedEvents.length === 1) {
       const event = linkedEvents[0]!;
+      referencedEventIds.add(String(event.event_id));
       if (event.subject !== prior.workflow_subject_ref || event.prior_record_id !== prior.critique_record_id
         || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id
         || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer
-        || event.authorization_sha256 !== resolution.authorization_sha256) errors.push("critique resolution authorization event does not bind the exact edge");
-      if (!projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") errors.push("critique resolution event requires a verifiable signed authorization");
-      else try {
-        const authorization = validateCritiqueResolutionAuthorization(event.signed_authorization, {
-          projectRoot, runId: String(event.run_id), subject: String(event.subject),
-          priorBundleSha256: String(event.preimage_bundle_sha256), priorRecordId: String(event.prior_record_id), priorRecordHash: String(event.prior_record_hash),
-          resolvingRecordId: String(event.resolving_record_id), resolvingRecordHash: String(event.resolving_record_hash), allowExpired: true,
-        });
-        if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
-      } catch { errors.push("critique resolution signed authorization is invalid"); }
+        || event.authorization_sha256 !== resolution.authorization_sha256
+        || canonical(event.edge) !== canonical(resolution)) errors.push("critique resolution authorization event does not bind the exact edge");
     }
     let cursor: AnyRecord | undefined = resolving;
     let reachesPrior = false;
@@ -150,11 +144,26 @@ export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSub
     if (canonical(requiredFindings) !== canonical(coveredFindings) || requiredFindings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
   }
   const live = records.filter((record) => !record.superseded_by);
+  const seenEventIds = new Set<string>();
   resolutionEvents.forEach((event, index) => {
     const { event_hash: eventHash, ...unsigned } = event;
     const expectedPredecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : resolutionEvents[index - 1]?.event_hash;
     if (event.sequence !== index + 1 || event.predecessor_hash !== expectedPredecessor
       || createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") !== eventHash) errors.push("critique resolution events must form one valid append-only hash chain");
+    if (typeof event.event_id !== "string" || !event.event_id || seenEventIds.has(event.event_id)
+      || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) errors.push("critique resolution events must have unique authorization-bound ids");
+    else seenEventIds.add(event.event_id);
+    if (!referencedEventIds.has(String(event.event_id))) errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
+    if (event.operation !== "resolve-critique" || !projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") {
+      errors.push("critique resolution event requires a verifiable signed authorization");
+    } else try {
+      const authorization = validateCritiqueResolutionAuthorization(event.signed_authorization, {
+        projectRoot, runId: String(event.run_id), subject: String(event.subject),
+        priorBundleSha256: String(event.preimage_bundle_sha256), priorRecordId: String(event.prior_record_id), priorRecordHash: String(event.prior_record_hash),
+        resolvingRecordId: String(event.resolving_record_id), resolvingRecordHash: String(event.resolving_record_hash), allowExpired: true,
+      });
+      if (authorizationDigest(authorization) !== event.authorization_sha256 || authorization.expected_resolver !== event.resolver) errors.push("critique resolution signed authorization does not match its event");
+    } catch { errors.push("critique resolution signed authorization is invalid"); }
     if (expectedSubject && event.subject !== expectedSubject) errors.push("critique resolution event has a mismatched workflow subject");
   });
   if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) errors.push("critique graph requires a current verified PASS");

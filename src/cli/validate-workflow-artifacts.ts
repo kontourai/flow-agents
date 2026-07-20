@@ -24,6 +24,17 @@ const sidecarSchemas: Record<string, string> = {
   "learning.json": "schemas/workflow-learning.schema.json",
   "waves.json": "schemas/workflow-waves.schema.json",
 };
+
+// Signed critique-resolution events are verified against the repository-owned
+// trust-root registry. Validation can be invoked from any working directory,
+// so process.cwd() is not an authority boundary: derive the owning repository
+// from the canonical runtime session path instead.
+function projectRootForSession(dir: string): string | undefined {
+  const marker = `${path.sep}.kontourai${path.sep}flow-agents${path.sep}`;
+  const resolved = path.resolve(dir);
+  const markerIndex = resolved.lastIndexOf(marker);
+  return markerIndex > 0 ? resolved.slice(0, markerIndex) : undefined;
+}
 // Runtime coordination records live below a session but are not workflow
 // sidecars. Recursing into them would validate continuation-driver/state.json
 // against the public workflow-state schema and turn an active driver into a
@@ -468,7 +479,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const stateResult = readJson(path.join(dir, "state.json"));
           const state = stateResult.value;
           const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1 ? state.work_item_refs[0] : undefined;
-          const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [], process.cwd());
+          const graph = validateCritiqueResolutionGraph(claims, subject, Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [], projectRootForSession(dir));
           if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
         }
       }
