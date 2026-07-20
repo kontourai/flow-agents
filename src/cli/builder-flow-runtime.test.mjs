@@ -98,10 +98,20 @@ test("shell output cannot spoof an executed-test count", () => {
 });
 
 test("pre-chain critique migration is deterministic and never rewrites legacy reviewer attribution", () => {
-  const legacy = [
-    { reviewer: "ephemeral:alpha", reviewed_at: "2026-01-01T00:00:00Z", verdict: "fail", summary: "legacy fail", lanes: [{ id: "code-review", status: "fail" }], findings: [], review_target: { artifacts: [] }, workflow_subject_ref: SUBJECT },
-    { reviewer: "ephemeral:omega", reviewed_at: "2026-01-02T00:00:00Z", verdict: "pass", summary: "legacy repair", lanes: [{ id: "code-review", status: "pass" }], findings: [], review_target: { artifacts: [] }, workflow_subject_ref: SUBJECT },
-  ];
+  // Hermetic analogue of a real pre-chain history: many disputed reviews from mixed
+  // ephemeral identities followed by repeated PASS observations. Values are synthetic;
+  // only key absence, cardinality, and lifecycle shape are retained.
+  const laneCounts = [5, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+  const findingCounts = [6, 2, 3, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0];
+  const legacy = laneCounts.map((laneCount, index) => ({
+    reviewer: `ephemeral-reviewer-${(index % 4) + 1}`,
+    reviewed_at: `2030-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+    verdict: index < 11 ? "fail" : "pass", summary: `synthetic review ${index + 1}`,
+    lanes: Array.from({ length: laneCount }, (_, lane) => ({ id: `lane-${lane + 1}`, status: index < 11 ? "fail" : "pass" })),
+    findings: Array.from({ length: findingCounts[index] }, (_, finding) => ({ id: `finding-${finding + 1}`, status: "open" })),
+    review_target: { artifacts: [{ path: `fixtures/artifact-${index + 1}.txt`, sha256: "a".repeat(64) }] }, workflow_subject_ref: "work-item:synthetic",
+  }));
+  assert.doesNotMatch(JSON.stringify(legacy), /604|change-provider|kontourai|codex|github|\/Users\//i, "public fixture shape must contain no source-session identifiers");
   const first = normalizeCritiqueChainRecords(structuredClone(legacy));
   const copied = normalizeCritiqueChainRecords(structuredClone(legacy));
   assert.equal(first.migrated, true);
