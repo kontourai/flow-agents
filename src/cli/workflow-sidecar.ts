@@ -4564,7 +4564,13 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const resolutionEvent = { ...eventWithoutHash, event_hash: createHash("sha256").update(JSON.stringify(eventWithoutHash)).digest("hex") };
   const nextResolutionEvents = [...resolutionEvents, resolutionEvent];
   const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir));
-  if (!graph.valid) die(`resolve-critique rejected invalid critique graph: ${graph.errors.join("; ")}`);
+  // Multiple independent reviewers may have live failures after a route-back. Each signed
+  // authorization binds one exact edge/preimage, so resolution is intentionally sequential.
+  // Permit only the intermediate "other live critiques remain" condition here; every other
+  // graph defect still fails, and Builder/runtime/artifact consumers remain blocked until the
+  // final signed edge makes the complete graph valid.
+  const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
+  if (blockingGraphErrors.length) die(`resolve-critique rejected invalid critique graph: ${blockingGraphErrors.join("; ")}`);
   assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, nextResolutionEvents));
   return 0;
 }

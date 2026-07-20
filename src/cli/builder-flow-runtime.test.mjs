@@ -24,7 +24,7 @@ import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPa
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash } from "../../build/src/cli/critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords } from "../../build/src/cli/critique-resolution.js";
 import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
@@ -95,6 +95,20 @@ test("shell output cannot spoof an executed-test count", () => {
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
   assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
   assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+});
+
+test("pre-chain critique migration is deterministic and never rewrites legacy reviewer attribution", () => {
+  const legacy = [
+    { reviewer: "ephemeral:alpha", reviewed_at: "2026-01-01T00:00:00Z", verdict: "fail", summary: "legacy fail", lanes: [{ id: "code-review", status: "fail" }], findings: [], review_target: { artifacts: [] }, workflow_subject_ref: SUBJECT },
+    { reviewer: "ephemeral:omega", reviewed_at: "2026-01-02T00:00:00Z", verdict: "pass", summary: "legacy repair", lanes: [{ id: "code-review", status: "pass" }], findings: [], review_target: { artifacts: [] }, workflow_subject_ref: SUBJECT },
+  ];
+  const first = normalizeCritiqueChainRecords(structuredClone(legacy));
+  const copied = normalizeCritiqueChainRecords(structuredClone(legacy));
+  assert.equal(first.migrated, true);
+  assert.deepEqual(first.records, copied.records, "a copied real-shape legacy history receives identical versioned anchors");
+  assert.deepEqual(first.records.map((record) => record.reviewer), legacy.map((record) => record.reviewer));
+  assert.equal(first.records[0].critique_predecessor_hash, CRITIQUE_CHAIN_GENESIS);
+  assert.equal(first.records[1].critique_predecessor_hash, first.records[0].critique_record_hash);
 });
 
 function readJson(file) {
