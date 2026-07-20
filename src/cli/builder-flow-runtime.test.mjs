@@ -32,7 +32,7 @@ import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
-import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
+import { assertTrustedGitAncestor, assertTrustedGitAncestorOrEquivalentTree } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -179,6 +179,204 @@ test("pre-chain critique migration is deterministic and never rewrites legacy re
   assert.deepEqual(first.records.map((record) => record.reviewer), legacy.map((record) => record.reviewer));
   assert.equal(first.records[0].critique_predecessor_hash, CRITIQUE_CHAIN_GENESIS);
   assert.equal(first.records[1].critique_predecessor_hash, first.records[0].critique_record_hash);
+});
+
+test("ordinary validation rejects pre-chain history with the public regeneration command", () => {
+  const base = (id, status, reviewedAt) => ({
+    id: `claim-${id}`,
+    value: "pass",
+    status,
+    fieldOrBehavior: `${id} review`,
+    metadata: {
+      origin: "critique",
+      reviewer: `${id}-reviewer`,
+      reviewed_at: reviewedAt,
+      workflow_subject_ref: SUBJECT,
+      lanes: [{ id: "code", status: "pass" }],
+      findings: [],
+      review_target: { artifacts: [] },
+    },
+  });
+  const historical = base("historical", "superseded", "2026-07-09T20:00:01.000Z");
+  historical.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  const current = base("current", "verified", "2026-07-09T20:00:02.000Z");
+
+  const graph = validateCritiqueResolutionGraph([historical, current], SUBJECT);
+
+  assert.equal(graph.valid, false);
+  assert.deepEqual(graph.errors, ["critique history requires regeneration; run `flow-agents workflow regenerate-critique-chain --session-dir <path>`"]);
+});
+
+test("public critique-chain regeneration preserves logical ids, history, provenance, and Flow manifest", async () => {
+  const session = makeSession("explicit-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const capturedAt = Date.now();
+  const historical = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "legacy-history");
+  historical.claim.metadata.critique_record_id = "legacy-logical-record";
+  historical.claim.status = "superseded";
+  historical.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  const current = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "current-review");
+  current.claim.metadata.critique_record_id = "current-logical-record";
+  const logicalIds = [historical.claim.metadata.critique_record_id, current.claim.metadata.critique_record_id];
+  writeBundle(session.sessionDir, [historical, current]);
+  const beforeManifest = snapshotTree(runDir(session.slug, session.projectRoot));
+
+  assert.equal(await workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]), 0);
+
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.deepEqual(critiques.map((claim) => claim.metadata.critique_record_id), logicalIds);
+  assert.ok(critiques.every((claim) => claim.metadata.critique_chain_regeneration?.operation === "regenerate-critique-chain"));
+  assert.match(critiques[0].metadata.critique_chain_regeneration.prior_bundle_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(critiques[0].metadata.critique_resolution.kind, "same-reviewer-recheck");
+  assert.equal(critiques[0].metadata.superseded_by, critiques[1].metadata.critique_record_id);
+  const graph = validateCritiqueResolutionGraph(critiques, SUBJECT, [], session.projectRoot);
+  assert.equal(graph.valid, true, graph.errors.join("; "));
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeManifest);
+  const regeneratedBytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /found no pre-chain critique history/,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), regeneratedBytes);
+});
+
+test("public critique-chain regeneration rejects ambiguous legacy supersession before mutation", async () => {
+  const session = makeSession("ambiguous-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const capturedAt = Date.now();
+  const historical = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "ambiguous-history");
+  historical.claim.status = "superseded";
+  historical.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  const currentOne = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "ambiguous-current-one");
+  const currentTwo = asPreChainCritique(verifiedTestsPrerequisites(session, new Date(capturedAt + 2).toISOString())[0], "ambiguous-current-two");
+  writeBundle(session.sessionDir, [historical, currentOne, currentTwo]);
+  const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /requires one unique later same-reviewer clean recheck/,
+  );
+
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+});
+
+test("critique graph and regeneration reject a nominal PASS resolver without clean lanes and reviewed artifacts", async () => {
+  const session = makeSession("malformed-pass-critique-resolver");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const capturedAt = Date.now();
+  const prior = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-resolver-prior");
+  prior.claim.value = "fail";
+  prior.claim.status = "disputed";
+  prior.claim.metadata.lanes = [{ id: "security-review", status: "fail" }];
+  prior.claim.metadata.findings = [];
+  const resolving = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString())[0], "malformed-resolver-current");
+  resolving.claim.metadata.lanes = [{ id: "security-review", status: "fail" }];
+  resolving.claim.metadata.review_target.artifacts = [];
+  appendCritiqueAfter(prior, resolving);
+  prior.claim.metadata.superseded_by = resolving.claim.metadata.critique_record_id;
+  prior.claim.metadata.critique_resolution = {
+    schema_version: "1.0",
+    kind: "same-reviewer-recheck",
+    prior_record_id: prior.claim.metadata.critique_record_id,
+    resolving_record_id: resolving.claim.metadata.critique_record_id,
+    resolver: resolving.claim.metadata.reviewer,
+    resolved_lane_ids: ["security-review"],
+    resolved_finding_ids: [],
+    resolved_at: resolving.claim.metadata.reviewed_at,
+  };
+  const graph = validateCritiqueResolutionGraph([prior.claim, resolving.claim], SUBJECT, [], session.projectRoot);
+  assert.equal(graph.valid, false);
+  assert.ok(graph.errors.includes("critique resolver must be a current verified substantive PASS"));
+
+  const preChainPrior = asPreChainCritique(prior, "pre-chain-prior");
+  const preChainResolving = asPreChainCritique(resolving, "pre-chain-resolving");
+  preChainPrior.claim.metadata.superseded_by = "legacy-same-reviewer-recheck";
+  delete preChainPrior.claim.metadata.critique_resolution;
+  writeBundle(session.sessionDir, [preChainPrior, preChainResolving]);
+  const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  await assert.rejects(
+    () => workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]),
+    /requires one unique later same-reviewer clean recheck/,
+  );
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+});
+
+test("public critique-chain regeneration anchors an unresolved FAIL so later review can proceed", async () => {
+  const session = makeSession("unresolved-fail-critique-chain-regeneration");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const failing = asPreChainCritique(verifiedTestsPrerequisites(session)[0], "legacy-unresolved-fail");
+  failing.claim.value = "fail";
+  failing.claim.status = "disputed";
+  failing.claim.metadata.lanes = [{ id: "code-review", status: "fail" }];
+  failing.claim.metadata.findings = [{ id: "legacy-defect", severity: "high", status: "open", description: "Requires a later repair review." }];
+  failing.event.status = "disputed";
+  writeBundle(session.sessionDir, [failing]);
+
+  assert.equal(await workflowMain(["regenerate-critique-chain", "--session-dir", session.sessionDir, "--json"]), 0);
+
+  let bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  let critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const unresolved = validateCritiqueResolutionGraph(critiques, SUBJECT, [], session.projectRoot);
+  assert.deepEqual(unresolved.errors.sort(), [
+    "critique graph has unresolved live critique records",
+    "critique graph requires a current verified PASS",
+  ].sort());
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const lane = JSON.stringify({
+    id: "code-review",
+    status: "pass",
+    summary: "Later repair review passed.",
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "later-repair-review", "--reviewer", "later-independent-reviewer", "--verdict", "pass",
+    "--summary", "Later review can append to the regenerated writer chain.",
+    "--artifact-ref", delivery, "--lane-json", lane,
+  ]);
+  bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  assert.deepEqual(critiques.map((claim) => claim.metadata.critique_sequence), [1, 2]);
+  assert.equal(critiques[1].metadata.critique_predecessor_hash, critiques[0].metadata.critique_record_hash);
+});
+
+test("a partially populated critique chain fails closed instead of being re-stamped", () => {
+  const claim = {
+    id: "claim-partial-chain",
+    value: "pass",
+    status: "verified",
+    fieldOrBehavior: "partial chain review",
+    metadata: {
+      origin: "critique",
+      reviewer: "partial-reviewer",
+      reviewed_at: "2026-07-09T20:00:01.000Z",
+      workflow_subject_ref: SUBJECT,
+      critique_sequence: 1,
+      lanes: [{ id: "code", status: "pass" }],
+      findings: [],
+      review_target: { artifacts: [] },
+    },
+  };
+
+  const graph = validateCritiqueResolutionGraph([claim], SUBJECT);
+
+  assert.equal(graph.valid, false);
+  assert.deepEqual(graph.errors, ["critique history has a partially migrated chain"]);
 });
 
 function readJson(file) {
@@ -504,6 +702,15 @@ function appendCritiqueAfter(prior, current) {
   current.claim.metadata.critique_sequence = prior.claim.metadata.critique_sequence + 1;
   current.claim.metadata.critique_predecessor_hash = prior.claim.metadata.critique_record_hash;
   return restampCritiqueClaim(current);
+}
+
+function asPreChainCritique(entry, suffix) {
+  const copy = withIdentitySuffix(entry, suffix);
+  delete copy.claim.metadata.critique_sequence;
+  delete copy.claim.metadata.critique_predecessor_hash;
+  delete copy.claim.metadata.critique_record_hash;
+  delete copy.claim.metadata.critique_record_id;
+  return copy;
 }
 
 function writeBundle(sessionDir, entries) {
@@ -1987,6 +2194,11 @@ test("trusted Git ancestry rejects a divergent repair snapshot", () => {
   git(["replace", divergentHead, maliciousReplacement]);
   assert.equal(spawnSync("/usr/bin/git", ["merge-base", "--is-ancestor", repairHead, divergentHead], { cwd: projectRoot }).status, 0, "hostile replacement makes ordinary Git accept false ancestry");
   assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, divergentHead));
+  assert.throws(() => assertTrustedGitAncestorOrEquivalentTree(projectRoot, repairHead, divergentHead));
+
+  const equivalentRebase = git(["commit-tree", `${repairHead}^{tree}`, "-p", divergentHead, "-m", "rebased equivalent repair"]);
+  assert.throws(() => assertTrustedGitAncestor(projectRoot, repairHead, equivalentRebase));
+  assert.doesNotThrow(() => assertTrustedGitAncestorOrEquivalentTree(projectRoot, repairHead, equivalentRebase));
 });
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
@@ -2280,10 +2492,12 @@ test("stale passing critique remains audit history when a current exact-workspac
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-other-reviewer-pass");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = withIdentitySuffix(currentEntry, "current-pass");
   appendCritiqueAfter(stale, current);
 
   const result = await writeAndSync(session, [
@@ -2306,11 +2520,13 @@ test("stale open critique remains blocking even when a different reviewer suppli
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "stale-open");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.findings = [{ id: "old-open-finding", status: "open", summary: "Must not be buried." }];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = withIdentitySuffix(currentEntry, "current-after-open");
   appendCritiqueAfter(stale, current);
 
   await assert.rejects(
@@ -2334,11 +2550,13 @@ test("malformed stale passing critique remains blocking when a current clean cri
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  const capturedAt = Date.now();
+  const stale = withIdentitySuffix(verifiedTestsPrerequisites(session, new Date(capturedAt).toISOString())[0], "malformed-stale");
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.review_target.workspace_snapshot.files = [];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
-  const [current, criterion] = verifiedTestsPrerequisites(session);
+  const [currentEntry, criterion] = verifiedTestsPrerequisites(session, new Date(capturedAt + 1).toISOString());
+  const current = withIdentitySuffix(currentEntry, "current-after-malformed");
   appendCritiqueAfter(stale, current);
 
   await assert.rejects(

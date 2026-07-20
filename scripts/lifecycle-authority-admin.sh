@@ -22,7 +22,7 @@ sudoers_backup="$sudoers_file.previous"
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
 ensure_operator_group() {
   case "$(uname -s)" in
-    Darwin) dseditgroup -o create "$operator_group" 2>/dev/null || true ;;
+    Darwin) dseditgroup -o read "$operator_group" >/dev/null 2>&1 || dseditgroup -o create "$operator_group" ;;
     Linux) getent group "$operator_group" >/dev/null 2>&1 || groupadd --system "$operator_group" ;;
     *) echo "unsupported platform for lifecycle operator group: $(uname -s)" >&2; exit 69 ;;
   esac
@@ -84,7 +84,22 @@ NODE
     chmod 755 "$install_dir"
     flow_stage="$target_flow.$$"
     mkdir -p "$flow_stage"
-    cp -R "$flow_node_modules" "$flow_stage/node_modules"
+    node - "$flow_node_modules" "$flow_stage/node_modules" <<'NODE'
+const fs = require('node:fs'), path = require('node:path');
+const source = path.resolve(process.argv[2]), target = path.resolve(process.argv[3]), seen = new Set();
+fs.mkdirSync(target, { recursive: true });
+fs.copyFileSync(path.join(source, '.package-lock.json'), path.join(target, '.package-lock.json'));
+function copyClosure(packageRoot) {
+  packageRoot = path.resolve(packageRoot); if (seen.has(packageRoot)) return; seen.add(packageRoot);
+  if (!packageRoot.startsWith(`${source}${path.sep}`)) throw new Error('Flow dependency escapes staged node_modules');
+  const relative = path.relative(source, packageRoot), destination = path.join(target, relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(packageRoot, destination, { recursive: true, dereference: false, errorOnExist: true, preserveTimestamps: true });
+  const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+  for (const name of Object.keys(metadata.dependencies || {}).sort()) copyClosure(path.join(source, name));
+}
+copyClosure(path.join(source, '@kontourai/flow'));
+NODE
     chown -R root:wheel "$flow_stage" 2>/dev/null || chown -R root:root "$flow_stage"
     chmod -R go-w "$flow_stage"
     node "$closure_verifier" "$flow_stage/node_modules" "$reducer_pin_file"

@@ -62,8 +62,8 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
     signing_payload: prepared.signingPayload,
     next_steps: [
       `Sign the exact bytes in "signing_payload" with your ed25519 lifecycle-authority key (base64).`,
-      `Add a "signature" block: {"algorithm":"ed25519","key_id":"<your registry key id>","value":"<base64 signature>"} to ${outFile}, and save it as the signed authorization file.`,
-      `Run: flow-agents builder-run cancel --session-dir ${sessionDir} --authorization-file <signed file>`,
+      `Add a "signature" block: {"algorithm":"ed25519","key_id":"<your registry key id>","value":"<base64 signature>"} to ${outFile}, then save the signed authorization outside the project and worktree.`,
+      `Run: flow-agents builder-run cancel --session-dir ${sessionDir} --authorization-file <external signed file>`,
       `The signature is verified against the externally provisioned lifecycle-authority registry; repository files and Git refs are never authority roots.`,
     ],
     ...(prepared.alreadyTerminal ? { note: `Run is already ${prepared.runStatus}; cancel would be a no-op.` } : {}),

@@ -223,6 +223,23 @@ Use `review-work` after implementation and before verification. Review is critiq
 
 Review checks quality, security triggers, architecture fit, project standards, risky assumptions, and maintainability. In the active `verify` step, `review-work` owns `clean-critique` through public `workflow critique` in `trust.bundle`. A clean review does not prove the feature works; it only says the implementation has no open reviewer findings that block the next gate.
 
+If implementation bytes change after a clean review, that passing critique stays
+in the audit history but no longer authorizes verification of the current
+workspace. Record a new distinct-actor clean critique for the current snapshot.
+Historical open or disputed critiques continue to block; a newer reviewer
+cannot erase them by supplying a clean pass.
+
+If an upgraded session reports that its critique history requires regeneration,
+run the exact public command in the diagnostic before recording another review:
+
+```sh
+flow-agents workflow regenerate-critique-chain --session-dir .kontourai/flow-agents/<slug>
+```
+
+Normal validation does not synthesize legacy chain anchors. Regeneration is an
+explicit, assignment-bound trust-bundle writer operation with persisted
+provenance; ambiguous legacy supersession fails loudly instead of guessing.
+
 Example prompt:
 
 ```text

@@ -14,7 +14,7 @@ import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestorOrEquivalentTree } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -31,7 +31,7 @@ import {
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, isSubstantivePassingCritiqueRecord, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 
 type AnyObj = Record<string, any>;
 
@@ -1216,6 +1216,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(supersededBy ? { superseded_by: supersededBy } : {}),
       ...(c.critique_resolution && typeof c.critique_resolution === "object" && !Array.isArray(c.critique_resolution)
         ? { critique_resolution: c.critique_resolution }
+        : {}),
+      ...(c.critique_chain_regeneration && typeof c.critique_chain_regeneration === "object" && !Array.isArray(c.critique_chain_regeneration)
+        ? { critique_chain_regeneration: c.critique_chain_regeneration }
         : {}),
     };
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
@@ -3745,8 +3748,80 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       ...(md.critique_resolution && typeof md.critique_resolution === "object" && !Array.isArray(md.critique_resolution)
         ? { critique_resolution: md.critique_resolution }
         : {}),
+      ...(md.critique_chain_regeneration && typeof md.critique_chain_regeneration === "object" && !Array.isArray(md.critique_chain_regeneration)
+        ? { critique_chain_regeneration: md.critique_chain_regeneration }
+        : {}),
     };
   });
+}
+
+async function regenerateCritiqueChain(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const state = loadJson(path.join(dir, "state.json"));
+  const projectedRun = state.flow_run && typeof state.flow_run === "object" && !Array.isArray(state.flow_run)
+    ? state.flow_run as AnyObj
+    : null;
+  if (projectedRun?.definition_id !== "builder.build" || projectedRun?.status !== "active") {
+    die("regenerate-critique-chain requires one active canonical builder.build session");
+  }
+  const existing = readBundleState(dir);
+  const priorBundle = fs.readFileSync(path.join(dir, "trust.bundle"));
+  const priorBundleValue = JSON.parse(priorBundle.toString("utf8")) as AnyObj;
+  const resolutionEvents = Array.isArray(priorBundleValue.critique_resolution_events) ? priorBundleValue.critique_resolution_events : [];
+  if (resolutionEvents.length > 0) {
+    die("regenerate-critique-chain cannot infer pre-chain history that already carries resolution authority events");
+  }
+  const normalized = normalizeCritiqueChainRecords(existing.critiques);
+  if (!normalized.migrated) die("regenerate-critique-chain found no pre-chain critique history to regenerate");
+  const regeneratedAt = new Date().toISOString();
+  const provenance = {
+    schema_version: "1.0",
+    operation: "regenerate-critique-chain",
+    regenerated_at: regeneratedAt,
+    prior_bundle_sha256: createHash("sha256").update(priorBundle).digest("hex"),
+  };
+  const critiques: AnyObj[] = normalized.records.map((record) => ({ ...record, critique_chain_regeneration: provenance }));
+  for (const prior of critiques) {
+    if (!prior.superseded_by || prior.critique_resolution) continue;
+    const candidates = critiques.filter((candidate) => candidate !== prior
+      && candidate.id === prior.id
+      && candidate.reviewer === prior.reviewer
+      && isSubstantivePassingCritiqueRecord(candidate)
+      && candidate.critique_sequence > prior.critique_sequence);
+    if (candidates.length !== 1) {
+      die(`regenerate-critique-chain requires one unique later same-reviewer clean recheck for legacy critique ${String(prior.critique_record_id)}`);
+    }
+    const resolving = candidates[0]!;
+    prior.superseded_by = resolving.critique_record_id;
+    prior.critique_resolution = {
+      schema_version: "1.0",
+      kind: "same-reviewer-recheck",
+      prior_record_id: prior.critique_record_id,
+      resolving_record_id: resolving.critique_record_id,
+      resolver: resolving.reviewer,
+      resolved_lane_ids: (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort(),
+      resolved_finding_ids: (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort(),
+      resolved_at: resolving.reviewed_at,
+    };
+  }
+  const exactFlowContext = { flowId: "builder.build", stepId: String(projectedRun.current_step) };
+  const candidate = await buildTrustBundle(slug, regeneratedAt, existing.checks, existing.criteria, critiques, [], path.dirname(dir), undefined, exactFlowContext, []);
+  if (!candidate) die("regenerate-critique-chain could not build the candidate trust bundle");
+  const workItemRefs = Array.isArray(state.work_item_refs) ? state.work_item_refs : [];
+  const subject = workItemRefs.length === 1 && hasNonEmptyString(workItemRefs[0]) ? String(workItemRefs[0]) : undefined;
+  const graph = validateCritiqueResolutionGraph(Array.isArray(candidate.claims) ? candidate.claims : [], subject, [], canonicalProjectRootForSession(dir));
+  // Regeneration establishes structural chain integrity; it must not manufacture a clean review.
+  // A legacy live FAIL remains intentionally unresolved until an ordinary later critique and
+  // authenticated resolution edge address it. Permit only those policy-state diagnostics here.
+  const unresolvedPolicyErrors = new Set([
+    "critique graph requires a current verified PASS",
+    "critique graph has unresolved live critique records",
+  ]);
+  const blockingGraphErrors = graph.errors.filter((error) => !unresolvedPolicyErrors.has(error));
+  if (blockingGraphErrors.length) die(`regenerate-critique-chain rejected invalid candidate graph: ${blockingGraphErrors.join("; ")}`);
+  assertBundleWritten(await writeTrustBundle(dir, slug, regeneratedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, []));
+  return 0;
 }
 
 function criteriaFromBundle(dir: string): AnyObj[] {
@@ -4511,7 +4586,11 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
     ? { flowId: projectedRun.definition_id, stepId: projectedRun.current_step }
     : undefined;
   const existing = readBundleState(dir);
-  existing.critiques = normalizeCritiqueChainRecords(existing.critiques).records;
+  const normalizedExisting = normalizeCritiqueChainRecords(existing.critiques);
+  if (normalizedExisting.migrated) {
+    die("critique history requires regeneration; run `flow-agents workflow regenerate-critique-chain --session-dir <path>`");
+  }
+  existing.critiques = normalizedExisting.records;
   const rawBundle = loadJson(path.join(dir, "trust.bundle"));
   const resolutionEvents = Array.isArray(rawBundle.critique_resolution_events) ? rawBundle.critique_resolution_events : [];
   const prior = critiqueByRecordId(existing.critiques, priorRecordId, "prior");
@@ -4556,7 +4635,7 @@ async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number>
   const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
   if (priorWorkspace?.kind === "git-worktree" && resolvingWorkspace?.kind === "git-worktree") {
     try {
-      assertTrustedGitAncestor(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
+      assertTrustedGitAncestorOrEquivalentTree(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
     } catch { die("resolve-critique resolving Git snapshot must descend from the prior reviewed commit"); }
   }
   const requiredLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
@@ -7273,6 +7352,10 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
+      case "regenerate-critique-chain": {
+        if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("regenerate-critique-chain is available only through the authenticated public workflow interface");
+        return regenerateCritiqueChain(p);
+      }
       case "resolve-critique": {
         if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("resolve-critique is available only through the authenticated public workflow interface");
         return resolveCritique(p);

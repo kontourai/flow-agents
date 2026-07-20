@@ -119,6 +119,10 @@ The authorization binds
 the exact canonical project root, run, subject, pre-mutation bundle digest, critique IDs and hashes,
 expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
 identity and actor overrides do not authorize this operation.
+The signed authorization file must itself be stored outside the project and worktree, and its path
+must contain no symbolic-link components. A user-owned protected location such as
+`$HOME/.config/kontour/lifecycle-authority/authorizations/` is suitable; repository-local signed
+authorizations are rejected even when their signature is valid.
 
 Requests and responses use strict single-line JSON envelopes. A response is accepted only when its
 protocol version, action, canonical request SHA-256 digest, status, and exact action-specific result
@@ -150,7 +154,7 @@ flow_agents workflow resolve-critique \
   --session-dir .kontourai/flow-agents/example \
   --prior-record-id '<earlier-critique-record-id>' \
   --resolving-record-id '<later-passing-critique-record-id>' \
-  --authorization-file critique-resolution.authorization.json
+  --authorization-file "$HOME/.config/kontour/lifecycle-authority/authorizations/critique-resolution.authorization.json"
 ```
 
 The earlier record remains in `trust.bundle` with its original reviewer,
@@ -169,8 +173,8 @@ the resulting state in their provider-neutral durable audit store.
 flow_agents workflow pause --reason "Waiting for a decision"
 flow_agents workflow resume --reason "Decision received"
 flow_agents workflow release --reason "Handing work back"
-flow_agents workflow cancel --authorization-file cancel.json
-flow_agents workflow archive --authorization-file archive.json
+flow_agents workflow cancel --authorization-file "$HOME/.config/kontour/lifecycle-authority/authorizations/cancel.json"
+flow_agents workflow archive --authorization-file "$HOME/.config/kontour/lifecycle-authority/authorizations/archive.json"
 ```
 
 `workflow status` is read-only. It reads the actor-scoped current-session pointer, the projected

@@ -72,6 +72,28 @@ route-back attempt. Failed evidence may still synchronize immediately when it
 carries a route reason declared by the gate; a disputed report-only critique is
 not itself a routed gate decision and remains pending.
 
+At the verify gate, every live non-passing critique or open finding remains
+blocking, independent of reviewer or workspace age. Substantive passing
+critiques authorize only the implementation workspace they reviewed: an older
+clean pass remains audit history after the workspace changes, while at least
+one distinct-actor clean critique must match the current workspace exactly and
+retain matching reviewed-artifact digests. This current-snapshot selection does
+not supersede another reviewer's record and cannot bury a disputed finding.
+
+Critique validation never repairs pre-chain history implicitly. An upgraded
+session with critique records that predate writer-issued sequence and hash
+anchors fails with a migration-required diagnostic naming the public command:
+
+```sh
+flow-agents workflow regenerate-critique-chain --session-dir <path>
+```
+
+That command is the sole regeneration boundary. It runs under the bound session
+assignment, preserves logical critique record ids, records prior-bundle digest
+provenance, converts unambiguous legacy same-reviewer supersession to explicit
+resolution edges, and leaves the canonical Flow manifest unchanged. Partial or
+ambiguous histories fail before mutation.
+
 Attachments carry the exact expectation ids selected from the current bundle.
 Digest idempotence applies only while an unsuperseded attachment for that gate
 and expectation set remains live. After route-back, claims must be current for
@@ -351,6 +373,9 @@ multiple output records, and malformed JSON fail closed. The helper independentl
 constrains all received paths, derives root relationships itself, and never treats caller-provided
 paths as trusted merely because the package serialized them. A positive end-to-end mutation remains
 `NOT_VERIFIED` when the administrator-owned helper and pinned verification key are absent.
+The coordinator accepts a signed authorization only from a canonical, non-symlink path outside the
+project and worktree. This keeps privileged lifecycle inputs out of agent-controlled repository scope;
+the Ed25519 signature, registry, request binding, and replay checks remain independently required.
 Package-side validation does not call a live verification action; it verifies the immutable signed
 completion locally and binds its result digest to the exact resolution graph before Builder consumes
 the transition.
@@ -366,6 +391,28 @@ create registries, signing keys, or deployment-specific configuration. The coord
 administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
+Package-side completion verification resolves the pinned key path before opening it and validates
+every canonical component as OS-owned and protected. On macOS, the verifier permits only Apple's
+exact root-owned `/etc` system alias to `/private/etc`; arbitrary, nested, final-file, or non-macOS
+symlink aliases remain rejected.
+Cross-reviewer critique repair normally requires the reviewed commit to be a trusted Git ancestor
+of the resolving review. A history rewrite may instead prove continuity when the prior commit's
+complete repository tree appears exactly in the resolving commit's bounded ancestry. Patch-only,
+replacement-object, unrelated, or merely similar divergent histories remain rejected.
+Sequential lifecycle-authority resolutions accumulate one append-only authorization-event chain in
+the separate session sidecar. Replaying an already-applied signed resolution is idempotent and can
+restore its missing event from the durable edge and authorization without rewriting critique claims;
+this recovery exists so an interrupted or older coordinator cannot leave valid claims with an
+incomplete audit sidecar.
+The signed completion binds the referenced critique claims and the complete authorization-event
+chain, not the whole mutable trust bundle. Later test, acceptance, or publication evidence therefore
+cannot invalidate a valid critique-resolution receipt, while changes to any referenced prior,
+resolver, edge, or event still fail verification.
+The immutable Flow attachment remains the audit snapshot written for the signed lifecycle request;
+its manifest digest and request-derived identity are verified independently. The signed result digest
+is checked against the current session critique graph, because later evidence may legitimately rebuild
+the trust bundle without rewriting that historical Flow snapshot. An unresolved later critique remains
+routable as failed gate evidence; full critique-graph policy is enforced before verification can pass.
 
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and

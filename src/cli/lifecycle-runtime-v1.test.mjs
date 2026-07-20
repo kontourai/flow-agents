@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveCritiqueTransition } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { critiqueResolutionAuthorityDigest as runtimeAuthorityDigest, reconcileCritiqueResolutionEvent, resolveCritiqueTransition } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { critiqueResolutionAuthorityDigest as packageAuthorityDigest } from "../../build/src/cli/critique-resolution.js";
 
 const priorHash = "a".repeat(64), resolvingHash = "b".repeat(64);
 const claim = (id, reviewer, verdict, status, lanes, findings) => ({ id: `claim-${id}`, value: verdict, status: "verified", metadata: { origin: "critique", critique_record_id: id, critique_record_hash: id === "prior" ? priorHash : resolvingHash, critique_sequence: id === "prior" ? 1 : 2, critique_predecessor_hash: id === "prior" ? "0".repeat(64) : priorHash, workflow_subject_ref: "work-item:1", reviewer, verdict, claim_status: status, lanes, findings, review_target: { workspace_snapshot: { digest: id === "prior" ? "c".repeat(64) : "d".repeat(64), head_sha: "none" } } } });
@@ -22,4 +23,23 @@ test("runtime v1 rejects incomplete repair coverage and same-reviewer resolution
   assert.throws(() => resolveCritiqueTransition({ bundle, authorization: { ...authorization, resolved_lane_ids: [] }, prior_record_id: "prior", resolving_record_id: "resolving" }), /exact failing critique surface/);
   const same = structuredClone(bundle); same.claims[1].metadata.reviewer = "reviewer-a";
   assert.throws(() => resolveCritiqueTransition({ bundle: same, authorization: { ...authorization, expected_resolver: "reviewer-a" }, prior_record_id: "prior", resolving_record_id: "resolving" }), /distinct/);
+});
+test("runtime v1 idempotently restores a missing event for an already-applied resolution", () => {
+  const applied = resolveCritiqueTransition({ bundle, authorization, prior_record_id: "prior", resolving_record_id: "resolving" });
+  const stripped = { ...applied };
+  delete stripped.critique_resolution_events;
+  const restored = reconcileCritiqueResolutionEvent({ bundle: stripped, authorization, existing_events: [], prior_record_id: "prior", resolving_record_id: "resolving" });
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].event_id, applied.critique_resolution_events[0].event_id);
+  assert.deepEqual(reconcileCritiqueResolutionEvent({ bundle: stripped, authorization, existing_events: restored, prior_record_id: "prior", resolving_record_id: "resolving" }), restored);
+});
+test("resolution authority digest ignores unrelated evidence and matches the package verifier", () => {
+  const applied = resolveCritiqueTransition({ bundle, authorization, prior_record_id: "prior", resolving_record_id: "resolving" });
+  const events = applied.critique_resolution_events;
+  const expected = runtimeAuthorityDigest(applied.claims, events);
+  assert.equal(packageAuthorityDigest(applied.claims, events), expected);
+  assert.equal(runtimeAuthorityDigest([...applied.claims, { id: "later-tests", claimType: "builder.verify.tests", value: "fail" }], events), expected);
+  const changed = structuredClone(applied.claims);
+  changed[1].metadata.reviewer = "different-reviewer";
+  assert.notEqual(runtimeAuthorityDigest(changed, events), expected);
 });
