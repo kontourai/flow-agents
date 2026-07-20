@@ -2292,6 +2292,22 @@ test("workspace review fails closed when a Git worktree marker cannot be inspect
   );
 });
 
+test("workspace review uses reviewed files only for a genuine non-Git root", () => {
+  const session = makeSession("non-git-review-snapshot");
+  const snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, [{ file: "review-target/delivery.md", sha256: createHash("sha256").update("reviewed delivery\n").digest("hex") }]);
+  assert.equal(snapshot.kind, "reviewed-files");
+});
+
+test("workspace review rejects a nested root inside a Git worktree", () => {
+  const session = makeSession("nested-git-review-snapshot");
+  execFileSync("git", ["init", "-q"], { cwd: session.projectRoot });
+  const nestedRoot = path.join(session.projectRoot, "review-target");
+  assert.throws(
+    () => captureReviewWorkspaceSnapshot(nestedRoot, [{ file: "delivery.md", sha256: createHash("sha256").update("reviewed delivery\n").digest("hex") }]),
+    /canonical project root must match the Git worktree root/,
+  );
+});
+
 test("publish-change reports an external capability gap and self-authored results cannot pass", async () => {
   const session = makeSession("composed-completion");
   const ambient = claimAmbientSessionAssignment(session);

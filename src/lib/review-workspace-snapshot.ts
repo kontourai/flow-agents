@@ -12,8 +12,14 @@ export function captureReviewWorkspaceSnapshot(projectRoot: string, reviewedFile
 function gitWorktreeSnapshot(projectRoot: string): Record<string, unknown> | null {
   const root = fs.realpathSync(projectRoot);
   const hasGitMarker = fs.existsSync(path.join(root, ".git"));
+  let gitRoot: string;
   try {
-    const gitRoot = String(execTrustedGitSync(root, ["rev-parse", "--show-toplevel"])).trim();
+    gitRoot = String(execTrustedGitSync(root, ["rev-parse", "--show-toplevel"])).trim();
+  } catch (error) {
+    if (!hasGitMarker) return null;
+    throw new Error(`could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
     if (!gitRoot || fs.realpathSync(gitRoot) !== root) throw new Error("canonical project root must match the Git worktree root");
     const headSha = String(execTrustedGitSync(root, ["rev-parse", "HEAD"])).trim();
     const trackedDiff = execTrustedGitSync(root, ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], "buffer") as Buffer;
@@ -30,8 +36,7 @@ function gitWorktreeSnapshot(projectRoot: string): Record<string, unknown> | nul
     }
     return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: headSha };
   } catch (error) {
-    if (hasGitMarker) throw new Error(`could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    throw new Error(`could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
