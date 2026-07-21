@@ -39,8 +39,9 @@ model and threat analysis.
 Flow Agents' deliver skill calls `publishDelivery`, which writes
 `delivery/<task-slug>/trust.bundle` to the repository with `git add -f` during the
 `record-release` step. This file carries the session's evidence and claims to CI so the
-anchor can reconcile them. On pull requests the action selects the single changed
-per-session bundle; the legacy flat path remains read-compatible during migration.
+anchor can reconcile them. The action delegates ownership-aware discovery to the reconciler,
+which selects the newest bundle that attests the change across per-session and legacy flat
+paths.
 
 You do not need to configure this — it is part of the deliver skill workflow. The bundle
 is gitignored by default (the deliver skill force-adds it for the PR commit only).
@@ -78,6 +79,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Ownership checks compare bundle commits through git ancestry.
+          fetch-depth: 0
 
       - uses: kontourai/flow-agents/.github/actions/trust-verify@<SHA>
         with:

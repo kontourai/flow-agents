@@ -240,11 +240,19 @@ if node -e '
   const emptyDefault=/bundle:\s*[\s\S]*?default: ""/.test(action);
   const delegatesDiscovery=!/discover-delivery-bundle\.mjs/.test(action);
   const explicitOnly=/BUNDLE_ARG="--bundle \$BUNDLE_INPUT"/.test(action);
-  process.exit(emptyDefault && delegatesDiscovery && explicitOnly ? 0 : 1);
+  const bindsPrHead=/TRUST_RECONCILE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/.test(action);
+  const bindsEvent=/TRUST_RECONCILE_EVENT: \$\{\{ github\.event_name \}\}/.test(action);
+  process.exit(emptyDefault && delegatesDiscovery && explicitOnly && bindsPrHead && bindsEvent ? 0 : 1);
 ' "$ROOT"; then
-  _pass "ACTION-DISCOVERY: omitted bundle stays auto-discovered by the ownership-aware reconciler"
+  _pass "ACTION-DISCOVERY: omitted bundle and CI context stay owned by the ownership-aware reconciler"
 else
-  _fail "ACTION-DISCOVERY: wrapper must not promote an auto-discovered path to explicit --bundle"
+  _fail "ACTION-DISCOVERY: wrapper must delegate discovery with PR-head and event context"
+fi
+
+if grep -A4 'name: Checkout' "$ROOT/docs/trust-anchor-adoption.md" | grep -q 'fetch-depth: 0'; then
+  _pass "ACTION-HISTORY: consumer adoption uses full history for bundle ancestry checks"
+else
+  _fail "ACTION-HISTORY: documented consumer checkout must use fetch-depth: 0"
 fi
 
 # The action checkout does not arrive with node_modules. Its ESM status-derivation helper

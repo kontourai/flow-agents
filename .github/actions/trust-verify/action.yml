@@ -130,6 +130,8 @@ runs:
         VERIFY_COMMAND: ${{ inputs.verify-command }}
         BUNDLE_INPUT: ${{ inputs.bundle }}
         MISSING_BUNDLE_POLICY: ${{ inputs.missing-bundle-policy }}
+        TRUST_RECONCILE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        TRUST_RECONCILE_EVENT: ${{ github.event_name }}
       run: |
         if [ -n "$BUNDLE_INPUT" ]; then
           echo "[trust-verify] using caller-selected delivery bundle: $BUNDLE_INPUT"
