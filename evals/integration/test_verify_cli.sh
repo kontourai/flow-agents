@@ -234,6 +234,19 @@ else
   _fail "ACTION-POLICY: trust-verify action can suppress failure or lacks the missing-bundle contract"
 fi
 
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const emptyDefault=/bundle:\s*[\s\S]*?default: ""/.test(action);
+  const delegatesDiscovery=!/discover-delivery-bundle\.mjs/.test(action);
+  const explicitOnly=/BUNDLE_ARG="--bundle \$BUNDLE_INPUT"/.test(action);
+  process.exit(emptyDefault && delegatesDiscovery && explicitOnly ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-DISCOVERY: omitted bundle stays auto-discovered by the ownership-aware reconciler"
+else
+  _fail "ACTION-DISCOVERY: wrapper must not promote an auto-discovered path to explicit --bundle"
+fi
+
 # The action checkout does not arrive with node_modules. Its ESM status-derivation helper
 # resolves @kontourai/surface from the action repository, so the composite action must install
 # the action's own locked runtime dependencies rather than relying on the consumer repo.

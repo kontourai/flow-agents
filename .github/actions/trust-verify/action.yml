@@ -18,9 +18,9 @@
 #   verify-command    [required]  Your comprehensive verify command (build + tests +
 #                                 lint). What the agent ran locally should match what
 #                                 this reruns in CI.
-#   bundle            [optional]  Path to the delivered trust.bundle (default:
-#                                 delivery/trust.bundle). If absent on a pull request,
-#                                 the single changed per-session bundle is discovered.
+#   bundle            [optional]  Explicit path to the delivered trust.bundle. When
+#                                 omitted, the reconciler performs ownership-aware
+#                                 discovery across flat and per-session delivery paths.
 #   fail-on-divergence [deprecated] Accepted for caller compatibility but no longer
 #                                 weakens the gate. Use missing-bundle-policy for the
 #                                 narrow advisory-adoption case.
@@ -70,11 +70,11 @@ inputs:
     required: true
   bundle:
     description: >
-      Path to the delivered trust.bundle (relative to workspace root).
-      Prefers delivery/trust.bundle, then discovers the single changed
-      delivery/<task-slug>/trust.bundle on pull requests.
+      Explicit path to the delivered trust.bundle (relative to workspace root).
+      Leave empty for ownership-aware discovery across legacy flat and per-session
+      delivery paths.
     required: false
-    default: "delivery/trust.bundle"
+    default: ""
   fail-on-divergence:
     description: >
       Deprecated compatibility input. Divergence and fresh verification failures
@@ -120,8 +120,9 @@ runs:
         ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
         npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
 
-    # Resolve the bundle path: use the input value if the file exists, otherwise
-    # pass an empty string (trust-reconcile.js auto-discovers and applies the selected policy).
+    # Explicit caller paths remain explicit. When omitted, trust-reconcile.js owns
+    # discovery so its ownership, staleness, and prefer-newest checks cannot be bypassed
+    # by a wrapper converting an auto-discovered path into a trusted explicit path.
     - name: Trust verify
       id: trust-verify
       shell: bash
@@ -129,13 +130,10 @@ runs:
         VERIFY_COMMAND: ${{ inputs.verify-command }}
         BUNDLE_INPUT: ${{ inputs.bundle }}
         MISSING_BUNDLE_POLICY: ${{ inputs.missing-bundle-policy }}
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
-        BUNDLE_PATH="$(node "${{ github.action_path }}/../../../scripts/ci/discover-delivery-bundle.mjs" \
-          "${{ github.workspace }}" "$BUNDLE_INPUT" "$BASE_SHA")"
-        if [ -n "$BUNDLE_PATH" ]; then
-          echo "[trust-verify] using delivery bundle: $BUNDLE_PATH"
-          BUNDLE_ARG="--bundle $BUNDLE_PATH"
+        if [ -n "$BUNDLE_INPUT" ]; then
+          echo "[trust-verify] using caller-selected delivery bundle: $BUNDLE_INPUT"
+          BUNDLE_ARG="--bundle $BUNDLE_INPUT"
         else
           BUNDLE_ARG=""
         fi

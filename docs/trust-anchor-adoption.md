@@ -86,8 +86,8 @@ jobs:
           verify-command: "npm run build && npm test && npm run lint"
           # Use advisory only while the check is not yet required in branch protection.
           missing-bundle-policy: required
-          # bundle: prefers legacy delivery/trust.bundle, then auto-discovers the
-          # single changed delivery/<task-slug>/trust.bundle for this pull request
+          # bundle: leave empty for ownership-aware discovery across legacy flat and
+          # per-session delivery paths; set only for a deliberate explicit path
           # sign: false (set to true + add id-token: write for Sigstore attestation)
 ```
 
