@@ -140,6 +140,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -1396,6 +1397,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       commit_sha: process.env.GITHUB_SHA || 'unknown',
       canonical_commands: ciResultsArr,
       reconciled: bundlePath !== null,
+      reconciled_bundle: bundlePath ? {
+        path: path.relative(resolvedRepoRoot, bundlePath),
+        sha256: crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex'),
+      } : null,
       built_at: new Date().toISOString(),
     };
     try {
