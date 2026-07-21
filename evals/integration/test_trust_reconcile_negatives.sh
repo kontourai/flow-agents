@@ -213,6 +213,45 @@ else
   _fail "no-bundle-no-marker: expected 'no delivery/DECLARED marker found' — output: $out7a"
 fi
 
+# 7aa. Advisory adoption still runs fresh verification but reports bundle absence without
+# requiring a DECLARED marker.
+out7aa="$(TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7A" --missing-bundle-policy advisory 2>&1)"
+code7aa=$?
+if [[ $code7aa -eq 0 ]]; then
+  _pass "no-bundle-advisory: fresh verification passes without a bundle or marker"
+else
+  _fail "no-bundle-advisory: expected zero exit, got $code7aa — output: $out7aa"
+fi
+if echo "$out7aa" | grep -qF "ADVISORY: no current bundle to reconcile"; then
+  _pass "no-bundle-advisory: missing evidence is reported loudly"
+else
+  _fail "no-bundle-advisory: expected advisory diagnostic — output: $out7aa"
+fi
+if echo "$out7aa" | grep -qF "PASS: $DECLARED_CMD"; then
+  _pass "no-bundle-advisory: canonical verification ran fresh"
+else
+  _fail "no-bundle-advisory: fresh verification evidence missing — output: $out7aa"
+fi
+
+out7aa_bad="$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(1)'" \
+  node "$RECONCILE" --repo-root "$CASE7A" --missing-bundle-policy advisory 2>&1)"
+code7aa_bad=$?
+if [[ $code7aa_bad -ne 0 ]]; then
+  _pass "no-bundle-advisory: failed fresh verification remains fail-closed"
+else
+  _fail "no-bundle-advisory: failed fresh verification must not pass — output: $out7aa_bad"
+fi
+
+out7aa_invalid="$(TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7A" --missing-bundle-policy permissive 2>&1)"
+code7aa_invalid=$?
+if [[ $code7aa_invalid -ne 0 ]] && echo "$out7aa_invalid" | grep -qF "expected required or advisory"; then
+  _pass "missing-bundle-policy: unsupported values fail closed with a stable diagnostic"
+else
+  _fail "missing-bundle-policy: unsupported value was not rejected — output: $out7aa_invalid"
+fi
+
 # 7b. delivery/DECLARED missing approved_by → treated as absent, missing field named.
 CASE7B="$DECLARED_TMPROOT/missing-field"
 mkdir -p "$CASE7B"
