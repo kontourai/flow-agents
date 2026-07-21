@@ -219,6 +219,42 @@ else
   _fail "ACTION-PATH: a trust-verify action.yml script ref does not resolve (wrong ../ depth?)"
 fi
 
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const hasInput=/missing-bundle-policy:\s*[\s\S]*?default: "required"/.test(action);
+  const passesPolicy=/--missing-bundle-policy "\$MISSING_BUNDLE_POLICY"/.test(action);
+  const cannotSuppressFailure=!/FAIL_ON_DIVERGENCE/.test(action)
+    && !/divergence detected \(fail-on-divergence=false/.test(action)
+    && /Deprecated compatibility input/.test(action);
+  process.exit(hasInput && passesPolicy && cannotSuppressFailure ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-POLICY: missing-bundle policy is explicit and no compatibility input can suppress a red anchor"
+else
+  _fail "ACTION-POLICY: trust-verify action can suppress failure or lacks the missing-bundle contract"
+fi
+
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const emptyDefault=/bundle:\s*[\s\S]*?default: ""/.test(action);
+  const delegatesDiscovery=!/discover-delivery-bundle\.mjs/.test(action);
+  const explicitOnly=/BUNDLE_ARG="--bundle \$BUNDLE_INPUT"/.test(action);
+  const bindsPrHead=/TRUST_RECONCILE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/.test(action);
+  const bindsEvent=/TRUST_RECONCILE_EVENT: \$\{\{ github\.event_name \}\}/.test(action);
+  process.exit(emptyDefault && delegatesDiscovery && explicitOnly && bindsPrHead && bindsEvent ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-DISCOVERY: omitted bundle and CI context stay owned by the ownership-aware reconciler"
+else
+  _fail "ACTION-DISCOVERY: wrapper must delegate discovery with PR-head and event context"
+fi
+
+if grep -A4 'name: Checkout' "$ROOT/docs/trust-anchor-adoption.md" | grep -q 'fetch-depth: 0'; then
+  _pass "ACTION-HISTORY: consumer adoption uses full history for bundle ancestry checks"
+else
+  _fail "ACTION-HISTORY: documented consumer checkout must use fetch-depth: 0"
+fi
+
 # The action checkout does not arrive with node_modules. Its ESM status-derivation helper
 # resolves @kontourai/surface from the action repository, so the composite action must install
 # the action's own locked runtime dependencies rather than relying on the consumer repo.
