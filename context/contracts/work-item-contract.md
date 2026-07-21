@@ -88,9 +88,9 @@ is defined without assuming any one provider's representation:
 
 | Operation | Meaning | Payload |
 | --- | --- | --- |
-| `status_transition` | Move a work item to a different provider-neutral lifecycle status (`WorkItemStatus`, see "Status Guidance"). | `{ to_status, to_status_raw? }` — `to_status_raw` carries the provider's native status text when the caller already resolved one (e.g. a board column name), so the adapter does not have to re-derive it. |
-| `field_update` | Set a single named field's value (a custom board field, or a mapped field such as `priority`/`size`/`risk`). | `{ field, value }` — `value` is a string, number, boolean, or `null`. |
-| `comment` | Post a comment on the work item. | `{ body }`. |
+| `status_transition` | Move a work item to a different provider-neutral lifecycle status. | `{ to_status, to_status_raw? }` — `to_status` (and `base.status`, below) must be one of `workItemStatuses` (`src/lib/work-item-vocabulary.ts`, #775) and nothing looser; `to_status_raw` carries the provider's native status text when the caller already resolved one (e.g. a board column name), so the adapter does not have to re-derive it, but never substitutes for `to_status`. |
+| `field_update` | Set a single named field's value (a custom board field, or a mapped field such as `priority`/`size`/`risk`). | `{ field, value }` — `value` is a string, number, boolean, or `null` (`null` clears the field; see "GitHub Mutations" for how each adapter represents clearing and why the GitHub adapter rejects booleans). |
+| `comment` | Post a comment on the work item. | `{ body, idempotency_key? }` — see "Comment Idempotency" below. |
 
 A mutation request is a single provider-neutral shape regardless of operation:
 
@@ -108,7 +108,7 @@ A mutation request is a single provider-neutral shape regardless of operation:
 | --- | --- | --- |
 | `schema_version` | yes | `"1.0"`. |
 | `operation` | yes | `status_transition`, `field_update`, or `comment`. |
-| `work_item_ref` | yes | The target work item's stable id (`WorkItem.id`) plus provider coordinates when known (`owner`, `repo`, `number`), matching the "Work Item Shape" `id` convention. |
+| `work_item_ref` | yes | The target work item's stable id (`WorkItem.id`) plus provider coordinates when known (`owner`, `repo`, `number`), matching the "Work Item Shape" `id` convention. The GitHub adapter additionally *requires* `owner`/`repo`/`number` and rejects rendering without them — see "Render Target Identity Guard". |
 | `base` | operation-dependent (see Conflict Policy) | The provider state the mutation was computed from — the write-side counterpart to `planned_base_ref`/`planned_base_sha`. |
 | `payload` | yes | The operation-specific payload from the table above. |
 
@@ -150,6 +150,23 @@ instead of planning scope:
   `conflict`) scoped to a single field's before/after value, not the broader repository-scope drift
   classification pickup Probe performs.
 
+#### GitHub Render-Time Caveat
+
+The staleness check above is only as strong as the gap between "when it ran" and "when the
+mutation actually takes effect." For the **local-file adapter** those are the same instant: the
+check and the write happen inside one `withSubjectLock`-serialized critical section (see "Render,
+Don't Execute"), so `applied` is an authoritative guarantee — nothing else could have changed the
+record in between. For the **GitHub adapter** they are NOT the same instant: `renderGithubMutation`
+only *renders* `gh` argv; a host executes it later, out of process, after an unbounded gap (human
+review, queued retry, network latency). Provider state can drift again in that gap. This contract
+is explicit rather than silently overselling a guarantee it cannot make: **the GitHub adapter's
+conflict check is advisory at render time only.** A `rendered` or `conflict` GitHub result carries
+`advisory: true` as a machine-readable marker of this (see "GitHub Mutations"). A host that needs a
+stronger guarantee must re-observe current state immediately before executing the rendered
+`gh_commands` and discard/re-render if it has drifted since; this contract does not itself add an
+execution-time precondition mechanism (e.g. a `gh` conditional-request equivalent), matching the
+deliberate, minimal scope this section already draws around #776.
+
 ### Render, Don't Execute
 
 Mutation adapters keep the same render/execute split already established for GitHub write paths in
@@ -163,6 +180,39 @@ conflict-policy vocabulary above is identical either way; only whether execution
 outside the adapter differs. This is the deliberate, minimal scope for #776: an authenticated
 self-executing GitHub mutation path (mirroring `publish-change`'s Wave 2B `ChangeProvider`) is a
 distinct, larger trust decision this contract does not make.
+
+### Render Target Identity Guard
+
+Because rendering and executing are split across a trust boundary (see "Render, Don't Execute"), a
+mismatched render target is a confused-deputy risk, not just a bug: a caller could render a
+mutation carrying one work item's payload against a `target` that names a different repository,
+issue, or Projects v2 item — deliberately or by a stale-cache accident — and, without a check, the
+adapter would happily produce valid-looking `gh` argv against the WRONG work item. Every GitHub
+mutation adapter therefore validates, before rendering any command, that the render target's
+repository and number exactly match `request.work_item_ref`'s `owner`/`repo`/`number` (required for
+this reason — see the `work_item_ref` field table above). A mismatch, or a `work_item_ref` missing
+those coordinates entirely, returns `rejected` with a reason naming both the target and the
+declared ref; zero `gh_commands` are rendered. This check runs before the conflict check above and
+applies to all three operations, including `comment` (a redirected comment would land on the wrong
+issue too).
+
+### Comment Idempotency
+
+Comment mutations are **at-least-once**, not exactly-once, across every adapter in this contract: a
+retry after a timeout or a transport failure between rendering/applying and the caller learning the
+outcome can result in the same comment being posted twice, because there is no read-before-write
+staleness check to fall back on (`comment`'s `base` is optional and non-blocking — see the Conflict
+Policy above). A caller that needs to avoid duplicate comments supplies
+`payload.idempotency_key`; every adapter that receives one embeds it as a stable, greppable marker
+— `<!-- flow-agents:mutation-comment:<idempotency_key> -->` on its own line before the caller's
+body, mirroring `assignment-provider.ts`'s `claim_comment_marker` convention — in the
+rendered/applied comment body. The **local-file adapter** goes one step further and uses the marker
+itself: before appending, it scans the item's existing comments for one already carrying the same
+key and, if found, returns `applied` without appending a duplicate (a real, adapter-side dedupe,
+possible because the adapter has direct read access to prior comments). The **GitHub render
+adapter** cannot dedupe itself — it is a pure function with no access to the issue's existing
+comments — so the marker is instead the mechanism a HOST uses: search prior comments for the marker
+before executing a rendered comment mutation, and skip execution if it is already present.
 
 ### Mutation Capability Flags
 
@@ -356,21 +406,25 @@ GitHub is the first adapter/example for publish-change. Core workflow text shoul
 ### GitHub Mutations
 
 The GitHub mutation adapter renders `gh` argv and never executes it (see "Render, Don't Execute"
-above). Every rendered record carries `{ operation, status, work_item_ref, base_ref, gh_commands? ,
-conflict? }`, where `base_ref` is the `owner/repo#number` coordinate the argv targets and
+above). Every rendered record carries `{ operation, status, work_item_ref, base_ref, gh_commands?,
+conflict?, advisory? }`, where `base_ref` is the `owner/repo#number` coordinate the argv targets and
 `gh_commands` (present only when `status` is `rendered`) is a JSON array of argv arrays — one
 element per `gh` argument, matching the `assignment-provider-contract.md` `gh_commands` execution
 contract: the host must run each entry as argv, never reconstruct or concatenate it into a shell
-string.
+string. `advisory: true` is present on `rendered`/`conflict` results for `status_transition`/
+`field_update` — see "GitHub Render-Time Caveat" above; it is never present on `comment` (no
+conflict check applies) or on `not_verified`/`rejected` (nothing was checked or matched).
 
 | Operation | Default GitHub representation | With `mutation_policy` project-field target |
 | --- | --- | --- |
 | `status_transition` | Swap a `status:<value>` label (remove the label for `base.status`, add the label for `payload.to_status`) — the same label-prefix convention `priority`/`size`/`risk` already use above. | `gh project item-edit --field-id <status field> --single-select-option-id <option>` against the configured GitHub Projects v2 item. |
-| `field_update` | Swap a `<field>:<value>` label the same way. | `gh project item-edit --field-id <field>` with `--text`, `--number`, or `--single-select-option-id` chosen from the payload value's type. |
-| `comment` | `gh issue comment <number> --repo <owner>/<repo> --body <text>`. | Same — comments are not project-field-scoped. |
+| `field_update` | Swap a `<field>:<value>` label the same way; `value: null` removes the label without adding a replacement (a clear, not a swap-to-empty-string). Boolean `value` is rejected (`status: "rejected"`) — neither labels nor a Projects v2 field has an unambiguous boolean representation here; callers that need one should model the field as a string (`"true"`/`"false"`) or a single-select option instead. | `gh project item-edit --field-id <field>` with `--text` or `--number` chosen from the payload value's type; `value: null` renders `--clear` (the field's actual clearing form) instead of a text/number flag. Boolean `value` is rejected the same as the labels case. |
+| `comment` | `gh issue comment <number> --repo <owner>/<repo> --body <text>`, where `<text>` is the idempotency-marker-prefixed body from "Comment Idempotency" when `payload.idempotency_key` is present. | Same — comments are not project-field-scoped. |
 
 A `conflict` result never renders `gh_commands` — the host receives the observed divergence instead
-and must re-fetch before retrying, per the Conflict Policy above.
+and must re-fetch before retrying, per the Conflict Policy above. A `rejected` result (invalid
+shape, a render-target mismatch, or an unsupported value like a boolean `field_update`) also never
+renders `gh_commands`.
 
 ## Artifact References
 

@@ -360,6 +360,7 @@ export {
   workItemMutationResultStatuses,
 } from "./lib/work-item-mutations.js";
 export type {
+  WorkItemCanonicalStatus,
   WorkItemCommentPayload,
   WorkItemFieldUpdatePayload,
   WorkItemMutationBase,

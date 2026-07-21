@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -17,6 +18,7 @@ import {
 import {
   applyLocalFileMutation,
   main as workItemMutationProviderMain,
+  parseGithubMutationTarget,
   readLocalBacklogDoc,
   renderGithubMutation,
 } from "../../build/src/cli/work-item-mutation-provider.js";
@@ -26,21 +28,31 @@ import {
 import { workItemMutationOperations as workItemMutationOperationsFromPackageRoot } from "@kontourai/flow-agents";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLI_PATH = path.resolve(__dirname, "../../build/src/cli.js");
 
 function withTempDir(run) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-item-mutation-provider-"));
   try {
-    return run(dir);
-  } finally {
+    const result = run(dir);
+    if (result && typeof result.then === "function") {
+      return result.finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+    }
     fs.rmSync(dir, { recursive: true, force: true });
+    return result;
+  } catch (error) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw error;
   }
 }
+
+const GITHUB_TARGET = { repo: { owner: "kontourai", name: "flow-agents" }, number: 776 };
+const MATCHING_REF = { id: "github:kontourai/flow-agents#776", owner: "kontourai", repo: "flow-agents", number: 776 };
 
 function statusRequest(overrides = {}) {
   return {
     schema_version: "1.0",
     operation: "status_transition",
-    work_item_ref: { id: "github:kontourai/flow-agents#776", owner: "kontourai", repo: "flow-agents", number: 776 },
+    work_item_ref: MATCHING_REF,
     base: { status: "in_progress" },
     payload: { to_status: "review" },
     ...overrides,
@@ -51,7 +63,7 @@ function fieldRequest(overrides = {}) {
   return {
     schema_version: "1.0",
     operation: "field_update",
-    work_item_ref: { id: "github:kontourai/flow-agents#776" },
+    work_item_ref: MATCHING_REF,
     base: { field_values: { priority: "P1" } },
     payload: { field: "priority", value: "P0" },
     ...overrides,
@@ -62,7 +74,7 @@ function commentRequest(overrides = {}) {
   return {
     schema_version: "1.0",
     operation: "comment",
-    work_item_ref: { id: "github:kontourai/flow-agents#776" },
+    work_item_ref: MATCHING_REF,
     base: {},
     payload: { body: "status update" },
     ...overrides,
@@ -114,6 +126,30 @@ test("parseWorkItemMutationRequest rejects an unsupported operation and a wrong 
   assert.throws(() => parseWorkItemMutationRequest({ ...statusRequest(), schema_version: "2.0" }), WorkItemMutationError);
 });
 
+// ─── review finding #5: status vocabulary must be canonical, not arbitrary provider text ──────
+
+test("parseWorkItemMutationRequest rejects an arbitrary (non-canonical) base.status", () => {
+  const request = statusRequest({ base: { status: "yolo-in-flight" } });
+  assert.throws(() => parseWorkItemMutationRequest(request), (error) => {
+    assert.ok(error instanceof WorkItemMutationError);
+    assert.match(error.message, /canonical work item statuses/);
+    return true;
+  });
+});
+
+test("parseWorkItemMutationRequest rejects an arbitrary (non-canonical) payload.to_status", () => {
+  const request = statusRequest({ payload: { to_status: "triage" } });
+  // "triage" is a real read-side board sentinel (see work-item-vocabulary.ts) but deliberately
+  // excluded from workItemStatuses — it must not be accepted as a mutation destination status.
+  assert.throws(() => parseWorkItemMutationRequest(request), WorkItemMutationError);
+});
+
+test("parseWorkItemMutationRequest accepts payload.to_status_raw carrying provider-native text alongside a canonical to_status", () => {
+  const parsed = parseWorkItemMutationRequest(statusRequest({ payload: { to_status: "review", to_status_raw: "In Review (Board Column 4)" } }));
+  assert.equal(parsed.payload.to_status, "review");
+  assert.equal(parsed.payload.to_status_raw, "In Review (Board Column 4)");
+});
+
 test("detectMutationConflict: comment operations never conflict", () => {
   const request = parseWorkItemMutationRequest(commentRequest());
   assert.equal(detectMutationConflict(request, { status: "anything" }), null);
@@ -141,9 +177,60 @@ test("parseObservedWorkItemState normalizes a loose observation payload", () => 
   assert.deepEqual(parseObservedWorkItemState(undefined), {});
 });
 
-// ─── GitHub adapter: argv rendering (render, don't execute) ───────────────
+// ─── review finding #6: comment idempotency_key ────────────────────────────
 
-const GITHUB_TARGET = { repo: { owner: "kontourai", name: "flow-agents" }, number: 776 };
+test("parseWorkItemMutationRequest accepts and normalizes an optional comment idempotency_key", () => {
+  const parsed = parseWorkItemMutationRequest(commentRequest({ payload: { body: "hi", idempotency_key: "dedupe-1" } }));
+  assert.equal(parsed.payload.idempotency_key, "dedupe-1");
+});
+
+test("parseWorkItemMutationRequest rejects a non-string idempotency_key", () => {
+  const request = commentRequest({ payload: { body: "hi", idempotency_key: 12 } });
+  assert.throws(() => parseWorkItemMutationRequest(request), WorkItemMutationError);
+});
+
+// ─── GitHub adapter: target validation and identity guard (review finding #3) ─────────────────
+
+test("parseGithubMutationTarget accepts a well-formed target and rejects a malformed one", () => {
+  assert.deepEqual(parseGithubMutationTarget(GITHUB_TARGET), GITHUB_TARGET);
+  assert.throws(() => parseGithubMutationTarget({ repo: { owner: "kontourai" }, number: 776 }), WorkItemMutationError);
+  assert.throws(() => parseGithubMutationTarget({ repo: { owner: "kontourai", name: "flow-agents" }, number: -1 }), WorkItemMutationError);
+  assert.throws(() => parseGithubMutationTarget({ repo: { owner: "kontourai", name: "flow-agents" }, number: 1.5 }), WorkItemMutationError);
+  assert.throws(() => parseGithubMutationTarget(null), WorkItemMutationError);
+});
+
+test("parseGithubMutationTarget validates an optional project_field's shape", () => {
+  const withField = parseGithubMutationTarget({ ...GITHUB_TARGET, project_field: { project_id: "PVT_1", item_id: "PVTI_1", field_id: "PVTF_1", option_id: "OPT_1" } });
+  assert.deepEqual(withField.project_field, { project_id: "PVT_1", item_id: "PVTI_1", field_id: "PVTF_1", option_id: "OPT_1" });
+  assert.throws(() => parseGithubMutationTarget({ ...GITHUB_TARGET, project_field: { project_id: "PVT_1", item_id: "PVTI_1" } }), WorkItemMutationError);
+});
+
+test("renderGithubMutation: a target naming a DIFFERENT work item than request.work_item_ref is rejected before rendering any command (target redirect guard)", () => {
+  const request = parseWorkItemMutationRequest(statusRequest({ work_item_ref: { id: "github:kontourai/flow-agents#776", owner: "kontourai", repo: "flow-agents", number: 776 } }));
+  const wrongTarget = { repo: { owner: "kontourai", name: "flow-agents" }, number: 999 };
+  const record = renderGithubMutation(request, { status: "in_progress" }, wrongTarget);
+  assert.equal(record.status, "rejected");
+  assert.match(record.reason, /does not match request\.work_item_ref/);
+  assert.equal(record.gh_commands, undefined);
+});
+
+test("renderGithubMutation: a work_item_ref missing owner/repo/number is rejected before rendering (cannot validate against the target)", () => {
+  const request = parseWorkItemMutationRequest(statusRequest({ work_item_ref: { id: "github:kontourai/flow-agents#776" } }));
+  const record = renderGithubMutation(request, { status: "in_progress" }, GITHUB_TARGET);
+  assert.equal(record.status, "rejected");
+  assert.match(record.reason, /must include owner, repo, and number/);
+  assert.equal(record.gh_commands, undefined);
+});
+
+test("renderGithubMutation: the target redirect guard also applies to comment mutations", () => {
+  const request = parseWorkItemMutationRequest(commentRequest({ work_item_ref: { id: "github:kontourai/flow-agents#776", owner: "kontourai", repo: "flow-agents", number: 776 } }));
+  const wrongTarget = { repo: { owner: "someone-else", name: "other-repo" }, number: 1 };
+  const record = renderGithubMutation(request, null, wrongTarget);
+  assert.equal(record.status, "rejected");
+  assert.equal(record.gh_commands, undefined);
+});
+
+// ─── GitHub adapter: argv rendering (render, don't execute) ───────────────
 
 test("renderGithubMutation: status_transition with matching base renders a label swap argv, never executes", () => {
   const request = parseWorkItemMutationRequest(statusRequest());
@@ -156,11 +243,9 @@ test("renderGithubMutation: status_transition with matching base renders a label
   ]);
 });
 
-test("renderGithubMutation: status_transition with no prior observed status only adds the new label", () => {
+test("renderGithubMutation: no prior observed status (base diverges from a truly unset status) is a conflict, not a silent proceed", () => {
   const request = parseWorkItemMutationRequest(statusRequest({ base: { status: "todo" } }));
   const record = renderGithubMutation(request, {}, GITHUB_TARGET);
-  // base.status ("todo") vs observed ({} -> null) diverges, so this is a conflict, not a render —
-  // proves the adapter never silently proceeds on an unset-vs-declared mismatch.
   assert.equal(record.status, "conflict");
 });
 
@@ -219,6 +304,56 @@ test("renderGithubMutation: diverged base surfaces a conflict and renders no gh_
 test("renderGithubMutation never touches gh: the module never imports node:child_process (render, don't execute)", () => {
   const source = fs.readFileSync(path.join(__dirname, "work-item-mutation-provider.ts"), "utf8");
   assert.ok(!/from\s+["']node:child_process["']/.test(source), "work-item-mutation-provider.ts must never import node:child_process — see the contract's Render, Don't Execute section");
+});
+
+// ─── review finding #2: GitHub conflict check is advisory at render time only ─────────────────
+
+test("renderGithubMutation: status_transition/field_update rendered and conflict results carry advisory: true", () => {
+  const statusRendered = renderGithubMutation(parseWorkItemMutationRequest(statusRequest()), { status: "in_progress" }, GITHUB_TARGET);
+  assert.equal(statusRendered.advisory, true);
+  const statusConflict = renderGithubMutation(parseWorkItemMutationRequest(statusRequest()), { status: "blocked" }, GITHUB_TARGET);
+  assert.equal(statusConflict.advisory, true);
+  const fieldRendered = renderGithubMutation(parseWorkItemMutationRequest(fieldRequest()), { field_values: { priority: "P1" } }, GITHUB_TARGET);
+  assert.equal(fieldRendered.advisory, true);
+});
+
+test("renderGithubMutation: comment and not_verified/rejected results never carry advisory (no conflict check occurred)", () => {
+  const comment = renderGithubMutation(parseWorkItemMutationRequest(commentRequest()), null, GITHUB_TARGET);
+  assert.equal(comment.advisory, undefined);
+  const notVerified = renderGithubMutation(parseWorkItemMutationRequest(statusRequest()), null, GITHUB_TARGET);
+  assert.equal(notVerified.advisory, undefined);
+  const rejectedTarget = renderGithubMutation(parseWorkItemMutationRequest(statusRequest()), { status: "in_progress" }, { repo: { owner: "x", name: "y" }, number: 1 });
+  assert.equal(rejectedTarget.advisory, undefined);
+});
+
+// ─── review finding #4: null clears, booleans are rejected ────────────────
+
+test("renderGithubMutation: field_update value null clears the label (remove-only, no add-label)", () => {
+  const request = parseWorkItemMutationRequest(fieldRequest({ payload: { field: "priority", value: null } }));
+  const record = renderGithubMutation(request, { field_values: { priority: "P1" } }, GITHUB_TARGET);
+  assert.equal(record.status, "rendered");
+  assert.deepEqual(record.gh_commands, [["issue", "edit", "776", "--repo", "kontourai/flow-agents", "--remove-label", "priority:P1"]]);
+});
+
+test("renderGithubMutation: field_update value null against a project field renders --clear, not a --text/--number flag", () => {
+  const request = parseWorkItemMutationRequest(fieldRequest({ payload: { field: "priority", value: null } }));
+  const target = { ...GITHUB_TARGET, project_field: { project_id: "PVT_1", item_id: "PVTI_1", field_id: "PVTF_1" } };
+  const record = renderGithubMutation(request, { field_values: { priority: "P1" } }, target);
+  assert.equal(record.status, "rendered");
+  assert.deepEqual(record.gh_commands, [["project", "item-edit", "--id", "PVTI_1", "--project-id", "PVT_1", "--field-id", "PVTF_1", "--clear"]]);
+});
+
+test("renderGithubMutation: field_update rejects a boolean value for both labels and project-field targets", () => {
+  const request = parseWorkItemMutationRequest(fieldRequest({ payload: { field: "priority", value: true } }));
+  const labelsRecord = renderGithubMutation(request, { field_values: { priority: "P1" } }, GITHUB_TARGET);
+  assert.equal(labelsRecord.status, "rejected");
+  assert.match(labelsRecord.reason, /must not be a boolean/);
+  assert.equal(labelsRecord.gh_commands, undefined);
+
+  const target = { ...GITHUB_TARGET, project_field: { project_id: "PVT_1", item_id: "PVTI_1", field_id: "PVTF_1" } };
+  const projectRecord = renderGithubMutation(request, { field_values: { priority: "P1" } }, target);
+  assert.equal(projectRecord.status, "rejected");
+  assert.equal(projectRecord.gh_commands, undefined);
 });
 
 // ─── local-file adapter: real read-modify-write round trip + staleness conflict ─────────────
@@ -284,6 +419,110 @@ test("applyLocalFileMutation: unknown work item id is rejected, not silently ign
   });
 });
 
+// ─── review finding #6: local-file comment idempotency dedupe ─────────────
+
+test("applyLocalFileMutation: a comment with a previously-used idempotency_key is deduped, not appended twice", () => {
+  withTempDir((dir) => {
+    const file = seedBacklog(dir, [{ id: "local:1", status: "in_progress" }]);
+    const request = parseWorkItemMutationRequest(commentRequest({ work_item_ref: { id: "local:1" }, payload: { body: "hello", idempotency_key: "dedupe-1" } }));
+    const first = applyLocalFileMutation(file, request);
+    assert.equal(first.status, "applied");
+    const second = applyLocalFileMutation(file, request);
+    assert.equal(second.status, "applied");
+    assert.match(second.reason, /already present/);
+    const doc = readLocalBacklogDoc(file);
+    assert.equal(doc.items[0].comments.length, 1, "the duplicate must not be appended a second time");
+    assert.match(doc.items[0].comments[0].body, /<!-- flow-agents:mutation-comment:dedupe-1 -->/);
+  });
+});
+
+test("applyLocalFileMutation: comments without an idempotency_key are never deduped (each call appends)", () => {
+  withTempDir((dir) => {
+    const file = seedBacklog(dir, [{ id: "local:1", status: "in_progress" }]);
+    const request = parseWorkItemMutationRequest(commentRequest({ work_item_ref: { id: "local:1" } }));
+    applyLocalFileMutation(file, request);
+    applyLocalFileMutation(file, request);
+    const doc = readLocalBacklogDoc(file);
+    assert.equal(doc.items[0].comments.length, 2);
+  });
+});
+
+// ─── review finding #1: TOCTOU / lost-update fix, proven with real concurrent OS processes ────
+
+function spawnCliMutationApply(requestFile, backlogFile) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI_PATH, "work-item-mutation-provider", "apply", "--request-json", requestFile, "--file", backlogFile], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+test("applyLocalFileMutation (via the real CLI, two concurrent OS processes): interleaved mutations to different fields both apply — no lost update", async () => {
+  await withTempDir(async (dir) => {
+    const file = seedBacklog(dir, [{ id: "local:1", status: "in_progress", field_values: { priority: "P1", risk: "low" } }]);
+    const requestA = path.join(dir, "request-a.json");
+    const requestB = path.join(dir, "request-b.json");
+    fs.writeFileSync(requestA, JSON.stringify(fieldRequest({ work_item_ref: { id: "local:1" }, base: { field_values: { priority: "P1" } }, payload: { field: "priority", value: "P0" } })));
+    fs.writeFileSync(requestB, JSON.stringify(fieldRequest({ work_item_ref: { id: "local:1" }, base: { field_values: { risk: "low" } }, payload: { field: "risk", value: "high" } })));
+
+    // Launch both as REAL, independent OS processes, started without awaiting either first, so
+    // the OS is free to interleave their startup and lock-acquire attempts. withSubjectLock's
+    // real filesystem mutual exclusion (not a test hook) is what must serialize their
+    // read-modify-write sections.
+    const [resultA, resultB] = await Promise.all([spawnCliMutationApply(requestA, file), spawnCliMutationApply(requestB, file)]);
+    assert.equal(resultA.code, 0, resultA.stderr);
+    assert.equal(resultB.code, 0, resultB.stderr);
+    assert.equal(JSON.parse(resultA.stdout).status, "applied");
+    assert.equal(JSON.parse(resultB.stdout).status, "applied");
+
+    const doc = readLocalBacklogDoc(file);
+    // If the TOCTOU race were still present, whichever process wrote LAST would have read the
+    // file before the other's write landed and clobbered it wholesale, losing that change. Both
+    // fields being present proves the lock serialized the two read-modify-write sections so the
+    // second writer observed (and preserved) the first writer's already-applied change.
+    assert.deepEqual(doc.items[0].field_values, { priority: "P0", risk: "high" }, "both concurrent field updates must be preserved — no lost update");
+  });
+});
+
+test("applyLocalFileMutation (via the real CLI, two concurrent OS processes): interleaved comment appends never drop a comment (closes the concurrent-append race)", async () => {
+  await withTempDir(async (dir) => {
+    const file = seedBacklog(dir, [{ id: "local:1", status: "in_progress" }]);
+    const requestA = path.join(dir, "comment-a.json");
+    const requestB = path.join(dir, "comment-b.json");
+    fs.writeFileSync(requestA, JSON.stringify(commentRequest({ work_item_ref: { id: "local:1" }, payload: { body: "comment from process A" } })));
+    fs.writeFileSync(requestB, JSON.stringify(commentRequest({ work_item_ref: { id: "local:1" }, payload: { body: "comment from process B" } })));
+
+    const [resultA, resultB] = await Promise.all([spawnCliMutationApply(requestA, file), spawnCliMutationApply(requestB, file)]);
+    assert.equal(resultA.code, 0, resultA.stderr);
+    assert.equal(resultB.code, 0, resultB.stderr);
+
+    const doc = readLocalBacklogDoc(file);
+    assert.equal(doc.items[0].comments.length, 2, "both concurrently-appended comments must survive — an unlocked array-append race would drop one");
+    const bodies = doc.items[0].comments.map((c) => c.body).sort();
+    assert.deepEqual(bodies, ["comment from process A", "comment from process B"]);
+  });
+});
+
+test("applyLocalFileMutation: same-field concurrent mutations serialize so the SECOND observes the FIRST's write and correctly reports conflict rather than silently double-applying", () => {
+  withTempDir((dir) => {
+    const file = seedBacklog(dir, [{ id: "local:1", status: "in_progress", field_values: { priority: "P1" } }]);
+    const request = parseWorkItemMutationRequest(fieldRequest({ work_item_ref: { id: "local:1" }, base: { field_values: { priority: "P1" } }, payload: { field: "priority", value: "P0" } }));
+    // Sequential calls through the SAME lock-protected function model the guaranteed-serialized
+    // outcome directly: the first call transitions priority P1 -> P0; a second call declaring the
+    // SAME stale base ("P1") must now see the first call's write and refuse, never silently
+    // reapplying or double-counting.
+    const first = applyLocalFileMutation(file, request);
+    assert.equal(first.status, "applied");
+    const second = applyLocalFileMutation(file, request);
+    assert.equal(second.status, "conflict");
+    assert.deepEqual(second.conflict, { field: "priority", base_value: "P1", observed_value: "P0" });
+  });
+});
+
 // ─── CLI entry points (render/apply/status subcommands) ───────────────────
 
 function runCli(argv) {
@@ -315,6 +554,18 @@ test("CLI render command reads request/observed/target JSON files and prints the
     assert.equal(code, 0);
     const printed = JSON.parse(out);
     assert.equal(printed.status, "rendered");
+  });
+});
+
+test("CLI render command surfaces a malformed target-json as a nonzero exit", () => {
+  withTempDir((dir) => {
+    const requestFile = path.join(dir, "request.json");
+    const targetFile = path.join(dir, "target.json");
+    fs.writeFileSync(requestFile, JSON.stringify(statusRequest()));
+    fs.writeFileSync(targetFile, JSON.stringify({ repo: { owner: "kontourai" } }));
+    const { code, err } = runCli(["render", "--request-json", requestFile, "--target-json", targetFile]);
+    assert.equal(code, 1);
+    assert.match(err, /invalid_request/);
   });
 });
 

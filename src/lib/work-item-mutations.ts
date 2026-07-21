@@ -15,6 +15,7 @@
  *
  * @module
  */
+import { workItemStatuses } from "./work-item-vocabulary.js";
 import type { WorkItemStatus } from "./work-item-vocabulary.js";
 
 export const WORK_ITEM_MUTATION_SCHEMA_VERSION = "1.0" as const;
@@ -31,10 +32,24 @@ export type WorkItemMutationResultStatus = (typeof workItemMutationResultStatuse
 export type WorkItemMutationFieldValue = string | number | boolean | null;
 
 /**
+ * A member of {@link workItemStatuses} — the canonical, closed lifecycle vocabulary — and nothing
+ * looser. Review finding #5 (2026-07-20 independent review of #776): unlike `WorkItem.status`
+ * (read side, `WorkItemStatus`, which tolerates an unrecognized provider-native string such as
+ * `"triage"` because an adapter cannot always normalize what it observes), a mutation REQUEST's
+ * `base.status`/`payload.to_status` is caller-authored input the caller controls, so this contract
+ * requires it to be one of the seven canonical statuses. Provider-native status text belongs only
+ * in `payload.to_status_raw`, never in `to_status`/`base.status` — see
+ * `parseWorkItemMutationRequest`'s `canonicalStatus` validation.
+ */
+export type WorkItemCanonicalStatus = (typeof workItemStatuses)[number];
+
+/**
  * The minimal provider-state snapshot used both as a mutation request's declared `base` (what it
- * was computed against) and as the freshly observed state an adapter diffs it against. Reuses
- * `WorkItem.status` naming from the read-side vocabulary module rather than inventing a parallel
- * field name.
+ * was computed against) and as the freshly observed state an adapter diffs it against. `status`
+ * uses the permissive read-side `WorkItemStatus` here because OBSERVED state (an adapter's fresh
+ * read of current provider state) may legitimately be an unrecognized provider-native string the
+ * adapter could not normalize — see `WorkItemCanonicalStatus`'s doc comment for why the mutation
+ * REQUEST side (`WorkItemMutationRequest`'s status_transition variant, below) is stricter.
  */
 export interface WorkItemMutationBase {
   status?: WorkItemStatus;
@@ -50,7 +65,7 @@ export interface WorkItemMutationRef {
 }
 
 export interface WorkItemStatusTransitionPayload {
-  to_status: WorkItemStatus;
+  to_status: WorkItemCanonicalStatus;
   to_status_raw?: string;
 }
 
@@ -61,6 +76,15 @@ export interface WorkItemFieldUpdatePayload {
 
 export interface WorkItemCommentPayload {
   body: string;
+  /**
+   * Optional caller-supplied dedupe key for comment mutations (review finding #6). Comment
+   * delivery is at-least-once across this contract's adapters (see the contract's "Mutations"
+   * section): a retry after a transient render/execute failure can post the same comment twice.
+   * When present, adapters embed this key as a stable marker in the rendered/applied comment body
+   * (mirroring `assignment-provider.ts`'s `claim_comment_marker` convention) so a host — or the
+   * local-file adapter itself — can detect and skip an already-posted duplicate.
+   */
+  idempotency_key?: string;
 }
 
 interface WorkItemMutationRequestCommon {
@@ -69,7 +93,7 @@ interface WorkItemMutationRequestCommon {
 }
 
 export type WorkItemMutationRequest =
-  | (WorkItemMutationRequestCommon & { operation: "status_transition"; base: Required<Pick<WorkItemMutationBase, "status">>; payload: WorkItemStatusTransitionPayload })
+  | (WorkItemMutationRequestCommon & { operation: "status_transition"; base: { status: WorkItemCanonicalStatus }; payload: WorkItemStatusTransitionPayload })
   | (WorkItemMutationRequestCommon & { operation: "field_update"; base: { field_values: Record<string, WorkItemMutationFieldValue> }; payload: WorkItemFieldUpdatePayload })
   | (WorkItemMutationRequestCommon & { operation: "comment"; base: WorkItemMutationBase; payload: WorkItemCommentPayload });
 
@@ -119,6 +143,16 @@ function fieldValue(value: unknown, field: string): WorkItemMutationFieldValue {
   invalid(`${field} must be a string, number, boolean, or null`);
 }
 
+/** Validate a mutation status value against the closed canonical vocabulary — see
+ * `WorkItemCanonicalStatus`'s doc comment (review finding #5). */
+function canonicalStatus(value: unknown, field: string): WorkItemCanonicalStatus {
+  const str = nonEmptyString(value, field);
+  if (!(workItemStatuses as readonly string[]).includes(str)) {
+    invalid(`${field} must be one of the canonical work item statuses (${workItemStatuses.join(", ")}); provider-native status text belongs in payload.to_status_raw, not ${field}`);
+  }
+  return str as WorkItemCanonicalStatus;
+}
+
 /**
  * Validate and normalize a mutation request per the contract's "A mutation request is a single
  * provider-neutral shape" section, including the required-`base` staleness-detection rule: a
@@ -145,8 +179,8 @@ export function parseWorkItemMutationRequest(value: unknown): WorkItemMutationRe
   const payloadRecord = plainObject(root.payload, "request.payload");
 
   if (root.operation === "status_transition") {
-    const status = nonEmptyString(baseRecord.status, "request.base.status (required to detect status_transition staleness)");
-    const to_status = nonEmptyString(payloadRecord.to_status, "request.payload.to_status");
+    const status = canonicalStatus(baseRecord.status, "request.base.status (required to detect status_transition staleness)");
+    const to_status = canonicalStatus(payloadRecord.to_status, "request.payload.to_status");
     const to_status_raw = payloadRecord.to_status_raw;
     return {
       schema_version: WORK_ITEM_MUTATION_SCHEMA_VERSION,
@@ -175,11 +209,19 @@ export function parseWorkItemMutationRequest(value: unknown): WorkItemMutationRe
 
   // comment: base is optional (append-only, non-clobbering — see the contract's Conflict Policy).
   const body = nonEmptyString(payloadRecord.body, "request.payload.body");
+  const idempotency_key = payloadRecord.idempotency_key;
+  if (idempotency_key !== undefined) nonEmptyString(idempotency_key, "request.payload.idempotency_key");
   const base: WorkItemMutationBase = {
     ...(typeof baseRecord.status === "string" ? { status: baseRecord.status } : {}),
     ...(baseRecord.field_values !== undefined ? { field_values: plainObject(baseRecord.field_values, "request.base.field_values") as Record<string, WorkItemMutationFieldValue> } : {}),
   };
-  return { schema_version: WORK_ITEM_MUTATION_SCHEMA_VERSION, operation: "comment", work_item_ref, base, payload: { body } };
+  return {
+    schema_version: WORK_ITEM_MUTATION_SCHEMA_VERSION,
+    operation: "comment",
+    work_item_ref,
+    base,
+    payload: { body, ...(typeof idempotency_key === "string" ? { idempotency_key } : {}) },
+  };
 }
 
 /** Parse a freshly observed provider-state snapshot to compare a mutation's `base` against. Looser
@@ -209,6 +251,9 @@ export function parseObservedWorkItemState(value: unknown): WorkItemMutationBase
  * obtain any fresh observation (the GitHub render adapter without a supplied `observed` argument)
  * must route to `not_verified` itself, one level up, rather than calling this function with a
  * fabricated observation — see `renderGithubMutation` in `src/cli/work-item-mutation-provider.ts`.
+ * That GitHub caller must also treat this comparison as ADVISORY ONLY: it evaluates conflict at
+ * render time, not at the later, out-of-process moment a host executes the rendered `gh` argv —
+ * see the contract's Conflict Policy "GitHub Render-Time Caveat".
  */
 export function detectMutationConflict(request: WorkItemMutationRequest, observed: WorkItemMutationBase): WorkItemMutationConflict | null {
   if (request.operation === "comment") return null;
