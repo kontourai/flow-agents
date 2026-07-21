@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.4.0](https://github.com/kontourai/flow-agents/compare/v4.3.1...v4.4.0) (2026-07-21)
+
+
+### Features
+
+* **protection:** scope gate-blocking to declared artifact roots; sanctioned fixture authoring ([#805](https://github.com/kontourai/flow-agents/issues/805)) ([999abfd](https://github.com/kontourai/flow-agents/commit/999abfd9c56c333b50b5e9618ba11ba17635a8c4))
+
+
+### Fixes
+
+* attest the reconciled delivery bundle ([#806](https://github.com/kontourai/flow-agents/issues/806)) ([0058671](https://github.com/kontourai/flow-agents/commit/00586711294462a1f935b67ca666811cfd525bdc))
+* bind trust verification to consumer change context ([#806](https://github.com/kontourai/flow-agents/issues/806)) ([18da500](https://github.com/kontourai/flow-agents/commit/18da50059c87244cac4f117096270b54cbe85436))
+* discover per-session trust bundles ([#810](https://github.com/kontourai/flow-agents/issues/810)) ([359b07c](https://github.com/kontourai/flow-agents/commit/359b07ce360af28caa7f462b4267665e9652eb8b))
+* preserve bundle discovery ownership checks ([#806](https://github.com/kontourai/flow-agents/issues/806)) ([345591d](https://github.com/kontourai/flow-agents/commit/345591d92615e9ac4e46f106dd86b0260fb74e29))
+* **trust:** separate advisory bundle absence policy ([07080df](https://github.com/kontourai/flow-agents/commit/07080df6be055c018902c26f2f298f16784ebfb4))
+
 ## [4.3.1](https://github.com/kontourai/flow-agents/compare/v4.3.0...v4.3.1) (2026-07-20)
 
 
