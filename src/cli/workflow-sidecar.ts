@@ -1093,6 +1093,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
       ...(Array.isArray(check._producer_self_produced_trust_slices) ? { self_produced_trust_slices: check._producer_self_produced_trust_slices } : {}),
       ...(waiver ? { waiver } : {}),
+      ...(Array.isArray(check._waiver_history) && check._waiver_history.length ? { waiver_history: check._waiver_history } : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
@@ -2387,6 +2388,18 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
     md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${acceptanceCriteria.map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
+    // #793 ENSURE-SESSION notice: every session ensure-session creates is deliver-type
+    // (the "type: deliver" markdown header above, always), and terminal states
+    // (accepted/archived) plus the learn-gate (stop-goal-fit.js's #793 STOP-GATE rule,
+    // and advance-state's terminal_jump_rejected guard) are only reachable/meaningful for a
+    // session bound to a canonical Flow run. Without --flow-id (or a subsequent
+    // `builder.build` binding), this session can advance through delivered/release but can
+    // never legally reach accepted/archived, and has no learn-gate at all — make that gap
+    // loud at creation instead of silently discoverable only much later. Full default-binding
+    // is tracked as a follow-up (see #793); this is the smallest defensible fix: a notice.
+    if (!entry.flowId) {
+      process.stderr.write(`[ensure-session] NOTICE: session ${JSON.stringify(slug)} has no canonical Flow bound — terminal states (accepted/archived) are unreachable and the learn-gate is absent; pass --flow-id <flow> (e.g. builder.build) to bind one now, or run builder.build later to bind it.\n`);
+    }
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
@@ -3317,8 +3330,17 @@ function critiqueSnapshotDigest(critique: AnyObj): string | null {
 // BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
 // enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
 // before, and superseding a STAMPED existing id is now rejected too.
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd()): AnyObj {
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd(), allowSkipLearningStamp = false): AnyObj {
   const check = { ...raw };
+  // Codex verify round 3/4: the _waiver.skip_learning stamp is minted ONLY by
+  // advance-state's --skip-learning path (which passes allowSkipLearningStamp). Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json)
+  // flows through here — scrubbing at this single choke point makes the stamp
+  // unforgeable regardless of ingestion route.
+  if (!allowSkipLearningStamp && check._waiver && typeof check._waiver === "object" && (check._waiver as AnyObj).skip_learning !== undefined) {
+    check._waiver = { ...(check._waiver as AnyObj) };
+    delete (check._waiver as AnyObj).skip_learning;
+  }
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -3684,6 +3706,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
@@ -3706,6 +3732,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
@@ -4373,7 +4403,55 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (!phases.includes(phase)) die(`phase must be one of: ${phases.join(", ")}`);
   if (target && !phases.includes(target)) die(`target phase must be one of: ${phases.join(", ")}`);
   const prev = loadJson(path.join(dir, "state.json"));
-  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") {
+    // #793: --skip-learning <reason> is the ONLY way past this guard without a real
+    // phase:learning transition, and it never bypasses silently — it first records a loud,
+    // reviewable accepted-gap check into the session's trust.bundle, then permits the
+    // transition. Absent the flag, behavior is byte-for-byte unchanged (still rejected).
+    const skipLearningProvided = p.flags.has("skip-learning") || opts(p, "skip-learning").length > 0;
+    const skipLearningReason = opt(p, "skip-learning").trim();
+    if (skipLearningProvided && !skipLearningReason) die('--skip-learning requires a non-empty reason, e.g. --skip-learning "customer escalation; learning-review deferred to next sprint"');
+    // Review-hardened (#798): ADR 0020's convention makes the approver a SEPARATE, mandatory
+    // argument (parseWaiver requires --waived-by distinct from --accepted-gap-reason). Mirror
+    // that forcing function here instead of silently deriving the approver from the invoking
+    // actor — the actor performing the skip must still name who approved it.
+    const skipWaivedBy = opt(p, "waived-by").trim();
+    if (skipLearningReason && !skipWaivedBy) die('--skip-learning also requires --waived-by <actor> (ADR 0020 accepted-gap convention: the approver is named explicitly, not derived from the invoking actor)');
+    if (!skipLearningReason) diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+    // Mirrors the repo's existing accepted-gap convention (ADR 0020, parseWaiver/
+    // --accepted-gap-reason/--waived-by): kind:"external" (session-local attestation — a
+    // command-backed check reconciles against CI and can never be waived), status:"not_verified"
+    // (the check-level status a waived gap carries), plus a _waiver record so no reviewer or
+    // reconciler can mistake it for a genuine pass. The check id ("learning-evidence-skip")
+    // deliberately contains "learning-evidence" so stop-goal-fit.js's hasLearningEvidence()
+    // (#793 STOP-GATE) recognizes it as satisfying the learning-gate requirement.
+    const _skipTs = opt(p, "timestamp", now());
+    const _skipSlug = taskSlugFor(dir, opt(p, "task-slug"));
+    const _skipActor = resolveReadActorKey(p);
+    const _skipExistingState = readBundleState(dir);
+    // Codex-review-hardened (#798): "learning-evidence-skip" is a RESERVED id. If a check
+    // with that id already exists and is not itself a skip-waiver, refuse — mergeChecksById
+    // is last-writer-wins and would destroy genuine evidence. Repeated skips supersede the
+    // gate-facing check but preserve every prior waiver in an append-only history so the
+    // audit trail (each reason, approver, recorder) survives.
+    const _skipPrior = (_skipExistingState.checks as any[]).find((c) => c && c.id === "learning-evidence-skip");
+    // Codex verify round 2: an existing check carrying an ORDINARY accepted-gap waiver is
+    // still genuine evidence — only a check stamped as a prior learning-skip may be
+    // superseded. Skip waivers are self-identified via _waiver.skip_learning below.
+    if (_skipPrior && !(_skipPrior._waiver && _skipPrior._waiver.skip_learning === true)) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" and is not a prior learning-skip waiver — resolve that collision instead of overwriting evidence');
+    const _skipHistory = [...(Array.isArray(_skipPrior?._waiver_history) ? _skipPrior._waiver_history : []), ...(_skipPrior?._waiver ? [_skipPrior._waiver] : [])];
+    const skipCheck = normalizeCheck({
+      id: "learning-evidence-skip",
+      kind: "external",
+      status: "not_verified",
+      summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
+      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor, skip_learning: true },
+      ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
+    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir), true);
+    const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
+    assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
+    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, approved by ${skipWaivedBy}, recorded by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
+  }
   const flow = opt(p, "flow-definition");
   // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).
   // Fires when the active flow's gate for prev.phase declares a route_back_policy
