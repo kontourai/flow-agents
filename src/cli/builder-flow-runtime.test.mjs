@@ -57,6 +57,29 @@ test("verification trust restores critique history without restoring superseded 
     ["tests-live", "critique-old", "critique-live"],
   );
 });
+
+test("verification trust restores an older superseded predecessor of a current critique", () => {
+  const priorHash = "a".repeat(64);
+  const liveHash = "b".repeat(64);
+  const prior = { id: "critique-old", metadata: { origin: "critique", critique_record_id: "record-old", critique_record_hash: priorHash, critique_predecessor_hash: CRITIQUE_CHAIN_GENESIS, superseded_by: "record-live" } };
+  const live = { id: "critique-live", metadata: { origin: "critique", critique_record_id: "record-live", critique_record_hash: liveHash, critique_predecessor_hash: priorHash } };
+  const tests = { id: "tests-live", claimType: "builder.verify.tests", metadata: { origin: "check" } };
+  const projected = mergeGateClaimsWithCritiqueHistory([tests, live], [prior, tests, live], (claim) => claim.id !== prior.id);
+  assert.deepEqual(projected.map((claim) => claim.id), ["critique-old", "tests-live", "critique-live"]);
+});
+
+test("critique chain diagnostics identify the first sequence and predecessor mismatch", () => {
+  const record = {
+    critique_sequence: 2, critique_predecessor_hash: "a".repeat(64), reviewer: "reviewer", reviewed_at: NOW,
+    verdict: "pass", summary: "reviewed", lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+  };
+  const hash = critiqueRecordHash(record);
+  const claim = { id: "critique-live", value: "pass", fieldOrBehavior: "reviewed", status: "verified", metadata: {
+    ...record, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash,
+  } };
+  const graph = validateCritiqueResolutionGraph([claim], SUBJECT);
+  assert.match(graph.errors.join("\n"), new RegExp(`critique chain mismatch at sequence 1:.*declares sequence 2.*expected predecessor ${CRITIQUE_CHAIN_GENESIS}`));
+});
 childProcess.execFileSync = ((file, args, options) => {
   if (Array.isArray(args) && String(args[0]).endsWith("lifecycle-authority-verifier.js")) {
     if (process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY !== TEST_AUTHORITY_FILE) return realExecFileSync(file, args, options);

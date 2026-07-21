@@ -19,7 +19,7 @@ import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
-import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
@@ -1026,6 +1026,28 @@ export function mergeGateClaimsWithCritiqueHistory(
   claimIsCurrent: (claim: AnyRecord) => boolean,
 ): AnyRecord[] {
   const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const critiqueByHash = new Map<string, AnyRecord>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || claim.metadata.origin !== "critique") continue;
+    if (typeof claim.metadata.critique_record_hash === "string") critiqueByHash.set(claim.metadata.critique_record_hash, claim);
+  }
+  // A same-reviewer recheck can be current while the critique it supersedes predates the
+  // current gate visit. Project the authenticated predecessor closure as audit history so the
+  // resolution validator sees the writer-issued chain rather than an invalid sequence suffix.
+  // Missing or forged links are deliberately not repaired here: graph validation reports the
+  // first unresolved sequence/hash edge and continues to fail closed.
+  const requiredCritiqueHashes = new Set<string>();
+  const pendingCritiqueHashes = relevant.filter((claim) => isRecord(claim.metadata) && claim.metadata.origin === "critique")
+    .map((claim) => String(claim.metadata.critique_record_hash ?? ""))
+    .filter(Boolean);
+  while (pendingCritiqueHashes.length > 0) {
+    const hash = pendingCritiqueHashes.pop()!;
+    if (requiredCritiqueHashes.has(hash)) continue;
+    requiredCritiqueHashes.add(hash);
+    const claim = critiqueByHash.get(hash);
+    const predecessor = isRecord(claim?.metadata) ? claim.metadata.critique_predecessor_hash : null;
+    if (typeof predecessor === "string" && predecessor !== CRITIQUE_CHAIN_GENESIS) pendingCritiqueHashes.push(predecessor);
+  }
   const merged: AnyRecord[] = [];
   const seen = new Set<string>();
   const seenCritiques = new Set<string>();
@@ -1033,7 +1055,7 @@ export function mergeGateClaimsWithCritiqueHistory(
     if (!isRecord(claim)) continue;
     const id = String(claim.id);
     const metadata = isRecord(claim.metadata) ? claim.metadata : null;
-    if (claimIsCurrent(claim) && metadata?.origin === "critique") {
+    if (metadata?.origin === "critique" && (claimIsCurrent(claim) || requiredCritiqueHashes.has(String(metadata.critique_record_hash)))) {
       const recordId = String(metadata.critique_record_id);
       if (!seenCritiques.has(recordId)) merged.push(claim);
       seenCritiques.add(recordId);

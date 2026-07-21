@@ -100,7 +100,9 @@ function validateRecords(records: AnyRecord[], state: GraphState): void {
   }
   [...bySequence.entries()].sort(([a], [b]) => a - b).forEach(([, record], index, ordered) => {
     const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : ordered[index - 1]![1].critique_record_hash;
-    if (record.critique_sequence !== index + 1 || record.critique_predecessor_hash !== predecessor) state.errors.push("critique sequence must form one contiguous predecessor hash chain");
+    if (record.critique_sequence !== index + 1 || record.critique_predecessor_hash !== predecessor) {
+      state.errors.push(`critique chain mismatch at sequence ${index + 1}: record ${String(record.critique_record_id)} declares sequence ${String(record.critique_sequence)} and predecessor ${String(record.critique_predecessor_hash)}, expected predecessor ${predecessor}`);
+    }
   });
 }
 

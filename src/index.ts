@@ -6,8 +6,14 @@
  * Agent-facing Kit guidance uses the public `flow-agents workflow` CLI.
  *
  * The sidecar JSON Schemas ship under `schemas/` and can be validated against
- * directly; the helpers below are the canonical writer/validator that produce
- * and check conforming artifacts.
+ * directly (also resolvable via the package's `./schemas/*` export subpath);
+ * the helpers below are the canonical writer/validator that produce and check
+ * conforming artifacts.
+ *
+ * `workItemStatuses`, `WorkItemStatus`, `WorkItem`, `SourceProvider`, and
+ * `BoardMembership` are the canonical provider-neutral work-item vocabulary
+ * and shapes from `context/contracts/work-item-contract.md`; hosts should
+ * import these instead of hand-mirroring them.
  *
  * @module
  */
@@ -330,6 +336,14 @@ export type {
 // signing requests. This does not load, create, or mutate a Flow run.
 export { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 export type { BuilderLifecycleAuthorization, CritiqueResolutionAuthorization } from "./builder-lifecycle-authority.js";
+
+export { workItemStatuses } from "./lib/work-item-vocabulary.js";
+export type {
+  BoardMembership,
+  SourceProvider,
+  WorkItem,
+  WorkItemStatus,
+} from "./lib/work-item-vocabulary.js";
 
 export {
   CAPABILITIES,

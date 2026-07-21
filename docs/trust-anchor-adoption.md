@@ -19,8 +19,9 @@ model and threat analysis.
    control, it runs your declared verify command (build + tests + lint). Real exit
    codes. No agent influence.
 
-2. **Reconciles the delivered bundle.** If the agent published a `delivery/trust.bundle`
-   with the PR, the anchor cross-checks every claimed-pass command against CI's own
+2. **Reconciles the delivered bundle.** If the agent published a canonical
+   `delivery/<task-slug>/trust.bundle` (or legacy `delivery/trust.bundle`) with the PR,
+   the anchor cross-checks every claimed-pass command against CI's own
    fresh results. Divergences (claimed pass + CI fail, laundered command, claim with
    no evidence, checkpoint-only bundle) fail the job with a clear diagnostic.
 
@@ -29,9 +30,11 @@ model and threat analysis.
 
 ## Step 1 — The Agent Publishes a Bundle
 
-Flow Agents' deliver skill calls `publishDelivery`, which writes `delivery/trust.bundle`
-to the repository with `git add -f` during the `record-release` step. This file carries
-the session's evidence and claims to CI so the anchor can reconcile them.
+Flow Agents' deliver skill calls `publishDelivery`, which writes
+`delivery/<task-slug>/trust.bundle` to the repository with `git add -f` during the
+`record-release` step. This file carries the session's evidence and claims to CI so the
+anchor can reconcile them. On pull requests the action selects the single changed
+per-session bundle; the legacy flat path remains read-compatible during migration.
 
 You do not need to configure this — it is part of the deliver skill workflow. The bundle
 is gitignored by default (the deliver skill force-adds it for the PR commit only).
@@ -75,7 +78,8 @@ jobs:
           # Declare your comprehensive verify command: build + tests + lint.
           # The agent must run this same command locally (via trust-reconcile-verify).
           verify-command: "npm run build && npm test && npm run lint"
-          # bundle: defaults to delivery/trust.bundle (auto-discovered if present)
+          # bundle: prefers legacy delivery/trust.bundle, then auto-discovers the
+          # single changed delivery/<task-slug>/trust.bundle for this pull request
           # sign: false (set to true + add id-token: write for Sigstore attestation)
 ```
 
@@ -223,10 +227,10 @@ The `flow-agents verify` CLI subcommand runs the same trust-reconcile logic loca
 # Install (or npx):
 npm install -D @kontourai/flow-agents
 
-# Re-run verify + reconcile against a delivered bundle:
+# Re-run verify + reconcile against a delivered bundle explicitly:
 npx @kontourai/flow-agents verify \
   --commands "npm run build,npm test" \
-  --bundle delivery/trust.bundle
+  --bundle delivery/<task-slug>/trust.bundle
 
 # Auto-discover bundle + verify command from package.json:
 npx @kontourai/flow-agents verify
@@ -255,7 +259,7 @@ Flow Agents uses the same pattern in its own repository:
 
 ## Adoption Checklist
 
-- [ ] Deliver skill is configured and publishes `delivery/trust.bundle`.
+- [ ] Deliver skill is configured and publishes `delivery/<task-slug>/trust.bundle`.
 - [ ] `.github/workflows/trust-verify.yml` added and the composite action is pinned.
 - [ ] `verify-command` declares a comprehensive verify (build + tests + lint).
 - [ ] `Trust Verify` added as a required, no-bypass status check on `main`.
