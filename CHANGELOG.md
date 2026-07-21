@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.5.0](https://github.com/kontourai/flow-agents/compare/v4.4.0...v4.5.0) (2026-07-21)
+
+
+### Features
+
+* **work-items:** provider-neutral mutation contract with conflict policy and two adapters ([#814](https://github.com/kontourai/flow-agents/issues/814)) ([df82ec4](https://github.com/kontourai/flow-agents/commit/df82ec4ab1a7875f19a5148286ecd4a4673d984c))
+
+
+### Fixes
+
+* **workflow:** keep learning outstanding loud — stop-gate flag, --skip-learning gap, unbound-session notice ([#793](https://github.com/kontourai/flow-agents/issues/793)) ([#798](https://github.com/kontourai/flow-agents/issues/798)) ([9d264a8](https://github.com/kontourai/flow-agents/commit/9d264a8ef105524d291366edd4bd063eacc599ba))
+
 ## [4.4.0](https://github.com/kontourai/flow-agents/compare/v4.3.1...v4.4.0) (2026-07-21)
 
 
