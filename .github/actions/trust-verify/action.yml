@@ -19,7 +19,8 @@
 #                                 lint). What the agent ran locally should match what
 #                                 this reruns in CI.
 #   bundle            [optional]  Path to the delivered trust.bundle (default:
-#                                 delivery/trust.bundle). Auto-discovered if present.
+#                                 delivery/trust.bundle). If absent on a pull request,
+#                                 the single changed per-session bundle is discovered.
 #   fail-on-divergence [deprecated] Accepted for caller compatibility but no longer
 #                                 weakens the gate. Use missing-bundle-policy for the
 #                                 narrow advisory-adoption case.
@@ -70,7 +71,8 @@ inputs:
   bundle:
     description: >
       Path to the delivered trust.bundle (relative to workspace root).
-      Auto-discovers delivery/trust.bundle if this input is not set.
+      Prefers delivery/trust.bundle, then discovers the single changed
+      delivery/<task-slug>/trust.bundle on pull requests.
     required: false
     default: "delivery/trust.bundle"
   fail-on-divergence:
@@ -127,10 +129,13 @@ runs:
         VERIFY_COMMAND: ${{ inputs.verify-command }}
         BUNDLE_INPUT: ${{ inputs.bundle }}
         MISSING_BUNDLE_POLICY: ${{ inputs.missing-bundle-policy }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
-        # Resolve bundle path: use the input if the file exists, empty otherwise.
-        if [ -n "$BUNDLE_INPUT" ] && [ -f "$BUNDLE_INPUT" ]; then
-          BUNDLE_ARG="--bundle $BUNDLE_INPUT"
+        BUNDLE_PATH="$(node "${{ github.action_path }}/../../../scripts/ci/discover-delivery-bundle.mjs" \
+          "${{ github.workspace }}" "$BUNDLE_INPUT" "$BASE_SHA")"
+        if [ -n "$BUNDLE_PATH" ]; then
+          echo "[trust-verify] using delivery bundle: $BUNDLE_PATH"
+          BUNDLE_ARG="--bundle $BUNDLE_PATH"
         else
           BUNDLE_ARG=""
         fi
