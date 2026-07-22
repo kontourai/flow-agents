@@ -59,6 +59,30 @@ test("effective ChangeProvider settings default to the consumer repository conte
   }
 });
 
+test("dotted repository names resolve (kontourai.io-class repos, #840)", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-change-provider-dotted-"));
+  try {
+    fs.writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ repository: "git@github.com:consumer/example.io.git" }));
+    const settings = path.join(consumer, "context", "settings", "change-provider-settings.json");
+    fs.mkdirSync(path.dirname(settings), { recursive: true });
+    fs.writeFileSync(settings, JSON.stringify({
+      schema_version: "1.0",
+      projects: [{
+        project: { repo: { owner: "consumer", name: "example.io" } },
+        provider: { role: "ChangeProvider", kind: "github", repository: { owner: "consumer", name: "example.io" }, capabilities: ["change.create", "change.observe"], executor: "gh-cli" },
+      }],
+    }));
+    const result = spawnSync(process.execPath, [cli, "effective-change-provider-settings", "--repo-path", consumer, "--global-settings", absent, "--json"], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const value = JSON.parse(result.stdout);
+    assert.equal(value.status, "configured", JSON.stringify(value));
+    assert.equal(value.provider.repository.name, "example.io");
+    assert.equal(value.current_repo.name, "example.io");
+  } finally {
+    fs.rmSync(consumer, { recursive: true, force: true });
+  }
+});
+
 test("effective ChangeProvider settings do not trust ambient HOME or Git package metadata fallback", async () => {
   const hostileHome = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-hostile-home-"));
   const gitRepo = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provider-git-"));
