@@ -383,12 +383,16 @@ export type {
 // BoardProvider, AssignmentProvider, WorkItemMutationProvider) this repository already
 // implements as CLIs, plus the `AssignmentProvider`/`ActorStruct`/`AssignmentClaimRecord`/
 // `AssignmentStatus` shapes those interfaces are typed against (assignment-provider-contract.md,
-// formalizing ADR 0021 §2) and two local-file adapters that formally satisfy
-// `AssignmentProvider`/`WorkItemMutationProvider` (see `local-file-provider-adapters.ts`). Native
-// hosts should import these instead of shelling out to the CLIs or hand-mirroring their I/O
-// shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
-// including flagged discrepancies between contract prose and the reference CLIs' actual
-// behavior.
+// formalizing ADR 0021 §2), `canonicalHolderActorKey` (the one canonical actor-key comparison
+// rule every holder-identity check in this repository should share), and three adapters that
+// formally satisfy `AssignmentProvider`/`WorkItemMutationProvider`: two local-file
+// (`local-file-provider-adapters.ts`) and one GitHub-render (`github-mutation-renderer.ts`).
+// Native hosts should import these instead of shelling out to the CLIs or hand-mirroring their
+// I/O shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
+// including flagged discrepancies between contract prose and the reference CLIs' actual behavior
+// — notably `WorkItemDriftOutcome` (the contract's normative drift vocabulary) vs.
+// `ReferenceAdapterFreshnessDiagnostic` (what the reference CLI actually emits today, a narrower,
+// tracked gap).
 export type {
   AssignmentClaimMeta,
   AssignmentProvider,
@@ -404,7 +408,11 @@ export type {
   BoardReadResult,
   ClassifiedWorkItem,
   EffectiveBacklogProviderSettings,
+  LocalAssignmentProviderExt,
+  ProviderMutationContext,
+  ReferenceAdapterFreshnessDiagnostic,
   WorkItemDependencyImpact,
+  WorkItemDriftOutcome,
   WorkItemListOptions,
   WorkItemListResult,
   WorkItemMutationCapability,
@@ -417,14 +425,20 @@ export type {
   WorkItemReadinessClassification,
   WorkItemReadinessReason,
   WorkItemRevisionFreshness,
-  WorkItemRevisionFreshnessClassification,
   WorkItemRevisionFreshnessRouteRecommendation,
   WorkItemSelectionFilters,
   WorkItemSelectionSettings,
   WorkItemWipPolicy,
 } from "./cli/provider-interfaces.js";
 export type { ActorStruct, AssignmentClaimRecord, AssignmentStatus } from "./cli/assignment-provider.js";
+export { canonicalHolderActorKey } from "./cli/assignment-provider.js";
 export { createLocalFileAssignmentProvider, createLocalFileMutationProvider } from "./cli/local-file-provider-adapters.js";
+export { createGithubMutationRenderer } from "./cli/github-mutation-renderer.js";
+// The reference adapter's OWN runtime classification vocabularies (#777 review finding 5) — the
+// same arrays `WorkItemReadinessClassification`/`ReferenceAdapterFreshnessDiagnostic` derive their
+// types from, exported as values too so a consumer can validate an observed classification against
+// the live vocabulary instead of a hand-copied list.
+export { workItemReadinessClassifications, referenceAdapterFreshnessDiagnostics } from "./cli/pull-work-provider.js";
 
 export {
   CAPABILITIES,

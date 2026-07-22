@@ -33,6 +33,14 @@ import type {
   WorkItemMutationResult,
 } from "../lib/work-item-mutations.js";
 import type { ActorStruct, AssignmentClaimRecord, AssignmentStatus } from "./assignment-provider.js";
+// Type-only imports of the CLI's OWN exported runtime const arrays (#777 review finding 5):
+// `WorkItemReadinessClassification`/`ReferenceAdapterFreshnessDiagnostic` below derive their
+// union directly from these arrays via `typeof ...[number]`, so a change to what `classify()`/
+// `classifyRevisionFreshness()` actually emit is a type error here, not a silently-stale hand
+// copy. `import type` keeps this module's own import graph runtime-value-free (see this file's
+// header); the `typeof` type-query usage of these names is a type-only use, which `import type`
+// permits.
+import type { referenceAdapterFreshnessDiagnostics, workItemReadinessClassifications } from "./pull-work-provider.js";
 
 // ─── Shared backlog-provider-settings shapes ────────────────────────────────
 // Re-typed from `schemas/backlog-provider-settings.schema.json`'s `$defs.backlog_settings` — the
@@ -140,14 +148,15 @@ export interface WorkItemReadinessReason {
 }
 
 /**
- * The exact classification literals `pull-work-provider.ts`'s `classify()` emits (verified
- * against the CLI source, not just contract prose — see `provider-interfaces.test.mjs`'s
- * mechanical anti-drift check against this union). Distinct from `WorkItemStatus`
- * (`work-item-vocabulary.ts`, #775): that is the provider-neutral LIFECYCLE status a work item
- * carries; this is the SELECTION verdict `pull-work` derives from status, blockers, and labels for
- * a given selection-settings pass.
+ * The exact classification literals `pull-work-provider.ts`'s `classify()` emits — derived
+ * directly from that module's own exported `workItemReadinessClassifications` runtime const array
+ * (#777 review finding 5), so this type cannot silently drift from what the function actually
+ * returns; `provider-interfaces.test.mjs` additionally asserts the array's current value.
+ * Distinct from `WorkItemStatus` (`work-item-vocabulary.ts`, #775): that is the provider-neutral
+ * LIFECYCLE status a work item carries; this is the SELECTION verdict `pull-work` derives from
+ * status, blockers, and labels for a given selection-settings pass.
  */
-export type WorkItemReadinessClassification = "ready" | "blocked" | "in_progress" | "stale" | "related-only";
+export type WorkItemReadinessClassification = (typeof workItemReadinessClassifications)[number];
 
 export interface WorkItemReadiness {
   classification: WorkItemReadinessClassification;
@@ -155,16 +164,33 @@ export interface WorkItemReadiness {
 }
 
 /**
- * The exact classification literals `pull-work-provider.ts`'s `classifyRevisionFreshness()`
- * emits, per the contract's "Planning Base And Drift" drift-outcome table — mechanically checked
- * the same way as `WorkItemReadinessClassification` above. Note this local union
- * (`fresh`/`drifted`/`stale`/`not_verified`) is a smaller, CLI-actual vocabulary than the
- * contract prose's five-value drift-outcome table (`no_material_drift`, `scope_drift`,
- * `dependency_drift`, `contract_drift`, `conflict_risk`) — a discrepancy this pass flags rather
- * than silently picking one source: the reference adapter has not yet implemented the prose's
- * more granular drift taxonomy.
+ * The contract's NORMATIVE five-value drift-outcome vocabulary, verbatim from
+ * work-item-contract.md's "Planning Base And Drift" table: `no_material_drift` (aligned),
+ * `scope_drift` (scope/acceptance criteria changed), `dependency_drift` (assumed
+ * blockers/prerequisites moved), `contract_drift` (relevant docs/contracts/schemas/policy
+ * changed), `conflict_risk` (changed files or active work overlap likely execution scope).
+ *
+ * KNOWN GAP (#777 review finding 2, flagged for upstream reconciliation — file/track a follow-up
+ * issue to either implement this vocabulary in `pull-work-provider.ts` or narrow the contract
+ * prose to match the reference adapter): `classifyRevisionFreshness()` does NOT currently emit
+ * this vocabulary. It emits the coarser, CLI-actual `ReferenceAdapterFreshnessDiagnostic` union
+ * below instead. Do not treat the two as interchangeable or silently map one onto the other — a
+ * caller that needs the contract's normative five-value classification cannot get it from the
+ * shipped CLI today; that gap is represented here as two DISTINCT types rather than smoothed into
+ * one that overclaims contract compliance.
  */
-export type WorkItemRevisionFreshnessClassification = "fresh" | "drifted" | "stale" | "not_verified";
+export type WorkItemDriftOutcome = "no_material_drift" | "scope_drift" | "dependency_drift" | "contract_drift" | "conflict_risk";
+
+/**
+ * The reference adapter's CURRENT, coarser freshness diagnostic — derived directly from
+ * `pull-work-provider.ts`'s own exported `referenceAdapterFreshnessDiagnostics` runtime const
+ * array (#777 review finding 5), so this type cannot silently drift from what
+ * `classifyRevisionFreshness()` actually returns. This is explicitly NOT `WorkItemDriftOutcome`
+ * (the contract's normative vocabulary, above) — see that type's doc comment for the flagged gap
+ * between contract prose and the reference CLI's actual behavior. `WorkItemRevisionFreshness`
+ * carries THIS diagnostic, not a value from the wider contract vocabulary the CLI does not emit.
+ */
+export type ReferenceAdapterFreshnessDiagnostic = (typeof referenceAdapterFreshnessDiagnostics)[number];
 
 export interface WorkItemRevisionFreshnessRouteRecommendation {
   target: string;
@@ -181,7 +207,9 @@ export interface WorkItemRevisionFreshness {
   planning_scope_refs: string[];
   planning_scope_intersections: string[];
   commits_since_planned_base: number | null;
-  classification: WorkItemRevisionFreshnessClassification;
+  /** The reference adapter's coarse diagnostic — NOT the contract's normative
+   * `WorkItemDriftOutcome` vocabulary. See `ReferenceAdapterFreshnessDiagnostic`'s doc comment. */
+  classification: ReferenceAdapterFreshnessDiagnostic;
   route_recommendation?: WorkItemRevisionFreshnessRouteRecommendation;
   reasons: WorkItemReadinessReason[];
 }
@@ -333,44 +361,38 @@ export interface AssignmentSupersedeMeta {
 
 export interface AssignmentProvider {
   /**
-   * Record durable ownership of `subjectId` for `actor`. ADR 0021 §2's abstract signature
-   * documents a `void` return ("caller re-reads via `status` to confirm" —
-   * assignment-provider-contract.md "AssignmentProvider Operations" table). The shipped
-   * local-file implementation (`performLocalClaim`, `src/cli/assignment-provider.ts`) instead
-   * returns the written `AssignmentClaimRecord` directly. This interface follows the actual code
-   * (the #775/#776 "code wins over prose" lesson: a discrepancy between contract prose and the
-   * reference implementation is flagged, not silently smoothed over) since every caller in this
-   * repository already consumes that return value and re-deriving it via a second `status()` call
-   * would be strictly less useful, not more contract-faithful.
+   * Record durable ownership of `subjectId` for `actor`. Returns `void` — ADR 0021 §2's abstract
+   * signature documents exactly this ("caller re-reads via `status` to confirm" —
+   * assignment-provider-contract.md "AssignmentProvider Operations" table). This is the
+   * provider-NEUTRAL surface: the shipped local-file implementation (`performLocalClaim`,
+   * `src/cli/assignment-provider.ts`) actually returns the written `AssignmentClaimRecord`
+   * directly, but a GitHub-backed `AssignmentProvider` cannot do the equivalent (the GitHub write
+   * path is render-don't-execute — see assignment-provider-contract.md's "Implementation Note" —
+   * so there is no synchronously-written record to hand back). Forcing every adapter to return a
+   * record would leak the local-file adapter's shape into the neutral contract (#777 review
+   * finding 1). A caller that wants the written record from an adapter that can supply one should
+   * use that adapter's capability extension instead — see `LocalAssignmentProviderExt` below for
+   * the local-file case.
    *
    * Same actor re-claiming before TTL expiry is idempotent; a different actor claiming an
    * already-`claimed` subject throws (AC7 — never silently overwritten; use `supersede`).
    */
-  claim(subjectId: string, actor: ActorStruct, meta: AssignmentClaimMeta): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
+  claim(subjectId: string, actor: ActorStruct, meta: AssignmentClaimMeta): void | Promise<void>;
 
   /**
-   * Clear durable ownership and leave a handoff note. `releasedBy: null` performs an
-   * unconditional release (no ownership check); every other caller should pass the releasing
-   * actor so ownership is verified before the record is cleared (AC6 — never force-release a
-   * claim held by a different actor). Returns `null` when `meta.tolerateNoActiveClaim` is set and
-   * there was nothing to release (an idempotent no-op) or ownership could not be verified; returns
-   * the terminal `AssignmentClaimRecord` (`status: "released"`) otherwise.
+   * Clear durable ownership and leave a handoff note. Returns `void` — same ADR 0021 §2 rationale
+   * as `claim` above; re-read via `status()` to confirm the release took effect. `releasedBy:
+   * null` performs an unconditional release (no ownership check); every other caller should pass
+   * the releasing actor so ownership is verified before the record is cleared (AC6 — never
+   * force-release a claim held by a different actor). `meta.tolerateNoActiveClaim` makes a missing
+   * claim or an ownership mismatch a tolerated no-op instead of a thrown error.
    */
-  release(
-    subjectId: string,
-    releasedBy: ActorStruct | null,
-    meta?: AssignmentReleaseMeta,
-  ): AssignmentClaimRecord | null | Promise<AssignmentClaimRecord | null>;
+  release(subjectId: string, releasedBy: ActorStruct | null, meta?: AssignmentReleaseMeta): void | Promise<void>;
 
   /** Reassign ownership from a lapsed actor (`from`) to a successor (`to`), with an audit-trail
-   * note. Throws when `from` does not match the current holder — never force-reassigns a claim
-   * held by someone else. */
-  supersede(
-    subjectId: string,
-    from: ActorStruct,
-    to: ActorStruct,
-    meta?: AssignmentSupersedeMeta,
-  ): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
+   * note. Returns `void` — same ADR 0021 §2 rationale as `claim` above. Throws when `from` does
+   * not match the current holder — never force-reassigns a claim held by someone else. */
+  supersede(subjectId: string, from: ActorStruct, to: ActorStruct, meta?: AssignmentSupersedeMeta): void | Promise<void>;
 
   /**
    * Read current assignment-layer state WITHOUT joining liveness — assignment-layer truth only
@@ -383,15 +405,87 @@ export interface AssignmentProvider {
    */
   status(subjectId: string): AssignmentStatus | Promise<AssignmentStatus>;
 
-  /** Enumerate subject ids currently claimed, optionally filtered to one actor's canonical
-   * actor key (the same flat/bare token `resolveActor(env).actor`, `liveness whoami`, and every
-   * other actor-key consumer in this repository already use — see
-   * assignment-provider-contract.md's `actor_key` field doc). */
+  /**
+   * Enumerate subject ids currently claimed, optionally filtered to one actor's CANONICAL actor
+   * key: `record.actor_key` when present, falling back to `serializeActor(record.actor)` only for
+   * pre-`actor_key` records — the exact comparison `canonicalHolderActorKey()`
+   * (`src/cli/assignment-provider.ts`) centralizes and `computeEffectiveState` already uses for
+   * self-recognition (#777 review finding 3). A filter that instead re-serializes the actor struct
+   * unconditionally, ignoring a present `actor_key`, gives the WRONG answer for an
+   * explicit-override actor (assignment-provider-contract.md's `actor_key` field doc: a bare
+   * canonical token vs. a re-derived `explicit-override:<value>:<host>` triple diverge for that
+   * one actor shape) — adapters must delegate to `canonicalHolderActorKey()` (or an equivalent
+   * provider-native rule that produces the same canonical key) rather than inventing their own
+   * comparison.
+   */
   list(actorKey?: string): string[] | Promise<string[]>;
+}
+
+/**
+ * Local-file-adapter-specific capability extension (#777 review finding 1): the record-returning
+ * counterparts to `AssignmentProvider`'s void-returning `claim`/`release`/`supersede`, for hosts
+ * that specifically want the local-file adapter's synchronously-written `AssignmentClaimRecord`
+ * instead of a second `status()` round trip. This interface is intentionally NOT part of
+ * `AssignmentProvider` itself — it is a capability only an adapter with direct, synchronous
+ * storage access (the local-file adapter) can honestly provide; a GitHub-backed adapter cannot
+ * implement it without fabricating a record the render-don't-execute split does not actually
+ * produce. A host must explicitly opt in by checking for/depending on this extension (e.g. `if
+ * ("claimReturning" in provider) ...`) rather than this leaking into the general contract every
+ * `AssignmentProvider` consumer is typed against. `createLocalFileAssignmentProvider`
+ * (`local-file-provider-adapters.ts`) returns an object satisfying `AssignmentProvider &
+ * LocalAssignmentProviderExt`.
+ */
+export interface LocalAssignmentProviderExt {
+  /** Record-returning counterpart to `AssignmentProvider.claim` — see that method's doc comment
+   * and `performLocalClaim`'s return value. */
+  claimReturning(subjectId: string, actor: ActorStruct, meta: AssignmentClaimMeta): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
+  /** Record-returning counterpart to `AssignmentProvider.release` — see that method's doc comment
+   * and `performLocalRelease`'s return value (`null` for a tolerated no-op). */
+  releaseReturning(
+    subjectId: string,
+    releasedBy: ActorStruct | null,
+    meta?: AssignmentReleaseMeta,
+  ): AssignmentClaimRecord | null | Promise<AssignmentClaimRecord | null>;
+  /** Record-returning counterpart to `AssignmentProvider.supersede` — see that method's doc
+   * comment and `performLocalSupersede`'s return value. */
+  supersedeReturning(
+    subjectId: string,
+    from: ActorStruct,
+    to: ActorStruct,
+    meta?: AssignmentSupersedeMeta,
+  ): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
 }
 
 // ─── WorkItemMutationProvider ────────────────────────────────────────────────
 // work-item-contract.md "Mutations" (issue #776).
+
+/**
+ * Per-call context for `WorkItemMutationProvider.mutate` (#777 review finding 4). Carries the two
+ * things a mutation adapter may need beyond the request itself: `observed` (provider-neutral,
+ * every adapter's own type) and `providerTarget` (adapter-specific, deliberately opaque here).
+ *
+ * `providerTarget` is what lets ONE provider-neutral `mutate()` signature actually type BOTH
+ * shipped adapters: the local-file adapter needs no target (its `file` is bound at adapter
+ * construction — see `createLocalFileMutationProvider`), while the GitHub render adapter needs a
+ * validated `GithubMutationTarget` (repo/number/optional project-field coordinate) PER CALL,
+ * because a single long-lived renderer instance is used across many different work items over its
+ * lifetime (unlike `file`, target is not adapter-construction-stable — see
+ * `createGithubMutationRenderer` in `github-mutation-renderer.ts`). Typing this slot `unknown`
+ * rather than `GithubMutationTarget` keeps the interface itself provider-neutral; each concrete
+ * adapter documents and validates/narrows what it expects here (the GitHub renderer delegates
+ * that validation to the already-reviewed `parseGithubMutationTarget`).
+ */
+export interface ProviderMutationContext {
+  /** The caller's freshly re-fetched provider-state snapshot to diff `request.base` against, per
+   * the Conflict Policy ("provider wins, with staleness detection"). Every adapter that cannot
+   * read its own storage (the GitHub render adapter) REQUIRES it and returns `not_verified` when
+   * omitted for a non-`comment` operation; an adapter with direct storage access (the local-file
+   * adapter) ignores it. `comment` mutations never use it (append-only, non-clobbering). */
+  observed?: WorkItemMutationBase | null;
+  /** Adapter-specific validated render/write target, opaque to this provider-neutral interface.
+   * See this interface's doc comment for why it is per-call, not adapter-construction-time. */
+  providerTarget?: unknown;
+}
 
 export interface WorkItemMutationProvider {
   /**
@@ -399,32 +493,16 @@ export interface WorkItemMutationProvider {
    * "Operations" table (`status_transition` | `field_update` | `comment`) and "Render, Don't
    * Execute". A provider with direct storage access performs the mutation itself and returns
    * `status: "applied"` (e.g. `applyLocalFileMutation`, `src/cli/work-item-mutation-provider.ts`
-   * — it self-observes current state and ignores `observed`); a provider that must defer
-   * execution to an external host instead renders the native command and returns
+   * — it self-observes current state and ignores `context`); a provider that must defer execution
+   * to an external host instead renders the native command and returns
    * `rendered`/`conflict`/`rejected`/`not_verified` without executing anything (e.g.
-   * `renderGithubMutation`'s pure `gh` argv render).
-   *
-   * `observed` is the caller's freshly re-fetched provider-state snapshot to diff `request.base`
-   * against, per the Conflict Policy ("provider wins, with staleness detection"). Every adapter
-   * that cannot read its own storage (the GitHub render adapter) REQUIRES it and returns
-   * `not_verified` when omitted for a non-`comment` operation; an adapter with direct storage
-   * access (the local-file adapter) ignores it. `comment` mutations never use it (append-only,
-   * non-clobbering — see the Conflict Policy).
-   *
-   * This provider-neutral signature deliberately omits the GitHub adapter's extra
-   * `GithubMutationTarget` parameter (a validated repo/number/optional project-field coordinate —
-   * see `renderGithubMutation` and `parseGithubMutationTarget` in
-   * `src/cli/work-item-mutation-provider.ts`): growing this interface a GitHub-specific parameter
-   * every adapter does not need would stop it from being provider-neutral. A GitHub-specific host
-   * binds or supplies that target itself (e.g. a small closure/factory around
-   * `renderGithubMutation`) outside this interface's generic surface — this is a known, deliberate
-   * scope line, not an oversight; see this file's header "Derivation order" note and
-   * `local-file-provider-adapters.ts`, which proves the local-file side of this interface
-   * (the GitHub render side is not proven here because that extra parameter cannot be dropped
-   * without changing `renderGithubMutation`'s actual, reviewed signature).
+   * `renderGithubMutation`'s pure `gh` argv render, via `context.observed`/`context.providerTarget`
+   * — see `createGithubMutationRenderer` in `github-mutation-renderer.ts`, which proves this
+   * interface types the GitHub side too, not just the local-file side).
+   * See `ProviderMutationContext`'s doc comment for `observed`/`providerTarget`'s full semantics.
    */
   mutate(
     request: WorkItemMutationRequest,
-    observed?: WorkItemMutationBase | null,
+    context?: ProviderMutationContext,
   ): WorkItemMutationResult | Promise<WorkItemMutationResult>;
 }

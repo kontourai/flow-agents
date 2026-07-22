@@ -485,6 +485,23 @@ function readSubjectLockOwner(file: string): { token?: string } | null {
  * through here too means `--now` deterministically governs idle_days as well as liveness
  * freshness, rather than idle_days silently reading the real wall clock regardless of `--now`.
  */
+/**
+ * The canonical holder actor key for a claim record: `record.actor_key` when present (the
+ * canonical `resolveActor(env).actor` string every actor-key consumer in this repository already
+ * compares against — `liveness whoami`, `liveness claim --actor`, per-actor `current.json`,
+ * pull-work's `--self-actor`), falling back to `serializeActor(record.actor)` for pre-actor_key
+ * records. Single-sourced here (#777 review finding 3) so `computeEffectiveState`'s
+ * self-recognition/liveness-join comparison and any OTHER holder-identity comparison (e.g.
+ * `local-file-provider-adapters.ts`'s `list()` actor filter) can never diverge by each
+ * re-deriving their own, potentially inconsistent, holder key. See the assignment-provider-
+ * contract.md `actor_key` field doc for why `serializeActor(record.actor)` alone is NOT a valid
+ * holder key for an explicit-override actor (a bare canonical token vs. a re-derived
+ * `explicit-override:<value>:<host>` triple diverge for that one actor shape).
+ */
+export function canonicalHolderActorKey(record: AssignmentClaimRecord): string {
+  return record.actor_key || loadActorIdentityHelper().serializeActor(record.actor);
+}
+
 export function computeEffectiveState(assignment: AssignmentStatus, freshHoldersList: FreshHolder[], selfActor: string | undefined, nowMs: number): {
   effective_state: EffectiveState;
   reason: string;
@@ -526,7 +543,7 @@ export function computeEffectiveState(assignment: AssignmentStatus, freshHolders
   // use — so for an explicit-override actor the self-check and the liveness join now agree with
   // every other tool. BACK-COMPAT: records with no actor_key (every pre-fix record, every #290
   // eval fixture) fall back to serializeActor(record.actor) exactly as before this fix.
-  const holderActorKey = record.actor_key || loadActorIdentityHelper().serializeActor(record.actor);
+  const holderActorKey = canonicalHolderActorKey(record);
   if (selfActor && holderActorKey === selfActor) return { effective_state: "held", reason: "self_is_holder", holder: { actor: holderActorKey } };
 
   const fresh = freshHoldersList.find((holder) => holder.actor === holderActorKey);
