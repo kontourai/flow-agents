@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.7.0](https://github.com/kontourai/flow-agents/compare/v4.6.2...v4.7.0) (2026-07-22)
+
+
+### Features
+
+* add portable utterance runtime profiles ([#850](https://github.com/kontourai/flow-agents/issues/850)) ([fb16cb5](https://github.com/kontourai/flow-agents/commit/fb16cb5b5a67455b90692f426e3306af87eab6b4))
+* route utterance extraction through dispatch ([#848](https://github.com/kontourai/flow-agents/issues/848)) ([0761fd5](https://github.com/kontourai/flow-agents/commit/0761fd5c09430828c6894ecc7ea6d5d018dc22c3))
+
+
+### Fixes
+
+* **builder:** allow execute-to-plan correction for plan_gap ([#837](https://github.com/kontourai/flow-agents/issues/837)) ([07e65ae](https://github.com/kontourai/flow-agents/commit/07e65ae3fbc82d0b57defeecbadce71adafc3849))
+* **builder:** ship standalone Flow validation ([efee110](https://github.com/kontourai/flow-agents/commit/efee110de5afce69b7bdd484aee3b9ed653b9914))
+
 ## [4.6.2](https://github.com/kontourai/flow-agents/compare/v4.6.1...v4.6.2) (2026-07-22)
 
 
