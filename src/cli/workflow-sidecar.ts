@@ -2982,6 +2982,27 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     const units = targets.reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), runner), 0);
     return units > 0 ? { kind: "local-process-exit", runner: `npx ${runner}`, static_test_units: units } : null;
   }
+  // `playwright test` discovers specs through playwright.config.*, so a bare invocation is the
+  // norm (kontourai/flow-agents#826). With no explicit target, the proof comes from spec files in
+  // the conventional test directories — anchored on a config actually existing at the root: no
+  // config means the runner would discover nothing, so there is no proof to grant.
+  // Bare token only — `npx ./vendored/playwright test` would re-open the binary-substitution
+  // channel the direct form's `executable === executableName` guard closes (review finding H1).
+  const npxPlaywright = executableName === "npx" && tokens[1] === "playwright" && tokens[2] === "test";
+  if ((executableName === "playwright" && executable === executableName && tokens[1] === "test") || npxPlaywright) {
+    if (tokens.some((token) => /pass.?with.?no.?tests/i.test(token))) return null;
+    const configNames = ["js", "cjs", "mjs", "ts", "cts", "mts"].map((ext) => `playwright.config.${ext}`);
+    if (!configNames.some((name) => fs.existsSync(path.join(projectRoot, name)))) return null;
+    const explicit = tokens.slice(npxPlaywright ? 3 : 2)
+      .filter((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token))
+      .flatMap((token) => /[*?\[]/.test(token) ? fs.globSync(token, { cwd: projectRoot }) : [token]);
+    const discovered = ["tests", "test", "e2e", "specs"]
+      .flatMap((dir) => [`${dir}/**/*.spec.*`, `${dir}/**/*.test.*`])
+      .flatMap((pattern) => fs.globSync(pattern, { cwd: projectRoot, exclude: ["node_modules/**", ".git/**"] }));
+    const files = explicit.length > 0 ? explicit : discovered;
+    const units = [...new Set(files)].reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), "playwright"), 0);
+    return units > 0 ? { kind: "local-process-exit", runner: npxPlaywright ? "npx playwright test" : "playwright test", static_test_units: units } : null;
+  }
   if (executableName === "node" && tokens.includes("--test")) {
     const testFlag = tokens.indexOf("--test");
     const targets = tokens.slice(testFlag + 1)
