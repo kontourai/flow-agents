@@ -12,9 +12,10 @@ import assert from "node:assert/strict";
 import {
   mapWorkflowStatusToConsoleProcessStatus,
   deriveConsoleProcessBlockedReason,
+  hasUnresolvedLiveCritique,
+  filterCritiquesForSlug,
   validateWorkflowStateProjectionSourceShape,
   validateWorkflowHandoffProjectionSourceShape,
-  validateWorkflowCritiqueProjectionSourceShape,
   buildWorkflowProcessProjection,
 } from "../../build/src/lib/workflow-process-projection.js";
 
@@ -50,19 +51,89 @@ test("mapWorkflowStatusToConsoleProcessStatus: verified + next_action.status=don
   assert.equal(mapWorkflowStatusToConsoleProcessStatus("verified", "done"), "completed");
 });
 
-test("mapWorkflowStatusToConsoleProcessStatus: a required pending critique overrides a non-terminal status to review_pending", () => {
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("verifying", "continue", "pending", true), "review_pending");
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("in_progress", "continue", "pending", true), "review_pending");
+test("mapWorkflowStatusToConsoleProcessStatus: an unresolved bundle critique overrides a non-terminal status to review_pending", () => {
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("verifying", "continue", true), "review_pending");
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("in_progress", "continue", true), "review_pending");
 });
 
-test("mapWorkflowStatusToConsoleProcessStatus: a pending critique that is not required does not override", () => {
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("verifying", "continue", "pending", false), "running");
+test("mapWorkflowStatusToConsoleProcessStatus: no unresolved critique does not override", () => {
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("verifying", "continue", false), "running");
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("verifying", "continue", undefined), "running");
 });
 
-test("mapWorkflowStatusToConsoleProcessStatus: a pending required critique never overrides a terminal status", () => {
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("delivered", "done", "pending", true), "completed");
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("failed", undefined, "pending", true), "failed");
-  assert.equal(mapWorkflowStatusToConsoleProcessStatus("canceled", undefined, "pending", true), "cancelled");
+test("mapWorkflowStatusToConsoleProcessStatus: an unresolved critique never overrides a terminal status", () => {
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("delivered", "done", true), "completed");
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("failed", undefined, true), "failed");
+  assert.equal(mapWorkflowStatusToConsoleProcessStatus("canceled", undefined, true), "cancelled");
+});
+
+// --- hasUnresolvedLiveCritique (issue #778 review finding 1: reads trust.bundle-shaped
+// critique claims, i.e. critiquesFromBundle() output, never critique.json) ---
+
+test("hasUnresolvedLiveCritique: a live (non-superseded) fail/not_verified critique is unresolved", () => {
+  assert.equal(hasUnresolvedLiveCritique([{ verdict: "fail" }]), true);
+  assert.equal(hasUnresolvedLiveCritique([{ verdict: "not_verified" }]), true);
+});
+
+test("hasUnresolvedLiveCritique: a live passing critique is resolved (false)", () => {
+  assert.equal(hasUnresolvedLiveCritique([{ verdict: "pass" }]), false);
+});
+
+test("hasUnresolvedLiveCritique: no critiques at all is resolved (false) -- absence is not a pending signal", () => {
+  assert.equal(hasUnresolvedLiveCritique([]), false);
+});
+
+test("hasUnresolvedLiveCritique: a superseded/resolved critique does NOT count, even with a failing verdict (negative test, review finding 1)", () => {
+  assert.equal(hasUnresolvedLiveCritique([{ verdict: "fail", superseded_by: "critique-2" }]), false);
+  assert.equal(hasUnresolvedLiveCritique([{ verdict: "not_verified", superseded_by: "critique-2" }]), false);
+});
+
+test("hasUnresolvedLiveCritique: a resolved-then-reopened history (superseded fail + live pass) is resolved (false)", () => {
+  assert.equal(
+    hasUnresolvedLiveCritique([
+      { verdict: "fail", superseded_by: "critique-2" },
+      { verdict: "pass" },
+    ]),
+    false,
+  );
+});
+
+test("hasUnresolvedLiveCritique: any live non-passing critique among several is unresolved (true)", () => {
+  assert.equal(
+    hasUnresolvedLiveCritique([
+      { verdict: "pass", superseded_by: "critique-2" },
+      { verdict: "fail" },
+    ]),
+    true,
+  );
+});
+
+// --- filterCritiquesForSlug (issue #778 review finding 3: join-key identity) ---
+
+test("filterCritiquesForSlug: a session-URI workflow_subject_ref matching the slug is kept, no warning", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "flow-agents://session/session-a" }], "session-a");
+  assert.equal(result.critiques.length, 1);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("filterCritiquesForSlug: a session-URI workflow_subject_ref naming a DIFFERENT slug is dropped with a warning (negative test, review finding 3)", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "flow-agents://session/other-session" }], "session-a");
+  assert.equal(result.critiques.length, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /other-session/);
+  assert.match(result.warnings[0], /session-a/);
+});
+
+test("filterCritiquesForSlug: a work-item-bound (non-session-URI) ref is passed through unchanged -- cannot be confidently compared", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "github:kontourai/flow-agents#778" }], "session-a");
+  assert.equal(result.critiques.length, 1);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("filterCritiquesForSlug: an absent workflow_subject_ref is passed through unchanged", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail" }], "session-a");
+  assert.equal(result.critiques.length, 1);
+  assert.deepEqual(result.warnings, []);
 });
 
 // --- deriveConsoleProcessBlockedReason ---
@@ -116,14 +187,15 @@ test("deriveConsoleProcessBlockedReason: needs_input falls back to a workflow-st
   );
 });
 
-test("deriveConsoleProcessBlockedReason: review_pending returns a fixed, honest sentence", () => {
+test("deriveConsoleProcessBlockedReason: review_pending returns a fixed, honest sentence referencing trust.bundle, not critique.json", () => {
   const reason = deriveConsoleProcessBlockedReason("review_pending", {});
   assert.match(reason, /review/i);
-  assert.match(reason, /critique\.json/);
+  assert.match(reason, /trust\.bundle/);
+  assert.doesNotMatch(reason, /critique\.json/);
 });
 
-test("deriveConsoleProcessBlockedReason: clears (undefined) for every non-interactive status, mirroring console#236's own clearing rule", () => {
-  for (const status of ["not_started", "running", "completed", "failed", "cancelled", "paused", "waiting"]) {
+test("deriveConsoleProcessBlockedReason: clears (undefined) for every status OUTSIDE console#236's blocked/needs_input/review_pending/waiting/paused contract", () => {
+  for (const status of ["not_started", "running", "completed", "failed", "cancelled"]) {
     assert.equal(
       deriveConsoleProcessBlockedReason(status, {
         nextActionStatus: "blocked",
@@ -134,6 +206,29 @@ test("deriveConsoleProcessBlockedReason: clears (undefined) for every non-intera
       undefined,
       `status=${status} must not carry a blockedReason`,
     );
+  }
+});
+
+// Issue #778 review finding 2: waiting/paused are IN console#236's retained-reason
+// contract (blockedReason is cleared only when status is NOT one of blocked/needs_input/
+// review_pending/waiting/paused) -- they must not be force-cleared just because today's
+// mapper has no concrete signal that produces them yet. Locks in the CORRECT behavior
+// (a prior version of this test wrongly asserted these two cleared to undefined).
+test("deriveConsoleProcessBlockedReason: waiting/paused RETAIN an available reason, per console#236's contract (review finding 2)", () => {
+  for (const status of ["waiting", "paused"]) {
+    const reason = deriveConsoleProcessBlockedReason(status, {
+      nextActionStatus: "needs_user",
+      nextActionSummary: "a reason that must be retained",
+      workflowStatus: "needs_decision",
+      handoffBlockers: [],
+    });
+    assert.equal(reason, "a reason that must be retained", `status=${status} must retain its reason`);
+  }
+});
+
+test("deriveConsoleProcessBlockedReason: waiting/paused fall back to undefined when no reason source is available at all", () => {
+  for (const status of ["waiting", "paused"]) {
+    assert.equal(deriveConsoleProcessBlockedReason(status, {}), undefined);
   }
 });
 
@@ -173,16 +268,6 @@ test("validateWorkflowHandoffProjectionSourceShape: accepts blockers array or it
   assert.equal(withoutBlockers.blockers, undefined);
 });
 
-test("validateWorkflowCritiqueProjectionSourceShape: accepts pending/required", () => {
-  const critique = validateWorkflowCritiqueProjectionSourceShape({
-    task_slug: "demo",
-    status: "pending",
-    required: true,
-  });
-  assert.equal(critique.status, "pending");
-  assert.equal(critique.required, true);
-});
-
 // --- envelope shape / determinism ---
 
 test("buildWorkflowProcessProjection: emits an inert, non-authoritative kontour.console.projection envelope", () => {
@@ -214,6 +299,25 @@ test("buildWorkflowProcessProjection: emits an inert, non-authoritative kontour.
   assert.equal(process.nonAuthority, true);
   assert.equal(process.status, "blocked");
   assert.equal(process.blockedReason, "waiting on X");
+});
+
+test("buildWorkflowProcessProjection: a source with hasUnresolvedCritique=true projects to review_pending", () => {
+  const source = {
+    path: "/tmp/x/session-b/state.json",
+    relativePath: "session-b/state.json",
+    slug: "session-b",
+    state: validateWorkflowStateProjectionSourceShape({
+      schema_version: "1.0",
+      task_slug: "session-b",
+      status: "verifying",
+      phase: "verification",
+      next_action: { status: "continue", summary: "awaiting review" },
+    }),
+    hasUnresolvedCritique: true,
+  };
+  const envelope = buildWorkflowProcessProjection([source], { scope: { kind: "repo", id: "demo" }, generatedAt: "2026-07-20T12:00:00Z" });
+  assert.equal(envelope.processes[0].status, "review_pending");
+  assert.equal(envelope.processes[0].extensions["flow-agents"].has_unresolved_critique, true);
 });
 
 test("buildWorkflowProcessProjection: output is deterministic across runs with the same generatedAt", () => {

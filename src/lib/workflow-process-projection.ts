@@ -21,8 +21,6 @@ export type WorkflowTaskStatus =
 
 export type WorkflowNextActionStatus = "continue" | "needs_user" | "blocked" | "done";
 
-export type WorkflowCritiqueStatus = "pending" | "pass" | "fail" | "not_required";
-
 /**
  * Console's process operating-state vocabulary (console#229/#236,
  * docs/specs/projection-schema.md `ProcessStatusProjection.status` /
@@ -61,10 +59,16 @@ export type WorkflowHandoffSidecar = {
   blockers?: string[];
 };
 
-export type WorkflowCritiqueSidecar = {
-  task_slug: string;
-  status: WorkflowCritiqueStatus;
-  required: boolean;
+/**
+ * A critique claim as read back from trust.bundle by workflow-sidecar.ts's
+ * `critiquesFromBundle` (the AUTHORITATIVE critique source -- critique.json is
+ * retired historical residue, see readWorkflowProcessSources below). Only the
+ * fields this module's pure derivation needs; the real reader returns more.
+ */
+export type BundleCritique = {
+  verdict?: unknown;
+  superseded_by?: unknown;
+  workflow_subject_ref?: unknown;
 };
 
 export type WorkflowProcessSource = {
@@ -73,7 +77,14 @@ export type WorkflowProcessSource = {
   slug: string;
   state: WorkflowStateSidecar;
   handoff?: WorkflowHandoffSidecar;
-  critique?: WorkflowCritiqueSidecar;
+  /**
+   * Pre-computed by the CLI layer (console-process-projection.ts), which is
+   * the only layer allowed to import workflow-sidecar.ts's trust.bundle
+   * reader (src/lib must not import src/cli -- see that file's join step).
+   * Absent/undefined means "no bundle-derived signal available" (e.g. a unit
+   * test exercising the pure mapper directly), NOT "definitely false".
+   */
+  hasUnresolvedCritique?: boolean;
 };
 
 export type ConsoleProjectionRef = {
@@ -103,7 +114,7 @@ export type ConsoleProcessProjection = {
       workflow_status: WorkflowTaskStatus;
       phase: string;
       next_action_status: WorkflowNextActionStatus;
-      critique_status?: WorkflowCritiqueStatus;
+      has_unresolved_critique?: boolean;
       updated_at?: string;
       source_path: string;
     };
@@ -145,6 +156,11 @@ export type BuildWorkflowProcessProjectionOptions = {
   };
 };
 
+export type ReadWorkflowProcessSourcesResult = {
+  sources: WorkflowProcessSource[];
+  warnings: string[];
+};
+
 const KNOWN_STATUSES = new Set<WorkflowTaskStatus>([
   "new",
   "planning",
@@ -162,7 +178,6 @@ const KNOWN_STATUSES = new Set<WorkflowTaskStatus>([
   "archived",
 ]);
 const KNOWN_NEXT_ACTION_STATUSES = new Set<WorkflowNextActionStatus>(["continue", "needs_user", "blocked", "done"]);
-const KNOWN_CRITIQUE_STATUSES = new Set<WorkflowCritiqueStatus>(["pending", "pass", "fail", "not_required"]);
 const SKIPPED_ROOT_ENTRIES = new Set(["archive", "changes", "delivery-history", "liveness"]);
 const MAX_SIDECAR_BYTES = 1024 * 1024;
 
@@ -203,8 +218,10 @@ const MAX_SIDECAR_BYTES = 1024 * 1024;
  * No `state.json` status value maps cleanly onto Console's `review_pending`,
  * `waiting`, or `paused` -- flagged as a gap (see docs/integrations/
  * flow-agents-console.md). `review_pending` is derived separately in
- * `deriveConsoleProcessStatus` from `critique.json` (see there), not from
- * `status` alone.
+ * `mapWorkflowStatusToConsoleProcessStatus` from the AUTHORITATIVE
+ * trust.bundle critique state (`hasUnresolvedLiveCritique`), not from
+ * `status` alone -- critique.json is retired and is never read (review
+ * finding, issue #778).
  */
 export const WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS: Readonly<Record<WorkflowTaskStatus, ConsoleProcessStatus>> = {
   new: "not_started",
@@ -224,39 +241,106 @@ export const WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS: Readonly<Record<Workflow
 };
 
 /**
+ * Pure review_pending signal (issue #778 review finding 1): given the LIVE
+ * (non-superseded) critique claims already read from trust.bundle by
+ * workflow-sidecar.ts's `critiquesFromBundle` -- the authoritative critique
+ * source; critique.json is retired and unsupported historical residue (see
+ * the Phase 4c comment above workflow-sidecar.ts's readBundleState) -- true
+ * when at least one is NOT a passing verdict.
+ *
+ * Semantics: a critique claim only exists in the bundle because a review
+ * actually happened (record-critique was run). A live claim whose verdict is
+ * "fail" or "not_verified" is, by construction, an outstanding review action
+ * nothing has resolved yet -- that is Console's `review_pending` (a human
+ * reviewer's verdict is not yet a clean pass). trust.bundle's critique claims
+ * carry no separate "required" boolean (that concept lived only on the
+ * retired critique.json wrapper, and belongs to Flow gate policy, not to an
+ * individual critique record) -- a live, non-passing critique is inherently
+ * outstanding, so "required" is not a separate condition here. A critique
+ * marked `superseded_by` (resolved via `resolve-critique`) is excluded: it is
+ * history, not a pending action (mirrors the `liveCritiques` filter
+ * workflow-sidecar.ts itself uses at record-gate-claim time).
+ */
+export function hasUnresolvedLiveCritique(critiques: BundleCritique[]): boolean {
+  return critiques.some((critique) => {
+    const supersededBy = critique.superseded_by;
+    const isSuperseded = typeof supersededBy === "string" && supersededBy.length > 0;
+    if (isSuperseded) return false;
+    return critique.verdict !== "pass";
+  });
+}
+
+const SESSION_SUBJECT_REF_PREFIX = "flow-agents://session/";
+
+/**
+ * Join-key identity check for bundle-derived critiques (issue #778 review
+ * finding 3): a `critiquesFromBundle()` entry stamped with a
+ * `workflow_subject_ref` in the `flow-agents://session/<slug>` form that
+ * names a DIFFERENT slug than this session's own directory is a stale or
+ * misplaced signal and must never be silently trusted to drive this
+ * session's review_pending status -- skip it and report why, don't force
+ * review_pending (or silently swallow it either). A ref that is absent, or
+ * bound to a work-item (any other shape), cannot be confidently compared to
+ * a slug and is passed through unchanged: this is a confident-mismatch-only
+ * filter, not an allowlist.
+ */
+export function filterCritiquesForSlug<T extends BundleCritique>(critiques: T[], slug: string): { critiques: T[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const kept = critiques.filter((critique) => {
+    const ref = critique.workflow_subject_ref;
+    if (typeof ref !== "string" || !ref.startsWith(SESSION_SUBJECT_REF_PREFIX)) return true;
+    const refSlug = ref.slice(SESSION_SUBJECT_REF_PREFIX.length);
+    if (refSlug === slug) return true;
+    warnings.push(`${slug}: trust.bundle critique workflow_subject_ref names a different session ('${refSlug}') -- skipping this critique's contribution to review_pending`);
+    return false;
+  });
+  return { critiques: kept, warnings };
+}
+
+/**
  * Pure status mapper (issue #778 AC): workflow status + next_action.status +
- * an optional joined critique status -> Console `ConsoleProcessStatus`.
+ * a bundle-derived "has an unresolved live critique" boolean (see
+ * `hasUnresolvedLiveCritique`) -> Console `ConsoleProcessStatus`.
  *
  * Refinements over the base table:
  * - `verified` + `next_action.status === "done"` -> `completed` (the workflow
  *   lifecycle doc's second `verified` row: the next phase already closed).
- * - Any status + `critique.status === "pending" && critique.required === true`
- *   -> `review_pending`, overriding the base mapping. This is the one signal
- *   in this repo's schemas that means "a human reviewer has not yet recorded
- *   a verdict and one is mandatory" (schemas/workflow-critique.schema.json),
- *   i.e. Console's `review_pending` semantic. Terminal statuses (`completed`,
- *   `failed`, `cancelled`) are never overridden by a stale pending critique.
+ * - Any non-terminal status + `hasUnresolvedCritique === true` -> `review_pending`,
+ *   overriding the base mapping. Terminal statuses (`completed`, `failed`,
+ *   `cancelled`) are never overridden by a critique signal -- a workflow that
+ *   already finished, failed, or was cancelled does not become "review
+ *   pending" because of history in the bundle.
  */
 export function mapWorkflowStatusToConsoleProcessStatus(
   status: WorkflowTaskStatus,
   nextActionStatus?: WorkflowNextActionStatus,
-  critiqueStatus?: WorkflowCritiqueStatus,
-  critiqueRequired?: boolean,
+  hasUnresolvedCritique?: boolean,
 ): ConsoleProcessStatus {
   let mapped: ConsoleProcessStatus = WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS[status] ?? "running";
   if (status === "verified" && nextActionStatus === "done") mapped = "completed";
 
   const isTerminal = mapped === "completed" || mapped === "failed" || mapped === "cancelled";
-  if (!isTerminal && critiqueRequired === true && critiqueStatus === "pending") mapped = "review_pending";
+  if (!isTerminal && hasUnresolvedCritique === true) mapped = "review_pending";
 
   return mapped;
 }
 
+// console#236's own clearing rule (console-core current-operating-state.ts):
+// blockedReason is cleared whenever the incoming status is not one of these
+// five -- so it is RETAINED for all five, not just the three this projector
+// currently has concrete signals for. `waiting`/`paused` have no producing
+// workflow-status mapping today (flagged in the table doc comment above), but
+// the CONTRACT still applies to them: a caller that ever supplies a reason
+// for a waiting/paused process must not have it silently dropped here.
+const BLOCKED_REASON_ELIGIBLE_STATUSES = new Set<ConsoleProcessStatus>(["blocked", "needs_input", "review_pending", "waiting", "paused"]);
+
 /**
  * Pure blockedReason derivation (issue #778 AC): mirrors console#236's own
- * clearing rule (`blockedReason` is cleared whenever the projected status is
- * not one of blocked/needs_input/review_pending/waiting/paused) so a stale
- * reason never survives a transition out of an interactive-session state.
+ * clearing rule -- retained for blocked/needs_input/review_pending/waiting/
+ * paused, cleared (undefined) for every other status -- so a stale reason
+ * never survives a transition out of an interactive-session state, and (per
+ * review finding 2) a status the contract covers is never force-cleared just
+ * because today's mapper does not yet have a concrete signal for it.
  *
  * Sourcing, by projected `consoleStatus`:
  * - `blocked`: prefer `handoff.json.blockers` (schemas/workflow-handoff.schema.json
@@ -267,9 +351,13 @@ export function mapWorkflowStatusToConsoleProcessStatus(
  *   `next_action.status === "needs_user"` -- the field that already answers
  *   "what does the human need to do". Falls back to a generic, status-derived
  *   sentence so `needs_input` never ships without SOME reason text.
- * - `review_pending`: a fixed, honest sentence -- `critique.json` (schemas/
- *   workflow-critique.schema.json) carries a required/pending flag but no
- *   free-text reason field, so nothing is fabricated beyond that fact.
+ * - `review_pending`: a fixed, honest sentence -- trust.bundle's critique
+ *   claims carry no free-text reason field, so nothing is fabricated beyond
+ *   the fact that a live critique has not resolved to a pass.
+ * - `waiting`/`paused`: no producing signal exists today (see the status
+ *   table doc comment); falls back to `next_action.summary` when present so a
+ *   future caller that does supply one is not silently dropped, per the
+ *   retained-not-cleared contract above.
  * - anything else: `undefined` (no blockedReason emitted).
  */
 export function deriveConsoleProcessBlockedReason(
@@ -281,6 +369,8 @@ export function deriveConsoleProcessBlockedReason(
     handoffBlockers?: string[];
   },
 ): string | undefined {
+  if (!BLOCKED_REASON_ELIGIBLE_STATUSES.has(consoleStatus)) return undefined;
+
   if (consoleStatus === "blocked") {
     const blockers = (input.handoffBlockers ?? []).filter((entry) => entry.trim().length > 0);
     if (blockers.length > 0) return blockers.join("; ");
@@ -294,17 +384,34 @@ export function deriveConsoleProcessBlockedReason(
     return input.nextActionSummary;
   }
   if (consoleStatus === "review_pending") {
-    return "an independent review is required and has not yet recorded a verdict (critique.json status: pending)";
+    return "an independent review is required and has not yet recorded a verdict (trust.bundle carries an unresolved live critique)";
   }
-  return undefined;
+  // waiting / paused: retained-not-cleared contract, no dedicated signal yet.
+  return input.nextActionSummary;
 }
 
-export function readWorkflowProcessSources(artifactRoot: string): WorkflowProcessSource[] {
+/**
+ * Reads state.json (required) + handoff.json (optional) per session directory.
+ * Does NOT read critique.json (retired, see the module doc comment) or
+ * trust.bundle (that requires workflow-sidecar.ts's `critiquesFromBundle`,
+ * which src/lib must not import -- see console-process-projection.ts, the
+ * only caller allowed to do that join, for the bundle-derived
+ * `hasUnresolvedCritique` step and its own trust.bundle join-key check).
+ *
+ * Join-key identity (issue #778 review finding 3): a handoff.json whose own
+ * `task_slug` disagrees with its directory's state.json `task_slug` is a
+ * stale or misplaced sidecar -- never silently trusted. The join is skipped
+ * (handoff omitted from the returned source; blockedReason then falls back to
+ * next_action.summary or undefined) and a warning is returned so the caller
+ * can surface it, rather than failing the whole batch for one bad sidecar.
+ */
+export function readWorkflowProcessSources(artifactRoot: string): ReadWorkflowProcessSourcesResult {
   const root = path.resolve(artifactRoot);
   const stat = fs.statSync(root);
   if (!stat.isDirectory()) throw new Error(`artifact root is not a directory: ${root}`);
 
   const sources: WorkflowProcessSource[] = [];
+  const warnings: string[] = [];
   for (const slug of childWorkflowDirs(root)) {
     const stateFile = path.join(root, slug, "state.json");
     if (!fs.existsSync(stateFile)) continue;
@@ -312,14 +419,15 @@ export function readWorkflowProcessSources(artifactRoot: string): WorkflowProces
     const state = validateWorkflowStateProjectionSourceShape(stateValue, `${slug}/state.json`);
 
     const handoffFile = path.join(root, slug, "handoff.json");
-    const handoff = fs.existsSync(handoffFile)
-      ? validateWorkflowHandoffProjectionSourceShape(readSourceJson(handoffFile, `${slug}/handoff.json`), `${slug}/handoff.json`)
-      : undefined;
-
-    const critiqueFile = path.join(root, slug, "critique.json");
-    const critique = fs.existsSync(critiqueFile)
-      ? validateWorkflowCritiqueProjectionSourceShape(readSourceJson(critiqueFile, `${slug}/critique.json`), `${slug}/critique.json`)
-      : undefined;
+    let handoff: WorkflowHandoffSidecar | undefined;
+    if (fs.existsSync(handoffFile)) {
+      const candidate = validateWorkflowHandoffProjectionSourceShape(readSourceJson(handoffFile, `${slug}/handoff.json`), `${slug}/handoff.json`);
+      if (candidate.task_slug !== state.task_slug) {
+        warnings.push(`${slug}: handoff.json task_slug '${candidate.task_slug}' does not match state.json task_slug '${state.task_slug}' -- skipping handoff.json join (blockers ignored)`);
+      } else {
+        handoff = candidate;
+      }
+    }
 
     sources.push({
       path: stateFile,
@@ -327,10 +435,9 @@ export function readWorkflowProcessSources(artifactRoot: string): WorkflowProces
       slug,
       state,
       ...(handoff ? { handoff } : {}),
-      ...(critique ? { critique } : {}),
     });
   }
-  return sources;
+  return { sources, warnings };
 }
 
 export function buildWorkflowProcessProjection(
@@ -358,7 +465,7 @@ export function buildWorkflowProcessProjection(
         id: `flow-agents-process:${scope.kind}:${scope.id}`,
         emittedAt: generatedAt,
         producer,
-        reason: "workflow-process projection is derived from local workflow state/handoff/critique sidecars; Console event history is unavailable",
+        reason: "workflow-process projection is derived from local workflow state/handoff sidecars and trust.bundle critique state; Console event history is unavailable",
         sourceRef: {
           product: "flow-agents",
           kind: "workflow-process",
@@ -372,12 +479,11 @@ export function buildWorkflowProcessProjection(
 }
 
 function mapProcessSource(source: WorkflowProcessSource): ConsoleProcessProjection {
-  const { state, handoff, critique } = source;
+  const { state, handoff } = source;
   const status = mapWorkflowStatusToConsoleProcessStatus(
     state.status,
     state.next_action?.status,
-    critique?.status,
-    critique?.required,
+    source.hasUnresolvedCritique,
   );
   const blockedReason = deriveConsoleProcessBlockedReason(status, {
     nextActionStatus: state.next_action?.status,
@@ -410,7 +516,7 @@ function mapProcessSource(source: WorkflowProcessSource): ConsoleProcessProjecti
         workflow_status: state.status,
         phase: state.phase,
         next_action_status: state.next_action?.status ?? "continue",
-        ...(critique?.status ? { critique_status: critique.status } : {}),
+        ...(source.hasUnresolvedCritique !== undefined ? { has_unresolved_critique: source.hasUnresolvedCritique } : {}),
         ...(state.updated_at ? { updated_at: state.updated_at } : {}),
         source_path: source.relativePath,
       },
@@ -449,15 +555,6 @@ export function validateWorkflowHandoffProjectionSourceShape(value: unknown, lab
   const blockersValue = sidecar.blockers;
   const blockers = blockersValue === undefined ? undefined : stringArray(blockersValue, `${label}.blockers`, true);
   return { task_slug: taskSlug, summary, ...(blockers ? { blockers } : {}) };
-}
-
-export function validateWorkflowCritiqueProjectionSourceShape(value: unknown, label = "critique.json"): WorkflowCritiqueSidecar {
-  const sidecar = objectValue(value, `${label} projection source must be an object`);
-  const taskSlug = requiredString(sidecar, "task_slug", label);
-  const status = enumString(sidecar, "status", KNOWN_CRITIQUE_STATUSES, label);
-  const required = sidecar.required;
-  if (typeof required !== "boolean") throw new Error(`${label}.required must be a boolean`);
-  return { task_slug: taskSlug, status, required };
 }
 
 function readSourceJson(file: string, label: string): unknown {

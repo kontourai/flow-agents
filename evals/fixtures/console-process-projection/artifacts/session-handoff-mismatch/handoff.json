@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "some-other-slug",
+  "summary": "This handoff.json belongs to a different session and must not be trusted.",
+  "next_steps": ["do not use this file"],
+  "blockers": ["a blocker belonging to a different session -- must never leak"]
+}
