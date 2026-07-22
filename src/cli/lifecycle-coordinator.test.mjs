@@ -14,6 +14,7 @@ test("reference coordinator canonicalization is order-independent", () => {
 test("reference coordinator treats only a missing legacy human field as canonical null", () => {
   const canonical = { runtime: "codex", session_id: "session", host: "host", human: null };
   const legacy = { runtime: "codex", session_id: "session", host: "host" };
+  const legacyBefore = structuredClone(legacy);
   assert.equal(assignmentActorsMatch(legacy, canonical), true);
   assert.equal(assignmentActorsMatch(canonical, legacy), true);
   for (const changed of [
@@ -23,6 +24,7 @@ test("reference coordinator treats only a missing legacy human field as canonica
     { ...canonical, human: "operator" },
     { ...legacy, extra: "unsupported" },
   ]) assert.equal(assignmentActorsMatch(legacy, changed), false);
+  assert.deepEqual(legacy, legacyBefore, "semantic comparison must not rewrite a legacy assignment actor");
 });
 test("reference coordinator rejects unknown fields actions and digest drift", () => {
   assert.throws(() => validateEnvelope({ ...envelope, extra: true }), /unexpected or missing/);

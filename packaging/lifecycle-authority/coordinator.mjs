@@ -389,7 +389,16 @@ async function processRootOperation(envelope) {
       const prior = durableJson(nonceFile, "nonce record");
       if (canonicalJson(prior) !== canonicalJson(prepared)) throw new Error("lifecycle authorization nonce has already been consumed");
       resumePrepared = true;
-    } else atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    } else {
+      // Reject a stale or mismatched live holder before creating any durable
+      // nonce state. A prepared nonce is intentionally exempt: it may be
+      // recovering a cancel whose child mutation already completed, and the
+      // child rechecks/reconciles that exact CAS state below.
+      if (envelope.action === "cancel") {
+        assertLiveAssignmentHolder(canonicalMutationPaths(envelope.request), authorization);
+      }
+      atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    }
     const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared }) }, caller);
     if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
     const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
