@@ -164,23 +164,39 @@ export interface WorkItemReadiness {
 }
 
 /**
- * The contract's NORMATIVE revision-freshness vocabulary (work-item-contract.md, "Planning Base
- * And Drift" → "Revision-freshness outcomes"), derived directly from `pull-work-provider.ts`'s
- * own exported `referenceAdapterFreshnessDiagnostics` runtime const array (#777 review finding 5),
- * so this type cannot silently drift from what `classifyRevisionFreshness()` actually returns.
+ * The contract's NORMATIVE five-value MATERIAL-DRIFT JUDGMENT vocabulary, verbatim from
+ * work-item-contract.md's "Planning Base And Drift" table: `no_material_drift` (aligned),
+ * `scope_drift` (scope/acceptance criteria changed), `dependency_drift` (assumed
+ * blockers/prerequisites moved), `contract_drift` (relevant docs/contracts/schemas/policy
+ * changed), `conflict_risk` (changed files or active work overlap likely execution scope).
  *
- * RESOLVED (#818, following #777 review finding 2): an earlier draft of this module also exported
- * a hand-typed `WorkItemDriftOutcome` five-value union (`no_material_drift`/`scope_drift`/
- * `dependency_drift`/`contract_drift`/`conflict_risk`) copied from a prior draft of the contract
- * table, with no runtime array backing it and no `WorkItemProvider` adapter that emitted it. #818
- * confirmed the five-way split is not mechanically computable from `classifyRevisionFreshness()`'s
- * available inputs without new data (`dependency_drift` needs blocker-resolution state that stays
- * deliberately separate from freshness in `dependencyImpacts()`; `conflict_risk` needs visibility
- * into other work items' active claimed scope, which no `WorkItemProvider` input carries at
- * classification time) and narrowed the contract table to match this type instead of carrying an
- * unemitted parallel vocabulary. This is now the ONLY normative revision-freshness/drift-outcome
- * type this module exports; do not reintroduce a second one without also updating
- * `pull-work-provider.ts` to emit it.
+ * DISTINCT DIMENSION from `ReferenceAdapterFreshnessDiagnostic` below (#818, correcting an
+ * earlier #818 draft that wrongly treated these as competing/overlapping vocabularies for the
+ * same signal and retired this one — see git history on this doc comment for that dead end).
+ * `ReferenceAdapterFreshnessDiagnostic` grades revision-freshness SEVERITY: how stale is the
+ * planning base, mechanically, from `pull-work-provider.ts`'s `classifyRevisionFreshness()`. This
+ * type classifies the KIND of drift for ROUTING: why does it matter, and where should the item go
+ * next. They compose: `pull-work`'s CLI emits `ReferenceAdapterFreshnessDiagnostic` on
+ * `revision_freshness.classification`; pickup Probe (`kits/builder/skills/pickup-probe/SKILL.md`,
+ * `kits/builder/skills/pull-work/SKILL.md`) is the actor that produces THIS type's value, informed
+ * by that freshness signal plus data the CLI already carries but does not fold into freshness —
+ * `dependencyImpacts()`'s blocker-resolution state, and (via the Builder handoff) planning
+ * scope/expected-files/conflict-risk context — not by `FreshnessInputs` alone. No `WorkItemProvider`
+ * CLI emits this type today (that remains true and is not itself a defect: it is Probe's judgment
+ * output, not adapter output), so nothing in `pull-work-provider.ts` derives this type from a
+ * runtime array the way `ReferenceAdapterFreshnessDiagnostic` does — keep it a plain literal union.
+ * Do not treat the two types as interchangeable or silently map one onto the other.
+ */
+export type WorkItemDriftOutcome = "no_material_drift" | "scope_drift" | "dependency_drift" | "contract_drift" | "conflict_risk";
+
+/**
+ * The reference adapter's revision-freshness SEVERITY diagnostic — derived directly from
+ * `pull-work-provider.ts`'s own exported `referenceAdapterFreshnessDiagnostics` runtime const
+ * array (#777 review finding 5), so this type cannot silently drift from what
+ * `classifyRevisionFreshness()` actually returns. This is a DIFFERENT DIMENSION from
+ * `WorkItemDriftOutcome` above, not a narrower version of it — see that type's doc comment for how
+ * the two compose (mechanical freshness severity here vs. Probe's material-drift routing judgment
+ * there). `WorkItemRevisionFreshness` carries THIS diagnostic on `classification`.
  */
 export type ReferenceAdapterFreshnessDiagnostic = (typeof referenceAdapterFreshnessDiagnostics)[number];
 
@@ -199,7 +215,8 @@ export interface WorkItemRevisionFreshness {
   planning_scope_refs: string[];
   planning_scope_intersections: string[];
   commits_since_planned_base: number | null;
-  /** The contract's normative revision-freshness classification. See
+  /** The reference adapter's mechanical freshness-severity diagnostic — NOT
+   * `WorkItemDriftOutcome` (Probe's material-drift routing judgment, a distinct dimension). See
    * `ReferenceAdapterFreshnessDiagnostic`'s doc comment (#818). */
   classification: ReferenceAdapterFreshnessDiagnostic;
   route_recommendation?: WorkItemRevisionFreshnessRouteRecommendation;

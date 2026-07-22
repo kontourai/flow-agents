@@ -389,12 +389,12 @@ export type {
 // (`local-file-provider-adapters.ts`) and one GitHub-render (`github-mutation-renderer.ts`).
 // Native hosts should import these instead of shelling out to the CLIs or hand-mirroring their
 // I/O shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
-// including flagged discrepancies between contract prose and the reference CLIs' actual behavior.
-// `ReferenceAdapterFreshnessDiagnostic` is the contract's normative revision-freshness vocabulary
-// (work-item-contract.md "Planning Base And Drift"); it used to sit alongside a separate,
-// unemitted `WorkItemDriftOutcome` five-value type that #818 retired after finding no adapter
-// could honestly emit it — see `ReferenceAdapterFreshnessDiagnostic`'s doc comment in
-// `provider-interfaces.ts` for the data-availability analysis.
+// including flagged discrepancies between contract prose and the reference CLIs' actual behavior
+// — notably `WorkItemDriftOutcome` (the contract's normative material-drift JUDGMENT vocabulary,
+// produced by pickup Probe for routing) vs. `ReferenceAdapterFreshnessDiagnostic` (the reference
+// CLI's mechanical revision-freshness SEVERITY diagnostic) — two distinct dimensions, not
+// competing vocabularies for one signal; see `WorkItemDriftOutcome`'s doc comment (#818) for how
+// they compose.
 export type {
   AssignmentClaimMeta,
   AssignmentProvider,
@@ -414,6 +414,7 @@ export type {
   ProviderMutationContext,
   ReferenceAdapterFreshnessDiagnostic,
   WorkItemDependencyImpact,
+  WorkItemDriftOutcome,
   WorkItemListOptions,
   WorkItemListResult,
   WorkItemMutationCapability,

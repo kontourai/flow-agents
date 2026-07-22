@@ -64,7 +64,7 @@ test("workItemReadinessClassifications (pull-work-provider.ts) is the vocabulary
   assert.deepEqual([...workItemReadinessClassifications], ["ready", "blocked", "in_progress", "stale", "related-only"]);
 });
 
-test("referenceAdapterFreshnessDiagnostics (pull-work-provider.ts) is the vocabulary this codebase currently intends — also the contract's NORMATIVE revision-freshness vocabulary since #818 narrowed work-item-contract.md to match (retiring the unemitted five-value WorkItemDriftOutcome from #777 review finding 2)", () => {
+test("referenceAdapterFreshnessDiagnostics (pull-work-provider.ts) is the vocabulary this codebase currently intends — the contract's NORMATIVE revision-freshness SEVERITY vocabulary, a distinct dimension from the contract's five-value WorkItemDriftOutcome material-drift JUDGMENT vocabulary that pickup Probe produces (#818 disambiguation, correcting #777 review finding 2's mis-framing as one unemitted gap)", () => {
   assert.deepEqual([...referenceAdapterFreshnessDiagnostics], ["not_verified", "fresh", "stale", "drifted"]);
 });
 

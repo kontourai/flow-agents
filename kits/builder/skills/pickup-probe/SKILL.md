@@ -80,7 +80,7 @@ Hand `plan-work` the selected references, probe record, provider and baseline su
 
 ## Drift And Decision Safeguards
 
-Research drift before asking alignment questions. Record `planned_base_ref`, `planned_base_sha`, current target ref/SHA, commits-since, planned age, changed files, and intersections with `planning_scope_refs`. Classify revision freshness as `fresh`, `drifted`, or `stale`, and material drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`.
+Research drift before asking alignment questions. Record `planned_base_ref`, `planned_base_sha`, current target ref/SHA, commits-since, planned age, changed files, and intersections with `planning_scope_refs`. Classify revision freshness as `fresh`, `drifted`, or `stale`, and material drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`. These are two distinct dimensions (work-item-contract.md "Planning Base And Drift"): `pull-work` emits the mechanical freshness severity above; this probe produces the material-drift routing judgment from that severity plus dependency/scope/conflict context — never conflate or substitute one for the other.
 
 `drifted` may proceed only with a recorded decision or accepted gap. `stale` routes to `idea-to-backlog`. Missing `planned_base_sha` is `NOT_VERIFIED`, never implicitly fresh; an accepted fallback must name the current target ref/SHA plus provider history. When the Builder Probe shape supports resolution hints, record `gap_id: revision_freshness_not_verified`, `claim_id: planning.baseline.current`, the required evidence, and `resolve_at: pickup-probe`.
 

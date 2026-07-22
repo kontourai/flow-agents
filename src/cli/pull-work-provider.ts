@@ -212,21 +212,26 @@ function freshnessContext(item: Record<string, unknown>, inputs: FreshnessInputs
 }
 
 /**
- * The reference adapter's freshness diagnostic vocabulary — `classifyRevisionFreshness()`
- * below never returns any value outside this array. Exported as a runtime value (not just a type)
- * per #777 review finding 2 so `provider-interfaces.ts`'s `ReferenceAdapterFreshnessDiagnostic`
- * type derives from THIS array (`typeof referenceAdapterFreshnessDiagnostics[number]`) instead of
- * a hand-copied literal union that could silently drift from what this function actually emits.
+ * The reference adapter's revision-freshness SEVERITY diagnostic vocabulary —
+ * `classifyRevisionFreshness()` below never returns any value outside this array. Exported as a
+ * runtime value (not just a type) per #777 review finding 2 so `provider-interfaces.ts`'s
+ * `ReferenceAdapterFreshnessDiagnostic` type derives from THIS array
+ * (`typeof referenceAdapterFreshnessDiagnostics[number]`) instead of a hand-copied literal union
+ * that could silently drift from what this function actually emits.
  *
- * This is now also the work-item contract's NORMATIVE revision-freshness vocabulary
- * (work-item-contract.md "Planning Base And Drift" → "Revision-freshness outcomes", #818). An
- * earlier contract draft instead listed a five-value `no_material_drift`/`scope_drift`/
- * `dependency_drift`/`contract_drift`/`conflict_risk` taxonomy (#777 review finding 2 flagged that
- * nothing emitted it); #818 found that taxonomy was not mechanically computable from this
- * function's available inputs without new data (dependency-resolution and cross-item active-scope
- * state neither of which reaches this function) and narrowed the contract to match what this array
- * actually emits, retiring the unemitted five-value type. Keep this array and the contract table in
- * lockstep — a change here that isn't mirrored in work-item-contract.md's table re-opens the gap.
+ * This is the work-item contract's normative vocabulary for ONE dimension —
+ * revision-freshness severity (work-item-contract.md "Planning Base And Drift" →
+ * "Revision-freshness severity") — not the contract's material-drift JUDGMENT vocabulary
+ * (`no_material_drift`/`scope_drift`/`dependency_drift`/`contract_drift`/`conflict_risk`,
+ * exported as `WorkItemDriftOutcome` in `provider-interfaces.ts`). #818 (correcting a first draft
+ * that wrongly retired `WorkItemDriftOutcome` as an "unemitted duplicate") confirmed these are two
+ * distinct, DELIBERATELY separate dimensions, not competing vocabularies for the same signal: this
+ * function grades HOW STALE the planning base is, mechanically, from the inputs available at
+ * classification time; the contract's five-value judgment classifies WHY drift matters for
+ * ROUTING, and is produced by pickup Probe (`kits/builder/skills/pickup-probe/SKILL.md`,
+ * `kits/builder/skills/pull-work/SKILL.md`), informed by this function's output plus
+ * `dependencyImpacts()` and Builder-handoff context this function does not itself fold in. Do not
+ * merge the two vocabularies or have this function attempt to emit the five-value one.
  */
 export const referenceAdapterFreshnessDiagnostics = ["not_verified", "fresh", "stale", "drifted"] as const;
 const [FRESHNESS_NOT_VERIFIED, FRESHNESS_FRESH, FRESHNESS_STALE, FRESHNESS_DRIFTED] = referenceAdapterFreshnessDiagnostics;
