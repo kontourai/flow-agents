@@ -157,8 +157,8 @@
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",
     "@kontourai/surface": "2.13.0",
-    "@kontourai/survey": "1.18.0",
-    "@kontourai/traverse": "0.19.0",
+    "@kontourai/survey": "1.19.0",
+    "@kontourai/traverse": "0.19.1",
     "@types/node": "^26.1.1",
     "gcp-metadata": "7.0.1",
     "promptfoo": "^0.121.18",
