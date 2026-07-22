@@ -313,7 +313,14 @@ export function filterCritiquesForSlug<T extends BundleCritique>(critiques: T[],
   const workItemRefSet = new Set(workItemRefs);
   const kept = critiques.filter((critique) => {
     const ref = critique.workflow_subject_ref;
-    if (typeof ref !== "string" || ref.length === 0) return true; // no comparable subject at all -- genuinely unattributable
+    if (ref === undefined || typeof ref !== "string") return true; // key genuinely ABSENT -- nothing to compare, unattributable
+    if (ref.length === 0) {
+      // Key is PRESENT but empty ("") -- a malformed/foreign stamp, not "unattributable".
+      // A present ref that matches no session slug and no work-item ref is a confident
+      // mismatch and must be dropped, never trusted into forcing review_pending.
+      warnings.push(`${slug}: trust.bundle critique has a present-but-empty workflow_subject_ref -- skipping this critique's contribution to review_pending`);
+      return false;
+    }
     if (ref.startsWith(SESSION_SUBJECT_REF_PREFIX)) {
       const refSlug = ref.slice(SESSION_SUBJECT_REF_PREFIX.length);
       if (refSlug === slug) return true;

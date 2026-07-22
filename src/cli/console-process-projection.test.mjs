@@ -163,6 +163,13 @@ test("filterCritiquesForSlug: an absent workflow_subject_ref is passed through u
   assert.deepEqual(result.warnings, []);
 });
 
+test("filterCritiquesForSlug: a PRESENT-but-empty workflow_subject_ref is dropped with a warning -- not unattributable (review finding, 2nd confirmation)", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "" }], "session-a", ["github:kontourai/flow-agents#778"]);
+  assert.equal(result.critiques.length, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /present-but-empty/);
+});
+
 // --- deriveConsoleProcessBlockedReason ---
 
 test("deriveConsoleProcessBlockedReason: blocked prefers handoff.json blockers, joined", () => {
