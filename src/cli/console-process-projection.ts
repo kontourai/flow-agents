@@ -128,18 +128,33 @@ function printWarnings(warnings: string[]): void {
 
 /**
  * Joins each source's trust.bundle critique state onto it (issue #778 review
- * finding 1), applying the join-key identity check (finding 3) first. Mutates
- * nothing on disk; trust.bundle reads are read-only via critiquesFromBundle.
- * Errors from a genuinely unreadable/pre-supersession bundle propagate (fail
- * loud for the whole batch), matching this module's existing behavior for a
- * malformed state.json/handoff.json sidecar.
+ * finding 1), applying the join-key identity check (findings 3 and its
+ * work-item-ref follow-up) first. Mutates nothing on disk; trust.bundle reads
+ * are read-only via critiquesFromBundle.
+ *
+ * A missing trust.bundle already degrades to `[]` inside critiquesFromBundle
+ * (no file -> loadJson's `{}` fallback -> no claims array). A MALFORMED one
+ * (unreadable, narrative-isolation-tripped, or pre-#344 unstamped claims)
+ * instead THROWS -- per-session, caught here so ONE bad bundle never aborts
+ * the whole batch: the affected session is projected without the critique
+ * refinement (`hasUnresolvedCritique` stays undefined, its own documented
+ * "no bundle-derived signal available" meaning) and a warning is reported,
+ * rather than the entire projection run failing loud for every sibling
+ * session too. This mirrors readWorkflowProcessSources' own per-source
+ * (not whole-batch) handling of a mismatched handoff.json.
  */
 function joinCritiqueState(artifactRoot: string, sources: WorkflowProcessSource[]): { sources: WorkflowProcessSource[]; warnings: string[] } {
   const warnings: string[] = [];
   const joined = sources.map((source) => {
     const sessionDir = path.join(artifactRoot, source.slug);
-    const rawCritiques = critiquesFromBundle(sessionDir) as BundleCritique[];
-    const filtered = filterCritiquesForSlug(rawCritiques, source.slug);
+    let rawCritiques: BundleCritique[];
+    try {
+      rawCritiques = critiquesFromBundle(sessionDir) as BundleCritique[];
+    } catch (error) {
+      warnings.push(`${source.slug}: trust.bundle could not be read (${error instanceof Error ? error.message : String(error)}) -- projecting this session without the critique/review_pending refinement`);
+      return source;
+    }
+    const filtered = filterCritiquesForSlug(rawCritiques, source.slug, source.state.work_item_refs ?? []);
     warnings.push(...filtered.warnings);
     return { ...source, hasUnresolvedCritique: hasUnresolvedLiveCritique(filtered.critiques) };
   });

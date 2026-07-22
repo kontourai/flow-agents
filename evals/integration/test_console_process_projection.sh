@@ -2,7 +2,9 @@
 # test_console_process_projection.sh - Console process-state projection contract (issue #778):
 # workflow-state -> Console interactive-session process state mapping (needs_input,
 # review_pending via AUTHORITATIVE trust.bundle critique state, blocked + blockedReason),
-# join-key identity guards (handoff.json / trust.bundle critique refs), the Console-matching
+# join-key identity guards (handoff.json task_slug / trust.bundle critique session-URI and
+# work-item-bound refs against state.json.work_item_refs), per-session malformed-bundle
+# isolation (one bad trust.bundle must not abort the whole batch), the Console-matching
 # default kontour root, non-mutation guard, and determinism.
 set -uo pipefail
 
@@ -68,8 +70,8 @@ else
   _fail "source workflow-state sidecars or trust.bundle changed after running the projector"
 fi
 
-if jq -e '.scanned_state_file_count == 7' "$TMPDIR_EVAL/run.json" >/dev/null 2>&1; then
-  _pass "JSON summary reports 7 scanned workflow-state fixtures"
+if jq -e '.scanned_state_file_count == 10' "$TMPDIR_EVAL/run.json" >/dev/null 2>&1; then
+  _pass "JSON summary reports 10 scanned workflow-state fixtures"
 else
   _fail "JSON summary scanned_state_file_count unexpected: $(cat "$TMPDIR_EVAL/run.json" 2>/dev/null)"
 fi
@@ -85,10 +87,10 @@ if jq -e --arg generated "$GENERATED_AT" '
   .producer == {"id":"flow-agents-process","product":"flow-agents"} and
   .derivedFrom.mode == "direct_snapshot" and
   .derivedFrom.eventHistory == "unavailable" and
-  (.processes | length) == 7 and
+  (.processes | length) == 10 and
   all(.processes[]; .family == "workflow" and .nonAuthority == true)
 ' "$PROJECTION" >/dev/null 2>&1; then
-  _pass "projection envelope includes Console schema/scope/producer/provenance and 7 non-authoritative workflow processes"
+  _pass "projection envelope includes Console schema/scope/producer/provenance and 10 non-authoritative workflow processes"
 else
   _fail "projection envelope is missing required Console contract fields"
 fi
@@ -187,8 +189,68 @@ else
   _fail "no warning was reported for the handoff.json task_slug mismatch: $(cat "$TMPDIR_EVAL/run.err" 2>/dev/null)"
 fi
 
-if jq -e '(.warnings | length) == 2' "$TMPDIR_EVAL/run.json" >/dev/null 2>&1; then
-  _pass "JSON summary's warnings array reports exactly the 2 expected join-key mismatches"
+echo ""
+echo "--- Work-item-bound join-key identity (review finding 2 follow-up): state.json.work_item_refs is the authoritative expected subject ---"
+
+if jq -e '
+  .processes[] | select(.extensions["flow-agents"].task_slug == "session-workitem-review-pending") |
+  .status == "review_pending" and
+  .extensions["flow-agents"].has_unresolved_critique == true
+' "$PROJECTION" >/dev/null 2>&1; then
+  _pass "a work-item-bound trust.bundle critique matching this session's OWN state.json.work_item_refs drives review_pending"
+else
+  _fail "session-workitem-review-pending did not project to review_pending from its own matching work-item-bound critique"
+fi
+
+if jq -e '
+  .processes[] | select(.extensions["flow-agents"].task_slug == "session-workitem-mismatch") |
+  .status == "running" and
+  .extensions["flow-agents"].has_unresolved_critique == false
+' "$PROJECTION" >/dev/null 2>&1; then
+  _pass "NEGATIVE: a work-item-bound trust.bundle critique NOT in this session's own state.json.work_item_refs (a foreign work item) does not force review_pending"
+else
+  _fail "session-workitem-mismatch was wrongly driven to review_pending by a foreign work item's critique claim"
+fi
+
+if grep -q "session-workitem-mismatch" "$TMPDIR_EVAL/run.err" && grep -q "#999" "$TMPDIR_EVAL/run.err" && grep -q "work_item_refs" "$TMPDIR_EVAL/run.err"; then
+  _pass "a foreign work-item-bound critique ref is reported as a loud warning naming work_item_refs, not silently trusted"
+else
+  _fail "no warning was reported for the work-item-bound critique mismatch: $(cat "$TMPDIR_EVAL/run.err" 2>/dev/null)"
+fi
+
+echo ""
+echo "--- Per-session malformed-bundle isolation (review finding: one bad trust.bundle must not abort the whole batch) ---"
+
+if jq -e '
+  .processes[] | select(.extensions["flow-agents"].task_slug == "session-malformed-bundle") |
+  .status == "running" and
+  (.extensions["flow-agents"] | has("has_unresolved_critique") | not)
+' "$PROJECTION" >/dev/null 2>&1; then
+  _pass "a session with a malformed (unstamped, pre-#344) trust.bundle still projects, without the critique refinement (has_unresolved_critique omitted, not false)"
+else
+  _fail "session-malformed-bundle did not project correctly despite its unreadable trust.bundle"
+fi
+
+if grep -q "session-malformed-bundle" "$TMPDIR_EVAL/run.err" && grep -q "could not be read" "$TMPDIR_EVAL/run.err"; then
+  _pass "the malformed trust.bundle is reported as a loud warning naming the affected session"
+else
+  _fail "no warning was reported for the malformed trust.bundle: $(cat "$TMPDIR_EVAL/run.err" 2>/dev/null)"
+fi
+
+if jq -e '
+  ([.processes[] | .extensions["flow-agents"].task_slug] | sort) ==
+  (["session-blocked","session-critique-mismatch","session-handoff-mismatch","session-malformed-bundle","session-needs-decision","session-review-pending","session-review-resolved","session-running","session-workitem-mismatch","session-workitem-review-pending"] | sort)
+' "$PROJECTION" >/dev/null 2>&1; then
+  _pass "every OTHER session still projects correctly -- the malformed bundle in one session does not abort the batch"
+else
+  _fail "the projection batch is missing a sibling session, i.e. the malformed bundle aborted more than its own session"
+fi
+
+echo ""
+echo "--- Join-key mismatch warning count ---"
+
+if jq -e '(.warnings | length) == 4' "$TMPDIR_EVAL/run.json" >/dev/null 2>&1; then
+  _pass "JSON summary's warnings array reports exactly the 4 expected join-key/malformed-bundle warnings"
 else
   _fail "JSON summary warnings array unexpected: $(jq -c '.warnings' "$TMPDIR_EVAL/run.json" 2>/dev/null)"
 fi

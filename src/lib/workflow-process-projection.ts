@@ -51,6 +51,17 @@ export type WorkflowStateSidecar = {
     status: WorkflowNextActionStatus;
     summary: string;
   };
+  /**
+   * Provider-neutral work item references anchoring this session
+   * (schemas/workflow-state.schema.json). This is the AUTHORITATIVE expected
+   * subject for a work-item-bound trust.bundle critique claim -- the same
+   * value workflow-sidecar.ts's own record-critique uses to derive
+   * workflow_subject_ref (a single-entry work_item_refs, or else the session
+   * URI form). filterCritiquesForSlug (issue #778 review finding 2) compares
+   * a work-item-bound critique's ref against this, never discards it
+   * unchecked.
+   */
+  work_item_refs?: string[];
 };
 
 export type WorkflowHandoffSidecar = {
@@ -274,24 +285,43 @@ const SESSION_SUBJECT_REF_PREFIX = "flow-agents://session/";
 
 /**
  * Join-key identity check for bundle-derived critiques (issue #778 review
- * finding 3): a `critiquesFromBundle()` entry stamped with a
- * `workflow_subject_ref` in the `flow-agents://session/<slug>` form that
- * names a DIFFERENT slug than this session's own directory is a stale or
- * misplaced signal and must never be silently trusted to drive this
- * session's review_pending status -- skip it and report why, don't force
- * review_pending (or silently swallow it either). A ref that is absent, or
- * bound to a work-item (any other shape), cannot be confidently compared to
- * a slug and is passed through unchanged: this is a confident-mismatch-only
- * filter, not an allowlist.
+ * findings 3 and 2-followup). Two comparable forms, both checked -- nothing
+ * with a non-empty `workflow_subject_ref` is ever passed through unchecked:
+ *
+ * - `flow-agents://session/<slug>` form: must name THIS session's own slug.
+ *   A different slug is a stale or misplaced signal.
+ * - Any other non-empty ref is a work-item-bound subject
+ *   (workflow-sidecar.ts's own record-critique derives exactly this shape:
+ *   the session's single `work_item_refs` entry, when it has exactly one, or
+ *   else the session-URI form above -- never an arbitrary string). It IS
+ *   comparable: it must appear in this session's OWN `state.json.work_item_refs`
+ *   (the authoritative expected subject, already used by critique recording
+ *   and artifact validation) -- a foreign work-item ref such as another
+ *   session's `github:...#N` is a confident mismatch, not an unattributable
+ *   case, and must be dropped, never silently trusted into forcing
+ *   review_pending.
+ * - Only a genuinely ABSENT `workflow_subject_ref` (older critiques that
+ *   predate the stamp) is truly unattributable and passed through unchanged
+ *   -- there is nothing to compare.
+ *
+ * A confident mismatch is skipped (excluded from review_pending) and
+ * reported as a warning, never silently swallowed and never silently
+ * trusted.
  */
-export function filterCritiquesForSlug<T extends BundleCritique>(critiques: T[], slug: string): { critiques: T[]; warnings: string[] } {
+export function filterCritiquesForSlug<T extends BundleCritique>(critiques: T[], slug: string, workItemRefs: string[] = []): { critiques: T[]; warnings: string[] } {
   const warnings: string[] = [];
+  const workItemRefSet = new Set(workItemRefs);
   const kept = critiques.filter((critique) => {
     const ref = critique.workflow_subject_ref;
-    if (typeof ref !== "string" || !ref.startsWith(SESSION_SUBJECT_REF_PREFIX)) return true;
-    const refSlug = ref.slice(SESSION_SUBJECT_REF_PREFIX.length);
-    if (refSlug === slug) return true;
-    warnings.push(`${slug}: trust.bundle critique workflow_subject_ref names a different session ('${refSlug}') -- skipping this critique's contribution to review_pending`);
+    if (typeof ref !== "string" || ref.length === 0) return true; // no comparable subject at all -- genuinely unattributable
+    if (ref.startsWith(SESSION_SUBJECT_REF_PREFIX)) {
+      const refSlug = ref.slice(SESSION_SUBJECT_REF_PREFIX.length);
+      if (refSlug === slug) return true;
+      warnings.push(`${slug}: trust.bundle critique workflow_subject_ref names a different session ('${refSlug}') -- skipping this critique's contribution to review_pending`);
+      return false;
+    }
+    if (workItemRefSet.has(ref)) return true;
+    warnings.push(`${slug}: trust.bundle critique workflow_subject_ref ('${ref}') is not among this session's own state.json.work_item_refs -- skipping this critique's contribution to review_pending`);
     return false;
   });
   return { critiques: kept, warnings };
@@ -538,6 +568,8 @@ export function validateWorkflowStateProjectionSourceShape(value: unknown, label
   const nextActionValue = objectValue(sidecar.next_action, `${label}.next_action must be an object`);
   const nextActionStatus = enumString(nextActionValue, "status", KNOWN_NEXT_ACTION_STATUSES, `${label}.next_action`);
   const nextActionSummary = requiredString(nextActionValue, "summary", `${label}.next_action`);
+  const workItemRefsValue = sidecar.work_item_refs;
+  const workItemRefs = workItemRefsValue === undefined ? undefined : stringArray(workItemRefsValue, `${label}.work_item_refs`, false);
   return {
     schema_version: "1.0",
     task_slug: taskSlug,
@@ -545,6 +577,7 @@ export function validateWorkflowStateProjectionSourceShape(value: unknown, label
     phase,
     ...(updatedAt ? { updated_at: updatedAt } : {}),
     next_action: { status: nextActionStatus, summary: nextActionSummary },
+    ...(workItemRefs ? { work_item_refs: workItemRefs } : {}),
   };
 }
 

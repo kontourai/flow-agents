@@ -124,14 +124,41 @@ test("filterCritiquesForSlug: a session-URI workflow_subject_ref naming a DIFFER
   assert.match(result.warnings[0], /session-a/);
 });
 
-test("filterCritiquesForSlug: a work-item-bound (non-session-URI) ref is passed through unchanged -- cannot be confidently compared", () => {
-  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "github:kontourai/flow-agents#778" }], "session-a");
+// Issue #778 review finding 2 (confirmation-pass follow-up): a work-item-bound
+// critique subject IS comparable -- against this session's own
+// state.json.work_item_refs -- and must be checked, not passed through
+// unconditionally. A prior version of this test wrongly locked in the
+// pass-through-unchecked behavior for ANY non-session-URI ref; corrected below.
+test("filterCritiquesForSlug: a work-item-bound ref that IS one of this session's own work_item_refs is kept, no warning", () => {
+  const result = filterCritiquesForSlug(
+    [{ verdict: "fail", workflow_subject_ref: "github:kontourai/flow-agents#778" }],
+    "session-a",
+    ["github:kontourai/flow-agents#778"],
+  );
   assert.equal(result.critiques.length, 1);
   assert.deepEqual(result.warnings, []);
 });
 
-test("filterCritiquesForSlug: an absent workflow_subject_ref is passed through unchanged", () => {
-  const result = filterCritiquesForSlug([{ verdict: "fail" }], "session-a");
+test("filterCritiquesForSlug: a FOREIGN work-item-bound ref (not in this session's work_item_refs) is dropped with a warning (negative test, review finding 2)", () => {
+  const result = filterCritiquesForSlug(
+    [{ verdict: "fail", workflow_subject_ref: "github:kontourai/flow-agents#other" }],
+    "session-a",
+    ["github:kontourai/flow-agents#778"],
+  );
+  assert.equal(result.critiques.length, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /#other/);
+  assert.match(result.warnings[0], /work_item_refs/);
+});
+
+test("filterCritiquesForSlug: a work-item-bound ref is dropped with a warning when this session has NO work_item_refs at all (empty set is still a confident mismatch, not unattributable)", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail", workflow_subject_ref: "github:kontourai/flow-agents#778" }], "session-a", []);
+  assert.equal(result.critiques.length, 0);
+  assert.equal(result.warnings.length, 1);
+});
+
+test("filterCritiquesForSlug: an absent workflow_subject_ref is passed through unchanged -- genuinely unattributable, nothing to compare", () => {
+  const result = filterCritiquesForSlug([{ verdict: "fail" }], "session-a", ["github:kontourai/flow-agents#778"]);
   assert.equal(result.critiques.length, 1);
   assert.deepEqual(result.warnings, []);
 });
@@ -255,6 +282,29 @@ test("validateWorkflowStateProjectionSourceShape: rejects an unknown status", ()
     phase: "execution",
     next_action: { status: "continue", summary: "x" },
   }));
+});
+
+test("validateWorkflowStateProjectionSourceShape: reads work_item_refs when present (issue #778 review finding 2: the authoritative expected subject for a work-item-bound critique join)", () => {
+  const state = validateWorkflowStateProjectionSourceShape({
+    schema_version: "1.0",
+    task_slug: "demo",
+    status: "in_progress",
+    phase: "execution",
+    next_action: { status: "continue", summary: "keep going" },
+    work_item_refs: ["github:kontourai/flow-agents#778"],
+  });
+  assert.deepEqual(state.work_item_refs, ["github:kontourai/flow-agents#778"]);
+});
+
+test("validateWorkflowStateProjectionSourceShape: work_item_refs is undefined, not an empty array, when absent", () => {
+  const state = validateWorkflowStateProjectionSourceShape({
+    schema_version: "1.0",
+    task_slug: "demo",
+    status: "in_progress",
+    phase: "execution",
+    next_action: { status: "continue", summary: "keep going" },
+  });
+  assert.equal(state.work_item_refs, undefined);
 });
 
 test("validateWorkflowHandoffProjectionSourceShape: accepts blockers array or its absence", () => {
