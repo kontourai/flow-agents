@@ -1877,6 +1877,38 @@ function hasSidecarPresence(artifactDir) {
   return fs.existsSync(path.join(artifactDir, 'state.json')) || fs.existsSync(path.join(artifactDir, 'trust.bundle'));
 }
 
+function loadCanonicalFlowValidator() {
+  const scriptsDir = path.dirname(__dirname);
+  if (path.basename(__dirname) !== 'hooks' || path.basename(scriptsDir) !== 'scripts') {
+    throw new Error('Flow validator cannot derive the hook-owned bundle root');
+  }
+  const scriptsContainer = path.dirname(scriptsDir);
+  const bundleRoot = path.basename(scriptsContainer) === 'context' ? path.dirname(scriptsContainer) : scriptsContainer;
+  const bundledValidator = path.join(bundleRoot, 'build', 'src', 'vendor', 'flow-validator.cjs');
+  let flow;
+  if (fs.existsSync(bundledValidator)) {
+    const validatorStat = fs.lstatSync(bundledValidator);
+    const realBundleRoot = fs.realpathSync(bundleRoot);
+    const realValidator = fs.realpathSync(bundledValidator);
+    const relativeValidator = path.relative(realBundleRoot, realValidator);
+    if (validatorStat.isSymbolicLink() || !validatorStat.isFile() || relativeValidator.startsWith(`..${path.sep}`) || relativeValidator === '..' || path.isAbsolute(relativeValidator)) {
+      throw new Error('bundled Flow validator must be a regular file contained by the hook-owned bundle root');
+    }
+    flow = require(bundledValidator);
+  } else {
+    const packageFile = path.join(bundleRoot, 'package.json');
+    const packageIdentity = fs.existsSync(packageFile) ? JSON.parse(fs.readFileSync(packageFile, 'utf8')) : null;
+    if (!packageIdentity || packageIdentity.name !== '@kontourai/flow-agents') {
+      throw new Error(`hook-owned bundled Flow validator is unavailable at ${bundledValidator}`);
+    }
+    flow = require('@kontourai/flow');
+  }
+  if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') {
+    throw new Error('hook-owned Flow validator does not expose the required consistency API');
+  }
+  return flow;
+}
+
 function canonicalFlowState(root, artifactDir) {
   if (!artifactDir) return { state: null, definition: null, error: null };
   const slug = path.basename(artifactDir);
@@ -1892,8 +1924,13 @@ function canonicalFlowState(root, artifactDir) {
     const parents = components.map(component => secureDirectoryIdentity(component, 'canonical Flow run parent'));
     const stateRead = readSecureCanonicalJson(path.join(runDir, 'state.json'), 'canonical Flow state', parents, MAX_CANONICAL_FLOW_STATE_BYTES);
     const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
-    const state = stateRead.value;
-    const definition = definitionRead.value;
+    const persistedState = stateRead.value;
+    const startDefinition = definitionRead.value;
+    const flow = loadCanonicalFlowValidator();
+    const { definitionDigest, validateRunStateConsistency } = flow;
+    const validated = validateRunStateConsistency(startDefinition, persistedState, { runId: slug });
+    const state = validated.state;
+    const definition = validated.definition;
     if (!state || typeof state !== 'object' || Array.isArray(state)
       || !CANONICAL_FLOW_STATUSES.has(state.status)
       || state.run_id !== slug
@@ -1909,8 +1946,12 @@ function canonicalFlowState(root, artifactDir) {
       || definition.steps.some(step => !step || typeof step !== 'object' || Array.isArray(step) || typeof step.id !== 'string' || !step.id)) {
       return { state: null, definition: null, error: 'canonical Flow definition is malformed' };
     }
+    const digest = definitionDigest(definition);
     if (state.definition_id !== definition.id || state.definition_version !== definition.version) {
-      return { state: null, definition: null, error: 'canonical Flow definition identity does not match state' };
+      return { state: null, definition: null, error: 'canonical Flow effective definition id or version does not match state' };
+    }
+    if (Array.isArray(state.definition_amendments) && state.definition_amendments.length > 0 && (typeof state.definition_digest !== 'string' || state.definition_digest !== digest)) {
+      return { state: null, definition: null, error: 'canonical Flow effective definition digest does not match state' };
     }
     if (!definition.steps.some(step => step.id === state.current_step)) {
       return { state: null, definition: null, error: 'canonical Flow current_step is not present in definition' };
@@ -1918,9 +1959,9 @@ function canonicalFlowState(root, artifactDir) {
     assertSecureCanonicalReadStable(stateRead);
     assertSecureCanonicalReadStable(definitionRead);
     assertSecureDirectoriesStable(parents);
-    return { state, definition, error: null };
+    return { state: { ...state, definition_digest: digest }, definition, error: null };
   } catch (error) {
-    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 500)}` };
   }
 }
 

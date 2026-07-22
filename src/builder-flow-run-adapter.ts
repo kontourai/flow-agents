@@ -5,12 +5,15 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   attachEvidence,
+  definitionDigest,
   evaluateRun,
   expectationsForGate,
+  flowRunHead,
   loadRun,
   normalizeTrustBundle,
   openGates,
   pauseRun,
+  resolveEffectiveDefinition,
   resumeRun,
   startRun,
   validateDefinition,
@@ -71,6 +74,8 @@ export interface EvaluateBuilderBuildRunInput {
    */
   cwd?: string;
   evidence?: BuilderBuildTrustBundleEvidenceInput;
+  /** Optimistic-concurrency token for the canonical state authorized by the caller. */
+  expectedRunHead?: string;
 }
 
 export interface LoadBuilderBuildRunInput {
@@ -86,6 +91,11 @@ export interface ChangeBuilderBuildRunLifecycleInput extends LoadBuilderBuildRun
 export interface BuilderFlowRunResult {
   definitionId: BuilderFlowId;
   definitionVersion: string;
+  definitionDigest: string;
+  /** Flow-validated effective definition, including any authorized successor. */
+  definition: JsonObject;
+  /** Immutable definition that authenticated this run at start. */
+  startDefinition: JsonObject;
   runId: string;
   dir: string;
   state: FlowRunState;
@@ -183,14 +193,16 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
 
 export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["now", "gate"]);
+  if (input.expectedRunHead !== undefined && !isSha256(input.expectedRunHead)) {
+    throw new BuilderBuildRunInputError("expectedRunHead", "must be a SHA-256 hex digest");
+  }
   if (Array.isArray(input.evidence)) {
     throw new BuilderBuildRunInputError("evidence", "must be zero or one evidence object, not an array");
   }
 
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
-  assertCanonicalDefinition(input.runId, definition, run.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, run);
 
   let attachedEvidence: FlowEvidenceEntry[] = [];
   if (input.evidence !== undefined) {
@@ -204,7 +216,8 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     }
     const normalized = normalizeTrustBundle(JSON.parse(bytes.toString("utf8")));
     assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
-    const attached = await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence, validatedSha256));
+    const expectedRunHead = input.expectedRunHead ?? flowRunHead(run.state);
+    const attached = await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence, validatedSha256, expectedRunHead));
     if (attached.sha256 !== validatedSha256) {
       throw new BuilderBuildRunInputError("evidence.file", "changed after validation before Flow attachment");
     }
@@ -212,16 +225,11 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
   }
 
   const evaluated = await evaluateRun(input.runId, { cwd });
+  const result = resultFromRun(evaluated, input.runId);
   return {
-    definitionId: evaluated.definition.id,
-    definitionVersion: evaluated.definition.version,
-    runId: input.runId,
-    dir: evaluated.dir,
-    state: evaluated.state,
+    ...result,
     attachedEvidence,
     outcomes: evaluated.outcomes,
-    manifest: evaluated.manifest,
-    config: evaluated.config,
     freshnessTransitions: evaluated.freshness_transitions,
   };
 }
@@ -235,8 +243,7 @@ export async function loadBuilderFlowRun(input: LoadBuilderBuildRunInput): Promi
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
-  assertCanonicalDefinition(input.runId, definition, run.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, run);
   return resultFromRun(run, input.runId);
 }
 
@@ -275,8 +282,7 @@ async function changeBuilderFlowRunLifecycleResult(
   const cwd = input.cwd ?? process.cwd();
   const before = await loadBuilderFlowRun({ runId: input.runId, cwd });
   const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
-  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, changed.definition);
-  assertCanonicalDefinition(input.runId, definition, changed.definition);
+  await assertCanonicalBuilderRunOrigin(input.runId, changed);
   if (changed.state.subject !== before.state.subject) {
     throw new BuilderBuildRunInputError("flow_run.state.subject", "changed during lifecycle transition");
   }
@@ -284,9 +290,13 @@ async function changeBuilderFlowRunLifecycleResult(
 }
 
 function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderFlowRunResult {
+  const definition = run.definition as JsonObject & { id: BuilderFlowId; version: string };
   return {
-    definitionId: run.definition.id,
-    definitionVersion: run.definition.version,
+    definitionId: definition.id,
+    definitionVersion: definition.version,
+    definitionDigest: definitionDigest(definition),
+    definition,
+    startDefinition: run.startDefinition as JsonObject,
     runId,
     dir: run.dir,
     state: run.state,
@@ -304,8 +314,26 @@ async function loadCanonicalBuilderFlowRun(
   definition: { id: string; version: string },
 ): Promise<Awaited<ReturnType<typeof loadRun>>> {
   const run = await loadRun(runId, cwd);
-  assertCanonicalDefinition(runId, definition, run.definition);
+  assertCanonicalDefinition(runId, definition, run.startDefinition);
   return run;
+}
+
+async function assertCanonicalBuilderRunOrigin(
+  runId: string,
+  run: Pick<Awaited<ReturnType<typeof loadRun>>, "definition" | "startDefinition" | "state">,
+): Promise<void> {
+  // Flow owns the complete amendment ledger. Resolve it again here so an
+  // adapter never treats an arbitrary immutable start snapshot as sufficient
+  // authority for a newer package definition.
+  const effective = resolveEffectiveDefinition(run.startDefinition, run.state);
+  if (!isDeepStrictEqual(effective, run.definition)) {
+    throw new BuilderBuildRunIdentityError(runId, effective, run.definition, "definition-content");
+  }
+  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.definition);
+  assertCanonicalDefinition(runId, definition, run.definition);
+  if (!isBuilderFlowId(run.definition.id)) {
+    throw new BuilderBuildRunIdentityError(runId, definition, run.definition, "definition-id");
+  }
 }
 
 async function loadShippedBuilderFlowDefinition(flowId: BuilderFlowId, definitionPath: string): Promise<{ id: string; version: string }> {
@@ -435,12 +463,13 @@ function assertBundleSubjects(bundle: unknown, subject: string, gate: unknown): 
   }
 }
 
-function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput, expectedSha256: string): JsonObject {
+function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput, expectedSha256: string, expectedRunHead: string): JsonObject {
   return {
     cwd,
     gate: evidence.gate,
     file: evidence.file,
     expectedSha256,
+    expectedRunHead,
     kind: "trust.bundle",
     bundle: true,
     ...(evidence.status ? { status: evidence.status } : {}),
@@ -461,6 +490,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
 }
 
 function moduleDirectory(): string {

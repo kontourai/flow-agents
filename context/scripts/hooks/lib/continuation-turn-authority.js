@@ -9,7 +9,7 @@ const path = require('path');
 const { createHash, generateKeyPairSync, randomBytes, randomUUID, sign, verify } = require('crypto');
 const { isDeepStrictEqual } = require('util');
 
-const SCHEMA_VERSION = '2.0';
+const SCHEMA_VERSION = '3.0';
 const FILE_NAME = 'active-turn.json';
 const MAX_ACTIVE_TURN_BYTES = 16 * 1024;
 const MAX_DRIVER_RECORD_BYTES = 1024 * 1024;
@@ -38,6 +38,8 @@ function issueActiveTurnAuthority(input) {
     schema_version: SCHEMA_VERSION,
     run_id: requiredSafeRunId(input.runId, 'runId'),
     definition_id: requiredString(input.definitionId, 'definitionId'),
+    definition_version: requiredString(input.definitionVersion, 'definitionVersion'),
+    definition_digest: requiredDigest(input.definitionDigest, 'definitionDigest'),
     issued_step: requiredString(input.currentStep, 'currentStep'),
     iteration: requiredInteger(input.iteration, 'iteration', 1, 100),
     max_turns: requiredInteger(input.maxTurns, 'maxTurns', 1, 100),
@@ -102,6 +104,8 @@ function validateSignedActiveTurnAssignmentAuthority(input) {
     const record = readRegularJson(activeTurnFile(sessionDir), 'continuation active turn', parents, MAX_ACTIVE_TURN_BYTES).value;
     validateRecord(record);
     if (!equalText(record.run_id, runId)) return invalid('run does not match signed authority');
+    if (input.definitionVersion !== undefined && !equalText(record.definition_version, requiredString(input.definitionVersion, 'definitionVersion'))) return invalid('effective definition version does not match signed authority');
+    if (input.definitionDigest !== undefined && !equalText(record.definition_digest, requiredDigest(input.definitionDigest, 'definitionDigest'))) return invalid('effective definition digest does not match signed authority');
     if (!equalText(record.turn_secret_sha256, sha256(turnSecret))) return invalid('turn secret does not match');
     if (!validSignature(record)) return invalid('authority signature does not verify');
     const assignment = readActiveAssignment(sessionDir, parents, record.assignment_actor, record.assignment_actor_struct);
@@ -110,6 +114,8 @@ function validateSignedActiveTurnAssignmentAuthority(input) {
     if (!mission || mission.schema_version !== '1.0'
       || mission.run_id !== record.run_id
       || mission.definition_id !== record.definition_id
+      || mission.active_turn_definition_version !== record.definition_version
+      || mission.active_turn_definition_digest !== record.definition_digest
       || mission.adapter_command_identity !== record.adapter_command_identity
       || mission.max_turns !== record.max_turns
       || mission.turns_started !== record.iteration
@@ -143,6 +149,8 @@ function validateActiveTurnAuthority(input) {
     if (!canonical || canonical.status !== 'active'
       || canonical.run_id !== record.run_id
       || canonical.definition_id !== record.definition_id
+      || canonical.definition_version !== record.definition_version
+      || canonical.definition_digest !== record.definition_digest
       || typeof canonical.current_step !== 'string' || !canonical.current_step) return invalid('canonical Flow state does not match');
     return base;
   } catch (error) {
@@ -259,8 +267,9 @@ function fileIdentity(file, label) {
 
 function validateRecord(record) {
   if (!record || typeof record !== 'object' || Array.isArray(record) || record.schema_version !== SCHEMA_VERSION) throw new Error('authority schema is unsupported');
-  for (const field of ['run_id', 'definition_id', 'issued_step', 'adapter_command_identity', 'assignment_actor', 'assignment_record_sha256', 'turn_secret_sha256', 'public_key_spki_b64', 'public_key_digest', 'signature_b64', 'issued_at', 'expires_at']) requiredString(record[field], field);
+  for (const field of ['run_id', 'definition_id', 'definition_version', 'definition_digest', 'issued_step', 'adapter_command_identity', 'assignment_actor', 'assignment_record_sha256', 'turn_secret_sha256', 'public_key_spki_b64', 'public_key_digest', 'signature_b64', 'issued_at', 'expires_at']) requiredString(record[field], field);
   requiredSafeRunId(record.run_id, 'run_id');
+  requiredDigest(record.definition_digest, 'definition_digest');
   requiredActorStruct(record.assignment_actor_struct, 'assignment_actor_struct');
   if (!/^[0-9a-f]{64}$/i.test(record.assignment_record_sha256)
     || !/^[0-9a-f]{64}$/i.test(record.turn_secret_sha256)
@@ -330,6 +339,12 @@ function requiredSafeRunId(value, label) {
 function requiredTurnSecret(value) {
   const text = requiredString(value, 'turnSecret');
   if (!/^[A-Za-z0-9_-]{43}$/.test(text)) throw new Error('turnSecret must be a 32-byte base64url secret');
+  return text;
+}
+
+function requiredDigest(value, label) {
+  const text = requiredString(value, label);
+  if (!/^[0-9a-f]{64}$/i.test(text)) throw new Error(`${label} must be a SHA-256 hex digest`);
   return text;
 }
 

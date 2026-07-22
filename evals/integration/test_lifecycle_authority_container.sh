@@ -10,19 +10,33 @@ apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
 npm ci --ignore-scripts --silent
 npm run build --silent
+# The privileged coordinator intentionally remains pinned to the audited Flow 3.5.0
+# reducer closure even when the application runtime consumes a newer Flow release.
+pinned_reducer_root="$(mktemp -d)"
+npm install --prefix "$pinned_reducer_root" --ignore-scripts --no-save --silent \
+  @kontourai/flow@3.5.0 \
+  @kontourai/surface@2.13.0 \
+  hachure@0.15.0 \
+  ajv@8.20.0 \
+  ajv-formats@3.0.1 \
+  fast-deep-equal@3.1.3 \
+  fast-uri@3.1.2 \
+  json-schema-traverse@1.0.0 \
+  require-from-string@2.0.2
+pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
-ln -s "$PWD/node_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
+ln -s "$pinned_reducer_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$bad_modules" kontourai-lifecycle-operator >/tmp/rejected-staged-reducer.log 2>&1; then
   echo "symlinked staged reducer unexpectedly installed" >&2; exit 1
 fi
 tampered_modules="$(mktemp -d)"
-cp -a node_modules/. "$tampered_modules/"
+cp -a "$pinned_reducer_modules/." "$tampered_modules/"
 printf '\n// tampered fixture\n' >> "$tampered_modules/@kontourai/flow/dist/index.js"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-tampered-reducer.log 2>&1; then
   echo "tampered staged reducer unexpectedly installed" >&2; exit 1
 fi
-scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs node_modules kontourai-lifecycle-operator
+scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$pinned_reducer_modules" kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node
 test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
 visudo -cf /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1 >/dev/null

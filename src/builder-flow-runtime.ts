@@ -8,6 +8,7 @@ import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapsho
 import {
   evaluateGate,
   expectationsForGate,
+  flowRunHead,
   openGates,
   type FlowGate,
   type FlowExpectation,
@@ -51,6 +52,8 @@ type AnyRecord = Record<string, any>;
 export interface BuilderFlowSessionInput {
   sessionDir: string;
   flowId?: BuilderFlowId;
+  /** Exact canonical Flow state authorized for a subsequent evidence attachment. */
+  expectedRunHead?: string;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -163,7 +166,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead);
 }
 
 /**
@@ -550,6 +553,7 @@ async function syncAndProject(
   context: SessionContext,
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
+  expectedRunHead?: string,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -587,6 +591,7 @@ async function syncAndProject(
           run = await evaluateBuilderFlowRun({
             cwd: context.projectRoot,
             runId: context.slug,
+            ...(expectedRunHead ? { expectedRunHead } : {}),
             evidence: {
               gate: gates[0]!.id,
               file: path.relative(context.projectRoot, snapshot.file),
@@ -641,9 +646,8 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(definition, run.state, run.manifest, gate.id, run.config);
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -917,10 +921,7 @@ function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
 }
 
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(
-    JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")),
-    run.state,
-  ) as Array<FlowGate & { id: string }>;
+  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
 async function bundleGateEvidence(
@@ -986,6 +987,35 @@ async function bundleGateEvidence(
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
   }
+  if (relevant.some((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (!metadata) return true;
+    if (metadata.origin === "check") return false;
+    if (metadata.origin === "critique") {
+      return claim.claimType !== "workflow.critique.review" || claim.subjectType !== "workflow-critique";
+    }
+    if (metadata.origin === "acceptance") {
+      return claim.claimType !== "workflow.acceptance.criterion" || claim.subjectType !== "flow-step";
+    }
+    return true;
+  })) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.origin", "must match a supported current-gate evidence producer type and subject");
+  }
+  const headBoundGateClaims = relevant.filter((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    return gateClaim !== null || metadata?.origin === "check";
+  });
+  const recordedRunHeads = headBoundGateClaims.map((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    return gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
+  });
+  if (headBoundGateClaims.length > 0 && (recordedRunHeads.some((head) => head === null)
+    || new Set(recordedRunHeads).size !== 1
+    || recordedRunHeads[0] !== flowRunHead(state))) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state authorized when the gate claim was recorded");
+  }
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
@@ -1001,7 +1031,12 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "must agree across current-gate claims");
   }
   const routeReason = routeReasons[0] ?? null;
-  if (failed && !routeReason) return null;
+  if (failed && !routeReason) {
+    if (String((gate as AnyRecord).id) === "execute-gate") {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "is required for failed current-gate evidence");
+    }
+    return null;
+  }
   // Passing evidence waits for the complete expectation set. A failing
   // snapshot is complete only when a gate producer explicitly declares its
   // route reason; report-only disputed critique state remains pending.
@@ -1349,7 +1384,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 }
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
+  const definition = run.definition;
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
@@ -1425,6 +1460,8 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       run_id: run.runId,
       definition_id: run.definitionId,
       definition_version: run.definitionVersion,
+      definition_digest: run.definitionDigest,
+      run_head: flowRunHead(run.state),
       status: run.state.status,
       current_step: run.state.current_step,
       run_ref: path.relative(context.projectRoot, run.dir),

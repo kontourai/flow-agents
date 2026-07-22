@@ -259,7 +259,7 @@ Expected behavior:
 - flag weakened tests, changed requirements, skipped checks, or suspicious scope drift
 - produce `PASS`, `FAIL`, or `NOT_VERIFIED`
 
-When verification or evidence gates route work backward, the handoff must name both the route reason and the next action for the next agent. Use these Builder Kit route reasons consistently: `missing_evidence` returns to `verify-work`, `implementation_defect` returns to `execute-plan`, `plan_gap` returns to `plan-work`, and `decision_gap` returns to the `design-probe` step. Record the route reason in the evidence or handoff artifact, then state the exact next action needed before the gate can be retried.
+When verification or evidence gates route work backward, the handoff must name both the route reason and the next action for the next agent. Use Builder Kit route reasons only where the current Flow gate declares them: `missing_evidence` returns to `verify-work`, `implementation_defect` returns to `execute-plan`, `plan_gap` returns to `plan-work`, and `decision_gap` returns to the `design-probe` step. In particular, `execute -> plan` is available only when that active run's `execute-gate` declares `plan_gap -> plan`; it has no default or implicit route and Flow owns its three-attempt block policy. Record the route reason in the evidence or handoff artifact, then state the exact next action needed before the gate can be retried. Status and sync never infer a route-back or amend an active definition.
 
 For pickup or planning alignment gaps, `decision_gap -> design-probe` means returning to the pickup Probe record, resolving the missing decision or recording an accepted gap, and only then retrying `plan-work`.
 

@@ -165,7 +165,8 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/flow": "3.5.0"
+    "@kontourai/flow": "3.6.2",
+    "esbuild": "0.28.1"
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.11.0",

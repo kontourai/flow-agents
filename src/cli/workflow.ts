@@ -5,7 +5,7 @@ import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type 
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
-import { validateDefinition } from "@kontourai/flow";
+import { flowRunHead, loadRun, validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
@@ -292,6 +292,8 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
           sessionDir,
           runId: request.run_id,
           definitionId: request.definition_id,
+          definitionVersion: request.definition_version,
+          definitionDigest: request.definition_digest,
           currentStep: request.current_step,
           iteration: request.iteration,
           maxTurns: request.max_turns,
@@ -538,6 +540,12 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   if (operation) {
     throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
   }
+  assertExecuteFailureRouteBeforeMutation(
+    inspected.run.definition as JsonRecord,
+    inspected.run.state.current_step,
+    flagString(parsed.flags, "status")!,
+    flagString(parsed.flags, "route-reason"),
+  );
   const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
@@ -546,18 +554,47 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
     // session state cannot change mid-invocation.
-    const caller = assertMatchingAssignmentActor(sessionDir, slug);
     const repaired = await recoverBuilderFlowSession({ sessionDir });
+    const caller = await assertMatchingAssignmentActor(sessionDir, slug);
     const beforeEvidence = manifestEvidenceIdentity(repaired.run.manifest);
-    await mainFromPublicWorkflow([
-      "record-gate-claim",
-      sessionDir,
-      ...forwarded,
-      "--actor",
-      caller.actorKey,
-    ]);
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const beforeBundle = snapshotOptionalFile(bundleFile);
+    let writtenBundle: FileIdentity;
+    try {
+      await mainFromPublicWorkflow([
+        "record-gate-claim",
+        sessionDir,
+        ...forwarded,
+        "--actor",
+        caller.actorKey,
+        "--flow-run-head",
+        caller.expectedRunHead,
+      ]);
+      writtenBundle = regularFileIdentityNoFollow(bundleFile);
+    } catch (error) {
+      const afterProducer = optionalRegularFileIdentityNoFollow(bundleFile);
+      if (afterProducer && (!beforeBundle.file || !sameFileIdentity(afterProducer, beforeBundle.file))) {
+        restoreOptionalFile(bundleFile, beforeBundle, afterProducer);
+      }
+      throw error;
+    }
 
-    const synchronized = await syncBuilderFlowSession({ sessionDir });
+    let synchronized: Awaited<ReturnType<typeof syncBuilderFlowSession>>;
+    try {
+      synchronized = await syncBuilderFlowSession({ sessionDir, expectedRunHead: caller.expectedRunHead });
+    } catch (error) {
+      let manifestUnchanged = false;
+      try {
+        const afterFailure = await loadRun(slug, repaired.projectRoot);
+        manifestUnchanged = isDeepStrictEqual(manifestEvidenceIdentity(afterFailure.manifest as JsonRecord), beforeEvidence);
+      } catch {
+        // Preserve the head-bound bundle when canonical Flow state cannot
+        // prove that no attachment committed; masking an unknown commit would
+        // lose audit data. Its flow_run_head stamp prevents later attachment.
+      }
+      if (manifestUnchanged) restoreOptionalFile(bundleFile, beforeBundle, writtenBundle);
+      throw error;
+    }
 
     const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
     const run = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
@@ -585,6 +622,31 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+function assertExecuteFailureRouteBeforeMutation(
+  definition: JsonRecord,
+  currentStep: string,
+  status: string,
+  routeReason: string | undefined,
+): void {
+  if (currentStep !== "execute" || status !== "fail") return;
+  if (!routeReason) {
+    throw new Error("workflow evidence --route-reason is required for failed execute evidence");
+  }
+  const gates = definition.gates;
+  if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
+    throw new Error("workflow evidence cannot resolve the active execute gate route map");
+  }
+  const executeGate = Object.values(gates).find((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    return (candidate as JsonRecord).step === "execute";
+  }) as JsonRecord | undefined;
+  const routes = executeGate?.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)
+    || typeof (routes as JsonRecord)[routeReason] !== "string") {
+    throw new Error(`workflow evidence --route-reason ${routeReason} is not declared by the active execute gate`);
+  }
 }
 
 function builderOperationForExpectation(flowId: string, expectationId: string): string | null {
@@ -796,7 +858,8 @@ function doctor(argv: string[]): number {
   const currentDefinition = definitions.find((definition) => definition.id === currentRun?.definition_id);
   if (currentRun?.definition_id && !currentDefinition) {
     warnings.push(`Current run uses unsupported Flow definition ${String(currentRun.definition_id)}; recover or migrate before mutation.`);
-  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version) {
+  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version
+    && typeof currentRun.definition_digest !== "string") {
     warnings.push(`Current run uses ${currentDefinition.id}@${String(currentRun.definition_version)} while CLI resolves ${currentDefinition.id}@${String(currentDefinition.packageDefinition?.version)}; recover or migrate before mutation.`);
   }
   if (state && state.schema_version !== "1.0") warnings.push(`Artifact schema ${String(state.schema_version)} is unsupported; recreate or migrate the session with CLI ${cliVersion}.`);
@@ -926,19 +989,30 @@ function readAssignment(sessionDir: string, slug: string): JsonRecord {
   return readJsonFile(file, "workflow assignment");
 }
 
-function assertMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+type MatchingAssignmentActor = ReturnType<typeof resolveCurrentAssignmentActor> & { expectedRunHead: string };
+
+async function assertMatchingAssignmentActor(sessionDir: string, slug: string): Promise<MatchingAssignmentActor> {
   const { assignment, caller, matches } = assignmentActorContext(sessionDir, slug);
-  if (matches) return caller;
+  const { projectRoot } = readBoundSession(sessionDir);
+  const canonical = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+  const expectedRunHead = flowRunHead(canonical.state);
+  if (matches) return { ...caller, expectedRunHead };
 
   const authority = loadContinuationTurnAuthority().validateSignedActiveTurnAssignmentAuthority({
     sessionDir,
     runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
     turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
+    definitionVersion: canonical.definitionVersion,
+    definitionDigest: canonical.definitionDigest,
   });
   if (authority.valid && authority.record
     && assignment.actor_key === authority.record.assignment_actor
     && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(authority.record.assignment_actor_struct))) {
-    return { actorKey: authority.record.assignment_actor, actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"] };
+    return {
+      actorKey: authority.record.assignment_actor,
+      actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"],
+      expectedRunHead,
+    };
   }
   throw new Error("workflow mutation requires the session's active, matching assignment actor");
 }
@@ -1007,6 +1081,114 @@ function optionalFileDigest(file: string): string | null {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+type FileIdentity = { dev: number; ino: number };
+type OptionalFileSnapshot = { bytes: Buffer | null; file: FileIdentity | null; directory: FileIdentity; directoryRealpath: string };
+
+function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function directoryIdentity(directory: string): FileIdentity {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("workflow evidence bundle parent must remain a non-symlink directory");
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function regularFileIdentityNoFollow(file: string): FileIdentity {
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error("workflow evidence bundle must remain a regular file");
+    return { dev: stat.dev, ino: stat.ino };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function optionalRegularFileIdentityNoFollow(file: string): FileIdentity | null {
+  try {
+    return regularFileIdentityNoFollow(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function snapshotOptionalFile(file: string): OptionalFileSnapshot {
+  const directory = path.dirname(file);
+  const identity = directoryIdentity(directory);
+  const directoryRealpath = fs.realpathSync(directory);
+  try {
+    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const before = fs.fstatSync(descriptor);
+      if (!before.isFile()) throw new Error("workflow evidence bundle must be a regular file");
+      const bytes = fs.readFileSync(descriptor);
+      const after = fs.fstatSync(descriptor);
+      if (!sameFileIdentity(before, after)) throw new Error("workflow evidence bundle identity changed while reading");
+      return { bytes, file: { dev: before.dev, ino: before.ino }, directory: identity, directoryRealpath };
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { bytes: null, file: null, directory: identity, directoryRealpath };
+    throw error;
+  }
+}
+
+function assertSnapshotDirectoryStable(file: string, snapshot: OptionalFileSnapshot): void {
+  const directory = path.dirname(file);
+  if (!sameFileIdentity(directoryIdentity(directory), snapshot.directory) || fs.realpathSync(directory) !== snapshot.directoryRealpath) {
+    throw new Error("workflow evidence bundle parent identity changed before rollback");
+  }
+}
+
+function fsyncSnapshotDirectory(file: string, snapshot: OptionalFileSnapshot): void {
+  const directory = path.dirname(file);
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isDirectory() || !sameFileIdentity(stat, snapshot.directory)) {
+      throw new Error("workflow evidence bundle parent identity changed before durability sync");
+    }
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertSnapshotDirectoryStable(file, snapshot);
+}
+
+function restoreOptionalFile(file: string, snapshot: OptionalFileSnapshot, written: FileIdentity): void {
+  assertSnapshotDirectoryStable(file, snapshot);
+  const suffix = `${process.pid}-${randomBytes(8).toString("hex")}`;
+  const quarantine = path.join(path.dirname(file), `.${path.basename(file)}.failed-${suffix}`);
+  fs.renameSync(file, quarantine);
+  assertSnapshotDirectoryStable(file, snapshot);
+  if (!sameFileIdentity(regularFileIdentityNoFollow(quarantine), written)) {
+    // The path was concurrently replaced. Restore that unexpected file with a
+    // creation-only hard link, retain the quarantine copy, and fail loudly.
+    fs.linkSync(quarantine, file);
+    fsyncSnapshotDirectory(file, snapshot);
+    throw new Error("workflow evidence bundle changed after this invocation before rollback");
+  }
+  // Retain the failed invocation under its unique quarantine name. This avoids
+  // destructive unlink races and preserves audit bytes while making them inert
+  // to canonical synchronization, which reads only trust.bundle.
+  fsyncSnapshotDirectory(file, snapshot);
+  if (snapshot.bytes === null) return;
+  const restoreSource = path.join(path.dirname(file), `.${path.basename(file)}.restore-${suffix}`);
+  const restoreDescriptor = fs.openSync(restoreSource, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(restoreDescriptor, snapshot.bytes);
+    fs.fsyncSync(restoreDescriptor);
+  } finally {
+    fs.closeSync(restoreDescriptor);
+  }
+  assertSnapshotDirectoryStable(file, snapshot);
+  fs.linkSync(restoreSource, file);
+  fsyncSnapshotDirectory(file, snapshot);
 }
 
 function stripPublicFlags(argv: string[], removed: Set<string>): string[] {

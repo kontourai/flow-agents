@@ -90,6 +90,13 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   fs.appendFileSync(file, `${line}\n`);
 }
 function die(message: string): never { throw new Error(message); }
+export class FlowProjectionRegenerationRequiredError extends Error {
+  readonly code = "flow_projection_regeneration_required";
+  constructor(sessionDir: string) {
+    super(`current Flow projection is missing a valid run_head; regenerate it and re-record evidence with: flow-agents workflow evidence --session-dir ${JSON.stringify(sessionDir)} <evidence options>; inspect the recovered result with: flow-agents workflow status --session-dir ${JSON.stringify(sessionDir)} --json`);
+    this.name = "FlowProjectionRegenerationRequiredError";
+  }
+}
 
 /**
  * #783: sanctioned fixture authoring. `fixture write <dir> [--from-json <file> | --malformed
@@ -1070,6 +1077,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
+    const gateClaimFlowRunHead = typeof check._gate_claim_flow_run_head === "string" ? check._gate_claim_flow_run_head : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1162,7 +1170,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -3674,6 +3682,7 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
+    if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -4181,8 +4190,10 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const summary = opt(p, "summary") || die("--summary is required");
   const expectationId = opt(p, "expectation");
   const routeReason = opt(p, "route-reason");
+  const requestedFlowRunHead = opt(p, "flow-run-head");
   if (routeReason && statusVal !== "fail") die("--route-reason is only valid with --status fail");
   if (routeReason && !/^[a-z][a-z0-9_-]*$/.test(routeReason)) die("--route-reason must be a lowercase classifier identifier");
+  if (requestedFlowRunHead && !/^[a-f0-9]{64}$/i.test(requestedFlowRunHead)) die("--flow-run-head must be a SHA-256 hex digest");
 
   // Prefer the exact session's canonical Flow projection. Actor/global current pointers are
   // ambient navigation state and may legitimately point at another run or lag this run.
@@ -4193,6 +4204,16 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
     ? sidecarState.flow_run as AnyObj
     : null;
+  const projectedFlowRunHead = projectedRun && typeof projectedRun.run_head === "string" && /^[a-f0-9]{64}$/i.test(projectedRun.run_head)
+    ? projectedRun.run_head.toLowerCase()
+    : null;
+  if ((projectedRun && !projectedFlowRunHead) || (requestedFlowRunHead && !projectedFlowRunHead)) {
+    throw new FlowProjectionRegenerationRequiredError(dir);
+  }
+  if (requestedFlowRunHead && projectedFlowRunHead && requestedFlowRunHead.toLowerCase() !== projectedFlowRunHead) {
+    die("--flow-run-head must match the exact session Flow projection");
+  }
+  const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
@@ -4263,6 +4284,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
+    ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
   };
 
   // Include structured evidence refs if provided

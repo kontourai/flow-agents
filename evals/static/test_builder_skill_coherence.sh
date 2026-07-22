@@ -8,6 +8,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = process.argv[2];
 const kit = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/kit.json'), 'utf8'));
+const buildFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/build.flow.json'), 'utf8'));
+const executeGate = buildFlow.gates?.['execute-gate'];
+if (JSON.stringify(executeGate?.on_route_back) !== JSON.stringify({ plan_gap: 'plan' })) {
+  throw new Error('execute-gate must declare exactly plan_gap -> plan');
+}
+if (JSON.stringify(executeGate?.route_back_policy) !== JSON.stringify({ max_attempts: 3, on_exceeded: 'block' })) {
+  throw new Error('execute-gate must bound plan_gap with the Flow-owned 3-attempt block policy');
+}
 
 const expected = {
   'builder-shape': ['entrypoint', 'builder.shape', []],

@@ -72,6 +72,18 @@ route-back attempt. Failed evidence may still synchronize immediately when it
 carries a route reason declared by the gate; a disputed report-only critique is
 not itself a routed gate decision and remains pending.
 
+Every current-gate claim in a Flow-bound session is stamped with the exact
+projected `run_head` at record time, and synchronization rejects missing, mixed,
+or stale stamps. Pre-upgrade unbound current-gate claims must be re-recorded;
+they are never silently rebound to a later canonical head. Regenerate an old
+projection and re-record through `flow-agents workflow evidence --session-dir
+<session-dir> <evidence options>`, then inspect the recovered result with
+`flow-agents workflow status --session-dir <session-dir> --json`. If evidence writing
+commits bytes but later reports a durability failure, the public wrapper moves
+those bytes to a unique inert quarantine artifact and restores the prior live
+bundle with creation-only operations, preserving both audit data and concurrent
+writes.
+
 Attachments carry the exact expectation ids selected from the current bundle.
 Digest idempotence applies only while an unsuperseded attachment for that gate
 and expectation set remains live. After route-back, claims must be current for
@@ -131,6 +143,11 @@ A failed gate claim may include a Flow classifier through
 `flow-agents workflow evidence --status fail --route-reason <reason>`. Flow validates the reason
 against the gate's `on_route_back` map and owns both the destination and attempt
 budget. Flow Agents only projects the resulting attempt and maximum into `state.json`.
+`plan_gap` is therefore not a universal command: a Builder `execute` claim may use it
+only when that run's current `execute-gate` declares `plan_gap -> plan`. The Builder
+definition bounds that correction to three Flow-owned attempts and blocks on exhaustion;
+there is no default execute route. Status and sync are read-only/reprojection operations,
+not implicit backtracking or definition amendment.
 
 ## Agent Projection
 
@@ -163,6 +180,27 @@ to the installed Builder Kit's validated `flow_step_actions` record. It is an
 execution context, not a second gate evaluator: Flow remains the only authority
 that evaluates requirements, advances steps, routes back, or consumes attempt
 budget.
+
+Route-back changes the canonical head. A gate-action envelope derived before an
+`execute -> plan` correction is stale and cannot authorize evidence or progress for the
+new plan head; callers must obtain the newly projected envelope after Flow records the
+route.
+
+An authorized Flow definition amendment also changes the canonical head. The immutable
+`definition.json` continues to authenticate the installed Builder definition that started
+the run, while Flow 3.6 validates the complete amendment ledger and its effective successor
+drives gates and projections. The adapter accepts that successor only when it is byte-for-byte
+the shipped composed Builder definition; an arbitrary old origin or unshipped successor cannot
+be projected. Envelopes,
+progress snapshots, and sidecar `flow_run` projections bind the successor's version and
+SHA-256 digest. A pre-amendment envelope therefore fails canonical snapshot validation even
+when the run id and current step are unchanged. Legacy unamended runs remain readable without
+a projected digest.
+
+An active continuation turn is also bound to that effective version and digest. Stop and
+public evidence validate the full Flow ledger before honoring its signed capability, so a
+capability issued before an amendment cannot be replayed against the amended head; the next
+turn receives a fresh capability for the new identity.
 
 The envelope provides the current gate ids and claim shapes, including each
 expectation's required flag and `satisfied`, `accepted_exception`, or `unresolved`
