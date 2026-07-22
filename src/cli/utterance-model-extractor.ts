@@ -25,6 +25,19 @@ export interface UtteranceModelExtractorOptions {
   client?: AnthropicMessagesClient;
 }
 
+export interface UtteranceRuntimeCandidate {
+  id: string;
+  runtime: ModelRuntime;
+}
+
+export interface UtteranceRuntimeCompositionOptions {
+  candidates: readonly UtteranceRuntimeCandidate[];
+  maxAttempts?: number;
+  receiptPath?: string;
+  /** Prompt-enforced structured output is lower fidelity and requires explicit opt-in. */
+  allowPromptedStructuredOutput?: boolean;
+}
+
 const TOOL_NAME = "submit_extracted_statements";
 const TOOL = {
   name: TOOL_NAME,
@@ -91,6 +104,48 @@ export function createUtteranceModelExtractor(options: UtteranceModelExtractorOp
   return createRuntimeUtteranceExtractor(createRuntime(options));
 }
 
+/** Compose the same producer definition over one runtime or an ordered Dispatch plan. */
+export function createProfiledUtteranceExtractor(options: UtteranceRuntimeCompositionOptions) {
+  if (options.candidates.length === 0) throw new Error("At least one runtime candidate is required");
+  if (options.candidates.length === 1 && options.maxAttempts === undefined && !options.receiptPath) {
+    return createRuntimeUtteranceExtractor(options.candidates[0]!.runtime);
+  }
+  const runtimes = new Map(options.candidates.map(({ id, runtime }) => [id, runtime]));
+  const candidates = options.candidates.map(({ id, runtime }) => ({
+    id,
+    runtimeId: id,
+    evidence: {
+      level: "declared" as const,
+      capabilities: ["structured-tools", "abort", "usage"],
+      structuredToolsFidelity: runtime.capabilities().structuredToolsFidelity,
+    },
+  }));
+  const runtime = createDispatchRuntime({
+    id: "flow-agents-utterance-dispatch",
+    capabilities: {
+      structuredTools: true,
+      streaming: false,
+      abort: true,
+      usage: true,
+    },
+    runtimes,
+    plan: {
+      schemaVersion: 1,
+      role: "utterance-extraction",
+      candidates,
+      budget: { maxAttempts: options.maxAttempts ?? candidates.length },
+      policy: {
+        retryRuntimeFailures: true,
+        minimumStructuredToolsFidelity: options.allowPromptedStructuredOutput ? "prompted" : "native",
+      },
+    },
+    ...(options.receiptPath
+      ? { onReceipt: (receipt: DispatchReceipt) => persistReceipt(options.receiptPath!, receipt) }
+      : {}),
+  });
+  return createRuntimeUtteranceExtractor(runtime);
+}
+
 function createRuntime(options: UtteranceModelExtractorOptions): ModelRuntime {
   const models = [options.model, ...(options.fallbackModels ?? [])];
   const runtimes = new Map<string, ModelRuntime>();
@@ -115,6 +170,7 @@ function createRuntime(options: UtteranceModelExtractorOptions): ModelRuntime {
     evidence: {
       level: "declared" as const,
       capabilities: ["structured-tools", "abort", "usage"],
+      structuredToolsFidelity: runtimes.get(`runtime-${index}`)!.capabilities().structuredToolsFidelity,
     },
   }));
   return createDispatchRuntime({
@@ -131,7 +187,7 @@ function createRuntime(options: UtteranceModelExtractorOptions): ModelRuntime {
       role: "utterance-extraction",
       candidates,
       budget: { maxAttempts: options.maxAttempts ?? candidates.length },
-      policy: { retryRuntimeFailures: true },
+      policy: { retryRuntimeFailures: true, minimumStructuredToolsFidelity: "native" },
     },
     ...(options.receiptPath
       ? { onReceipt: (receipt: DispatchReceipt) => persistReceipt(options.receiptPath!, receipt) }
