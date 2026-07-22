@@ -56,7 +56,7 @@ function makeRunner(store, storeDir) {
 }
 
 function readTelemetryEvents(dir) {
-  const sinkPath = path.join(dir, ".telemetry", "full.jsonl");
+  const sinkPath = path.join(dir, ".kontourai", "telemetry", "full.jsonl");
   if (!fs.existsSync(sinkPath)) return [];
   return fs.readFileSync(sinkPath, "utf8")
     .trim()

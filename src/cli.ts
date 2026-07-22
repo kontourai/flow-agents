@@ -6,12 +6,14 @@ import { main as effectiveChangeProviderSettings } from "./cli/effective-change-
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
+import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
+import { main as workItemMutationProvider } from "./cli/work-item-mutation-provider.js";
 import { main as narrativeRender } from "./cli/narrative-render.js";
 import { main as narrativeSources } from "./cli/narrative-sources.js";
 import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
@@ -34,6 +36,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["builder-run", builderRun],
   ["capability-matrix", capabilityMatrix],
   ["console-learning-projection", consoleLearningProjection],
+  ["console-process-projection", consoleProcessProjection],
   ["context-map", contextMap],
   ["assignment-provider", assignmentProvider],
   ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
@@ -47,6 +50,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
+  ["work-item-mutation-provider", workItemMutationProvider],
   ["runtime-adapter", runtimeAdapter],
   ["skill-drift-check", skillDriftCheck],
   ["utterance-check", utteranceCheck],
@@ -64,6 +68,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
   ["flow-agents-capability-matrix", "capability-matrix"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
+  ["flow-agents-console-process-projection", "console-process-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-assignment-provider", "assignment-provider"],
   ["flow-agents-effective-assignment-provider-settings", "effective-assignment-provider-settings"],
@@ -75,6 +80,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],
+  ["flow-agents-work-item-mutation-provider", "work-item-mutation-provider"],
   ["flow-agents-runtime-adapter", "runtime-adapter"],
   ["flow-agents-skill-drift-check", "skill-drift-check"],
   ["flow-agents-telemetry-doctor", "telemetry-doctor"],

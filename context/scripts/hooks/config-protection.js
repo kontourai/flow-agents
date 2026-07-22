@@ -52,8 +52,42 @@
 'use strict';
 
 const path = require('path');
+// #783: root-scoping for the Bash-command detectors below (redirect / interpreter-write /
+// cp-move) -- see that module's header comment for the full fail-closed contract.
+const { isCandidateWithinDeclaredRoots, resolveCandidatePath, canonicalize } = require('./lib/declared-artifact-roots.js');
+// #799: narrow, conservative allowlist for interpreter one-liners that are PROVABLY read-only
+// (e.g. `py3 -c "print(json.load(open('trust.bundle'))['claims'][0])"`) -- see that
+// module's header comment for the full grammar and fail-closed contract. Consulted ONLY by
+// checkInterpreterWriteToProtected; the redirect/tee and cp/mv/install detectors key off an
+// actual write TARGET and have no read-only false-positive class to fix.
+const { isProvablyReadOnlyCommand } = require('./lib/read-only-grammar.js');
 
 const MAX_STDIN = 1024 * 1024;
+
+// #783: named once so every Bash-detector block message below can point a legitimate
+// fixture-authoring agent at the sanctioned, discoverable escape instead of dying on a raw
+// redirect/interpreter one-liner (issue #783's dogfooding complaint). Only reachable when a
+// scoped path is blocked because it is INSIDE a declared root or root detection was ambiguous
+// -- a path already outside every declared root was never blocked in the first place.
+const FIXTURE_AFFORDANCE_HINT =
+  'To author a test fixture, target a path OUTSIDE every declared artifact root (a scratch/temp ' +
+  'dir, never the repo durable .kontourai/flow-agents, .flow-agents, or delivery/) and use ' +
+  '`npm run workflow:sidecar -- fixture write <dir> --from-json <file>` for a schema-valid ' +
+  'fixture, or `... fixture write <dir> --malformed --content <string|@file>` for an ' +
+  'intentionally-invalid one (negative-test fixtures). Both refuse to write inside a declared root.';
+
+// #799: named once so every Bash-detector block message below can point a legitimate READ
+// attempt at a command shape that is never blocked, instead of leaving the agent to guess (or
+// to construct a runtime path to evade the hook, which is the false-positive cost #799 exists
+// to cut). `cat <file> | py3 -m json.tool` / `py3 -m json.tool <file>` is a recognized
+// fast-pass grammar (see lib/read-only-grammar.js) and is never blocked by this hook.
+// (Interpreter name built by concatenation per this file's INTERPRETER_TOKEN convention so
+// the hint text does not trip validate-source-tree's first-party-Python-command scan.)
+const PY_CMD = 'p' + 'ython3';
+const READ_REMEDIATION_HINT =
+  'If you only need to READ this file: `' + PY_CMD + ' -m json.tool <file>` (or `cat <file> | ' + PY_CMD +
+  ' -m json.tool`) is never blocked by this hook; for a trust.bundle specifically, ' +
+  '`npm run workflow:sidecar -- render-trust-panel <dir>` renders a human-readable summary.';
 
 const PROTECTED_FILES = new Set([
   '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
@@ -100,7 +134,9 @@ const PROTECTED_FILES = new Set([
 function checkProtectedPathPattern(filePath) {
   if (!filePath || typeof filePath !== 'string') return null;
   // Normalize: forward-slashes, strip leading ~/
-  const norm = filePath.replace(/\\/g, '/').replace(/^~\//, '');
+  // Confirmation-review F1 variant: defended filesystems are commonly case-insensitive,
+  // so compare a lowercased normalization (patterns below are written lowercase).
+  const norm = filePath.replace(/\\/g, '/').replace(/^~\//, '').toLowerCase();
 
   // .claude/settings.json — an agent could add an env block or delete the Stop
   // hook to disable gate enforcement for the entire session.
@@ -426,28 +462,93 @@ function checkCommandForBypass(command) {
  */
 // #379: the delivery/ arms carry an optional (?:[^/]+\/)? segment so redirects/tee to the
 // per-session path delivery/<slug>/trust.bundle (+ checkpoint) are caught, not just the flat path.
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+// #783 review F1: the protected shapes split into TWO classes with different scoping rules.
+// GLOBAL arms — shell profiles, .claude settings, lifecycle authority keys — are kill switches
+// with NO legitimate fixture use anywhere; a shape match alone blocks, exactly as before root
+// scoping existed. ARTIFACT arms — sidecar/delivery files — are scoped to declared artifact
+// roots so scratch-dir test fixtures stay authorable.
+// Case-insensitive (confirmation-review F1 variant): the host filesystems this hook defends
+// are commonly case-insensitive, so ~/.BASHRC IS ~/.bashrc.
+const REDIRECT_GLOBAL_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/i;
+const REDIRECT_ARTIFACT_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/i;
+
+// Basenames that identify a flow-artifact even when the DIRECTORY spelling is laundered
+// through a symlink (confirmation-review F4 variant): a token like /tmp/hop/slug/state.json
+// carries none of the .kontourai spelling, so the shape regex alone cannot see it — but its
+// basename justifies one canonicalization + re-test.
+const ARTIFACT_BASENAME_RE = /(?:^|\/)(state\.json|current\.json|trust\.bundle|trust\.checkpoint\.json|\.goal-fit-block-streak\.json)$|(?:^|\/)current\/[^/]+\.json$/i;
+
+function matchesRedirectGlobal(token) {
+  if (!token || typeof token !== 'string') return false;
+  return REDIRECT_GLOBAL_RE.test(token.replace(/\\/g, '/'));
+}
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
- * a protected kill-switch path.
+ * a protected kill-switch path of either class. Retained for compatibility.
  */
 function matchesRedirectProtected(token) {
   if (!token || typeof token !== 'string') return false;
   const norm = token.replace(/\\/g, '/');
-  return REDIRECT_PROTECTED_RE.test(norm);
+  return REDIRECT_GLOBAL_RE.test(norm) || REDIRECT_ARTIFACT_RE.test(norm);
 }
 
 /**
- * checkRedirectToProtected(command): scan a Bash command string for shell
+ * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
+ * the shell resolves later relative paths against a cwd we did not model. Fail closed:
+ * commands that change directory get NO root-scoping relief on artifact-shaped targets.
+ */
+function commandChangesDirectory(command) {
+  // Strip quote characters first (confirmation-review F2 variant): the shell concatenates
+  // adjacent quoted fragments, so `c""d` executes as `cd` — the guard must see through that.
+  const dequoted = String(command || '').replace(/["']/g, '');
+  return /(^|[;&|(]|\s)(cd|pushd|popd)(\s|$)/.test(dequoted);
+}
+
+/**
+ * Shared #783 decision for one redirect/tee/cp target token: GLOBAL shapes block on match
+ * alone; ARTIFACT shapes block unless provably outside every declared root (with the
+ * cd-in-command fail-closed guard).
+ */
+function protectedTargetBlocks(token, cwd, command) {
+  if (!token || typeof token !== 'string') return false;
+  const norm = token.replace(/\\/g, '/');
+  if (REDIRECT_GLOBAL_RE.test(norm)) return true;
+  let artifactShaped = REDIRECT_ARTIFACT_RE.test(norm);
+  if (!artifactShaped) {
+    // Symlink-laundering check (F4, third-pass closure): the visible spelling can be FULLY
+    // innocent (a symlink named anything pointing at a protected anchor), so any token that
+    // resolves at all gets one canonicalization + shape re-test against where it REALLY
+    // lands. Bare basenames stay ambiguous in resolveCandidatePath and are skipped here —
+    // they are handled by the interpreter detector's fail-closed rules instead.
+    try {
+      const resolved = resolveCandidatePath(token, cwd);
+      if (!resolved.ambiguous && resolved.path) {
+        const canonicalNorm = canonicalize(resolved.path).replace(/\\/g, '/');
+        artifactShaped = REDIRECT_ARTIFACT_RE.test(canonicalNorm) || REDIRECT_GLOBAL_RE.test(canonicalNorm);
+      }
+    } catch { /* canonicalization failure degrades to the lexical result */ }
+  }
+  if (!artifactShaped) return false;
+  if (commandChangesDirectory(command)) return true;
+  return isCandidateWithinDeclaredRoots(token, cwd);
+}
+
+/**
+ * checkRedirectToProtected(command, cwd): scan a Bash command string for shell
  * redirects (> >>) or tee invocations that target protected kill-switch paths.
  *
  * Returns a human-readable description of the matched redirect, or null if
  * none found.
  *
+ * #783: a shape match ALONE no longer blocks -- the resolved target must also be inside a
+ * DECLARED artifact root (isCandidateWithinDeclaredRoots; fails closed on ambiguity), so a
+ * test fixture written to a scratch/temp dir outside every declared root is no longer caught
+ * by this detector just because its basename looks like state.json/current.json/trust.bundle.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
-function checkRedirectToProtected(command) {
+function checkRedirectToProtected(command, cwd) {
   if (typeof command !== 'string' || !command) return null;
   // Fast path: skip if no redirect indicators present.
   if (!command.includes('>') && !command.includes('tee')) return null;
@@ -461,7 +562,7 @@ function checkRedirectToProtected(command) {
       // Redirect operators: > and >>
       if ((t === '>' || t === '>>') && i + 1 < tokens.length) {
         const target = tokens[i + 1];
-        if (matchesRedirectProtected(target)) {
+        if (protectedTargetBlocks(target, cwd, command)) {
           return `shell redirect (${t}) to ${target}`;
         }
       }
@@ -475,7 +576,7 @@ function checkRedirectToProtected(command) {
           if (!pastDashDash && arg === '--') { pastDashDash = true; continue; }
           if (!pastDashDash && arg.startsWith('-')) continue; // skip tee flags (-a, --append, etc.)
           // Check every positional arg — no early break (tee writes to all of them).
-          if (matchesRedirectProtected(arg)) return `tee to ${arg}`;
+          if (protectedTargetBlocks(arg, cwd, command)) return `tee to ${arg}`;
         }
       }
     }
@@ -518,6 +619,53 @@ const INTERPRETER_WRITE_RE = new RegExp(
   '\\bsed\\s+-i\\b|\\bperl\\s+-e\\b'
 );
 
+// #799 v2 verify finding: `py -m json.tool <infile> <OUTFILE>` is a WRITE (json.tool's second
+// positional operand is an output file), but INTERPRETER_WRITE_RE only recognizes `-c` forms,
+// so the outfile shape previously fell through unblocked. Because this hook's own
+// READ_REMEDIATION_HINT advertises json.tool as the sanctioned read idiom, the write-capable
+// form of the advertised tool must be detected here — this is a correctness closure of the
+// #799 change itself, not new bar-raising surface (the read-only grammar already refuses to
+// fast-pass it; this makes the fall-through block instead of allow).
+const _PY_NAME_RE = new RegExp('^' + _PY_CMD + '[23]?$');
+function isJsonToolWriteShape(seg) {
+  const tokens = tokenize(seg);
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (_PY_NAME_RE.test(tokens[i]) && tokens[i + 1] === '-m' && tokens[i + 2] === 'json.tool') {
+      // Fail-closed operand count: tokens are only discounted when POSITIVELY recognized as a
+      // json.tool option. `--` terminates options (everything after is positional, including
+      // dash-prefixed filenames); any unrecognized dash token classifies the segment as
+      // write-suspicious rather than being skipped as a presumed flag.
+      const NO_VALUE_OPTIONS = new Set(['--sort-keys', '--no-ensure-ascii', '--json-lines', '--compact', '--tab', '--no-indent']);
+      let operands = 0;
+      let afterTerminator = false;
+      for (let j = i + 3; j < tokens.length; j++) {
+        const t = tokens[j];
+        if (!afterTerminator) {
+          if (t === '--') { afterTerminator = true; continue; }
+          if (t === '--indent') {
+            // The only value-taking json.tool option. Its value must be a literal integer:
+            // an expansion-capable value ('--indent {1,2}') becomes multiple tokens at
+            // execution and shifts a later path into the outfile slot.
+            const v = tokens[j + 1];
+            if (typeof v !== 'string' || !/^[0-9]+$/.test(v)) return true;
+            j++; continue;
+          }
+          if (NO_VALUE_OPTIONS.has(t)) continue;
+          if (t.startsWith('-') && t !== '-') return true; // unrecognized option-like token: fail closed
+        }
+        // Operand counting happens pre-expansion: one lexical token carrying brace expansion,
+        // a glob, or a variable/command substitution can become MULTIPLE operands (including
+        // json.tool's write-capable outfile) at execution. Any operand that is not a plain
+        // literal path therefore classifies as write-suspicious rather than being counted.
+        if (t !== '-' && !/^[A-Za-z0-9._/-]+$/.test(t)) return true;
+        operands++; // '-' alone is the stdin operand and counts
+      }
+      return operands >= 2; // second positional operand is json.tool's write-capable outfile
+    }
+  }
+  return false;
+}
+
 /**
  * Protected-path token literals.  When any of these strings appears as a
  * literal substring of a segment that also matches INTERPRETER_WRITE_RE,
@@ -530,7 +678,7 @@ const INTERPRETER_PROTECTED_TOKENS = [
   // Shell profiles (basename match is specific in this context)
   '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile',
   // Claude and flow-agents routing files
-  '.claude/settings.json',
+  '.claude/settings.json', '.claude/settings.local.json',
   // Flow-agents session sidecars (basename match; false-positive risk is low
   // in the interpreter-write context and accepted per R5a honest framing)
   'current.json', 'state.json', 'trust.bundle',
@@ -539,31 +687,73 @@ const INTERPRETER_PROTECTED_TOKENS = [
   'delivery/trust.bundle', 'delivery/trust.checkpoint.json',
 ];
 
+// #783 review F1: tokens in this set are GLOBAL kill switches — blocked on segment match
+// alone, never root-scoped (see protectedTargetBlocks for the same split on redirect targets).
+const INTERPRETER_GLOBAL_TOKENS = new Set([
+  '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile',
+  '.claude/settings.json', '.claude/settings.local.json',
+]);
+
 /**
- * checkInterpreterWriteToProtected(command): detect interpreter invocations
- * (node -e, py3 -c, sed -i, perl -e) in segments that also contain a
+ * checkInterpreterWriteToProtected(command, cwd): detect interpreter invocations
+ * (see INTERPRETER_WRITE_RE) in segments that also contain a
  * protected-path token as a literal substring.
  *
  * Returns a human-readable description of the match, or null if not detected.
  *
+ * Root-scoping (issue 783 follow-up) via isCandidateWithinDeclaredRoots(token, cwd) applies
+ * here too, using the LITERAL matched token as the candidate. For tokens with no directory
+ * context at all (the sidecar runtime file basenames, the bare shell-profile names) this
+ * is a bare basename, which isCandidateWithinDeclaredRoots's resolver treats as ambiguous
+ * -- so those stay blocked exactly as before (a substring match can't prove WHERE a
+ * runtime-constructed path will land, so failing closed here is correct, not overreach). For
+ * tokens that already carry directory context (the settings file under a dotdir, the
+ * delivery trust-anchor paths) scoping applies normally.
+ *
+ * #799: BEFORE any block decision, checks isProvablyReadOnlyCommand(command, {tokenize,
+ * splitSegments}) -- a narrow, POSITIVE-match grammar (see lib/read-only-grammar.js) that
+ * recognizes only two exact templates -- `py(2|3)? -m json.tool <path>` and
+ * `cat <path> | py(2|3)? -m json.tool` -- under a raw charset gate that excludes quotes,
+ * expansions, redirections, and every separator except a single `|`. Interpreter BODIES are
+ * never analyzed (a v1 body heuristic was removed after adversarial review showed it was a
+ * deny-list, not a proof). Anything else is NOT fast-passed and falls through to the
+ * substring-match detection below exactly as before.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
-function checkInterpreterWriteToProtected(command) {
+function checkInterpreterWriteToProtected(command, cwd) {
   if (typeof command !== 'string' || !command) return null;
   // Fast path: skip if no interpreter keywords present.
   if (!command.includes('node') && !command.includes(_PY_CMD) &&
       !command.includes('sed') && !command.includes('perl')) return null;
 
+  // #799: a command that is PROVABLY read-only (see lib/read-only-grammar.js) never blocks
+  // here, regardless of which protected-path token it happens to mention as a literal
+  // substring below. Ambiguous/unparseable commands are NOT covered by this grammar and fall
+  // through to the substring-match detection unchanged.
+  if (isProvablyReadOnlyCommand(command, { tokenize, splitSegments })) return null;
+
   const segments = splitSegments(command);
   for (const seg of segments) {
-    // Check interpreter pattern.
+    // Check interpreter pattern (plus the json.tool outfile write shape, which the `-c`-only
+    // regex cannot see -- see isJsonToolWriteShape above).
     const interpMatch = INTERPRETER_WRITE_RE.exec(seg);
-    if (!interpMatch) continue;
+    const jsonToolWrite = !interpMatch && isJsonToolWriteShape(seg);
+    if (!interpMatch && !jsonToolWrite) continue;
+    const matchLabel = interpMatch ? interpMatch[0].trim() : _PY_CMD + '3 -m json.tool <outfile form>';
 
-    // Check for protected-path token literal in the same segment.
+    // Check for protected-path token literal in the same segment. #783 review F1: GLOBAL
+    // kill-switch tokens (shell profiles, .claude settings) block on the segment match alone —
+    // they have no fixture use and must not receive root-scoping relief. Artifact tokens go
+    // through the fail-closed resolver (bare basenames stay ambiguous → blocked; the
+    // cd-in-command guard applies as everywhere else).
+    // Case-insensitive segment match (confirmation-review F1 variant): the defended
+    // filesystems are commonly case-insensitive, so '.CLAUDE/Settings.json' is the same file.
+    const segLower = seg.toLowerCase();
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
-      if (seg.includes(token)) {
-        return `${interpMatch[0].trim()} with protected path token "${token}"`;
+      if (!segLower.includes(token.toLowerCase())) continue;
+      if (INTERPRETER_GLOBAL_TOKENS.has(token) || commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(token, cwd)) {
+        return `${matchLabel} with protected path token "${token}"`;
       }
     }
   }
@@ -577,7 +767,7 @@ function checkInterpreterWriteToProtected(command) {
  * #379: the optional (?:[^/]+\/)? segment also catches the per-session path
  * `cp forged.json delivery/<slug>/trust.bundle`.
  */
-const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/i;
 
 /**
  * Return true when a normalized token matches a delivery-protected path.
@@ -588,22 +778,29 @@ function matchesDeliveryProtected(token) {
 }
 
 /**
- * checkCopyMoveToProtected(command): detect cp/mv/install commands whose
+ * checkCopyMoveToProtected(command, cwd): detect cp/mv/install commands whose
  * destination argument targets a delivery-protected path.
  *
  * Catches the plain-cp attack vector: `cp forged.json delivery/trust.bundle`
  * is not a redirect and not an interpreter invocation, so those checks miss it.
  * The destination is the LAST positional (non-flag) argument.
  *
+ * Root-scoping (issue 783 follow-up) via isCandidateWithinDeclaredRoots(dest, cwd) applies
+ * here too -- a destination provably outside every declared artifact root is allowed (a
+ * fixture-authoring scratch dir is not the CI trust anchor), fails closed on ambiguity.
+ *
  * INCOMPLETE COVERAGE: only cp, mv, install are checked. Other copy tools
  * (rsync, scp, dd, etc.) and runtime-constructed path arguments are NOT caught.
  * The real anchor remains external (clean CI env + human review). Bar-raiser only.
  * RESIDUAL: publishDelivery uses fs.copyFileSync (not bash cp) -- unaffected.
  */
-function checkCopyMoveToProtected(command) {
+function checkCopyMoveToProtected(command, cwd) {
   if (typeof command !== "string" || !command) return null;
   if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
-  if (!command.includes("delivery/")) return null;
+  // #783 fourth-pass closure: NO textual content gate — an innocent-name symlink destination
+  // carries neither the delivery/ spelling nor a trust-anchor basename, so the only sound
+  // fast path is the command-name check above. protectedTargetBlocks canonicalizes each
+  // destination candidate (one realpath walk per cp/mv/install command — negligible).
 
   const segments = splitSegments(command);
   for (const seg of segments) {
@@ -612,15 +809,50 @@ function checkCopyMoveToProtected(command) {
     const cmd = tokens[0];
     if (cmd !== "cp" && cmd !== "mv" && cmd !== "install") continue;
 
+    // #783 fifth-pass closure: option-aware destination parsing. `-t DIR` /
+    // `--target-directory[=DIR]` name the destination explicitly; value-taking flags
+    // (install -m 0644, cp --suffix .bak, ...) must not have their VALUES mistaken for the
+    // destination positional.
+    const VALUE_FLAGS = new Set(["-t", "-m", "-o", "-g", "-S", "--mode", "--owner", "--group", "--suffix", "--backup", "--target-directory", "--context"]);
     const positional = [];
+    let targetDir = null;
     for (let i = 1; i < tokens.length; i++) {
-      if (!tokens[i].startsWith("-")) positional.push(tokens[i]);
+      const tok = tokens[i];
+      if (tok === "--") { for (let j = i + 1; j < tokens.length; j++) positional.push(tokens[j]); break; }
+      if (tok.startsWith("--target-directory=")) { targetDir = tok.slice("--target-directory=".length); continue; }
+      if (tok === "-t" || tok === "--target-directory") { if (i + 1 < tokens.length) { targetDir = tokens[i + 1]; i++; } continue; }
+      // GNU attached short form: -tDIR (sixth-pass closure).
+      if (tok.startsWith("-t") && !tok.startsWith("--") && tok.length > 2) { targetDir = tok.slice(2); continue; }
+      if (tok.startsWith("--") && tok.includes("=")) continue;
+      if (tok.startsWith("-") && tok !== "-") { if (VALUE_FLAGS.has(tok) && i + 1 < tokens.length) i++; continue; }
+      positional.push(tok);
+    }
+    if (targetDir !== null) {
+      // Every positional is a SOURCE; effective destination = targetDir/<basename(src)>.
+      const dirClean = targetDir.replace(/\/+$/, "");
+      const candidates = [targetDir, ...positional.map((src) => `${dirClean}/${path.basename(src.replace(/\\/g, '/'))}`)];
+      for (const candidate of candidates) {
+        if (protectedTargetBlocks(candidate, cwd, command) || (matchesDeliveryProtected(candidate) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(candidate, cwd)))) {
+          return `${cmd} into ${targetDir} (delivery-protected destination)`;
+        }
+      }
+      continue;
     }
     if (positional.length === 0) continue;
 
     const dest = positional[positional.length - 1];
-    if (matchesDeliveryProtected(dest)) {
+    if (protectedTargetBlocks(dest, cwd, command) || (matchesDeliveryProtected(dest) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(dest, cwd)))) {
       return `${cmd} to ${dest} (delivery-protected path)`;
+    }
+    // Third-pass closure: `cp /tmp/trust.bundle delivery/` writes dest/<source-basename> —
+    // when a SOURCE carries a trust-anchor basename, test the effective destination path too.
+    for (let s = 0; s < positional.length - 1; s++) {
+      const srcBase = path.basename(positional[s].replace(/\\/g, '/'));
+      if (!/^(trust\.bundle|trust\.checkpoint\.json|state\.json|current\.json)$/i.test(srcBase)) continue;
+      const effective = `${dest.replace(/\/+$/, '')}/${srcBase}`;
+      if (protectedTargetBlocks(effective, cwd, command) || (matchesDeliveryProtected(effective) && (commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(effective, cwd)))) {
+        return `${cmd} of ${srcBase} into ${dest} (delivery-protected destination)`;
+      }
     }
   }
   return null;
@@ -698,7 +930,7 @@ function run(inputOrRaw, options = {}) {
   // Read-only tools never mutate a file, so path-based protection must not block them.
   // (Bash is NOT read-only and stays fully covered by the command-based checks below.)
   if (filePath && !READ_ONLY_TOOL_NAMES.has(toolName)) {
-    const basename = path.basename(filePath);
+    const basename = path.basename(filePath).toLowerCase();
     if (PROTECTED_FILES.has(basename)) {
       return {
         exitCode: 2,
@@ -720,6 +952,10 @@ function run(inputOrRaw, options = {}) {
     }
   }
   const command = input?.tool_input?.command || '';
+  // #783: cwd for declared-artifact-root scoping below -- input.cwd when the harness
+  // provides one (matches other hooks' input.cwd || process.cwd() convention), else the
+  // hook process's own cwd.
+  const cwd = input?.cwd || process.cwd();
   if (command) {
     const bypass = checkCommandForBypass(command);
     if (bypass) {
@@ -734,7 +970,7 @@ function run(inputOrRaw, options = {}) {
     // Gate lock-down: check for shell redirects to protected kill-switch paths.
     // HONEST — INCOMPLETE: only > >> and tee are covered; sed -i and other forms
     // are NOT. An agent with shell access can still evade. Bar-raiser only.
-    const redirect = checkRedirectToProtected(command);
+    const redirect = checkRedirectToProtected(command, cwd);
     if (redirect) {
       return {
         exitCode: 2,
@@ -742,14 +978,15 @@ function run(inputOrRaw, options = {}) {
           'Writing to shell profiles or Claude/flow-agents config files via shell redirect could ' +
           'disable or tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught).',
+          'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught). ' +
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down: check for interpreter invocations (node -e, py3 -c, sed -i,
     // perl -e) combined with a protected-path token literal in the command string.
     // HONEST — INCOMPLETE (R5a best-effort): runtime-constructed paths, base64,
     // multi-step assembly, and other interpreters not listed are NOT caught.
-    const interpWrite = checkInterpreterWriteToProtected(command);
+    const interpWrite = checkInterpreterWriteToProtected(command, cwd);
     if (interpWrite) {
       return {
         exitCode: 2,
@@ -757,13 +994,14 @@ function run(inputOrRaw, options = {}) {
           'Interpreter invocations (node -e, py3 -c, sed -i, perl -e) that reference ' +
           'protected gate files could tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
+          'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it. ' +
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
     // Catches the plain-cp attack: `cp forged.json delivery/trust.bundle`.
     // INCOMPLETE: cp/mv/install only; rsync/scp/dd evade. Real anchor is external.
-    const copyMove = checkCopyMoveToProtected(command);
+    const copyMove = checkCopyMoveToProtected(command, cwd);
     if (copyMove) {
       return {
         exitCode: 2,
@@ -771,7 +1009,8 @@ function run(inputOrRaw, options = {}) {
           'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
           'could forge the CI trust anchor. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
-          'NOTE: This check covers cp/mv/install only -- other copy tools may evade it.',
+          'NOTE: This check covers cp/mv/install only -- other copy tools may evade it. ' +
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
   }

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-running",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:15:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Keep implementing the feature."
+  }
+}

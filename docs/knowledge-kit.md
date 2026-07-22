@@ -36,7 +36,7 @@ The output-shape story is why the adapter model matters: the same five flows and
 
 The vector detector is fail-closed: infrastructure failures throw `EMBED_FAILURE` rather than silently returning an empty cluster (which would be indistinguishable from "no similar records found").
 
-**Tests** — 198 tests across six suites (contract, ingest/compile, synthesis, consolidation, similarity-vector, retirement). The contract suite is parameterized — any adapter can run it by pointing `KNOWLEDGE_ADAPTER` at the adapter module.
+**Tests** — an extensive automated test suite covering contract conformance, ingest/compile, synthesis, consolidation, similarity-vector matching, and retirement. The contract suite is parameterized — any adapter can run it by pointing `KNOWLEDGE_ADAPTER` at the adapter module.
 
 **Live-proven** — keyless operation validated via a Strands agent + local ollama acceptance harness. The vector similarity detector is validated against `nomic-embed-text` with documented threshold guidance.
 

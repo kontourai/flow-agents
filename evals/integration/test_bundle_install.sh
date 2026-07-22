@@ -946,6 +946,13 @@ echo ""
 echo "--- Packed Package Builder Entry ---"
 PACKAGE_CONSUMER="$TMPDIR_EVAL/package-consumer"
 PACKAGE_PROJECT="$TMPDIR_EVAL/package-project"
+mkdir -p "$PACKAGE_PROJECT"
+git -C "$PACKAGE_PROJECT" init -q
+git -C "$PACKAGE_PROJECT" config user.email bundle-install@example.invalid
+git -C "$PACKAGE_PROJECT" config user.name "Bundle Install Eval"
+printf '.kontourai/\n' > "$PACKAGE_PROJECT/.gitignore"
+git -C "$PACKAGE_PROJECT" add .gitignore
+git -C "$PACKAGE_PROJECT" commit -qm "seed bundle install fixture"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
 mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"

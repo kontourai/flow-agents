@@ -3,13 +3,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { assignmentActorsMatch, canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const request = { action: "cancel", project_root: "/srv/project", session_dir: "/srv/project/.kontourai/flow-agents/run-1", authorization_file: "/etc/kontourai/request.json" };
 const envelope = { schema_version: "1.0", action: "cancel", request_sha256: sha256(request), request };
 test("reference coordinator canonicalization is order-independent", () => {
   assert.equal(canonicalJson({ b: 1, a: 2 }), canonicalJson({ a: 2, b: 1 }));
   assert.deepEqual(validateEnvelope(envelope), envelope);
+});
+test("reference coordinator treats only a missing legacy human field as canonical null", () => {
+  const canonical = { runtime: "codex", session_id: "session", host: "host", human: null };
+  const legacy = { runtime: "codex", session_id: "session", host: "host" };
+  const legacyBefore = structuredClone(legacy);
+  assert.equal(assignmentActorsMatch(legacy, canonical), true);
+  assert.equal(assignmentActorsMatch(canonical, legacy), true);
+  for (const changed of [
+    { ...canonical, runtime: "other-runtime" },
+    { ...canonical, session_id: "other-session" },
+    { ...canonical, host: "other-host" },
+    { ...canonical, human: "operator" },
+    { ...legacy, extra: "unsupported" },
+  ]) assert.equal(assignmentActorsMatch(legacy, changed), false);
+  assert.deepEqual(legacy, legacyBefore, "semantic comparison must not rewrite a legacy assignment actor");
 });
 test("reference coordinator rejects unknown fields actions and digest drift", () => {
   assert.throws(() => validateEnvelope({ ...envelope, extra: true }), /unexpected or missing/);
@@ -23,7 +38,7 @@ test("reference coordinator pins the published Flow reducer identity rather than
     package: "@kontourai/flow",
     package_version: "3.5.0",
     release_commit: "871ed9c",
-    closure_sha256: "d6fec9277a27df126a3005ce09068e65ab486ee641b4963c9f81043bcda77b0d",
+    closure_sha256: "e2ed60d81adfb57acc2e774a50a9a24d4163327f9ee2d07397d63191826c7562",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
       version: "1.0.0",

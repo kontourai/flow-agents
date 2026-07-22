@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "source": "fixture",
+  "claims": [
+    {
+      "id": "critique-review-1",
+      "subjectId": "flow-agents://session/session-review-resolved/critique/review",
+      "subjectType": "workflow",
+      "claimType": "critique",
+      "fieldOrBehavior": "independent review verdict",
+      "value": "fail",
+      "status": "verified",
+      "createdAt": "2026-07-20T10:12:00Z",
+      "updatedAt": "2026-07-20T10:18:00Z",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-20T10:12:00Z",
+        "workflow_subject_ref": "flow-agents://session/session-review-resolved",
+        "superseded_by": "critique-review-2",
+        "critique_resolution": { "resolver": "tool-code-reviewer", "resolved_at": "2026-07-20T10:18:00Z" }
+      }
+    },
+    {
+      "id": "critique-review-2",
+      "subjectId": "flow-agents://session/session-review-resolved/critique/review",
+      "subjectType": "workflow",
+      "claimType": "critique",
+      "fieldOrBehavior": "independent review verdict",
+      "value": "pass",
+      "status": "verified",
+      "createdAt": "2026-07-20T10:18:00Z",
+      "updatedAt": "2026-07-20T10:18:00Z",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-20T10:18:00Z",
+        "workflow_subject_ref": "flow-agents://session/session-review-resolved"
+      }
+    }
+  ],
+  "evidence": [],
+  "events": [],
+  "policies": []
+}

@@ -149,6 +149,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
 
+      - name: Reviewed grounding reference integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check reviewed-grounding-reference-integration
+
       - name: Narrative source contract integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration
@@ -381,6 +385,10 @@ jobs:
       - name: Console learning projection integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-learning-projection-integration
+
+      - name: Console process projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-process-projection-integration
 
       - name: Context map integration
         continue-on-error: true

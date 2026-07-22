@@ -20,7 +20,7 @@ import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
-import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
@@ -982,6 +982,7 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
+  const currentGateClaimsForTrust = mergeGateClaimsWithCritiqueHistory(relevant, bundle.claims, claimIsCurrent);
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
@@ -1049,9 +1050,63 @@ async function bundleGateEvidence(
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+export function mergeGateClaimsWithCritiqueHistory(
+  relevant: AnyRecord[],
+  bundleClaims: unknown[],
+  claimIsCurrent: (claim: AnyRecord) => boolean,
+): AnyRecord[] {
+  const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const critiqueByHash = new Map<string, AnyRecord>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || claim.metadata.origin !== "critique") continue;
+    if (typeof claim.metadata.critique_record_hash === "string") critiqueByHash.set(claim.metadata.critique_record_hash, claim);
+  }
+  // A same-reviewer recheck can be current while the critique it supersedes predates the
+  // current gate visit. Project the authenticated predecessor closure as audit history so the
+  // resolution validator sees the writer-issued chain rather than an invalid sequence suffix.
+  // Missing or forged links are deliberately not repaired here: graph validation reports the
+  // first unresolved sequence/hash edge and continues to fail closed.
+  const requiredCritiqueHashes = new Set<string>();
+  const pendingCritiqueHashes = relevant.filter((claim) => isRecord(claim.metadata) && claim.metadata.origin === "critique")
+    .map((claim) => String(claim.metadata.critique_record_hash ?? ""))
+    .filter(Boolean);
+  while (pendingCritiqueHashes.length > 0) {
+    const hash = pendingCritiqueHashes.pop()!;
+    if (requiredCritiqueHashes.has(hash)) continue;
+    requiredCritiqueHashes.add(hash);
+    const claim = critiqueByHash.get(hash);
+    const predecessor = isRecord(claim?.metadata) ? claim.metadata.critique_predecessor_hash : null;
+    if (typeof predecessor === "string" && predecessor !== CRITIQUE_CHAIN_GENESIS) pendingCritiqueHashes.push(predecessor);
+  }
+  const merged: AnyRecord[] = [];
+  const seen = new Set<string>();
+  const seenCritiques = new Set<string>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim)) continue;
+    const id = String(claim.id);
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (metadata?.origin === "critique" && (claimIsCurrent(claim) || requiredCritiqueHashes.has(String(metadata.critique_record_hash)))) {
+      const recordId = String(metadata.critique_record_id);
+      if (!seenCritiques.has(recordId)) merged.push(claim);
+      seenCritiques.add(recordId);
+      seen.add(id);
+      continue;
+    }
+    const selected = relevantById.get(id) ?? null;
+    if (!selected || seen.has(id)) continue;
+    merged.push(selected);
+    seen.add(id);
+  }
+  for (const claim of relevant) {
+    const id = String(claim.id);
+    if (!seen.has(id)) merged.push(claim);
+  }
+  return merged;
 }
 
 function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {

@@ -463,3 +463,7 @@ file, and runs `cancel --authorization-file` as above. The signing payload is pr
 same actor/request normalization the verifier applies, so a signature over it verifies by
 construction. Like `cancel`, it requires an active assignment holder; an active run whose
 assignment has already been released cannot be authorized this way without re-claiming it first.
+For legacy persisted assignments, an actor that omits only `human` is treated as the canonical
+`human: null` identity during lifecycle authorization construction and live-holder comparison.
+This compatibility rule does not rewrite the persisted assignment and does not relax any other
+actor field or non-null human identity.
