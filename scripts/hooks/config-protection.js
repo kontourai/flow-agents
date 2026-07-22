@@ -764,6 +764,8 @@ function run(inputOrRaw, options = {}) {
           'Interpreter invocations (node -e, py3 -c, sed -i, perl -e) that reference ' +
           'protected gate files could tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
+          'To READ a protected file, use the harness Read tool or plain cat/jq — ' +
+          'read-only inspection is fine; this check cannot tell a read one-liner from a write. ' +
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
       };
     }
