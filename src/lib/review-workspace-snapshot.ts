@@ -1,12 +1,49 @@
 import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import * as path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { execTrustedGitSync } from "./trusted-git.js";
 
 type ReviewedFile = { file: string; sha256: string };
+export type ReviewWorkspaceSnapshot = Record<string, unknown>;
 
-export function captureReviewWorkspaceSnapshot(projectRoot: string, reviewedFiles: ReviewedFile[], excludedRoots: string[] = []): Record<string, unknown> {
+export function captureReviewWorkspaceSnapshot(projectRoot: string, reviewedFiles: ReviewedFile[], excludedRoots: string[] = []): ReviewWorkspaceSnapshot {
   return gitWorktreeSnapshot(projectRoot, excludedRoots) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
+}
+
+/**
+ * A passing gate can only be reused when its recorded workspace authority is
+ * structurally valid and exactly matches a fresh trusted capture. The fallback
+ * reviewed-files form is retained for genuine non-Git projects; Git roots are
+ * always captured through the trusted Git path above.
+ */
+export function workspaceSnapshotMatches(projectRoot: string, snapshot: unknown): boolean {
+  if (!isReviewWorkspaceSnapshot(snapshot)) return false;
+  try {
+    const reviewedFiles = snapshot.kind === "reviewed-files"
+      ? snapshot.files as ReviewedFile[]
+      : [];
+    return isDeepStrictEqual(snapshot, captureReviewWorkspaceSnapshot(projectRoot, reviewedFiles));
+  } catch {
+    return false;
+  }
+}
+
+export function isReviewWorkspaceSnapshot(snapshot: unknown): snapshot is ReviewWorkspaceSnapshot & { kind: "git-worktree" | "reviewed-files"; files?: ReviewedFile[] } {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  const value = snapshot as Record<string, unknown>;
+  if (value.version !== 1 || value.algorithm !== "sha256" || typeof value.digest !== "string" || !/^[a-f0-9]{64}$/i.test(value.digest)) return false;
+  if (value.kind === "git-worktree") return typeof value.head_sha === "string" && /^[a-f0-9]{40,64}$/i.test(value.head_sha);
+  // Execute scope supplies no reviewed artifacts to the fallback strategy. A
+  // genuine non-Git project therefore has an explicitly empty, still
+  // canonical snapshot; Git worktrees never take this branch.
+  if (value.kind !== "reviewed-files" || !Array.isArray(value.files)) return false;
+  const files = value.files as unknown[];
+  return files.every((file) => file && typeof file === "object" && !Array.isArray(file)
+    && typeof (file as Record<string, unknown>).file === "string"
+    && typeof (file as Record<string, unknown>).sha256 === "string"
+    && /^[a-f0-9]{64}$/i.test(String((file as Record<string, unknown>).sha256)))
+    && new Set(files.map((file) => String((file as Record<string, unknown>).file))).size === files.length;
 }
 
 function gitWorktreeSnapshot(projectRoot: string, excludedRoots: string[]): Record<string, unknown> | null {

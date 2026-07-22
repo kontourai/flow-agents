@@ -15,7 +15,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { captureReviewWorkspaceSnapshot, workspaceSnapshotMatches } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -562,6 +562,13 @@ async function syncAndProject(
     const snapshot = stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
+      const executeFreshness = executeWorkspaceFreshness(run, rawBundle, context.projectRoot);
+      const forcedRouteReason = !executeFreshness.fresh && gateAcceptsImplementationDefect(gates[0]!)
+        ? "implementation_defect"
+        : undefined;
+      if (!executeFreshness.fresh && !forcedRouteReason) {
+        throw new BuilderBuildRunInputError("implementation-scope.workspace_snapshot", "is stale or missing; this downstream gate cannot advance until execute evidence is refreshed");
+      }
       const gateEvidence = await bundleGateEvidence(
         rawBundle,
         gates[0]!,
@@ -571,6 +578,7 @@ async function syncAndProject(
         context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
+        forcedRouteReason,
       );
       if (gateEvidence) {
         const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
@@ -664,6 +672,10 @@ async function currentPublishChangeAction(context: SessionContext, intent: Publi
   const subject = workflowSubject(sidecarSnapshot.state);
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   assertRunSubjectBinding(run, subject);
+  const freshness = executeWorkspaceFreshness(run, readTrustBundleForWorkspaceFreshness(context), context.projectRoot);
+  if (!freshness.fresh) {
+    throw new BuilderBuildRunInputError("implementation-scope.workspace_snapshot", "is stale or missing; synchronize the active gate to route the run back to execute before publishing a change");
+  }
   const gates = openGatesForResult(run);
   if (run.state.status !== "active" || gates.length !== 1) throw new BuilderBuildRunInputError("publish-change", "requires exactly one active canonical gate");
   const envelope = deriveBuilderGateActionEnvelope({ sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, definition: JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")) as AnyRecord });
@@ -923,6 +935,63 @@ function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: s
   ) as Array<FlowGate & { id: string }>;
 }
 
+/**
+ * A passed execute gate is authority only for the workspace it captured. Once
+ * Builder has moved downstream, exactly one live execute-scope claim must
+ * remain and its immutable snapshot must still match a fresh trusted capture.
+ * Missing and malformed historical claims deliberately fail closed: they can
+ * route a live gate back, but can never be treated as current authority.
+ */
+function executeWorkspaceFreshness(run: BuilderFlowRunResult, bundle: unknown, projectRoot: string): { fresh: boolean } {
+  if (run.definitionId !== BUILDER_BUILD_FLOW_ID || !["verify", "merge-ready", "pr-open", "merge-ready-ci", "learn"].includes(run.state.current_step)) return { fresh: true };
+  if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return { fresh: false };
+  const claims = bundle.claims.filter((candidate): candidate is AnyRecord => {
+    if (!isRecord(candidate) || candidate.claimType !== "builder.execute.scope" || candidate.subjectType !== "change") return false;
+    if (candidate.producerStatus === "superseded") return false;
+    const metadata = isRecord(candidate.metadata) ? candidate.metadata : null;
+    return !metadata || typeof metadata.superseded_by !== "string";
+  });
+  if (claims.length !== 1) return { fresh: false };
+  const claim = claims[0]!;
+  const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+  const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+  if (claim.value !== "pass" || claim.status !== "verified" || !metadata || metadata.workflow_subject_ref !== run.state.subject || !gateClaim
+    || gateClaim.expectation_id !== "implementation-scope" || gateClaim.identity_version !== 2) return { fresh: false };
+  // The mutable session bundle is only a current presentation of evidence. Its
+  // execute authority must be the exact claim accepted by Flow's one live
+  // execute-gate attachment; a replacement claim with a fresh-looking snapshot
+  // cannot rewrite what the canonical execute visit actually approved.
+  const authorityClaims = manifestEvidence(run.manifest).flatMap((entry) => {
+    if (entry.gate_id !== "execute-gate" || entry.status !== "passed"
+      || typeof entry.superseded_by === "string"
+      || !Array.isArray(entry.expectation_ids) || !entry.expectation_ids.includes("implementation-scope")) return [];
+    const attachmentClaims = isRecord(entry.bundle) && Array.isArray(entry.bundle.claims) ? entry.bundle.claims : [];
+    return attachmentClaims.filter((candidate): candidate is AnyRecord => isRecord(candidate)
+      && candidate.claimType === "builder.execute.scope" && candidate.subjectType === "change");
+  });
+  if (authorityClaims.length !== 1) return { fresh: false };
+  const authority = authorityClaims[0]!;
+  if (authority.id !== claim.id || authority.subjectId !== claim.subjectId
+    || authority.value !== "pass" || authority.status !== "verified"
+    || !isRecord(authority.metadata) || authority.metadata.workflow_subject_ref !== run.state.subject
+    || !isRecord(authority.metadata.gate_claim)
+    || authority.metadata.gate_claim.expectation_id !== "implementation-scope"
+    || authority.metadata.gate_claim.identity_version !== 2
+    || !isDeepStrictEqual(authority.metadata.gate_claim.workspace_snapshot, gateClaim.workspace_snapshot)) return { fresh: false };
+  return { fresh: workspaceSnapshotMatches(projectRoot, gateClaim.workspace_snapshot) };
+}
+
+function gateAcceptsImplementationDefect(gate: FlowGate): boolean {
+  const routes = isRecord((gate as AnyRecord).on_route_back) ? (gate as AnyRecord).on_route_back : null;
+  return Boolean(routes && typeof routes.implementation_defect === "string");
+}
+
+function readTrustBundleForWorkspaceFreshness(context: SessionContext): unknown {
+  if (!fs.existsSync(context.bundleFile)) return null;
+  assertSafeFile(context.bundleFile, context.sessionDir, "trust.bundle");
+  return JSON.parse(fs.readFileSync(context.bundleFile, "utf8"));
+}
+
 async function bundleGateEvidence(
   bundle: unknown,
   gate: FlowGate,
@@ -932,6 +1001,7 @@ async function bundleGateEvidence(
   sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
+  forcedRouteReason?: "implementation_defect",
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
   const expectations = expectationsForGate(gate, config) as FlowExpectation[];
@@ -986,7 +1056,7 @@ async function bundleGateEvidence(
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
   }
-  const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
+  const failed = forcedRouteReason ? true : relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
     return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);
@@ -1000,7 +1070,7 @@ async function bundleGateEvidence(
   if (routeReasons.length > 1) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "must agree across current-gate claims");
   }
-  const routeReason = routeReasons[0] ?? null;
+  const routeReason = forcedRouteReason ?? routeReasons[0] ?? null;
   if (failed && !routeReason) return null;
   // Passing evidence waits for the complete expectation set. A failing
   // snapshot is complete only when a gate producer explicitly declares its
@@ -1013,9 +1083,9 @@ async function bundleGateEvidence(
   if (routeReason && (!routeMap || typeof routeMap[routeReason] !== "string")) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
-  if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
+  if (!forcedRouteReason && String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(bundle.claims as AnyRecord[], currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -1114,7 +1184,7 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   return { events, verified: true };
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
+async function assertVerifiedTestsTrust(bundleClaims: AnyRecord[], currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
@@ -1122,13 +1192,16 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     && isRecord(claim.metadata.gate_claim)
     && claim.metadata.gate_claim.expectation_id === "tests-evidence");
   if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
-  // A route-back starts a new gate visit and therefore a new critique generation. Historical
-  // reviewer slices remain in the bundle and manifest for audit, but only critiques acquired
-  // during this visit describe the implementation snapshot currently being verified. Within a
-  // visit every live reviewer slice still participates, so changing reviewers cannot bury a
-  // disputed finding.
-  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
+  // Resolution integrity is an append-only property of the complete candidate bundle. In
+  // particular, a live critique can have a valid predecessor chain through superseded history;
+  // filtering that history before validation would turn a valid recovery into a malformed chain.
+  const graph = validateCritiqueResolutionGraph(bundleClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
   if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
+  // A route-back starts a new gate visit and therefore a new critique generation. Historical
+  // reviewer slices remain in the bundle for audit and graph integrity, but only live critique
+  // records acquired during this visit describe the implementation snapshot currently being
+  // verified. Within a visit every live reviewer slice still participates, so changing reviewers
+  // cannot bury a disputed finding.
   const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
   const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)

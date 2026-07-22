@@ -86,6 +86,7 @@ type GraphState = {
   records: AnyRecord[]; byId: Map<string, AnyRecord>; byHash: Map<string, AnyRecord>;
   errors: string[]; referencedEventIds: Set<string>; expectedSubject?: string;
   resolutionEvents: AnyRecord[]; projectRoot?: string; externalCompletionVerified: boolean;
+  mode: "gate" | "writer";
 };
 
 function validateRecords(records: AnyRecord[], state: GraphState): void {
@@ -127,13 +128,19 @@ function validateResolution(prior: AnyRecord, state: GraphState): void {
   if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) state.errors.push("critique resolver must be a current verified PASS");
   if (resolution.resolver !== resolving.reviewer || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer) || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer) || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) state.errors.push("critique resolution actor binding is invalid");
   if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) state.errors.push("critique resolution crosses workflow subjects");
-  validateResolutionSnapshots(prior, resolving, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
+  validateResolutionSnapshots(prior, resolving, resolution, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
 }
 
-function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, state: GraphState): void {
+function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {
   const first = prior.review_target?.workspace_snapshot; const second = resolving.review_target?.workspace_snapshot;
   if (first?.kind !== "git-worktree" && second?.kind !== "git-worktree") return;
   if (!state.projectRoot || first?.kind !== "git-worktree" || second?.kind !== "git-worktree") { state.errors.push("critique resolution Git snapshots require one trusted project context"); return; }
+  // The same authenticated reviewer may re-evaluate their own lane after a canonical route-back
+  // rewrites implementation history (for example, rebasing onto newly current main). Their fresh
+  // PASS is still bound to the same workflow subject, append-only critique chain, complete prior
+  // coverage, and an immutable current workspace snapshot. Cross-reviewer resolution retains the
+  // stronger ancestry constraint because it transfers resolution authority between identities.
+  if (resolution.kind === "same-reviewer-recheck") return;
   try { assertTrustedGitAncestor(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid"); }
 }
 
@@ -161,21 +168,23 @@ function validateEvents(state: GraphState): void {
     if (event.operation !== "resolve-critique" || !state.projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
     else if (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
     else if (createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex") !== event.authorization_sha256) state.errors.push("critique resolution signed authorization does not match its event");
-    else if (!state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    else if (state.mode === "gate" && !state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
     if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");
     const prior = state.byId.get(String(event.prior_record_id)); const resolving = state.byId.get(String(event.resolving_record_id));
     if (!prior || !resolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(prior, resolving, event.edge)) state.errors.push("critique resolution event resulting bundle core digest is invalid");
   });
 }
 
-export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, externalCompletionVerified = false): { valid: boolean; errors: string[]; live: AnyRecord[] } {
+export function validateCritiqueResolutionGraph(claims: AnyRecord[], expectedSubject?: string, resolutionEvents: AnyRecord[] = [], projectRoot?: string, externalCompletionVerified = false, mode: "gate" | "writer" = "gate"): { valid: boolean; errors: string[]; live: AnyRecord[] } {
   const records = claims.filter((claim) => claim?.metadata?.origin === "critique").map(critiqueFromClaim);
   if (!records.length) return { valid: false, errors: ["critique graph has no records"], live: [] };
-  const state: GraphState = { records, byId: new Map(), byHash: new Map(), errors: [], referencedEventIds: new Set(), expectedSubject, resolutionEvents, projectRoot, externalCompletionVerified };
+  const state: GraphState = { records, byId: new Map(), byHash: new Map(), errors: [], referencedEventIds: new Set(), expectedSubject, resolutionEvents, projectRoot, externalCompletionVerified, mode };
   validateRecords(records, state); records.forEach((record) => validateResolution(record, state));
   const live = records.filter((record) => !record.superseded_by);
   validateEvents(state);
-  if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) state.errors.push("critique graph requires a current verified PASS");
-  if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) state.errors.push("critique graph has unresolved live critique records");
+  if (mode === "gate") {
+    if (!live.some((record) => record.verdict === "pass" && record.claim_status === "verified")) state.errors.push("critique graph requires a current verified PASS");
+    if (live.some((record) => record.verdict !== "pass" || record.claim_status !== "verified")) state.errors.push("critique graph has unresolved live critique records");
+  }
   return { valid: state.errors.length === 0, errors: [...new Set(state.errors)], live };
 }

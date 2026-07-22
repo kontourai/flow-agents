@@ -484,6 +484,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
       claimType,
       fieldOrBehavior: `${expectation} fixture`,
       value: status,
+      status: status === "pass" ? "verified" : "disputed",
       metadata: {
         workflow_subject_ref: subject,
         origin: "check",
@@ -533,10 +534,7 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
   const implementationFile = path.relative(session.projectRoot, implementation);
   const implementationBytes = fs.readFileSync(implementation);
   const implementationSha256 = createHash("sha256").update(implementationBytes).digest("hex");
-  const workspaceDigest = createHash("sha256")
-    .update("flow-agents:reviewed-files:v1\0")
-    .update(implementationFile).update("\0").update(implementationBytes).update("\0")
-    .digest("hex");
+  const workspaceSnapshot = captureReviewWorkspaceSnapshot(session.projectRoot, [{ file: implementationFile, sha256: implementationSha256 }]);
   const critique = bundleClaim({ expectation: "clean-critique", claimType: "workflow.critique.review", subjectType: "workflow-critique", timestamp });
   critique.claim.metadata = {
     workflow_subject_ref: SUBJECT,
@@ -546,13 +544,7 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
     lanes: [{ id: "code", status: "pass" }],
     review_target: {
       artifacts: [{ file: path.relative(session.projectRoot, reviewArtifact), sha256: createHash("sha256").update(fs.readFileSync(reviewArtifact)).digest("hex") }],
-      workspace_snapshot: {
-        version: 1,
-        kind: "reviewed-files",
-        algorithm: "sha256",
-        digest: workspaceDigest,
-        files: [{ file: implementationFile, sha256: implementationSha256 }],
-      },
+      workspace_snapshot: workspaceSnapshot,
     },
   };
   const critiqueRecord = {
@@ -637,8 +629,47 @@ function withIdentitySuffix(entry, suffix) {
 }
 
 async function writeAndSync(session, entries) {
-  writeBundle(session.sessionDir, entries);
+  // The public writer stamps passing execute scope with the exact workspace it
+  // observed. Test fixtures construct normalized bundles directly, so mirror
+  // that producer boundary here instead of hand-authoring a digest.
+  for (const entry of entries) {
+    if (entry.claim?.claimType !== "builder.execute.scope" || entry.claim?.value !== "pass") continue;
+    const gateClaim = entry.claim.metadata?.gate_claim;
+    if (gateClaim && !gateClaim.workspace_snapshot) {
+      gateClaim.workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+    }
+  }
+  writeBundlePreservingExecute(session, entries);
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
+}
+
+function writeBundlePreservingExecute(session, entries) {
+  const effectiveEntries = [...entries];
+  // The real public writer rebuilds a complete trust bundle. These focused
+  // runtime fixtures normally provide only the new gate slice, so retain the
+  // prior immutable execute claim while exercising downstream behavior.
+  if (!effectiveEntries.some((entry) => entry.claim?.claimType === "builder.execute.scope")) {
+    const bundleFile = path.join(session.sessionDir, "trust.bundle");
+    if (fs.existsSync(bundleFile)) {
+      const prior = readJson(bundleFile);
+      const claim = prior.claims?.find((candidate) => candidate.claimType === "builder.execute.scope" && candidate.producerStatus !== "superseded");
+      if (claim) {
+        const evidence = prior.evidence?.find((candidate) => candidate.claimId === claim.id);
+        const event = prior.events?.find((candidate) => candidate.claimId === claim.id);
+        if (evidence && event) effectiveEntries.push({ claim, evidence, event });
+      }
+    }
+  }
+  writeBundle(session.sessionDir, effectiveEntries);
+}
+
+function initializeTrackedSession(session) {
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  execFileSync("git", ["init", "-q"], { cwd: session.projectRoot });
+  execFileSync("git", ["config", "user.email", "flow-agents-test@example.invalid"], { cwd: session.projectRoot });
+  execFileSync("git", ["config", "user.name", "Flow Agents Test"], { cwd: session.projectRoot });
+  execFileSync("git", ["add", ".gitignore", "review-target"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-qm", "Initial implementation"], { cwd: session.projectRoot });
 }
 
 test("small-model client can start and advance from projected actions without choosing Flow steps", async () => {
@@ -1707,7 +1738,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   const correctedPrerequisites = verifiedTestsPrerequisites(session, correctedAt)
     .map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`));
   correctedPrerequisites[0].claim.metadata.reviewer = "reviewer-after-route-back";
-  restampCritiqueClaim(correctedPrerequisites[0]);
+  appendCritiqueAfter(initialPrerequisites[0], correctedPrerequisites[0]);
   const corrected = await writeAndSync(session, [
     withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
     ...correctedPrerequisites,
@@ -1726,6 +1757,80 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
     "reviewer-after-route-back",
     "reviewer-before-route-back",
   ]);
+});
+
+test("implementation scope snapshot routes tracked drift back before verification and permits fresh execute re-entry", async () => {
+  const session = makeSession("execute-workspace-snapshot");
+  initializeTrackedSession(session);
+  const ambient = claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+
+  const deliver = path.join(session.sessionDir, `${session.slug}--deliver.md`);
+  fs.writeFileSync(deliver, "# Delivery\n\nTracked implementation scope.\n");
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "pass",
+    "--summary", "Tracked implementation scope recorded.",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, deliver), summary: "Delivery scope." }),
+  ]), 0);
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "verify");
+  const executeClaim = readJson(path.join(session.sessionDir, "trust.bundle")).claims.find((claim) => claim.claimType === "builder.execute.scope");
+  assert.deepEqual(executeClaim.metadata.gate_claim.workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+  assert.equal(executeClaim.metadata.gate_claim.workspace_snapshot.kind, "git-worktree");
+  const executeClaimId = executeClaim.id;
+  const executeSnapshot = structuredClone(executeClaim.metadata.gate_claim.workspace_snapshot);
+
+  // A public verify writer rebuilds the full trust bundle. Its rebuild must
+  // retain the immutable execute authority exactly rather than recapturing it.
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "tests-evidence", "--status", "fail",
+    "--summary", "Verification is intentionally deferred for the snapshot fixture.",
+  ]), 0);
+  const rebuiltExecuteClaim = readJson(path.join(session.sessionDir, "trust.bundle")).claims.find((claim) => claim.id === executeClaimId);
+  assert.deepEqual(rebuiltExecuteClaim.metadata.gate_claim.workspace_snapshot, executeSnapshot);
+
+  // This is a tracked source edit made directly after execute passed. No hook is
+  // involved. A well-shaped replacement execute claim even carries the fresh
+  // post-edit snapshot, but it was not the claim Flow accepted at execute.
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "implementation changed after execute\n");
+  const replacement = withIdentitySuffix(bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+  }), "replacement");
+  replacement.claim.metadata.gate_claim.workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  const attemptedVerify = await writeAndSync(session, [
+    replacement,
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    ...verifiedTestsPrerequisites(session),
+  ]);
+  assert.equal(attemptedVerify.run.state.current_step, "execute");
+  assert.equal(attemptedVerify.run.state.transitions.at(-1).type, "route_back");
+  assert.equal(attemptedVerify.run.state.transitions.at(-1).route_reason, "implementation_defect");
+
+  const reentered = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+  }), "fresh-snapshot")]);
+  assert.equal(reentered.run.state.current_step, "verify");
+  const freshSnapshot = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .find((claim) => claim.id.endsWith("fresh-snapshot"));
+  assert.deepEqual(freshSnapshot.metadata.gate_claim.workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+
+  // Runtime sidecar writes remain ignored, and no source change after fresh
+  // execute evidence must leave the run at verify rather than route it again.
+  const unchanged = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(unchanged.run.state.current_step, "verify");
+  assert.equal(unchanged.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
@@ -1762,6 +1867,157 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
     ["disputed-reviewer", "fail"],
     ["passing-reviewer", "pass"],
   ]);
+});
+
+test("same-reviewer rechecks reject incomplete passes and recover a legacy automatic edge", async () => {
+  const session = makeSession("same-reviewer-critique-recovery");
+  initializeTrackedSession(session);
+  const ambient = claimAmbientSessionAssignment(session);
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  const deliver = path.join(session.sessionDir, `${session.slug}--deliver.md`);
+  fs.writeFileSync(deliver, "# Delivery\n\n## Plan\n\nPublic implementation scope evidence.\n\n## Definition Of Done\n\n- **User outcome:** Critique recovery can advance this bounded fixture.\n- **Acceptance criteria:** The public scope claim enters verify.\n- **Evidence:** `true # fixture`.\n- **Stop-short risks:** None for the hermetic fixture.\n- **Durable docs target:** None for the hermetic fixture.\n- **Sandbox mode:** local-edit.\n\n## Verification Report\n\n`true # fixture`\n\n## Goal Fit Gate\n\n- [x] Fixture scope remains bounded.\n\n## Final Acceptance\n\n- [x] Fixture evidence recorded.\n");
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "pass",
+    "--summary", "Public implementation scope recorded for critique recovery.",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, deliver), summary: "Delivery scope." }),
+  ]), 0);
+  const verify = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(verify.run.state.current_step, "verify");
+
+  const lane = (id, status) => JSON.stringify({
+    id,
+    status,
+    summary: `${id} ${status}.`,
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  const finding = (status) => JSON.stringify({ id: "blocking-defect", severity: "high", status, description: "Requires repair." });
+  const record = (verdict, lanes, findingStatus, timestamp) => workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "repair-review", "--reviewer", "same-reviewer", "--verdict", verdict,
+    "--summary", `Same reviewer ${verdict}.`, "--artifact-ref", delivery,
+    ...lanes.flatMap(([id, status]) => ["--lane-json", lane(id, status)]),
+    "--finding-json", finding(findingStatus), "--timestamp", timestamp,
+  ]);
+  const recordedAt = (offset = 0) => new Date(Date.now() + offset).toISOString();
+
+  await record("fail", [["code-review", "fail"], ["security-review", "not_verified"]], "open", recordedAt());
+  const beforeIncomplete = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
+  await assert.rejects(
+    () => record("pass", [["code-review", "pass"]], "fixed", recordedAt(1)),
+    /must cover every failed lane and open finding/,
+  );
+  assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), beforeIncomplete, "an incomplete same-reviewer pass must not persist an edge");
+
+  // Simulate the observed pre-fix state: its hash chain is intact, but its
+  // automatic edge points at a pass that omitted a failed lane. Recovery uses
+  // the public writer only; the direct mutation is fixture setup for old data.
+  await record("pass", [["code-review", "pass"], ["security-review", "pass"]], "fixed", recordedAt(2));
+  const legacyBundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const legacyPass = legacyBundle.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 2);
+  const legacyPrior = legacyBundle.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 1);
+  legacyPass.metadata.lanes = legacyPass.metadata.lanes.filter((entry) => entry.id === "code-review");
+  const legacyRecord = {
+    critique_sequence: legacyPass.metadata.critique_sequence,
+    critique_predecessor_hash: legacyPass.metadata.critique_predecessor_hash,
+    reviewer: legacyPass.metadata.reviewer,
+    reviewed_at: legacyPass.metadata.reviewed_at,
+    verdict: legacyPass.value,
+    summary: legacyPass.fieldOrBehavior,
+    lanes: legacyPass.metadata.lanes,
+    review_target: legacyPass.metadata.review_target,
+    findings: legacyPass.metadata.findings,
+    workflow_subject_ref: legacyPass.metadata.workflow_subject_ref,
+  };
+  legacyPass.metadata.critique_record_hash = critiqueRecordHash(legacyRecord);
+  legacyPass.metadata.critique_record_id = `critique:${legacyPass.metadata.critique_record_hash}`;
+  legacyPrior.metadata.superseded_by = legacyPass.metadata.critique_record_id;
+  legacyPrior.metadata.critique_resolution.resolving_record_id = legacyPass.metadata.critique_record_id;
+  fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${JSON.stringify(legacyBundle, null, 2)}\n`);
+  assert.equal(validateCritiqueResolutionGraph(legacyBundle.claims, SUBJECT, [], session.projectRoot).valid, false, "legacy incomplete automatic edge must be invalid");
+
+  await record("pass", [["code-review", "pass"], ["security-review", "pass"]], "fixed", recordedAt(3));
+  const recovered = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const recoveredPass = recovered.claims.find((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence === 3);
+  const history = recovered.claims.filter((claim) => claim.metadata?.origin === "critique" && claim.metadata?.critique_sequence < 3);
+  assert.ok(recoveredPass);
+  assert.deepEqual(history.map((claim) => claim.metadata.critique_resolution.resolving_record_id), [recoveredPass.metadata.critique_record_id, recoveredPass.metadata.critique_record_id]);
+  assert.equal(validateCritiqueResolutionGraph(recovered.claims, SUBJECT, [], session.projectRoot).valid, true, "a corrected public re-review repairs the same-reviewer lineage");
+  const artifactValidation = spawnSync(process.execPath, [
+    path.resolve(import.meta.dirname, "../../build/src/cli/validate-workflow-artifacts.js"),
+    "--require-critique", session.sessionDir,
+  ], { cwd: session.projectRoot, encoding: "utf8" });
+  assert.equal(artifactValidation.status, 0, artifactValidation.stderr);
+
+  // The public writer leaves the recovered history intact. Add current
+  // acceptance/tests evidence to that complete candidate bundle and prove that
+  // only the live recovery record satisfies this verify visit while every
+  // predecessor remains necessary to validate the append-only graph.
+  const timestamp = recordedAt(4);
+  const executeClaim = recovered.claims.find((claim) => claim.claimType === "builder.execute.scope");
+  const acceptedExecuteClaim = verify.run.manifest.evidence
+    .find((entry) => entry.gate_id === "execute-gate" && !entry.superseded_by)
+    .bundle.claims.find((claim) => claim.claimType === "builder.execute.scope");
+  assert.equal(executeClaim.id, acceptedExecuteClaim.id);
+  assert.equal(executeClaim.subjectId, acceptedExecuteClaim.subjectId);
+  assert.equal(executeClaim.status, acceptedExecuteClaim.status);
+  assert.deepEqual(executeClaim.metadata.gate_claim.workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+  const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp });
+  const [, criterion] = verifiedTestsPrerequisites(session, timestamp);
+  recovered.claims.push(tests.claim, criterion.claim);
+  recovered.evidence.push(tests.evidence, criterion.evidence);
+  recovered.events.push(tests.event, criterion.event);
+  writeJson(path.join(session.sessionDir, "trust.bundle"), recovered);
+  const advanced = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(advanced.attached, true);
+  assert.equal(advanced.run.state.current_step, "merge-ready", JSON.stringify(advanced.run.state.transitions.at(-1)));
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("same-reviewer rechecks remain recoverable after implementation history is rebased", async () => {
+  const session = makeSession("same-reviewer-rebase-recovery");
+  initializeTrackedSession(session);
+  const delivery = path.join(session.projectRoot, "review-target", "delivery.md");
+  const reviewer = "same-reviewer-after-rebase";
+  const lane = (status) => JSON.stringify({
+    id: "code-review",
+    status,
+    summary: `Rebase recovery ${status}.`,
+    evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, delivery), summary: "Reviewed delivery artifact." }],
+  });
+  const finding = (status) => JSON.stringify({ id: "rebase-defect", severity: "medium", status, description: "Repair must survive a history rewrite." });
+  const record = (verdict, laneStatus, findingStatus, timestamp) => workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "rebase-review", "--reviewer", reviewer, "--verdict", verdict,
+    "--summary", `Same reviewer ${verdict} after rebase.`, "--artifact-ref", delivery,
+    "--lane-json", lane(laneStatus), "--finding-json", finding(findingStatus), "--timestamp", timestamp,
+  ]);
+
+  await record("fail", "fail", "open", "2030-01-01T00:00:00.000Z");
+  const priorHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  fs.writeFileSync(delivery, "reviewed delivery artifact after rebase\n");
+  execFileSync("git", ["add", "review-target/delivery.md"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "--amend", "-qm", "Rebased implementation"], { cwd: session.projectRoot });
+  const resolvingHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  assert.notEqual(priorHead, resolvingHead);
+  assert.notEqual(spawnSync("/usr/bin/git", ["merge-base", "--is-ancestor", priorHead, resolvingHead], { cwd: session.projectRoot }).status, 0);
+
+  await record("pass", "pass", "fixed", "2030-01-01T00:01:00.000Z");
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const graph = validateCritiqueResolutionGraph(bundle.claims, SUBJECT, [], session.projectRoot);
+  assert.equal(graph.valid, true, graph.errors.join("; "));
+  const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === "critique");
+  const prior = critiques.find((claim) => claim.metadata?.review_target?.workspace_snapshot?.head_sha === priorHead);
+  const resolving = critiques.find((claim) => claim.metadata?.review_target?.workspace_snapshot?.head_sha === resolvingHead);
+  assert.equal(prior.metadata.critique_resolution.kind, "same-reviewer-recheck");
+  assert.equal(prior.metadata.superseded_by, resolving.metadata.critique_record_id);
 });
 
 externalAuthorityE2E("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
@@ -2115,6 +2371,35 @@ test("producer-superseded FAIL is audit history and live PASS drives verify", as
   const attached = result.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate" && !entry.superseded_by);
   assert.equal(attached.length, 1);
   assert.deepEqual(attached[0].expectation_ids.sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
+});
+
+test("malformed superseded critique history blocks otherwise-current verify evidence", async () => {
+  const session = makeSession("malformed-full-critique-history");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const timestamp = new Date().toISOString();
+  const [historical] = verifiedTestsPrerequisites(session, timestamp);
+  historical.claim.producerStatus = "superseded";
+  const [current, criterion] = verifiedTestsPrerequisites(session, timestamp);
+  current.claim.metadata.critique_sequence = 2;
+  current.claim.metadata.critique_predecessor_hash = CRITIQUE_CHAIN_GENESIS;
+  restampCritiqueClaim(current);
+  await assert.rejects(
+    () => writeAndSync(session, [
+      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp }),
+      historical,
+      current,
+      criterion,
+    ]),
+    /evidence\.critique\.resolution_graph: critique sequence must form one contiguous predecessor hash chain/,
+  );
 });
 
 test("partial passing review snapshot waits for the complete verify expectation set", async () => {
@@ -2648,7 +2933,6 @@ async function advanceSessionToPrOpen(session) {
 test("configured ChangeProvider projects only the operation-specific executable contract", async () => {
   const session = makeSession("configured-change-provider");
   writeJson(path.join(session.projectRoot, "package.json"), { repository: "https://github.com/kontourai/flow-agents.git" });
-  await advanceSessionToPrOpen(session);
   writeJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json"), {
     schema_version: "1.0",
     defaults: {
@@ -2659,6 +2943,7 @@ test("configured ChangeProvider projects only the operation-specific executable 
       },
     },
   });
+  await advanceSessionToPrOpen(session);
   const configured = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   const publish = configured.gateActionEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "operation");
   assert.equal(configured.projection.next_action.status, "continue");
@@ -2677,12 +2962,12 @@ test("Flow completion authenticates the exact issued publish-change observation 
   const session = makeSession("publish-change-transaction");
   const ambient = claimAmbientSessionAssignment(session);
   writeJson(path.join(session.projectRoot, "package.json"), { repository: "https://github.com/kontourai/flow-agents.git" });
-  await advanceSessionToPrOpen(session);
   writeJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json"), {
     schema_version: "1.0",
     defaults: { provider: { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe"], executor: "gh-cli" } },
   });
   initializePublishChangeGitRepository(session.projectRoot);
+  await advanceSessionToPrOpen(session);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
     title: "Open the authenticated transaction", body: "Provider observation fixture.", base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
   } });
@@ -2778,8 +3063,8 @@ async function preparePublishChangeTransaction(slug) {
   const session = makeSession(slug);
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
-  await advanceSessionToPrOpen(session);
   initializePublishChangeGitRepository(session.projectRoot);
+  await advanceSessionToPrOpen(session);
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
     title: "Authenticated transaction fixture", body: "Provider observation fixture.",
     base_ref: "main", head_ref: "agent/publish-change", head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
@@ -2855,7 +3140,7 @@ test("stale publish-change actions fail before provider execution or canonical m
     });
     await assert.rejects(
       () => complete({ sessionDir: session.sessionDir, action }),
-      /(publish-change\.assignment|does not match the current canonical run, gate visit, assignment actor, or provider configuration)/,
+      /(publish-change\.assignment|does not match the current canonical run, gate visit, assignment actor, or provider configuration|implementation-scope\.workspace_snapshot)/,
     );
     assert.equal(observations, 0, "stale action must be rejected before provider create/recover");
     assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
@@ -2932,8 +3217,8 @@ test("provider failures cannot leak hostile output into publish-change artifacts
   const session = makeSession("publish-change-secret-boundary");
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
-  await advanceSessionToPrOpen(session);
   initializePublishChangeGitRepository(session.projectRoot);
+  await advanceSessionToPrOpen(session);
   const diagnostics = [];
   const previousConsoleError = console.error;
   console.error = (...args) => diagnostics.push(args.map(String).join(" "));
@@ -2967,10 +3252,11 @@ test("provider failures cannot leak hostile output into publish-change artifacts
 
 function initializePublishChangeGitRepository(projectRoot) {
   fs.writeFileSync(path.join(projectRoot, "README.md"), "publish-change fixture\n");
+  fs.writeFileSync(path.join(projectRoot, ".gitignore"), ".kontourai/\n");
   execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "fixture@example.test"], { cwd: projectRoot });
   execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
-  execFileSync("git", ["add", "README.md"], { cwd: projectRoot });
+  execFileSync("git", ["add", ".gitignore", "README.md"], { cwd: projectRoot });
   execFileSync("git", ["commit", "-m", "fixture"], { cwd: projectRoot, stdio: "ignore" });
   execFileSync("git", ["branch", "-M", "agent/publish-change"], { cwd: projectRoot });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/kontourai/flow-agents.git"], { cwd: projectRoot });
@@ -2994,6 +3280,7 @@ function configurePublishChangeProvider(projectRoot) {
 function installRecoveringFakeGh(projectRoot, body) {
   const bin = path.join(projectRoot, "fake-bin");
   const log = path.join(projectRoot, "fake-gh.log");
+  fs.appendFileSync(path.join(projectRoot, ".git", "info", "exclude"), "fake-gh.log\n");
   fs.mkdirSync(bin, { recursive: true });
   const list = JSON.stringify([{ id: "PR_fixture", number: 604, state: "OPEN", baseRefName: "main", headRefName: "agent/publish-change", headRefOid: execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim(), title: "Composed provider recovery", body, isDraft: false }]);
   const record = JSON.stringify({ node_id: "PR_fixture", number: 604, html_url: "https://github.com/kontourai/flow-agents/pull/604", state: "OPEN", title: "Composed provider recovery", body, draft: false, base: { ref: "main", repo: { full_name: "kontourai/flow-agents" } }, head: { ref: "agent/publish-change", sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim() } });
@@ -3005,10 +3292,10 @@ test("in-process publish-change composition recovers through an injected GitHub 
   const session = makeSession("publish-change-composed");
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
-  await advanceSessionToPrOpen(session);
   initializePublishChangeGitRepository(session.projectRoot);
   const body = "Recovered through the configured adapter.";
   const fake = installRecoveringFakeGh(session.projectRoot, body);
+  await advanceSessionToPrOpen(session);
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
   const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
     title: "Composed provider recovery", body,
@@ -3044,7 +3331,6 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
   const session = makeSession("publish-change-public-path-shim");
   const ambient = claimAmbientSessionAssignment(session);
   configurePublishChangeProvider(session.projectRoot);
-  await advanceSessionToPrOpen(session);
   initializePublishChangeGitRepository(session.projectRoot);
   const shimDirectory = path.join(session.projectRoot, "public-path-shim");
   const shimLog = path.join(session.projectRoot, "public-path-shim.log");
@@ -3052,13 +3338,14 @@ test("public publish-change ignores a PATH-prepended gh shim and cannot advance 
   fs.mkdirSync(shimDirectory, { recursive: true });
   fs.writeFileSync(path.join(shimDirectory, "gh"), `#!/bin/sh\nprintf 'shim invoked\\n' >> '${shimLog}'\nexit 0\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(shimDirectory, "git"), `#!/bin/sh\nprintf 'git shim invoked\\n' >> '${gitShimLog}'\nprintf '%s\\n' '${"f".repeat(40)}'\n`, { mode: 0o755 });
+  const emptyGhConfig = path.join(session.projectRoot, "empty-gh-config");
+  fs.mkdirSync(emptyGhConfig, { recursive: true });
+  await advanceSessionToPrOpen(session);
   const before = snapshotTree(runDir(session.slug, session.projectRoot));
   const previousPath = process.env.PATH;
   const previousGhConfigDir = process.env.GH_CONFIG_DIR;
   const previousGhToken = process.env.GH_TOKEN;
   const previousGithubToken = process.env.GITHUB_TOKEN;
-  const emptyGhConfig = path.join(session.projectRoot, "empty-gh-config");
-  fs.mkdirSync(emptyGhConfig, { recursive: true });
   process.env.PATH = `${shimDirectory}${path.delimiter}${previousPath}`;
   process.env.GH_CONFIG_DIR = emptyGhConfig;
   delete process.env.GH_TOKEN;
@@ -3133,8 +3420,13 @@ test("pr-open route-back with an undeclared reason still throws and mutates noth
   const flowDirectory = runDir(session.slug, session.projectRoot);
   const beforeState = readJson(path.join(flowDirectory, "state.json"));
   const beforeManifest = readJson(path.join(flowDirectory, FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+  const executeAuthority = readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .find((claim) => claim.claimType === "builder.execute.scope" && claim.producerStatus !== "superseded");
+  assert.ok(executeAuthority);
+  assert.equal(executeAuthority.status, "verified");
+  assert.deepEqual(executeAuthority.metadata.gate_claim.workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
 
-  writeBundle(session.sessionDir, [bundleClaim({
+  writeBundlePreservingExecute(session, [bundleClaim({
     expectation: "pull-request-opened",
     claimType: "builder.pr-open.pull-request",
     subjectType: "pull-request",
@@ -3142,6 +3434,7 @@ test("pr-open route-back with an undeclared reason still throws and mutates noth
     routeReason: "stale_critique",
     timestamp: new Date().toISOString(),
   })]);
+  assert.equal(readJson(path.join(session.sessionDir, "trust.bundle")).claims.filter((claim) => claim.claimType === "builder.execute.scope").length, 1);
   await assert.rejects(
     () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
     /route_reason.*is not declared by gate builder\.publish-learn:pr-open-gate/,

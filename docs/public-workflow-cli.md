@@ -149,10 +149,33 @@ files and the workspace snapshot are
 hashed into the stored review target so later implementation changes invalidate
 stale clean critiques.
 
+`implementation-scope` is also exact-workspace authority. A passing execute
+claim stores a versioned immutable workspace snapshot. Any later tracked source
+or documentation change causes downstream synchronization to fail with
+`implementation_defect` and routes the same Builder run back to `execute`; the
+agent records fresh execute evidence after completing the changed scope. This
+check runs in the public runtime even when hooks are absent or stale. Canceling
+a run remains a separately user-authorized lifecycle operation, not a recovery
+mechanism for stale implementation evidence.
+
 Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
+
+Same-reviewer public re-reviews are append-only. A passing `workflow critique`
+for the same review id and reviewer is rejected before mutation unless its
+passing lanes cover every failed or not-verified lane and its findings resolve
+every open finding in its eligible recheck lineage. A later complete re-review
+repairs an older automatic same-reviewer-recheck edge by pointing that lineage
+to the new pass. It preserves history and never rewrites a signed
+cross-reviewer resolution. The writer validates the complete candidate critique
+graph before atomically replacing `trust.bundle`; an invalid candidate leaves
+the prior bundle unchanged. A same-reviewer recheck may cover a rebased or
+otherwise rewritten implementation history after route-back because that reviewer
+is re-evaluating their own lane against a fresh immutable workspace snapshot.
+Cross-reviewer resolution continues to require trusted Git ancestry and external
+authorization because it transfers resolution authority between identities.
 
 ## Resolving repaired critique history
 

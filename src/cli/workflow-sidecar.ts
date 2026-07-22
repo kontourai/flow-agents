@@ -1070,6 +1070,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
+    // A passed execute scope is authority over the exact workspace bytes that
+    // were implemented. Preserve a previously recorded snapshot on rebuild;
+    // only a first public write is allowed to capture it.
+    const gateClaimWorkspaceSnapshot = check._gate_claim_workspace_snapshot && typeof check._gate_claim_workspace_snapshot === "object" && !Array.isArray(check._gate_claim_workspace_snapshot)
+      ? check._gate_claim_workspace_snapshot as AnyObj
+      : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1161,8 +1167,14 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
+      const executeWorkspaceSnapshot = declared.claimType === "builder.execute.scope" && effectiveStatus === "pass"
+        ? (gateClaimWorkspaceSnapshot ?? (() => {
+            if (!flowAgentsDir) die("passing implementation-scope requires a session workspace for its immutable snapshot");
+            return captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(path.join(flowAgentsDir, slug)), []);
+          })())
+        : null;
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(executeWorkspaceSnapshot ? { workspace_snapshot: executeWorkspaceSnapshot } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -1405,12 +1417,16 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
 // fail-open write = SILENT DATA LOSS. Data-persisting writers must fail loudly when the
 // bundle was not written (Surface unavailable, validation, or I/O) instead of exiting 0
 // and dropping the record. (Was masked as a "flaky" concurrent-critique test.)
+function bundleNotWrittenMessage(errors: string[]): string {
+  const reason = errors.length
+    ? errors.join("; ")
+    : "@kontourai/surface is unavailable — it is REQUIRED to persist the trust.bundle (bundle-only workspace, ADR 0010 Phase 4c). Install it (>= 1.2) and retry.";
+  return `trust.bundle was NOT written — the record was not persisted: ${reason}`;
+}
+
 function assertBundleWritten(result: { written: boolean; errors: string[] }): void {
   if (result.written) return;
-  const reason = result.errors.length
-    ? result.errors.join("; ")
-    : "@kontourai/surface is unavailable — it is REQUIRED to persist the trust.bundle (bundle-only workspace, ADR 0010 Phase 4c). Install it (>= 1.2) and retry.";
-  die(`trust.bundle was NOT written — the record was not persisted: ${reason}`);
+  die(bundleNotWrittenMessage(result.errors));
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3653,6 +3669,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
+    // Preserve the execute authority verbatim. It is compared by the Builder
+    // runtime, not regenerated during unrelated trust-bundle rebuilds.
+    if (gc.workspace_snapshot && typeof gc.workspace_snapshot === "object" && !Array.isArray(gc.workspace_snapshot)) {
+      check._gate_claim_workspace_snapshot = gc.workspace_snapshot;
+    }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -4524,6 +4545,38 @@ export function normalizeFinding(raw: AnyObj, projectRoot = process.cwd()): AnyO
   return raw;
 }
 
+const resolvedFindingStatuses = new Set(["fixed", "accepted", "deferred", "false_positive"]);
+
+function sameReviewerRecheckLineage(prior: AnyObj, resolving: AnyObj): boolean {
+  if (prior.id !== resolving.id || prior.reviewer !== resolving.reviewer) return false;
+  const resolution = prior.critique_resolution;
+  // Re-review recovery may replace only automatic same-reviewer edges. An
+  // independently authorized cross-reviewer resolution remains immutable.
+  return !resolution || (typeof resolution === "object" && !Array.isArray(resolution)
+    && resolution.kind === "same-reviewer-recheck");
+}
+
+function sameReviewerRecheckCoverage(prior: AnyObj, resolving: AnyObj): { lanes: string[]; findings: string[]; complete: boolean } {
+  const lanes = (Array.isArray(prior.lanes) ? prior.lanes : [])
+    .filter((lane: AnyObj) => lane.status !== "pass")
+    .map((lane: AnyObj) => lane.id)
+    .sort();
+  const resolvingLanes = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : [])
+    .map((lane: AnyObj) => [lane.id, lane.status]));
+  const findings = (Array.isArray(prior.findings) ? prior.findings : [])
+    .filter((finding: AnyObj) => finding.status === "open")
+    .map((finding: AnyObj) => finding.id)
+    .sort();
+  const resolvingFindings = new Map((Array.isArray(resolving.findings) ? resolving.findings : [])
+    .map((finding: AnyObj) => [finding.id, finding.status]));
+  return {
+    lanes,
+    findings,
+    complete: lanes.every((id: string) => resolvingLanes.get(id) === "pass")
+      && findings.every((id: string) => resolvedFindingStatuses.has(resolvingFindings.get(id))),
+  };
+}
+
 async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
@@ -4598,28 +4651,59 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // distinction yet — that lands with the runtime actor-identity slice (#287/#290). Same-reviewer-
   // string scoping is the strongest honest enforcement available today and matches the granularity
   // the critique record already has.
+  const sameReviewerLineage = critique.verdict === "pass"
+    ? bundleCritiques.filter((entry: AnyObj) => sameReviewerRecheckLineage(entry, critique))
+    : [];
+  for (const prior of sameReviewerLineage) {
+    if (!sameReviewerRecheckCoverage(prior, critique).complete) {
+      die(`record-critique passing same-reviewer recheck must cover every failed lane and open finding from ${prior.critique_record_id}`);
+    }
+  }
   const _supersedeMarker = critique.critique_record_id;
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
-    const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
-    const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
-    if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
-      const resolvedLaneIds = (Array.isArray(e.lanes) ? e.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
-      const resolvedFindingIds = (Array.isArray(e.findings) ? e.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+    if (sameReviewerLineage.includes(e)) {
+      const coverage = sameReviewerRecheckCoverage(e, critique);
       return { ...e, superseded_by: _supersedeMarker, critique_resolution: {
         schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: e.critique_record_id,
         resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
-        resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
+        resolved_lane_ids: coverage.lanes, resolved_finding_ids: coverage.findings, resolved_at: critique.reviewed_at,
       } };
     }
     return e;
   });
   const critiques = [..._mergedCritiques, critique];
+  const priorBundle = loadJson(path.join(dir, "trust.bundle"));
+  const resolutionEvents = Array.isArray(priorBundle.critique_resolution_events) ? priorBundle.critique_resolution_events : [];
+  const candidateBundle = await buildTrustBundle(
+    slug,
+    critique.reviewed_at,
+    _critiqueState.checks,
+    _critiqueState.criteria,
+    critiques,
+    undefined,
+    path.dirname(dir),
+    undefined,
+    exactFlowContext,
+    resolutionEvents,
+  );
+  if (!candidateBundle) die(bundleNotWrittenMessage([]));
+  const candidateGraph = validateCritiqueResolutionGraph(
+    Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [],
+    workflowSubjectRef,
+    resolutionEvents,
+    projectRoot,
+    false,
+    "writer",
+  );
+  if (!candidateGraph.valid) {
+    die(`record-critique refused an invalid candidate critique graph: ${candidateGraph.errors.join("; ")}`);
+  }
   // Phase 4c: build bundle from raw inputs; read checks/criteria via the shared compose-safe
   // readBundleState path (#270 LOW consolidation) instead of hand-rolling the identical
   // checksFromBundle + acceptance.json read inline — this is the exact pattern readBundleState
   // already exists to share; recordLearning uses it directly (see below) and recordCritique
   // previously duplicated it by hand for no reason.
-  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext));
+  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext, resolutionEvents));
   return 0;
 }
 

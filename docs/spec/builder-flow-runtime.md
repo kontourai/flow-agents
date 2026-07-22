@@ -85,6 +85,23 @@ manufacture a fresh identity. Because those identities are embedded in TrustBund
 genuinely new identity necessarily changes the bundle SHA-256; byte-identical
 replay remains pending rather than consuming another attempt.
 
+### Execute workspace authority
+
+A passing `implementation-scope` claim records a versioned immutable
+`metadata.gate_claim.workspace_snapshot`. In a Git worktree it is a trusted Git
+snapshot of `HEAD`, tracked changes, and non-ignored untracked files; ignored
+runtime sidecars therefore do not create implementation drift. Flow Agents
+preserves that snapshot through every trust-bundle rebuild rather than
+recapturing it at a later step.
+
+Before Builder synchronizes any downstream gate evidence, it compares that
+stored snapshot with a fresh trusted capture. A missing, malformed, ambiguous,
+or different snapshot is not current execute authority. If downstream evidence
+is being synchronized, the runtime canonically evaluates that gate as failed
+with `implementation_defect`, so the same run routes to `execute`. Fresh
+implementation-scope evidence after re-entry captures a new snapshot. This is a
+runtime invariant; hooks are only defense in depth and cannot weaken it.
+
 Every gate visit has a canonical boundary: the latest Flow transition into the
 step, or the run's initial timestamp for its entry step. Claim creation and
 observation timestamps must fall within that visit and may not be more than 30
@@ -367,6 +384,15 @@ administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
+The coordinator's logical configuration root remains `/etc/kontourai/...` on every Unix host.
+Package-side completion verification selects the equivalent platform-canonical pinned path before
+performing its component checks: Darwin uses `/private/etc/kontourai/...` because the operating
+system defines `/etc` as a symlink to `/private/etc`, while other supported Unix platforms use
+`/etc/kontourai/...` directly. This mapping is fixed in package code, not configurable by a caller.
+Every component below the selected canonical root must still be root-owned, non-writable by the
+runtime user, group, and world, and free of symlinks. The key is opened with `O_NOFOLLOW`, validated
+as a bounded protected regular file, and read from that same descriptor before Ed25519 verification.
+
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
 a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
@@ -398,6 +424,37 @@ authority roots. Flow's
 current lifecycle authority vocabulary also requires agent-owned pause/resume events to use the
 closest available `operator_request` shape; a distinct canonical runtime authority is tracked in
 Flow issue #118.
+
+Same-reviewer public re-reviews are append-only. Before a passing
+`record-critique` can supersede a same-id, same-reviewer record, its passing
+lanes must cover every failed or not-verified lane and its structured findings
+must resolve every open finding from every eligible record in that recheck
+lineage. An incomplete pass is rejected before the bundle changes. A later
+complete public re-review may repair an older automatic same-reviewer recheck
+edge by retargeting that lineage to the new pass; it preserves each historical
+record and never retargets a signed cross-reviewer edge. Before persistence, the
+writer validates the complete candidate critique graph in writer mode and
+atomically replaces `trust.bundle` only when the graph is structurally valid.
+Writer mode permits unresolved live review verdicts, which are legitimate gate
+state, but still enforces chain, resolution, subject, actor, coverage, snapshot,
+and event integrity.
+
+A same-reviewer recheck does not require the prior reviewed Git commit to be an
+ancestor of the new reviewed commit. Canonical execute route-backs can replace or
+rebase implementation history, and the same reviewer remains responsible for
+re-evaluating their own lane against the fresh immutable workspace snapshot and
+covering all prior failed lanes and findings. A cross-reviewer resolution still
+requires trusted Git ancestry plus its externally authorized resolution event;
+history rewriting never weakens an authority transfer between reviewers.
+
+When passing `tests-evidence` is synchronized, Builder validates the critique
+resolution graph against the complete candidate bundle, including superseded
+critique history. This preserves the required contiguous append-only chain and
+makes prior recovery records auditable. Separately, only live critique records
+that are current for the active verify-gate visit can satisfy the clean-critique
+requirement: each must be substantive, passing, and review the current
+implementation workspace. Historical, stale, superseded, or open records never
+satisfy that current-visit requirement.
 
 ```text
 flow-agents builder-run pause --session-dir <dir> --reason <text>
