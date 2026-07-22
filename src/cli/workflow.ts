@@ -582,8 +582,9 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
 }
 
 type EvidenceFileSnapshot = { file: string; exists: boolean; bytes: Buffer | null };
+type EvidenceWrittenFile = { file: string; descriptor: number; identity: { dev: number; ino: number }; digest: string };
 type CommandObservationReport = { ordinal: number; observation_id: string; exit_code: number; output_sha256: string; outcome: "pass" | "fail" };
-type EvidenceDirectoryIdentity = { artifactRoot: string; sessionDir: string; artifact: { dev: number; ino: number; realpath: string }; session: { dev: number; ino: number; realpath: string } };
+type EvidenceDirectoryIdentity = { artifactRoot: string; sessionDir: string; artifact: { dev: number; ino: number; realpath: string; descriptor: number }; session: { dev: number; ino: number; realpath: string; descriptor: number } };
 type EvidenceReceipt = {
   runId: string; subject: string | null; gateId: string; stepId: string | null; expectedRunHead: string;
   expectationIds: string[]; expectation: string; visit: { enteredAt: number; initial: boolean };
@@ -611,22 +612,23 @@ async function runEvidenceTransaction(input: {
   const abortCapability = createWriterTransactionAbortCapability(input.sessionDir);
   const trustBundle = snapshotEvidenceFile(trustBundleFile);
   const beforeEvidence = manifestEvidenceIdentity(input.beforeRun.manifest);
-  const beforeIds = new Set(beforeEvidence.map((entry) => entry.id));
   const preMutationReceipt = captureEvidenceReceipt(input.beforeRun, input.expectation, input.expectedRunHead);
   let digest: string | null = null;
   let receipt: EvidenceReceipt | null = null;
+  let writtenTrust: EvidenceWrittenFile | null = null;
   try {
     await mainFromPublicWorkflow([
       "record-gate-claim", input.sessionDir, ...input.forwarded, "--actor", input.callerActor,
       "--flow-run-head", input.expectedRunHead,
     ], { writerTransactionId: transactionId });
+    writtenTrust = snapshotTransactionWrittenFile(trustBundleFile);
+    digest = writtenTrust.digest;
     await workflowEvidenceTransactionTestHooks?.afterRecord?.();
-    digest = fileSha256(trustBundleFile);
     receipt = receiptForGateClaim(trustBundleFile, preMutationReceipt, digest);
     const synchronized = await syncBuilderFlowSession({ sessionDir: input.sessionDir, expectedRunHead: input.expectedRunHead });
     const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
     await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
-    assertEvidencePostconditions(synchronized.attached, beforeIds, run, receipt);
+    assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
     await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
     const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
     const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
@@ -641,16 +643,21 @@ async function runEvidenceTransaction(input: {
       }),
     };
   } catch (error) {
-    return classifyEvidenceTransactionFailure(input, transactionId, abortCapability, trustBundle, directories, receipt, beforeIds, error);
+    return await classifyEvidenceTransactionFailure(input, transactionId, abortCapability, trustBundle, writtenTrust, directories, receipt, beforeEvidence, error);
+  } finally {
+    if (writtenTrust) {
+      try { fs.closeSync(writtenTrust.descriptor); } catch { /* descriptor already closed */ }
+    }
+    closeEvidenceDirectoryIdentity(directories);
   }
 }
 
 async function classifyEvidenceTransactionFailure(
   input: { sessionDir: string; slug: string; projectRoot: string; requestedStatus: string }, transactionId: string, abortCapability: WriterTransactionAbortCapability,
-  trustBundle: EvidenceFileSnapshot, directories: EvidenceDirectoryIdentity, receipt: EvidenceReceipt | null,
-  beforeIds: ReadonlySet<string>, error: unknown,
+  trustBundle: EvidenceFileSnapshot, writtenTrust: EvidenceWrittenFile | null, directories: EvidenceDirectoryIdentity, receipt: EvidenceReceipt | null,
+  beforeEvidence: readonly JsonRecord[], error: unknown,
 ): Promise<EvidenceTransactionResult> {
-  const attachment = await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeIds);
+  const attachment = await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeEvidence);
   if (attachment === "attached") {
     try {
       const recovered = await recoverBuilderFlowSession({ sessionDir: input.sessionDir });
@@ -673,8 +680,9 @@ async function classifyEvidenceTransactionFailure(
     catch (recoveryError) { return { state: "recovery_required", error: evidenceRecoveryError(error, recoveryError) }; }
   }
   if (attachment !== "unattached") return { state: "recovery_required", error };
+  if (!writtenTrust) return { state: "recovery_required", error };
   try {
-    restoreTrustBundleSnapshot(trustBundle, directories);
+    restoreTrustBundleSnapshot(trustBundle, writtenTrust, directories);
     if (!appendWriterTransactionAbort(abortCapability, transactionId, new Date().toISOString())) {
       return { state: "recovery_required", error: new Error(`workflow evidence preserved command-log.jsonl but could not append its abort marker: ${errorMessage(error)}`) };
     }
@@ -702,84 +710,136 @@ function snapshotEvidenceFile(file: string): EvidenceFileSnapshot {
   }
 }
 
+function snapshotTransactionWrittenFile(file: string): EvidenceWrittenFile {
+  const descriptor = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const current = fs.lstatSync(file);
+    if (!opened.isFile() || current.isSymbolicLink() || !current.isFile() || opened.dev !== current.dev || opened.ino !== current.ino) {
+      throw new Error("workflow evidence cannot bind the transaction-written trust.bundle identity");
+    }
+    const bytes = readDescriptorBytes(descriptor);
+    return {
+      file,
+      descriptor,
+      identity: { dev: opened.dev, ino: opened.ino },
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    };
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
 function snapshotEvidenceDirectoryIdentity(sessionDir: string): EvidenceDirectoryIdentity {
   const artifactRoot = path.dirname(sessionDir);
   const artifact = snapshotDirectoryIdentity(artifactRoot, "artifact root");
-  const session = snapshotDirectoryIdentity(sessionDir, "session directory");
-  if (path.dirname(session.realpath) !== artifact.realpath) {
-    throw new Error("workflow evidence session directory is not canonically contained by its artifact root");
+  try {
+    const session = snapshotDirectoryIdentity(sessionDir, "session directory");
+    if (path.dirname(session.realpath) !== artifact.realpath) {
+      fs.closeSync(session.descriptor);
+      throw new Error("workflow evidence session directory is not canonically contained by its artifact root");
+    }
+    return { artifactRoot, sessionDir, artifact, session };
+  } catch (error) {
+    fs.closeSync(artifact.descriptor);
+    throw error;
   }
-  return { artifactRoot, sessionDir, artifact, session };
 }
 
-function snapshotDirectoryIdentity(directory: string, label: string): { dev: number; ino: number; realpath: string } {
-  const stat = fs.lstatSync(directory);
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`workflow evidence ${label} must be a non-symlink directory`);
-  return { dev: stat.dev, ino: stat.ino, realpath: fs.realpathSync.native(directory) };
+function snapshotDirectoryIdentity(directory: string, label: string): { dev: number; ino: number; realpath: string; descriptor: number } {
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    const current = fs.lstatSync(directory);
+    if (!stat.isDirectory() || current.isSymbolicLink() || !current.isDirectory() || stat.dev !== current.dev || stat.ino !== current.ino) {
+      throw new Error(`workflow evidence ${label} must be a stable non-symlink directory`);
+    }
+    return { dev: stat.dev, ino: stat.ino, realpath: fs.realpathSync.native(directory), descriptor };
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function closeEvidenceDirectoryIdentity(identity: EvidenceDirectoryIdentity): void {
+  try { fs.closeSync(identity.session.descriptor); } catch { /* closed */ }
+  try { fs.closeSync(identity.artifact.descriptor); } catch { /* closed */ }
 }
 
 function assertEvidenceDirectoryIdentity(identity: EvidenceDirectoryIdentity): void {
   const current = snapshotEvidenceDirectoryIdentity(identity.sessionDir);
-  if (current.artifactRoot !== identity.artifactRoot
-    || current.artifact.dev !== identity.artifact.dev || current.artifact.ino !== identity.artifact.ino || current.artifact.realpath !== identity.artifact.realpath
-    || current.session.dev !== identity.session.dev || current.session.ino !== identity.session.ino || current.session.realpath !== identity.session.realpath) {
-    throw new Error("workflow evidence recovery refused: artifact-root or session-directory identity changed");
+  try {
+    if (current.artifactRoot !== identity.artifactRoot
+      || current.artifact.dev !== identity.artifact.dev || current.artifact.ino !== identity.artifact.ino || current.artifact.realpath !== identity.artifact.realpath
+      || current.session.dev !== identity.session.dev || current.session.ino !== identity.session.ino || current.session.realpath !== identity.session.realpath) {
+      throw new Error("workflow evidence recovery refused: artifact-root or session-directory identity changed");
+    }
+  } finally {
+    closeEvidenceDirectoryIdentity(current);
   }
 }
 
-function restoreTrustBundleSnapshot(snapshot: EvidenceFileSnapshot, directories: EvidenceDirectoryIdentity): void {
+function restoreTrustBundleSnapshot(snapshot: EvidenceFileSnapshot, written: EvidenceWrittenFile, directories: EvidenceDirectoryIdentity): void {
   assertEvidenceDirectoryIdentity(directories);
-  let existing: fs.Stats | null = null;
-  try { existing = fs.lstatSync(snapshot.file); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (existing && (existing.isSymbolicLink() || !existing.isFile())) {
-    throw new Error(`workflow evidence refuses to restore over non-regular file ${snapshot.file}`);
-  }
+  assertTransactionWrittenFileIdentity(written);
   if (!snapshot.exists) {
-    if (existing) {
-      workflowEvidenceTransactionTestHooks?.beforeTrustUnlink?.();
-      assertEvidenceDirectoryIdentity(directories);
-      fs.unlinkSync(snapshot.file);
-      fsyncDirectory(path.dirname(snapshot.file), directories);
+    workflowEvidenceTransactionTestHooks?.beforeTrustUnlink?.();
+    assertEvidenceDirectoryIdentity(directories);
+    assertTransactionWrittenFileIdentity(written);
+    const quarantine = path.join(path.dirname(snapshot.file), `.trust.bundle.aborted-${randomBytes(16).toString("hex")}`);
+    fs.renameSync(snapshot.file, quarantine);
+    const quarantined = fs.lstatSync(quarantine);
+    if (!quarantined.isFile() || quarantined.dev !== written.identity.dev || quarantined.ino !== written.identity.ino) {
+      throw new Error("workflow evidence recovery refused: trust.bundle identity changed during quarantine");
     }
+    fsyncPinnedSessionDirectory(directories);
     return;
   }
-  const temporary = path.join(path.dirname(snapshot.file), `.${path.basename(snapshot.file)}.${process.pid}.${randomBytes(8).toString("hex")}.restore`);
-  let descriptor: number | null = null;
-  try {
-    descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-    fs.writeFileSync(descriptor, snapshot.bytes!);
-    fs.fsyncSync(descriptor);
-    fs.closeSync(descriptor);
-    descriptor = null;
-    workflowEvidenceTransactionTestHooks?.beforeTrustRename?.();
-    assertEvidenceDirectoryIdentity(directories);
-    fs.renameSync(temporary, snapshot.file);
-    fsyncDirectory(path.dirname(snapshot.file), directories);
-  } finally {
-    if (descriptor !== null) fs.closeSync(descriptor);
-    try {
-      assertEvidenceDirectoryIdentity(directories);
-      fs.unlinkSync(temporary);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof Error && error.message.includes("identity changed"))) throw error;
-    }
-  }
+  workflowEvidenceTransactionTestHooks?.beforeTrustRename?.();
+  assertEvidenceDirectoryIdentity(directories);
+  assertTransactionWrittenFileIdentity(written);
+  fs.writeSync(written.descriptor, snapshot.bytes!, 0, snapshot.bytes!.length, 0);
+  fs.ftruncateSync(written.descriptor, snapshot.bytes!.length);
+  fs.fsyncSync(written.descriptor);
+  assertTransactionWrittenFileIdentity(written, createHash("sha256").update(snapshot.bytes!).digest("hex"));
+  fsyncPinnedSessionDirectory(directories);
 }
 
-function fsyncDirectory(directory: string, directories: EvidenceDirectoryIdentity): void {
+function assertTransactionWrittenFileIdentity(written: EvidenceWrittenFile, expectedDigest = written.digest): void {
+  const descriptor = fs.fstatSync(written.descriptor);
+  const current = fs.lstatSync(written.file);
+  if (!descriptor.isFile() || current.isSymbolicLink() || !current.isFile()
+    || descriptor.dev !== written.identity.dev || descriptor.ino !== written.identity.ino
+    || current.dev !== written.identity.dev || current.ino !== written.identity.ino) {
+    throw new Error("workflow evidence recovery refused: transaction-written trust.bundle identity changed");
+  }
+  const digest = createHash("sha256").update(readDescriptorBytes(written.descriptor)).digest("hex");
+  if (digest !== expectedDigest) throw new Error("workflow evidence recovery refused: transaction-written trust.bundle bytes changed");
+}
+
+function readDescriptorBytes(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error("workflow evidence expected a readable regular file descriptor");
+  const bytes = Buffer.alloc(stat.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (read === 0) throw new Error("workflow evidence encountered a short descriptor read");
+    offset += read;
+  }
+  return bytes;
+}
+
+function fsyncPinnedSessionDirectory(directories: EvidenceDirectoryIdentity): void {
   workflowEvidenceTransactionTestHooks?.beforeTrustDirectoryFsync?.();
   assertEvidenceDirectoryIdentity(directories);
-  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-  try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isDirectory()) throw new Error("workflow evidence recovery refused: trust bundle parent is not a directory");
-    assertEvidenceDirectoryIdentity(directories);
-    fs.fsyncSync(descriptor);
+  const stat = fs.fstatSync(directories.session.descriptor);
+  if (!stat.isDirectory() || stat.dev !== directories.session.dev || stat.ino !== directories.session.ino) {
+    throw new Error("workflow evidence recovery refused: pinned session directory identity changed");
   }
-  finally { fs.closeSync(descriptor); }
+  fs.fsyncSync(directories.session.descriptor);
+  assertEvidenceDirectoryIdentity(directories);
 }
 
 function captureEvidenceReceipt(
@@ -795,6 +855,7 @@ function captureEvidenceReceipt(
   const stepId = typeof gate.step === "string" ? gate.step : null;
   if (!gateId || !stepId) throw new Error("workflow evidence cannot bind a canonical gate identifier and step");
   const expectationIds = (expectationsForGate(gate as never, beforeRun.config) as Array<JsonRecord>)
+    .filter((candidate) => candidate.required === true || candidate.id === expectation)
     .map((candidate) => typeof candidate.id === "string" ? candidate.id : null);
   if (expectationIds.some((id) => !id) || new Set(expectationIds).size !== expectationIds.length || !expectationIds.includes(expectation)) {
     throw new Error("workflow evidence cannot bind an exact canonical expectation set");
@@ -838,11 +899,16 @@ function receiptForGateClaim(
 export function classifyCanonicalEvidenceAttachment(
   receipt: EvidenceReceipt,
   run: { runId: string; state: JsonRecord; manifest: JsonRecord },
-  beforeEvidenceIds: ReadonlySet<string>,
+  beforeEvidence: readonly JsonRecord[],
 ): "attached" | "unattached" | "unknown" {
   if (!validReceipt(receipt) || run.runId !== receipt.runId || run.state.subject !== receipt.subject) return "unknown";
   const evidence = Array.isArray(run.manifest.evidence) ? run.manifest.evidence : null;
   if (!evidence) return "unknown";
+  const beforeById = new Map<string, JsonRecord>();
+  for (const entry of beforeEvidence) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.id !== "string" || beforeById.has(entry.id)) return "unknown";
+    beforeById.set(entry.id, entry);
+  }
   const allIds = new Set<string>();
   for (const entry of evidence) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "unknown";
@@ -852,9 +918,11 @@ export function classifyCanonicalEvidenceAttachment(
   }
   const newEntries = evidence.filter((entry) => {
     const id = (entry as JsonRecord).id;
-    return !beforeEvidenceIds.has(id as string);
+    return !beforeById.has(id as string);
   });
-  if (newEntries.length === 0) return "unattached";
+  if (newEntries.length === 0) {
+    return priorManifestEvidenceIsUnchanged(evidence as JsonRecord[], beforeById) ? "unattached" : "unknown";
+  }
   if (newEntries.length !== 1) return "unknown";
   const entry = newEntries[0];
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "unknown";
@@ -865,7 +933,30 @@ export function classifyCanonicalEvidenceAttachment(
   const recordedAt = parseEvidenceTimestamp(receipt.recordedAt);
   const attachedAt = parseEvidenceTimestamp(candidate.attached_at);
   if (recordedAt === null || attachedAt === null || recordedAt < receipt.visit.enteredAt || attachedAt < recordedAt) return "unknown";
+  if (!priorManifestEvidenceMatchesAttachment(evidence as JsonRecord[], beforeById, candidate)) return "unknown";
   return "attached";
+}
+
+function priorManifestEvidenceIsUnchanged(evidence: JsonRecord[], beforeById: ReadonlyMap<string, JsonRecord>): boolean {
+  if (evidence.length !== beforeById.size) return false;
+  return evidence.every((entry) => typeof entry.id === "string" && isDeepStrictEqual(stableManifestEvidenceIdentity(entry), beforeById.get(entry.id)));
+}
+
+function priorManifestEvidenceMatchesAttachment(evidence: JsonRecord[], beforeById: ReadonlyMap<string, JsonRecord>, candidate: JsonRecord): boolean {
+  const priorEntries = evidence.filter((entry) => entry.id !== candidate.id);
+  if (priorEntries.length !== beforeById.size || typeof candidate.id !== "string") return false;
+  return priorEntries.every((entry) => {
+    if (typeof entry.id !== "string") return false;
+    const before = beforeById.get(entry.id);
+    if (!before) return false;
+    const normalizedEntry = stableManifestEvidenceIdentity(entry);
+    const normalizedBefore = { ...before };
+    if (isDeepStrictEqual(normalizedEntry, normalizedBefore)) return true;
+    if (normalizedEntry.gate_id !== candidate.gate_id || normalizedEntry.superseded_by !== candidate.id) return false;
+    delete normalizedEntry.superseded_by;
+    if (normalizedBefore.superseded_by === null) delete normalizedBefore.superseded_by;
+    return isDeepStrictEqual(normalizedEntry, normalizedBefore);
+  });
 }
 
 function validReceipt(receipt: EvidenceReceipt): boolean {
@@ -901,8 +992,8 @@ function parseEvidenceTimestamp(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function assertEvidencePostconditions(attached: boolean, beforeEvidenceIds: ReadonlySet<string>, run: { runId: string; state: JsonRecord; manifest: JsonRecord }, receipt: EvidenceReceipt): void {
-  const classification = classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidenceIds);
+function assertEvidencePostconditions(attached: boolean, beforeEvidence: readonly JsonRecord[], run: { runId: string; state: JsonRecord; manifest: JsonRecord }, receipt: EvidenceReceipt): void {
+  const classification = classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
   if (attached && classification !== "attached") {
     throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
   }
@@ -911,11 +1002,11 @@ function assertEvidencePostconditions(attached: boolean, beforeEvidenceIds: Read
   }
 }
 
-async function canonicalEvidenceAttachment(projectRoot: string, slug: string, receipt: EvidenceReceipt | null, beforeEvidenceIds: ReadonlySet<string>): Promise<"attached" | "unattached" | "unknown"> {
+async function canonicalEvidenceAttachment(projectRoot: string, slug: string, receipt: EvidenceReceipt | null, beforeEvidence: readonly JsonRecord[]): Promise<"attached" | "unattached" | "unknown"> {
   if (!receipt) return "unknown";
   try {
     const run = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
-    return classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidenceIds);
+    return classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
   } catch {
     // A valid but not-yet-shipped definition amendment makes the Builder adapter
     // intentionally reject its own identity.  The raw Flow manifest can still
@@ -924,7 +1015,7 @@ async function canonicalEvidenceAttachment(projectRoot: string, slug: string, re
     // to be restored safely.
     try {
       const raw = await loadRun(slug, projectRoot);
-      return classifyCanonicalEvidenceAttachment(receipt, { runId: slug, state: raw.state as JsonRecord, manifest: raw.manifest as JsonRecord }, beforeEvidenceIds);
+      return classifyCanonicalEvidenceAttachment(receipt, { runId: slug, state: raw.state as JsonRecord, manifest: raw.manifest as JsonRecord }, beforeEvidence);
     } catch {
       return "unknown";
     }
@@ -1429,14 +1520,25 @@ function immutableReport<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function manifestEvidenceIdentity(manifest: JsonRecord): Array<{ id: string; sha256: string }> {
+function manifestEvidenceIdentity(manifest: JsonRecord): JsonRecord[] {
   const evidence = Array.isArray(manifest.evidence) ? manifest.evidence : [];
   return evidence
     .flatMap((entry) => entry && typeof entry === "object"
       && typeof (entry as JsonRecord).id === "string"
       && typeof (entry as JsonRecord).sha256 === "string"
-      ? [{ id: String((entry as JsonRecord).id), sha256: String((entry as JsonRecord).sha256) }]
+      ? [stableManifestEvidenceIdentity(entry as JsonRecord)]
       : []);
+}
+
+function stableManifestEvidenceIdentity(entry: JsonRecord): JsonRecord {
+  const identity = structuredClone(entry);
+  // Flow refreshes these two embedded projections on every attachment. They
+  // describe report folding, not the manifest receipt's identity. Every other
+  // field remains bound, including id, gate, digest, status, paths, timestamps,
+  // expectations, supersession, and route metadata.
+  delete identity.bundle_report;
+  delete identity.inquiry_records;
+  return identity;
 }
 
 function optionalFileDigest(file: string): string | null {

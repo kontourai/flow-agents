@@ -3281,10 +3281,11 @@ function writerAcquireAbortLock(lockFile: string): { fd: number; identity: { dev
       try { stat = fs.lstatSync(lockFile); } catch { continue; }
       if (stat.isSymbolicLink() || !stat.isFile()) return null;
       if (Date.now() - stat.mtimeMs > WRITER_LOCK_STALE_MS) {
-        const current = fs.lstatSync(lockFile);
-        if (current.isSymbolicLink() || !current.isFile() || current.dev !== stat.dev || current.ino !== stat.ino) return null;
-        try { fs.unlinkSync(lockFile); } catch { return null; }
-        continue;
+        // A stale pathname is not ownership authority. Deleting it after an
+        // identity check would retain a check/use race and could remove a
+        // foreign replacement. Abort persistence therefore fails closed and
+        // leaves stale-lock recovery to an explicit operator action.
+        return null;
       }
       writerSleepSync(WRITER_LOCK_RETRY_MS);
     }
@@ -3327,17 +3328,44 @@ function writerAssertAbortLogIdentity(logFile: string, identity: { dev: number; 
   } catch { return false; }
 }
 
-function writerReadLastChainStateFromDescriptor(descriptor: number, genesis: string): { seq: number; hash: string } {
+function writerReadLastChainStateFromDescriptor(
+  descriptor: number,
+  chain: { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string },
+): { seq: number; hash: string } | null {
   let raw = "";
-  try { raw = fs.readFileSync(descriptor, "utf8"); } catch { return { seq: -1, hash: genesis }; }
+  try { raw = fs.readFileSync(descriptor, "utf8"); } catch { return null; }
   const lines = raw.split("\n").filter((line) => line.trim());
-  for (let index = lines.length - 1; index >= 0; index--) {
+  const entries: AnyObj[] = [];
+  for (const line of lines) {
     try {
-      const entry = JSON.parse(lines[index]!) as AnyObj;
-      if (entry?._chain && typeof entry._chain.hash === "string" && typeof entry._chain.seq === "number") return { seq: entry._chain.seq, hash: entry._chain.hash };
-    } catch { /* malformed historical records do not become writable authority */ }
+      const entry = JSON.parse(line) as unknown;
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) entries.push(entry as AnyObj);
+    } catch { /* malformed legacy lines have no chain authority */ }
   }
-  return { seq: -1, hash: genesis };
+  const hasAnyChain = entries.some((entry) => entry._chain && typeof entry._chain.hash === "string");
+  if (!hasAnyChain) return { seq: -1, hash: chain.CHAIN_GENESIS };
+  const reachable = new Set([chain.CHAIN_GENESIS]);
+  const parentSources = new Map<string, unknown[]>();
+  let previousWasChained = false;
+  let tip: { seq: number; hash: string } | null = null;
+  for (const entry of entries) {
+    const link = entry._chain;
+    if (!link || typeof link.hash !== "string") {
+      if (previousWasChained) return null;
+      continue;
+    }
+    if (typeof link.prevHash !== "string" || !Number.isSafeInteger(link.seq) || link.seq < 0) return null;
+    if (link.hash !== chain.computeChainHash(link.prevHash, entry) || !reachable.has(link.prevHash)) return null;
+    const sources = parentSources.get(link.prevHash) ?? [];
+    sources.push(entry.source);
+    parentSources.set(link.prevHash, sources);
+    if (sources.length > 1
+      && !sources.every((source) => source === "postToolUse-capture" || source === WRITER_OBSERVATION_SOURCE)) return null;
+    reachable.add(link.hash);
+    previousWasChained = true;
+    tip = { seq: link.seq, hash: link.hash };
+  }
+  return tip;
 }
 
 export function appendWriterTransactionAbort(capability: WriterTransactionAbortCapability, transactionId: string, timestamp: string): boolean {
@@ -3354,7 +3382,9 @@ export function appendWriterTransactionAbort(capability: WriterTransactionAbortC
       try {
         assertWriterTransactionAbortCapability(capability);
         if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
-        const { seq, hash: prevHash } = writerReadLastChainStateFromDescriptor(log.fd, chain.CHAIN_GENESIS);
+        const priorChain = writerReadLastChainStateFromDescriptor(log.fd, chain);
+        if (priorChain === null) return false;
+        const { seq, hash: prevHash } = priorChain;
         const record: AnyObj = {
           source: "workflow-evidence-transaction",
           capturedAt: timestamp,

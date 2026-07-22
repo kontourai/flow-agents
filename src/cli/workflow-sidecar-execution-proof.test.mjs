@@ -4,9 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 import { composeGateVerdict, inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
+
+const commandLogChain = createRequire(import.meta.url)("../../scripts/lib/command-log-chain.js");
 
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
@@ -87,6 +90,51 @@ test("transaction abort journal refuses create races and replaced session identi
   fs.writeFileSync(replacementLog, "replacement sentinel\n");
   assert.equal(appendTransactionAbortForTest(capability, "transaction-replaced"), false);
   assert.equal(fs.readFileSync(replacementLog, "utf8"), "replacement sentinel\n");
+});
+
+test("transaction abort journal refuses to extend a broken execution-proof chain", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-broken-chain-"));
+  const logFile = path.join(directory, "command-log.jsonl");
+  const broken = `${JSON.stringify({
+    source: "canonical-writer-execution",
+    command: "true",
+    _chain: { seq: 0, prevHash: "f".repeat(64), hash: "e".repeat(64) },
+  })}\n`;
+  fs.writeFileSync(logFile, broken);
+
+  assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-broken"), false);
+  assert.equal(fs.readFileSync(logFile, "utf8"), broken, "a broken chain remains untouched for explicit recovery");
+});
+
+test("transaction abort journal refuses to extend a valid-hash non-benign fork", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-non-benign-fork-"));
+  const logFile = path.join(directory, "command-log.jsonl");
+  const makeSibling = (source) => {
+    const record = {
+      source,
+      command: "true",
+      _chain: { seq: 0, prevHash: commandLogChain.CHAIN_GENESIS, hash: "" },
+    };
+    record._chain.hash = commandLogChain.computeChainHash(record._chain.prevHash, record);
+    return record;
+  };
+  const fork = `${JSON.stringify(makeSibling("postToolUse-capture"))}\n${JSON.stringify(makeSibling("foreign-non-capture"))}\n`;
+  fs.writeFileSync(logFile, fork);
+
+  assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-non-benign-fork"), false);
+  assert.equal(fs.readFileSync(logFile, "utf8"), fork, "a non-benign fork remains untouched for explicit recovery");
+});
+
+test("transaction abort journal never deletes a stale foreign lock", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-stale-lock-"));
+  const lockFile = path.join(directory, "command-log.jsonl.lock");
+  fs.writeFileSync(lockFile, "foreign stale lock\n");
+  const stale = new Date(Date.now() - 60_000);
+  fs.utimesSync(lockFile, stale, stale);
+
+  assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-stale-lock"), false);
+  assert.equal(fs.readFileSync(lockFile, "utf8"), "foreign stale lock\n");
+  assert.equal(fs.existsSync(path.join(directory, "command-log.jsonl")), false);
 });
 
 test("explicit gate verdicts remain authoritative over successful and failing command observations", () => {

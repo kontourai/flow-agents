@@ -230,9 +230,9 @@ test("current gate visit rejects a missing canonical boundary with a typed input
   );
 });
 
-function classifyCanonicalEvidenceAttachmentForTest(receipt, run, beforeEvidenceIds = new Set()) {
+function classifyCanonicalEvidenceAttachmentForTest(receipt, run, beforeEvidence = []) {
   assert.equal(typeof workflowRuntime.classifyCanonicalEvidenceAttachment, "function", "workflow must expose the exact canonical receipt classifier to its internal tests");
-  return workflowRuntime.classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidenceIds);
+  return workflowRuntime.classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
 }
 
 test("canonical evidence receipt classifier accepts only one exactly bound live attachment", () => {
@@ -274,6 +274,23 @@ test("canonical evidence receipt classifier accepts only one exactly bound live 
     assert.equal(classifyCanonicalEvidenceAttachmentForTest(value.receipt, value), "unknown", label);
   }
   assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { ...run, manifest: { evidence: [] } }), "unattached", "only a clean empty new-entry set permits rollback");
+});
+
+test("canonical evidence receipt classifier binds every prior manifest entry", () => {
+  const receipt = {
+    runId: "receipt-run", subject: SUBJECT, gateId: "pull-work-gate", stepId: "pull-work",
+    expectedRunHead: "a".repeat(64), expectationIds: ["selected-work"], expectation: "selected-work",
+    visit: { enteredAt: Date.parse("2026-07-09T20:00:00.000Z"), initial: true },
+    recordedAt: "2026-07-09T20:01:00.000Z", digest: "b".repeat(64),
+    claimSubject: SUBJECT, claimStepId: "pull-work", claimExpectation: "selected-work", claimRunHead: "a".repeat(64),
+  };
+  const prior = { id: "prior-entry", gate_id: "older-gate", sha256: "c".repeat(64), expectation_ids: ["older"] };
+  const candidate = { id: "receipt-entry", gate_id: "pull-work-gate", sha256: "b".repeat(64), expectation_ids: ["selected-work"], attached_at: "2026-07-09T20:02:00.000Z" };
+  const beforeManifest = [structuredClone(prior)];
+
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [prior, candidate] } }, beforeManifest), "attached");
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [candidate] } }, beforeManifest), "unknown", "removing prior evidence is uncertain");
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [{ ...prior, sha256: "d".repeat(64) }, candidate] } }, beforeManifest), "unknown", "mutating prior evidence is uncertain");
 });
 
 async function loadRuntimeTestSeams() {
@@ -669,6 +686,34 @@ test("public workflow evidence refuses recovery after session replacement or tru
   }
 });
 
+test("public workflow evidence never overwrites a foreign regular trust.bundle replacement", async () => {
+  const session = makeSession("public-evidence-foreign-regular-trust");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const transactionFile = path.join(session.sessionDir, ".transaction-written-trust.bundle");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterRecord: () => {
+      fs.renameSync(bundleFile, transactionFile);
+      fs.writeFileSync(bundleFile, "foreign regular replacement\n");
+      const state = readJson(path.join(session.sessionDir, "state.json"));
+      state.work_item_refs = ["local:work-item/foreign-regular-trust-mutation"];
+      writeJson(path.join(session.sessionDir, "state.json"), state);
+    },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "foreign regular replacement fixture"]),
+      /recovery required|identity changed/i,
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+  assert.equal(fs.readFileSync(bundleFile, "utf8"), "foreign regular replacement\n");
+  assert.equal(fs.existsSync(transactionFile), true, "transaction-written evidence remains available for explicit recovery");
+});
+
 test("public workflow evidence refuses trust recovery directory swaps at unlink, rename, and fsync boundaries", async () => {
   for (const boundary of ["unlink", "rename", "directory-fsync"]) {
     const session = makeSession(`public-evidence-trust-${boundary}`);
@@ -719,6 +764,45 @@ test("public workflow evidence returns committed recovery without rollback after
     } finally {
       setWorkflowEvidenceTransactionTestHooksForTest(undefined);
     }
+  }
+});
+
+test("public workflow evidence recovers an attached failing verify route-back without retry", async () => {
+  const session = makeSession("public-evidence-failed-verify-route-back");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  const verifying = await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  assert.equal(verifying.run.state.current_step, "verify");
+  writeBundle(session.sessionDir, verifiedTestsPrerequisites(session));
+
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforePostconditions: () => { throw new Error("post-route receipt fixture"); } });
+  try {
+    const report = await workflowJson([
+      "evidence", "--session-dir", session.sessionDir,
+      "--expectation", "tests-evidence", "--status", "fail", "--route-reason", "implementation_defect",
+      "--summary", "Independent verification failed and routes back for implementation repair.",
+    ]);
+    assert.deepEqual(report.recovery, { committed: true, retry: "none" });
+    assert.equal(report.attached, true);
+    assert.equal(report.current_step, "execute");
+    const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+    const attached = manifest.evidence.at(-1);
+    assert.equal(attached.gate_id, "verify-gate");
+    assert.equal(attached.status, "failed");
+    assert.equal(attached.sha256, createHash("sha256").update(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"))).digest("hex"));
+    assert.equal(
+      fs.existsSync(path.join(session.sessionDir, "command-log.jsonl")),
+      false,
+      "committed recovery writes no abort marker when no observations exist",
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
   }
 });
 
