@@ -165,9 +165,9 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/dispatch": "0.2.0",
+    "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "3.6.2",
-    "@kontourai/relay": "0.2.0",
+    "@kontourai/relay": "0.4.0",
     "esbuild": "0.28.1"
   },
   "optionalDependencies": {

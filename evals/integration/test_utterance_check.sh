@@ -261,27 +261,27 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Hook: resolvePolicy applies anthropic extractor from config
+# Hook: resolvePolicy applies model runtimes from config
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "--- hook: resolvePolicy applies extractor:anthropic from config ---"
+echo "--- hook: resolvePolicy applies extractor:model from config ---"
 
 mkdir -p "$TMPDIR_EVAL/anthropic-repo/context/settings"
 touch "$TMPDIR_EVAL/anthropic-repo/AGENTS.md"
 cat > "$TMPDIR_EVAL/anthropic-repo/context/settings/flow-agents-settings.json" <<'ACFG_EOF'
-{"schema_version":"1.0","utteranceCheck":{"enabled":true,"mode":"report","extractor":"anthropic","model":"claude-haiku-4-5"}}
+{"schema_version":"1.0","utteranceCheck":{"enabled":true,"mode":"report","extractor":"model","runtimes":["claude-code:sonnet","codex:gpt-5"]}}
 ACFG_EOF
 
 if node -e '
   const { resolvePolicy } = require(process.argv[1]);
   const policy = resolvePolicy(process.argv[2]);
-  if (policy.extractor !== "anthropic") { console.error("expected extractor:anthropic, got:", policy.extractor); process.exit(1); }
-  if (policy.model !== "claude-haiku-4-5") { console.error("expected model:claude-haiku-4-5, got:", policy.model); process.exit(2); }
+  if (policy.extractor !== "model") { console.error("expected extractor:model, got:", policy.extractor); process.exit(1); }
+  if (policy.runtimes.join(",") !== "claude-code:sonnet,codex:gpt-5") { console.error("unexpected runtimes:", policy.runtimes); process.exit(2); }
 ' "$HOOK" "$TMPDIR_EVAL/anthropic-repo"; then
-  _pass "resolvePolicy applies extractor:anthropic and model from config"
+  _pass "resolvePolicy applies extractor:model and ordered runtimes from config"
 else
-  _fail "resolvePolicy did not apply anthropic extractor from config"
+  _fail "resolvePolicy did not apply model runtime config"
 fi
 
 # ---------------------------------------------------------------------------
@@ -455,18 +455,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# CLI: --extractor anthropic without ANTHROPIC_API_KEY fails open (exit 0)
+# CLI: hosted model profile without ANTHROPIC_API_KEY fails open
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "--- cli: anthropic extractor without API key fails open ---"
+echo "--- cli: hosted runtime without API key fails open ---"
 
 # Run without ANTHROPIC_API_KEY set.
 # The CLI should emit not_configured JSON and exit 0 (fail open).
 if env -u ANTHROPIC_API_KEY \
    node "$ROOT/build/src/cli.js" utterance-check check \
    --utterance "The test coverage is 92%." \
-   --extractor anthropic \
+   --extractor model \
+   --runtime anthropic:claude-haiku-4-5 \
    >"$TMPDIR_EVAL/no-apikey.out" 2>"$TMPDIR_EVAL/no-apikey.err"
 then
   status_val=$(node -e '
@@ -474,20 +475,20 @@ then
     console.log(r.status);
   ' "$TMPDIR_EVAL/no-apikey.out" 2>/dev/null || echo "parse-error")
   if [[ "$status_val" == "not_configured" ]]; then
-    _pass "CLI --extractor anthropic without ANTHROPIC_API_KEY emits not_configured and exits 0 (fail open)"
+    _pass "CLI hosted runtime without ANTHROPIC_API_KEY emits not_configured and exits 0"
   elif [[ "$status_val" == "ok" || "$status_val" == "error" ]]; then
     # If survey is installed and somehow proceeded (shouldn't happen without key), still accept
-    _pass "CLI --extractor anthropic produced a valid report (status: $status_val)"
+    _pass "CLI model extractor produced a valid report (status: $status_val)"
   else
-    _fail "CLI --extractor anthropic without API key produced unexpected output (status: $status_val)"
+    _fail "CLI hosted runtime without API key produced unexpected output (status: $status_val)"
   fi
 else
   exit_code=$?
   # Exit 1 means survey not installed — that's a different fail-open path, acceptable
   if [[ "$exit_code" -eq 1 ]]; then
-    _pass "CLI --extractor anthropic: survey not installed, exits 1 (not_configured)"
+    _pass "CLI model extractor: survey not installed, exits 1 (not_configured)"
   else
-    _fail "CLI --extractor anthropic without API key should exit 0 or 1 (fail open), got: $exit_code"
+    _fail "CLI hosted runtime without API key should exit 0 or 1, got: $exit_code"
   fi
 fi
 
@@ -500,7 +501,7 @@ echo "--- cli: invalid dispatch attempt ceiling ---"
 
 if node "$ROOT/build/src/cli.js" utterance-check check \
    --utterance "The test coverage is 92%." \
-   --extractor anthropic \
+   --extractor model \
    --max-attempts 0 \
    >"$TMPDIR_EVAL/invalid-attempts.out" 2>"$TMPDIR_EVAL/invalid-attempts.err"
 then

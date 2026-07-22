@@ -75,15 +75,15 @@ The extractor is responsible for splitting the agent utterance into discrete fac
 | Extractor | How it works | Requirements |
 |-----------|-------------|--------------|
 | `reference` (default) | Pattern-based heuristics. Fast, no API call, no key needed. Works offline. Lower recall on complex prose. | `@kontourai/survey` installed |
-| `anthropic` | Flow Agents' model-backed producer over Relay. Higher recall, understands context and nuance, and can split compound claims. The current CLI composition profile uses an Anthropic-compatible hosted runtime. | `@kontourai/survey` installed and `ANTHROPIC_API_KEY` set |
+| `model` | Flow Agents' model-backed producer over Relay. The same prompt, schema, parser, and Survey projection run through a local harness or hosted runtime. | `@kontourai/survey` plus the selected runtime |
 
-For most exploratory use, `reference` is sufficient. Switch to `anthropic` when you find the reference extractor is missing statements that matter for your domain.
+For most exploratory use, `reference` is sufficient. Switch to `model` when the reference extractor misses statements that matter for your domain.
 
-The `anthropic` extractor fails open: if `ANTHROPIC_API_KEY` or the optional SDK is missing, the CLI emits `status: "not_configured"` (with a clear explanation in `summary`) and exits 0. The hook treats this as a silent pass-through. You will see a message in stderr explaining what is missing, but the hook will not block.
+The `model` extractor fails open when its runtime is not configured. Local profiles use an installed and authenticated harness; the hosted `anthropic` profile uses `ANTHROPIC_API_KEY`. The CLI reports `not_configured` rather than silently substituting a different runtime.
 
-The producer itself is runtime-neutral: `createRuntimeUtteranceExtractor(runtime)` accepts any Relay `ModelRuntime`. Prompts, tool schema, parsing, and Survey projection therefore stay unchanged when a composition root selects a different local or hosted runtime. Harness-backed local profiles are tracked separately and are not implied by the current CLI flags.
+Each `--runtime` uses `PROFILE:MODEL`. Supported profiles are `claude-code`, `codex`, `opencode`, and hosted `anthropic`. Repeat the option for ordered fallback. Multiple candidates, an attempt ceiling, or receipt persistence opt into Dispatch; one candidate otherwise invokes Relay directly.
 
-Repeat `--fallback-model` to opt into Dispatch-backed ordered fallback. `--max-attempts` limits total attempts, and `--receipt-path` appends terminal, secret-free Dispatch receipts as NDJSON. Without these options the CLI invokes the primary runtime directly.
+Native structured output is the default requirement. OpenCode currently uses prompt-enforced JSON and is rejected unless `--allow-prompted-structured-output` is explicit. `--max-attempts` limits attempts, and `--receipt-path` appends secret-free terminal Dispatch receipts as NDJSON.
 
 ---
 
@@ -105,7 +105,7 @@ The canonical way to enable utterance checking is a `context/settings/flow-agent
 }
 ```
 
-**With a trust bundle and anthropic extractor:**
+**With a trust bundle and a local runtime:**
 
 ```json
 {
@@ -114,9 +114,9 @@ The canonical way to enable utterance checking is a `context/settings/flow-agent
   "utteranceCheck": {
     "enabled": true,
     "mode": "report",
-    "extractor": "anthropic",
+    "extractor": "model",
     "bundlePath": ".veritas/trust.bundle.json",
-    "model": "claude-haiku-4-5",
+    "runtimes": ["claude-code:sonnet"],
     "agentId": "surface-agent"
   }
 }
@@ -131,7 +131,8 @@ The canonical way to enable utterance checking is a `context/settings/flow-agent
   "utteranceCheck": {
     "enabled": true,
     "mode": "strict",
-    "extractor": "anthropic",
+    "extractor": "model",
+    "runtimes": ["codex:gpt-5"],
     "bundlePath": "dist/trust-bundle.json"
   }
 }
@@ -143,9 +144,10 @@ Config field reference:
 |-------|------|---------|-------------|
 | `enabled` | boolean | `false` | Whether utterance checking is active for this repo. |
 | `mode` | `"report"` \| `"strict"` | `"report"` | How to handle concerning badges. See above. |
-| `extractor` | `"reference"` \| `"anthropic"` | `"reference"` | Extractor to use. See above. |
+| `extractor` | `"reference"` \| `"model"` | `"reference"` | Extractor to use. See above. |
 | `bundlePath` | string | — | Repo-relative or absolute path to the trust bundle JSON. Omit to use an empty bundle. |
-| `model` | string | — | Model for the anthropic extractor. Only used when `extractor` is `"anthropic"`. |
+| `runtimes` | string[] | — | Ordered `PROFILE:MODEL` candidates for the model extractor. |
+| `allowPromptedStructuredOutput` | boolean | `false` | Explicitly permit prompted structured output for profiles without native schema enforcement. |
 | `agentId` | string | `"flow-agents-hook"` | Agent identifier for provenance in the trust report. |
 
 ---
@@ -160,7 +162,9 @@ For one-off sessions or CI pipelines, you can override the config with environme
 | `FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true` | Force strict mode. |
 | `FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH=/path/to/bundle.json` | Override `bundlePath`. |
 | `FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID=my-agent` | Override `agentId`. |
-| `FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=anthropic\|reference` | Override `extractor`. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=model\|reference` | Override `extractor`. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_RUNTIMES=codex:gpt-5,opencode:zai/glm-5` | Override ordered runtime candidates. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_ALLOW_PROMPTED=true` | Permit prompted structured output. |
 
 **When the config file is absent and no env vars are set**, the hook is disabled. This is the safe default — existing repos are not affected until they opt in.
 
@@ -206,8 +210,8 @@ The utterance check CLI is available as:
 node build/src/cli.js utterance-check check \
   --utterance "The coverage is 92% and all tests pass." \
   --bundle-path .veritas/trust.bundle.json \
-  --extractor anthropic \
-  --model claude-haiku-4-5 \
+  --extractor model \
+  --runtime claude-code:sonnet \
   --agent-id my-session
 ```
 
@@ -217,9 +221,9 @@ Options:
   --utterance TEXT      Utterance text to check (required unless --not-configured).
   --bundle-path FILE    Trust bundle JSON file. Omit for an empty bundle (all unsupported).
   --agent-id ID         Agent identifier for provenance (default: flow-agents-utterance-check).
-  --extractor NAME      'reference' (default) or 'anthropic'.
-  --model MODEL         Primary model for model-backed extraction.
-  --fallback-model ID   Ordered fallback model; repeat for multiple candidates.
+  --extractor NAME      'reference' (default) or 'model'.
+  --runtime PROFILE:MODEL  Ordered runtime candidate; repeat for fallback.
+  --allow-prompted-structured-output  Permit lower-fidelity prompted JSON.
   --max-attempts N      Dispatch attempt ceiling (defaults to candidate count).
   --receipt-path FILE   Append secret-free terminal Dispatch receipts as NDJSON.
   --not-configured      Skip survey call; output not_configured without error.
@@ -260,7 +264,7 @@ Badge values:
 | `rejected` | Matched a claim that was rejected. |
 | `unsupported` | No matching claim in the trust bundle. |
 
-Exit codes: `0` = pass, `0` = anthropic not_configured (fail open), `1` = survey unavailable, `2` = strict mode with concerning badges, `3` = usage error.
+Exit codes: `0` = pass or model runtime not_configured (fail open), `1` = Survey unavailable, `2` = strict mode with concerning badges, `3` = usage error.
 
 ---
 

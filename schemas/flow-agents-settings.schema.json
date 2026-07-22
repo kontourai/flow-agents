@@ -27,16 +27,22 @@
           "description": "report = badges only, never blocks. strict = exit 2 on disputed/rejected/unsupported (routes hook back). Default when enabled: report."
         },
         "extractor": {
-          "enum": ["reference", "anthropic"],
-          "description": "Extractor used to split utterances into factual statements. reference = pattern-based (no API key needed). anthropic = model-backed via @kontourai/survey/anthropic (requires ANTHROPIC_API_KEY). Default: reference."
+          "enum": ["reference", "model"],
+          "description": "Extractor used to split utterances into factual statements. model uses the configured Relay runtime profiles. Default: reference."
         },
         "bundlePath": {
           "type": "string",
           "description": "Path to a trust bundle JSON file for claim resolution. Relative paths are resolved from the repo root. Omit to use an empty bundle (all statements resolve as unsupported)."
         },
-        "model": {
-          "type": "string",
-          "description": "Model identifier for anthropic extractor (e.g. claude-haiku-4-5). Only used when extractor is anthropic."
+        "runtimes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(claude-code|codex|opencode|anthropic):.+$" },
+          "minItems": 1,
+          "description": "Ordered Relay runtime profiles in PROFILE:MODEL form."
+        },
+        "allowPromptedStructuredOutput": {
+          "type": "boolean",
+          "description": "Explicit opt-in for prompt-enforced structured output. Default: false."
         },
         "agentId": {
           "type": "string",

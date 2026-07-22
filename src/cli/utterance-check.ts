@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
-import { createUtteranceModelExtractor } from "./utterance-model-extractor.js";
+import { createProfiledUtteranceExtractor } from "./utterance-model-extractor.js";
+import { createModelRuntimeProfile, parseModelRuntimeProfile } from "@kontourai/relay/runtime-profile";
 
 // ---------------------------------------------------------------------------
 // Output types
@@ -78,9 +79,10 @@ function usage(): void {
       "  --utterance TEXT      Utterance text to check (required unless --not-configured).",
       "  --bundle-path FILE    Trust bundle JSON file. Omit for an empty bundle (all unsupported).",
       "  --agent-id ID         Agent identifier for provenance (default: flow-agents-utterance-check).",
-      "  --extractor NAME      Extractor to use: 'reference' (default) or 'anthropic'.",
-      "  --model MODEL         Primary model for model-backed extraction.",
-      "  --fallback-model ID   Ordered fallback model; repeat for multiple candidates.",
+      "  --extractor NAME      Extractor to use: 'reference' (default) or 'model'.",
+      "  --runtime PROFILE:MODEL  Ordered runtime candidate; repeat for fallback.",
+      "                         Profiles: claude-code, codex, opencode, anthropic.",
+      "  --allow-prompted-structured-output  Permit lower-fidelity prompted JSON (OpenCode).",
       "  --max-attempts N      Dispatch attempt ceiling (defaults to candidate count).",
       "  --receipt-path FILE   Append secret-free terminal Dispatch receipts as NDJSON.",
       "  --not-configured      Skip survey call; output not_configured without error.",
@@ -125,31 +127,34 @@ async function loadSurvey(): Promise<SurveyMod | undefined> {
 /**
  * Create Flow Agents' producer-owned extractor over the shared runtime port.
  */
-async function loadAnthropicExtractor(options: {
-  model?: string;
-  fallbackModels: string[];
+async function loadModelExtractor(options: {
+  runtimeProfiles: string[];
   maxAttempts?: number;
   receiptPath?: string;
+  allowPromptedStructuredOutput: boolean;
 }): Promise<SurveyExtractor | { notConfigured: true; reason: string }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (options.runtimeProfiles.length === 0) {
     return {
       notConfigured: true,
-      reason:
-        "anthropic extractor requires ANTHROPIC_API_KEY to be set. " +
-        "Set the environment variable or switch extractor to 'reference'.",
+      reason: "model extractor requires at least one --runtime PROFILE:MODEL candidate.",
     };
   }
   try {
-    return createUtteranceModelExtractor({
-      model: options.model ?? "claude-haiku-4-5",
-      fallbackModels: options.fallbackModels,
-      apiKey,
-      ...(process.env.ANTHROPIC_BASE_URL
-        ? { baseUrl: process.env.ANTHROPIC_BASE_URL }
-        : {}),
+    const candidates = options.runtimeProfiles.map((value, index) => ({
+      id: `candidate-${index}`,
+      runtime: createModelRuntimeProfile({
+        ...parseModelRuntimeProfile(value),
+        cwd: process.cwd(),
+        allowPromptedStructuredOutput: options.allowPromptedStructuredOutput,
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        baseUrl: process.env.ANTHROPIC_BASE_URL,
+      }),
+    }));
+    return createProfiledUtteranceExtractor({
+      candidates,
       ...(options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
       ...(options.receiptPath ? { receiptPath: options.receiptPath } : {}),
+      allowPromptedStructuredOutput: options.allowPromptedStructuredOutput,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -176,8 +181,8 @@ async function runCheck(argv: string[]): Promise<number> {
   const notConfigured = flagBool(flags, "not-configured");
   const strict = flagBool(flags, "strict");
   const extractorName = flagString(flags, "extractor") ?? "reference";
-  const model = flagString(flags, "model");
-  const fallbackModels = flagList(flags, "fallback-model");
+  const runtimeProfiles = flagList(flags, "runtime");
+  const allowPromptedStructuredOutput = flagBool(flags, "allow-prompted-structured-output");
   const maxAttemptsFlag = flagString(flags, "max-attempts");
   const receiptPath = flagString(flags, "receipt-path");
   const maxAttempts = maxAttemptsFlag === undefined ? undefined : Number(maxAttemptsFlag);
@@ -237,29 +242,32 @@ async function runCheck(argv: string[]): Promise<number> {
 
   // Resolve which extractor to use.
   let extractor: SurveyExtractor;
-  if (extractorName === "anthropic") {
-    const anthropicResult = await loadAnthropicExtractor({
-      model,
-      fallbackModels,
+  if (extractorName === "model") {
+    const modelResult = await loadModelExtractor({
+      runtimeProfiles,
       maxAttempts,
       receiptPath,
+      allowPromptedStructuredOutput,
     });
-    if ("notConfigured" in anthropicResult) {
+    if ("notConfigured" in modelResult) {
       // Fail open: emit not_configured with a clear reason rather than erroring.
       const report: UtteranceReport = {
         status: "not_configured",
         agent_id: agentId,
         utterance_excerpt: excerptText(utterance),
         statements: [],
-        summary: anthropicResult.reason,
+        summary: modelResult.reason,
       };
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-      process.stderr.write(`[UtteranceCheck] not_configured: ${anthropicResult.reason}\n`);
+      process.stderr.write(`[UtteranceCheck] not_configured: ${modelResult.reason}\n`);
       return 0;
     }
-    extractor = anthropicResult;
-  } else {
+    extractor = modelResult;
+  } else if (extractorName === "reference") {
     extractor = referenceUtteranceExtractor;
+  } else {
+    process.stderr.write(`[UtteranceCheck] unknown extractor: ${extractorName}\n`);
+    return 3;
   }
 
   let trustReport: SurveyTrustReport;

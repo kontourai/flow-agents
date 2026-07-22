@@ -14,7 +14,8 @@
  *     "utteranceCheck": {
  *       "enabled": true,
  *       "mode": "report",         // "report" (default) or "strict"
- *       "extractor": "reference", // "reference" (default) or "anthropic"
+ *       "extractor": "reference", // "reference" (default) or "model"
+ *       "runtimes": ["claude-code:sonnet"]
  *       "bundlePath": "path/to/trust.bundle.json",
  *       "model": "claude-haiku-4-5",
  *       "agentId": "my-agent"
@@ -29,7 +30,8 @@
  *   FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true
  *   FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH=/path/to/bundle.json
  *   FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID=my-agent
- *   FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=anthropic
+ *   FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=model
+ *   FLOW_AGENTS_UTTERANCE_CHECK_RUNTIMES=codex:gpt-5,opencode:zai/glm-5
  *
  * Hook category: PostToolUse / Stop (non-blocking in report mode, always fails open).
  */
@@ -139,10 +141,10 @@ function resolvePolicy(repoRoot) {
   }
 
   // extractor: repo config → default "reference"
-  let extractor = repoConfig.extractor === 'anthropic' ? 'anthropic' : 'reference';
+  let extractor = repoConfig.extractor === 'model' ? 'model' : 'reference';
   // Env var override for extractor
   const envExtractor = process.env.FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR;
-  if (envExtractor === 'anthropic') extractor = 'anthropic';
+  if (envExtractor === 'model') extractor = 'model';
   else if (envExtractor === 'reference') extractor = 'reference';
 
   // bundlePath: env var override > repo config
@@ -158,10 +160,16 @@ function resolvePolicy(repoRoot) {
     repoConfig.agentId ||
     'flow-agents-hook';
 
-  // model: repo config only (no env var for now)
-  const model = repoConfig.model || '';
+  const envRuntimes = String(process.env.FLOW_AGENTS_UTTERANCE_CHECK_RUNTIMES || '')
+    .split(',').map(value => value.trim()).filter(Boolean);
+  const runtimes = envRuntimes.length > 0
+    ? envRuntimes
+    : Array.isArray(repoConfig.runtimes) ? repoConfig.runtimes.filter(value => typeof value === 'string') : [];
+  const allowPromptedStructuredOutput =
+    String(process.env.FLOW_AGENTS_UTTERANCE_CHECK_ALLOW_PROMPTED || '').toLowerCase() === 'true' ||
+    repoConfig.allowPromptedStructuredOutput === true;
 
-  return { enabled, mode, extractor, bundlePath, agentId, model };
+  return { enabled, mode, extractor, bundlePath, agentId, runtimes, allowPromptedStructuredOutput };
 }
 
 /**
@@ -234,8 +242,9 @@ function run(rawInput) {
 
   if (policy.bundlePath) cliArgs.push('--bundle-path', policy.bundlePath);
   cliArgs.push('--agent-id', policy.agentId);
-  if (policy.extractor === 'anthropic') cliArgs.push('--extractor', 'anthropic');
-  if (policy.model) cliArgs.push('--model', policy.model);
+  if (policy.extractor === 'model') cliArgs.push('--extractor', 'model');
+  for (const runtime of policy.runtimes) cliArgs.push('--runtime', runtime);
+  if (policy.allowPromptedStructuredOutput) cliArgs.push('--allow-prompted-structured-output');
   if (policy.mode === 'strict') cliArgs.push('--strict');
 
   const result = spawnSync(process.execPath, [cliPath, ...cliArgs], {
