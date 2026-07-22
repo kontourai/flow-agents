@@ -21,7 +21,7 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
@@ -1257,6 +1257,37 @@ test("prepareBuilderCancelRequest refuses a run with no assignment holder", asyn
     () => prepareBuilderCancelRequest({ sessionDir: session.sessionDir }),
     /no assignment holder/,
   );
+});
+
+test("prepareBuilderCancelRequest canonicalizes a legacy missing-human assignment without rewriting it", async () => {
+  const session = makeSession("friendly-cancel-legacy-actor");
+  claimSessionAssignment(session);
+  const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
+  const legacyAssignment = readJson(assignmentFile);
+  delete legacyAssignment.actor.human;
+  writeJson(assignmentFile, legacyAssignment);
+  const before = fs.readFileSync(assignmentFile, "utf8");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  assert.deepEqual(req.authorization.assignment_actor, ACTOR);
+  assert.equal(req.signingPayload, JSON.stringify(req.authorization));
+  assert.equal(fs.readFileSync(assignmentFile, "utf8"), before);
+});
+
+test("unsigned lifecycle authorization preserves non-null human identity", () => {
+  const { unsigned } = buildUnsignedLifecycleAuthorization({
+    operation: "cancel",
+    project_root: "/tmp/project",
+    run_id: "run-1",
+    subject: SUBJECT,
+    assignment_actor_key: ACTOR_KEY,
+    assignment_actor: { ...ACTOR, human: "operator" },
+    nonce: "legacy-actor-test",
+    expires_at: "2026-07-09T21:00:00.000Z",
+    request: { reason: "test", authority: { kind: "operator_request", actor: "operator", request_ref: "fixture://legacy", requested_at: NOW } },
+  });
+  assert.equal(unsigned.assignment_actor.human, "operator");
 });
 
 test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {
