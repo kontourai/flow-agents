@@ -17,7 +17,7 @@ function loadSettings(file: string): Record<string, unknown> | null {
 }
 
 function repoFromText(text: string): { owner: string; name: string } | null {
-  const match = text.trim().match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/);
+  const match = text.trim().match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
   return match ? { owner: match[1], name: match[2] } : null;
 }
 

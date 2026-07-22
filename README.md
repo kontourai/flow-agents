@@ -33,6 +33,7 @@ Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition in
 - **Tamper-evident "done"** — the local runtime gate is advisory and best-effort; the controlled CI re-run is the authoritative anchor that reconciles manifest commands and git diff against fresh results before evidence is treated as CI-verified. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
 - **Engine plus opt-in kits** — `kits/catalog.json` lists discoverable kits, each `kit.json` declares its flows and assets, and bring-your-own-kit follows the same validation and activation path. See [Engine and Kits](docs/architecture-engine-and-kits.md).
 - **Evals that keep the bundle honest** — dozens of integration scripts and a full static-suite layer (`bash evals/run.sh`) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **A runnable reviewed-grounding example** — the [credential-free reference workflow](evals/reference/reviewed-grounding-workflow/README.md) acquires a source, performs exact provenance-bearing extraction, routes semantic changes through review, and refuses action until evidence and source-currency requirements are satisfied. A provider adapter can be supplied for optional live execution.
 
 ## Flow Agents as a process-discipline layer
 

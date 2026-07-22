@@ -339,6 +339,54 @@ The adapter implements L1 plus all blocking policy classes.
 
 ---
 
+## 4.1 Orchestration-Native Capabilities
+
+The conformance levels in section 4 grade **one** thing: how much of the policy
+contract a *runtime adapter* can enforce given its host's hook surface
+(telemetry-only → steering → enforcing gates). The scale is capped at L3 —
+"all four policy classes blocking, bounded by each host's hook surface" — and
+is **not** extended with a fourth rung.
+
+Some ideas an orchestration layer can realize are not "an adapter that blocks
+harder"; they are properties of a layer that owns the dispatch seam itself.
+Grading those on the adapter scale would be a category error: an L3 adapter is
+already doing the most its surface allows, and a rung that only one product can
+reach collapses "conformant at that level" into "is that product," destroying
+the scale's meaning. (Decision agreed with the maintainer; see issue #86, which
+supersedes the earlier "define a new top conformance tier" framing.)
+
+Instead, these are defined here as a small, **named capability set** that an
+orchestration layer may *declare*, separate from the adapter conformance scale:
+
+1. **Host-independent enforcement** — the same enforcing-gate guarantees
+   regardless of which host the agent runs in, because enforcement happens
+   *below* the host at the orchestration/dispatch layer rather than in a
+   per-host adapter. (A property of the orchestration layer, not of any one
+   adapter — which is exactly why it does not belong on the adapter scale.)
+2. **Durable workflow state across runtime switches** — workflow and gate state
+   survives switching from one runtime to another mid-flow. The proof artifact
+   is a `RUNTIME SWITCH` integration test demonstrating an in-flight flow's
+   status/phase/gate state carried intact across a runtime change.
+3. **Block reasons reaching the model** — the reason a gate blocked is delivered
+   into the model's context, not just a log, so the agent can self-correct.
+   Tracked separately in #100.
+
+**Declaration, not certification (independence guardrail).** An orchestration
+layer may **declare and cite** these capabilities today as *its own* — e.g.
+"Station declares host-independent enforcement and durable cross-runtime state"
+— in the same spirit as an adapter's conformance declaration (section 7). They
+are **not** promoted to a portable, certifiable standard until a second,
+non-Station implementer could build to the spec without copying the first
+implementation: one implementation is a feature, two is a standard. If a second
+orchestration layer is already expected, this ordering may flip (spec-first).
+
+**Related.** #99 (export the sidecar writer as a library, so orchestration
+hosts share the canonical implementation rather than reimplementing it); #87
+(make canonical skills workspace-portable); #100 (block reasons reaching the
+model).
+
+---
+
 ## 5. Mapping Tables
 
 The following tables show the canonical Flow Agents events and their corresponding host-native event surfaces. "No native equivalent" entries are honest gaps, not future work unless noted.
