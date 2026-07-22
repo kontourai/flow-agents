@@ -12,7 +12,7 @@
 #   1. Every launched entry is present (capture never drops a record).
 #   2. seq values are unique and contiguous (no fork — the lock held).
 #   3. verifyCommandLogChain() returns "ok" (chain verifies end-to-end).
-#   4. No stale .lock file is left behind.
+#   4. Persistent generation locks all remain durably released.
 #
 # Usage: bash evals/integration/test_command_log_concurrency.sh
 set -uo pipefail
@@ -109,11 +109,24 @@ else
   _fail "expected ok, got $chain_status"
 fi
 
-# 4. No stale lock left behind.
-if [[ ! -e "$LOG.lock" ]]; then
-  _pass "lockfile cleaned up (no stale .lock)"
+# 4. Persistent generations are audit history, not pathnames to unlink. Every
+# generation must be parseable and durably released.
+lock_report=$(node - "$LOG.lock" <<'NODE'
+const fs = require('fs'), path = require('path');
+const base = process.argv[2], prefix = `${path.basename(base)}.`;
+const files = fs.readdirSync(path.dirname(base)).filter((name) => name.startsWith(prefix));
+let ok = files.length > 0;
+for (const name of files) {
+  try { if (JSON.parse(fs.readFileSync(path.join(path.dirname(base), name), 'utf8')).state !== 'released') ok = false; }
+  catch { ok = false; }
+}
+console.log(ok ? `OK:${files.length}` : 'BAD');
+NODE
+)
+if [[ "$lock_report" == OK:* ]]; then
+  _pass "all ${lock_report#OK:} persistent lock generations are released"
 else
-  _fail "stale lockfile remains: $LOG.lock"
+  _fail "persistent lock generation remains active or malformed: $lock_report"
 fi
 
 echo ""

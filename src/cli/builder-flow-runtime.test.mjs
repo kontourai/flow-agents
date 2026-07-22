@@ -31,11 +31,11 @@ import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecor
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
-import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
@@ -291,6 +291,258 @@ test("canonical evidence receipt classifier binds every prior manifest entry", (
   assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [prior, candidate] } }, beforeManifest), "attached");
   assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [candidate] } }, beforeManifest), "unknown", "removing prior evidence is uncertain");
   assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [{ ...prior, sha256: "d".repeat(64) }, candidate] } }, beforeManifest), "unknown", "mutating prior evidence is uncertain");
+});
+
+function stagedCandidateArgs(session, summary = "stage candidate fixture") {
+  const projected = readJson(path.join(session.sessionDir, "state.json")).flow_run;
+  return [
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified", "--summary", summary,
+    "--timestamp", NOW, "--actor", ACTOR_KEY, "--flow-run-head", projected.run_head,
+  ];
+}
+
+test("internal evidence candidate is retained, correlated, durable, and non-authoritative", async () => {
+  const absent = makeSession("staged-candidate-absent");
+  claimAmbientSessionAssignment(absent);
+  await startBuilderFlowSession({ sessionDir: absent.sessionDir });
+  const args = stagedCandidateArgs(absent);
+  const staged = await stageWorkflowEvidenceCandidate(absent.sessionDir, args);
+  assert.equal(fs.existsSync(path.join(absent.sessionDir, "trust.bundle")), false, "staging does not create canonical trust when it was absent");
+  assert.equal(fs.existsSync(staged.file), true, "candidate residue is retained");
+  assert.equal(path.basename(staged.directory), `.workflow-evidence-transaction-${staged.transaction_id}`);
+  assert.equal(fs.statSync(staged.directory).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(staged.file).mode & 0o777, 0o600);
+  assert.deepEqual(fs.readFileSync(staged.file), staged.bytes);
+  assert.equal(staged.digest, createHash("sha256").update(staged.bytes).digest("hex"));
+
+  await mainFromPublicWorkflow(args);
+  assert.deepEqual(fs.readFileSync(path.join(absent.sessionDir, "trust.bundle")), staged.bytes, "omitting the internal target preserves the public writer bytes");
+
+  const present = makeSession("staged-candidate-present");
+  claimAmbientSessionAssignment(present);
+  await startBuilderFlowSession({ sessionDir: present.sessionDir });
+  writeBundle(present.sessionDir, []);
+  const prior = fs.readFileSync(path.join(present.sessionDir, "trust.bundle"));
+  const stagedPresent = await stageWorkflowEvidenceCandidate(present.sessionDir, stagedCandidateArgs(present, "stage over prior"));
+  assert.deepEqual(fs.readFileSync(path.join(present.sessionDir, "trust.bundle")), prior, "staging leaves prior canonical trust byte-identical");
+  assert.notDeepEqual(stagedPresent.bytes, prior);
+});
+
+test("candidate staging closes acquired descriptors on every setup fault and retains correlated residue", async () => {
+  const resources = ["artifact-directory", "session-directory", "trust-snapshot", "abort-capability", "candidate-directory", "candidate-file"];
+  for (const faultAt of resources) {
+    const session = makeSession(`staged-candidate-fault-${faultAt}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const canonicalBefore = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    const closed = [];
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterCandidateResourceAcquired: (resource) => { if (resource === faultAt) throw new Error(`fault after ${resource}`); },
+      candidateResourceClosed: (resource) => closed.push(resource),
+    });
+    try {
+      await assert.rejects(() => stageWorkflowEvidenceCandidate(session.sessionDir, stagedCandidateArgs(session)), new RegExp(`fault after ${faultAt}`));
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.equal(new Set(closed).size, closed.length, `${faultAt}: every acquired descriptor closes once`);
+    const expectedClosed = {
+      "artifact-directory": ["artifact-directory"],
+      "session-directory": ["session-directory", "artifact-directory"],
+      "trust-snapshot": ["trust-snapshot", "session-directory", "artifact-directory"],
+      "abort-capability": ["trust-snapshot", "session-directory", "artifact-directory"],
+      "candidate-directory": ["candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"],
+      "candidate-file": ["candidate-file", "candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"],
+    }[faultAt];
+    assert.deepEqual(closed, expectedClosed, `${faultAt}: all acquired descriptors close in reverse lifetime order`);
+    const residue = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+    if (["candidate-directory", "candidate-file"].includes(faultAt)) assert.equal(residue.length, 1, `${faultAt}: transaction residue is retained`);
+    assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), canonicalBefore, `${faultAt}: canonical trust remains byte-identical`);
+  }
+});
+
+test("candidate staging loops short writes and rejects zero writes and reread corruption", async () => {
+  const runFault = async (slug, hooks, succeeds) => {
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(hooks);
+    try {
+      const operation = stageWorkflowEvidenceCandidate(session.sessionDir, stagedCandidateArgs(session));
+      if (succeeds) return await operation;
+      await assert.rejects(() => operation);
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false);
+    assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+  };
+  const partial = await runFault("staged-candidate-short-write", {
+    candidateWrite: (fd, buffer, offset, length, position) => fs.writeSync(fd, buffer, offset, Math.min(length, 5), position),
+  }, true);
+  assert.ok(partial.bytes.length > 5);
+  await runFault("staged-candidate-zero-write", { candidateWrite: () => 0 }, false);
+  await runFault("staged-candidate-reread-corrupt", {
+    beforeCandidateReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
+  }, false);
+});
+
+test("sync accepts only the exact staged descriptor digest and pathname identity", async () => {
+  const makeCandidate = async (slug) => {
+    const session = makeSession(slug);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+    const bytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    fs.unlinkSync(path.join(session.sessionDir, "trust.bundle"));
+    const directory = path.join(session.sessionDir, `.workflow-evidence-transaction-${slug}`);
+    fs.mkdirSync(directory, { mode: 0o700 });
+    const file = path.join(directory, "trust.bundle.candidate");
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const stat = fs.fstatSync(descriptor);
+    return { session, file, descriptor, identity: { dev: stat.dev, ino: stat.ino }, digest: createHash("sha256").update(bytes).digest("hex") };
+  };
+
+  const wrong = await makeCandidate("staged-sync-wrong-digest");
+  try {
+    await assert.rejects(() => syncBuilderFlowSession({
+      sessionDir: wrong.session.sessionDir,
+      stagedTrustBundle: { file: wrong.file, descriptor: wrong.descriptor, identity: wrong.identity, expectedSha256: "0".repeat(64) },
+    }), /does not match the descriptor bytes/);
+  } finally { fs.closeSync(wrong.descriptor); }
+
+  const swapped = await makeCandidate("staged-sync-swapped-path");
+  try {
+    fs.renameSync(swapped.file, `${swapped.file}.parked`);
+    fs.writeFileSync(swapped.file, "foreign candidate\n");
+    await assert.rejects(() => syncBuilderFlowSession({
+      sessionDir: swapped.session.sessionDir,
+      stagedTrustBundle: { file: swapped.file, descriptor: swapped.descriptor, identity: swapped.identity, expectedSha256: swapped.digest },
+    }), /descriptor and pathname must identify/);
+  } finally { fs.closeSync(swapped.descriptor); }
+});
+
+test("public staged commit preserves foreign create-if-absent targets and retained residue", async () => {
+  for (const mode of ["eexist", "post-link-mismatch", "directory-fsync"]) {
+    const session = makeSession(`staged-commit-${mode}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    const foreign = `${mode} foreign canonical\n`;
+    setWorkflowEvidenceTransactionTestHooksForTest(mode === "eexist" ? {
+      beforeCandidateCommit: () => fs.writeFileSync(canonical, foreign),
+    } : mode === "post-link-mismatch" ? {
+      afterCandidateLink: () => { fs.renameSync(canonical, `${canonical}.staged-link`); fs.writeFileSync(canonical, foreign); },
+    } : {
+      beforeCandidateCommitDirectoryFsync: () => { throw new Error("candidate directory fsync uncertainty"); },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${mode} commit fixture`]),
+        /recovery required/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    if (mode !== "directory-fsync") assert.equal(fs.readFileSync(canonical, "utf8"), foreign, `${mode}: foreign canonical target is untouched`);
+    const residues = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+    assert.equal(residues.length, 1, `${mode}: staged residue remains correlated`);
+    assert.equal(fs.existsSync(path.join(session.sessionDir, residues[0], "trust.bundle.candidate")), true);
+  }
+});
+
+test("public staged commit uses a hard link when absent and the pinned original descriptor when present", async () => {
+  for (const baseline of ["absent", "present"]) {
+    const session = makeSession(`staged-commit-success-${baseline}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    let priorIdentity = null;
+    if (baseline === "present") {
+      writeBundle(session.sessionDir, []);
+      const stat = fs.statSync(canonical);
+      priorIdentity = { dev: stat.dev, ino: stat.ino };
+    }
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${baseline} commit success`]);
+    const residue = fs.readdirSync(session.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+    const candidate = path.join(session.sessionDir, residue, "trust.bundle.candidate");
+    assert.deepEqual(fs.readFileSync(canonical), fs.readFileSync(candidate));
+    const canonicalStat = fs.statSync(canonical);
+    const candidateStat = fs.statSync(candidate);
+    if (baseline === "absent") assert.deepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, { dev: candidateStat.dev, ino: candidateStat.ino }, "absent baseline publishes only by hard link");
+    else assert.deepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, priorIdentity, "present baseline commits through the pinned original inode");
+  }
+});
+
+test("attached prior-present commit preserves both baseline inode and foreign pathname replacement", async () => {
+  const session = makeSession("staged-commit-present-path-replacement");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const baseline = fs.readFileSync(canonical);
+  const parked = `${canonical}.baseline`;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeCandidateCommit: () => { fs.renameSync(canonical, parked); fs.writeFileSync(canonical, "foreign replacement\n"); },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "present pathname replacement"]),
+      (error) => /recovery required/i.test(String(error)) && /no retry is required/i.test(String(error)),
+    );
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.equal(fs.readFileSync(canonical, "utf8"), "foreign replacement\n");
+  assert.deepEqual(fs.readFileSync(parked), baseline);
+  assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+});
+
+test("public staged abort retains candidate, preserves baseline, and fails closed when abort authority is unavailable", async () => {
+  const session = makeSession("staged-abort-unavailable");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const baseline = fs.readFileSync(canonical);
+  const lock = path.join(session.sessionDir, "command-log.jsonl.lock.0");
+  fs.writeFileSync(lock, `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`);
+  setWorkflowEvidenceTransactionTestHooksForTest({ afterRecord: () => { throw new Error("unattached staged failure"); } });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "abort unavailable fixture"]),
+      /recovery required/i,
+    );
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.deepEqual(fs.readFileSync(canonical), baseline);
+  assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+  assert.equal(fs.readFileSync(lock, "utf8"), `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`);
+});
+
+test("public prewrite validation has no residue while staged writer validation records a correlated abort", async () => {
+  const noEffects = makeSession("staged-prewrite-no-effects");
+  claimAmbientSessionAssignment(noEffects);
+  await startBuilderFlowSession({ sessionDir: noEffects.sessionDir });
+  const manifestFile = path.join(runDir(noEffects.slug, noEffects.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const manifestBefore = fs.readFileSync(manifestFile);
+  await assert.rejects(
+    () => workflowMain(["evidence", "--session-dir", noEffects.sessionDir, "--expectation", "selected-work", "--status", "not_verified"]),
+    /requires --summary/,
+  );
+  assert.deepEqual(fs.readFileSync(manifestFile), manifestBefore);
+  assert.equal(fs.readdirSync(noEffects.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), false);
+
+  const staged = makeSession("staged-writer-validation-abort");
+  claimAmbientSessionAssignment(staged);
+  await startBuilderFlowSession({ sessionDir: staged.sessionDir });
+  await assert.rejects(
+    () => workflowMain(["evidence", "--session-dir", staged.sessionDir, "--expectation", "selected-work", "--status", "invalid", "--summary", "writer validation fixture"]),
+    /status must be one of/,
+  );
+  const residue = fs.readdirSync(staged.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+  assert.ok(residue);
+  const transactionId = residue.slice(".workflow-evidence-transaction-".length);
+  const abort = readCommandLog(path.join(staged.sessionDir, "command-log.jsonl")).find((record) => record.transaction?.outcome === "aborted");
+  assert.equal(abort.transaction.id, transactionId);
+  assert.equal(fs.existsSync(path.join(staged.sessionDir, "trust.bundle")), false);
 });
 
 async function loadRuntimeTestSeams() {
@@ -652,12 +904,11 @@ test("public workflow evidence isolates overlapping transaction observations and
   }
 });
 
-test("public workflow evidence refuses recovery after session replacement or trust-file symlink", async () => {
-  for (const mode of ["session-replacement", "trust-symlink"]) {
+test("public workflow evidence refuses recovery after session replacement", async () => {
+  for (const mode of ["session-replacement"]) {
     const session = makeSession(`public-evidence-${mode}`);
     claimAmbientSessionAssignment(session);
     await startBuilderFlowSession({ sessionDir: session.sessionDir });
-    const replacementTrust = path.join(session.projectRoot, `${mode}-sentinel.bundle`);
     setWorkflowEvidenceTransactionTestHooksForTest({
       afterRecord: () => {
         if (mode === "session-replacement") {
@@ -668,9 +919,6 @@ test("public workflow evidence refuses recovery after session replacement or tru
           fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "replacement bundle\n");
           return;
         }
-        fs.writeFileSync(replacementTrust, "sentinel\n");
-        fs.unlinkSync(path.join(session.sessionDir, "trust.bundle"));
-        fs.symlinkSync(replacementTrust, path.join(session.sessionDir, "trust.bundle"));
       },
     });
     try {
@@ -681,8 +929,7 @@ test("public workflow evidence refuses recovery after session replacement or tru
     } finally {
       setWorkflowEvidenceTransactionTestHooksForTest(undefined);
     }
-    if (mode === "session-replacement") assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), "replacement bundle\n");
-    else assert.equal(fs.readFileSync(replacementTrust, "utf8"), "sentinel\n");
+    assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), "replacement bundle\n");
   }
 });
 
@@ -712,39 +959,6 @@ test("public workflow evidence never overwrites a foreign regular trust.bundle r
   }
   assert.equal(fs.readFileSync(bundleFile, "utf8"), "foreign regular replacement\n");
   assert.equal(fs.existsSync(transactionFile), true, "transaction-written evidence remains available for explicit recovery");
-});
-
-test("public workflow evidence refuses trust recovery directory swaps at unlink, rename, and fsync boundaries", async () => {
-  for (const boundary of ["unlink", "rename", "directory-fsync"]) {
-    const session = makeSession(`public-evidence-trust-${boundary}`);
-    claimAmbientSessionAssignment(session);
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
-    if (boundary !== "unlink") writeBundle(session.sessionDir, []);
-    const replaceSession = () => {
-      fs.renameSync(session.sessionDir, `${session.sessionDir}-parked`);
-      fs.mkdirSync(session.sessionDir);
-      fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${boundary} replacement sentinel\n`);
-    };
-    setWorkflowEvidenceTransactionTestHooksForTest({
-      afterRecord: () => {
-        const state = readJson(path.join(session.sessionDir, "state.json"));
-        state.work_item_refs = [`local:work-item/trust-${boundary}-mutation`];
-        writeJson(path.join(session.sessionDir, "state.json"), state);
-      },
-      ...(boundary === "unlink" ? { beforeTrustUnlink: replaceSession }
-        : boundary === "rename" ? { beforeTrustRename: replaceSession }
-          : { beforeTrustDirectoryFsync: replaceSession }),
-    });
-    try {
-      await assert.rejects(
-        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", `trust ${boundary} identity fixture`]),
-        /recovery required|identity changed/i,
-      );
-    } finally {
-      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
-    }
-    assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), `${boundary} replacement sentinel\n`);
-  }
 });
 
 test("public workflow evidence returns committed recovery without rollback after post-sync faults", async () => {
@@ -816,7 +1030,7 @@ test("public workflow evidence leaves a committed attachment intact when recover
   try {
     await assert.rejects(
       () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "force recovery failure"]),
-      (error) => /recovery required/i.test(String(error)) && !/retry/i.test(String(error)),
+      (error) => /recovery required/i.test(String(error)) && /no retry is required/i.test(String(error)),
     );
   } finally {
     setWorkflowEvidenceTransactionTestHooksForTest(undefined);
@@ -1944,7 +2158,7 @@ test("direct sidecar gate recording cannot inject a head without an exact Flow p
   );
 });
 
-test("public evidence quarantines a committed bundle when producer durability reporting fails", async () => {
+test("public evidence retains non-authoritative staged residue when producer durability reporting fails", async () => {
   const session = makeSession("producer-durability-failure");
   claimAmbientSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1975,8 +2189,11 @@ test("public evidence quarantines a committed bundle when producer durability re
   }
   assert.equal(fs.existsSync(bundleFile), false, "a producer-reported failure must not leave a live attachable bundle");
   assert.deepEqual(readJson(manifestFile), beforeManifest);
-  const quarantined = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".trust.bundle.failed-"));
-  assert.equal(quarantined.length, 1, "the committed bytes remain preserved as inert audit evidence");
+  const transactions = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+  assert.equal(transactions.length, 1, "the correlated staged transaction remains as inert audit evidence");
+  const candidateFile = path.join(session.sessionDir, transactions[0], "trust.bundle.candidate");
+  assert.equal(fs.statSync(candidateFile).isFile(), true);
+  assert.doesNotThrow(() => JSON.parse(fs.readFileSync(candidateFile, "utf8")));
 });
 
 test("start rejects a requested Builder flow that differs from the existing run before projection mutation", async (t) => {

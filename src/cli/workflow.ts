@@ -19,7 +19,7 @@ import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
@@ -581,10 +581,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   return 0;
 }
 
-type EvidenceFileSnapshot = { file: string; exists: boolean; bytes: Buffer | null };
-type EvidenceWrittenFile = { file: string; descriptor: number; identity: { dev: number; ino: number }; digest: string };
 type CommandObservationReport = { ordinal: number; observation_id: string; exit_code: number; output_sha256: string; outcome: "pass" | "fail" };
-type EvidenceDirectoryIdentity = { artifactRoot: string; sessionDir: string; artifact: { dev: number; ino: number; realpath: string; descriptor: number }; session: { dev: number; ino: number; realpath: string; descriptor: number } };
 type EvidenceReceipt = {
   runId: string; subject: string | null; gateId: string; stepId: string | null; expectedRunHead: string;
   expectationIds: string[]; expectation: string; visit: { enteredAt: number; initial: boolean };
@@ -597,9 +594,217 @@ type EvidenceTransactionFailure = { state: "safely_rolled_back" | "recovery_requ
 type EvidenceTransactionResult = EvidenceTransactionSuccess | EvidenceTransactionFailure;
 
 /** Test-only fault boundary for the otherwise atomic public-evidence transaction. */
-export let workflowEvidenceTransactionTestHooks: { afterRecord?: () => void | Promise<void>; beforePostconditions?: () => void | Promise<void>; beforeSidecarRead?: () => void | Promise<void>; beforeTrustUnlink?: () => void; beforeTrustRename?: () => void; beforeTrustDirectoryFsync?: () => void } | undefined;
+export let workflowEvidenceTransactionTestHooks: {
+  afterRecord?: () => void | Promise<void>; beforePostconditions?: () => void | Promise<void>; beforeSidecarRead?: () => void | Promise<void>;
+  afterCandidateResourceAcquired?: (resource: "artifact-directory" | "session-directory" | "trust-snapshot" | "abort-capability" | "candidate-directory" | "candidate-file") => void;
+  candidateWrite?: typeof fs.writeSync;
+  beforeCandidateReread?: (descriptor: number) => void;
+  beforeCandidateCommit?: () => void;
+  afterCandidateLink?: (canonicalFile: string) => void;
+  beforeCandidateCommitDirectoryFsync?: () => void;
+  candidateResourceClosed?: (resource: "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
+} | undefined;
 export function setWorkflowEvidenceTransactionTestHooksForTest(hooks: typeof workflowEvidenceTransactionTestHooks): void {
   workflowEvidenceTransactionTestHooks = hooks;
+}
+
+export type StagedWorkflowEvidenceCandidate = { transaction_id: string; directory: string; file: string; digest: string; bytes: Buffer };
+type StagedWorkflowEvidenceContext = StagedWorkflowEvidenceCandidate & {
+  writerError: unknown | null;
+  abortCapability: WriterTransactionAbortCapability;
+  descriptor: number;
+  identity: { dev: number; ino: number };
+  sessionDescriptor: number;
+  sessionIdentity: { dev: number; ino: number };
+  baseline: { exists: boolean; descriptor: number | null; identity: { dev: number; ino: number } | null; bytes: Buffer | null; digest: string | null };
+};
+class StagedEvidenceSetupRecoveryRequiredError extends Error {}
+
+/** Wave-2 internal seam. Candidates are retained audit residue and never become authoritative here. */
+export async function stageWorkflowEvidenceCandidate(sessionDir: string, argv: string[]): Promise<StagedWorkflowEvidenceCandidate> {
+  return withStagedWorkflowEvidenceCandidate(sessionDir, argv, async ({ writerError, abortCapability: _abortCapability, descriptor: _descriptor, identity: _identity, sessionDescriptor: _sessionDescriptor, sessionIdentity: _sessionIdentity, baseline: _baseline, ...candidate }) => {
+    if (writerError) throw writerError;
+    return candidate;
+  });
+}
+
+async function withStagedWorkflowEvidenceCandidate<T>(
+  sessionDir: string,
+  argv: string[],
+  consume: (candidate: StagedWorkflowEvidenceContext) => Promise<T>,
+): Promise<T> {
+  const transactionId = randomBytes(16).toString("hex");
+  let artifactDescriptor: number | null = null;
+  let sessionDescriptor: number | null = null;
+  let trustDescriptor: number | null = null;
+  let trustBytes: Buffer | null = null;
+  let trustIdentity: { dev: number; ino: number } | null = null;
+  let candidateDirectoryDescriptor: number | null = null;
+  let candidateDescriptor: number | null = null;
+  let candidateDirectory = "";
+  let candidateFile = "";
+  let abortCapability: WriterTransactionAbortCapability | null = null;
+  try {
+    const artifactRoot = path.dirname(sessionDir);
+    artifactDescriptor = openStableDirectoryDescriptor(artifactRoot, "artifact root");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("artifact-directory");
+    sessionDescriptor = openStableDirectoryDescriptor(sessionDir, "session directory");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("session-directory");
+
+    try {
+      const canonical = path.join(sessionDir, "trust.bundle");
+      trustDescriptor = fs.openSync(canonical, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(trustDescriptor);
+      if (!stat.isFile()) throw new Error("workflow evidence canonical trust snapshot must be a regular file");
+      trustIdentity = { dev: stat.dev, ino: stat.ino };
+      trustBytes = readDescriptorBytes(trustDescriptor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      trustDescriptor = null;
+    }
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("trust-snapshot");
+
+    abortCapability = createWriterTransactionAbortCapability(sessionDir);
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("abort-capability");
+
+    candidateDirectory = path.join(sessionDir, `.workflow-evidence-transaction-${transactionId}`);
+    fs.mkdirSync(candidateDirectory, { mode: 0o700 });
+    candidateDirectoryDescriptor = openStableDirectoryDescriptor(candidateDirectory, "candidate directory");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("candidate-directory");
+
+    candidateFile = path.join(candidateDirectory, "trust.bundle.candidate");
+    candidateDescriptor = fs.openSync(candidateFile, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const candidateStat = fs.fstatSync(candidateDescriptor);
+    const candidateParentStat = fs.fstatSync(candidateDirectoryDescriptor);
+    const sessionStat = fs.fstatSync(sessionDescriptor);
+    if (!candidateStat.isFile() || !candidateParentStat.isDirectory()) throw new Error("workflow evidence candidate resources are not regular file/directory descriptors");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("candidate-file");
+
+    const writerTarget: TrustBundleWriterTarget = {
+      file: candidateFile,
+      descriptor: candidateDescriptor,
+      identity: { dev: candidateStat.dev, ino: candidateStat.ino },
+      parentDescriptor: candidateDirectoryDescriptor,
+      parentIdentity: { dev: candidateParentStat.dev, ino: candidateParentStat.ino },
+      write: workflowEvidenceTransactionTestHooks?.candidateWrite,
+      beforeReread: workflowEvidenceTransactionTestHooks?.beforeCandidateReread,
+    };
+    let writerError: unknown | null = null;
+    try { await mainFromPublicWorkflow(argv, { writerTransactionId: transactionId, writerTarget }); }
+    catch (error) { writerError = error; }
+    const bytes = readDescriptorBytes(candidateDescriptor);
+    if (bytes.length > 0) fs.fsyncSync(candidateDirectoryDescriptor);
+    return await consume({
+      transaction_id: transactionId,
+      directory: candidateDirectory,
+      file: candidateFile,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      bytes,
+      writerError,
+      abortCapability,
+      descriptor: candidateDescriptor,
+      identity: { dev: candidateStat.dev, ino: candidateStat.ino },
+      sessionDescriptor,
+      sessionIdentity: { dev: sessionStat.dev, ino: sessionStat.ino },
+      baseline: {
+        exists: trustDescriptor !== null,
+        descriptor: trustDescriptor,
+        identity: trustIdentity,
+        bytes: trustBytes,
+        digest: trustBytes ? createHash("sha256").update(trustBytes).digest("hex") : null,
+      },
+    });
+  } catch (error) {
+    if (candidateDirectory && abortCapability) {
+      const aborted = appendWriterTransactionAbort(abortCapability, transactionId, new Date().toISOString());
+      if (!aborted) throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence staged setup failed and its correlated abort could not be persisted: ${errorMessage(error)}`);
+    }
+    throw error;
+  } finally {
+    if (candidateDescriptor !== null) { fs.closeSync(candidateDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("candidate-file"); }
+    if (candidateDirectoryDescriptor !== null) { fs.closeSync(candidateDirectoryDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("candidate-directory"); }
+    if (trustDescriptor !== null) { fs.closeSync(trustDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("trust-snapshot"); }
+    if (sessionDescriptor !== null) { fs.closeSync(sessionDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("session-directory"); }
+    if (artifactDescriptor !== null) { fs.closeSync(artifactDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("artifact-directory"); }
+  }
+}
+
+function openStableDirectoryDescriptor(directory: string, label: string): number {
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const current = fs.lstatSync(directory);
+    if (!opened.isDirectory() || current.isSymbolicLink() || !current.isDirectory() || opened.dev !== current.dev || opened.ino !== current.ino) {
+      throw new Error(`workflow evidence ${label} must be a stable non-symlink directory`);
+    }
+    return descriptor;
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, canonicalFile: string): void {
+  workflowEvidenceTransactionTestHooks?.beforeCandidateCommit?.();
+  const candidateBytes = readDescriptorBytes(candidate.descriptor);
+  const digest = createHash("sha256").update(candidateBytes).digest("hex");
+  if (digest !== candidate.digest) throw new Error("workflow evidence candidate bytes changed before commit");
+  if (candidate.baseline.exists) {
+    assertCanonicalBaselineUnchanged(candidate, canonicalFile);
+    const descriptor = candidate.baseline.descriptor!;
+    writeDescriptorFully(descriptor, candidateBytes);
+    fs.ftruncateSync(descriptor, candidateBytes.length);
+    fs.fsyncSync(descriptor);
+    if (!readDescriptorBytes(descriptor).equals(candidateBytes)) throw new Error("workflow evidence canonical trust reread did not match committed candidate bytes");
+    const current = fs.lstatSync(canonicalFile);
+    const identity = candidate.baseline.identity!;
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+      throw new Error("workflow evidence canonical trust pathname changed during pinned-descriptor commit");
+    }
+  } else {
+    try { fs.linkSync(candidate.file, canonicalFile); }
+    catch (error) { throw new Error(`workflow evidence candidate create-if-absent commit failed without replacing canonical trust: ${errorMessage(error)}`); }
+    workflowEvidenceTransactionTestHooks?.afterCandidateLink?.(canonicalFile);
+    const current = fs.lstatSync(canonicalFile);
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== candidate.identity.dev || current.ino !== candidate.identity.ino) {
+      throw new Error("workflow evidence candidate hard-link commit did not preserve staged inode identity");
+    }
+    const canonicalDescriptor = fs.openSync(canonicalFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      if (!readDescriptorBytes(canonicalDescriptor).equals(candidateBytes)) throw new Error("workflow evidence hard-linked canonical bytes do not match the staged candidate");
+    } finally { fs.closeSync(canonicalDescriptor); }
+  }
+  workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
+  const session = fs.fstatSync(candidate.sessionDescriptor);
+  if (!session.isDirectory() || session.dev !== candidate.sessionIdentity.dev || session.ino !== candidate.sessionIdentity.ino) {
+    throw new Error("workflow evidence pinned session directory changed before candidate commit durability");
+  }
+  fs.fsyncSync(candidate.sessionDescriptor);
+}
+
+function assertCanonicalBaselineUnchanged(candidate: StagedWorkflowEvidenceContext, canonicalFile: string): void {
+  if (!candidate.baseline.exists) {
+    if (fs.existsSync(canonicalFile)) throw new Error("workflow evidence canonical trust appeared after absent baseline");
+    return;
+  }
+  const identity = candidate.baseline.identity!;
+  const descriptor = fs.fstatSync(candidate.baseline.descriptor!);
+  const current = fs.lstatSync(canonicalFile);
+  if (!descriptor.isFile() || current.isSymbolicLink() || !current.isFile()
+    || descriptor.dev !== identity.dev || descriptor.ino !== identity.ino
+    || current.dev !== identity.dev || current.ino !== identity.ino
+    || createHash("sha256").update(readDescriptorBytes(candidate.baseline.descriptor!)).digest("hex") !== candidate.baseline.digest) {
+    throw new Error("workflow evidence canonical trust baseline changed");
+  }
+}
+
+function writeDescriptorFully(descriptor: number, bytes: Buffer): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = fs.writeSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error("workflow evidence canonical trust write returned zero or invalid byte count");
+    offset += count;
+  }
 }
 
 async function runEvidenceTransaction(input: {
@@ -607,215 +812,96 @@ async function runEvidenceTransaction(input: {
   expectation: string; requestedStatus: string; beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"];
 }): Promise<EvidenceTransactionResult> {
   const trustBundleFile = path.join(input.sessionDir, "trust.bundle");
-  const transactionId = randomBytes(16).toString("hex");
-  const directories = snapshotEvidenceDirectoryIdentity(input.sessionDir);
-  const abortCapability = createWriterTransactionAbortCapability(input.sessionDir);
-  const trustBundle = snapshotEvidenceFile(trustBundleFile);
   const beforeEvidence = manifestEvidenceIdentity(input.beforeRun.manifest);
   const preMutationReceipt = captureEvidenceReceipt(input.beforeRun, input.expectation, input.expectedRunHead);
-  let digest: string | null = null;
-  let receipt: EvidenceReceipt | null = null;
-  let writtenTrust: EvidenceWrittenFile | null = null;
   try {
-    await mainFromPublicWorkflow([
+    return await withStagedWorkflowEvidenceCandidate(input.sessionDir, [
       "record-gate-claim", input.sessionDir, ...input.forwarded, "--actor", input.callerActor,
       "--flow-run-head", input.expectedRunHead,
-    ], { writerTransactionId: transactionId });
-    writtenTrust = snapshotTransactionWrittenFile(trustBundleFile);
-    digest = writtenTrust.digest;
-    await workflowEvidenceTransactionTestHooks?.afterRecord?.();
-    receipt = receiptForGateClaim(trustBundleFile, preMutationReceipt, digest);
-    const synchronized = await syncBuilderFlowSession({ sessionDir: input.sessionDir, expectedRunHead: input.expectedRunHead });
-    const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
-    await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
-    assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
-    await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
-    const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
-    const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
-    return {
-      state: "attached",
-      report: immutableReport({
-        run_id: run.runId, status: run.state.status, current_step: run.state.current_step,
-        attached: synchronized.attached, awaiting_evidence: !synchronized.attached,
-        next_action: updatedSidecar.next_action ?? null,
-        gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
-        command_observations: gateVerdict.observations,
-      }),
-    };
+    ], async (candidate) => {
+      let receipt: EvidenceReceipt | null = null;
+      let commitAttempted = false;
+      let commitSucceeded = false;
+      try {
+        if (candidate.writerError) throw candidate.writerError;
+        if (candidate.bytes.length === 0) throw new Error("workflow evidence staged writer produced no candidate bytes");
+        await workflowEvidenceTransactionTestHooks?.afterRecord?.();
+        receipt = receiptForGateClaim(candidate.file, preMutationReceipt, candidate.digest);
+        const synchronized = await syncBuilderFlowSession({
+          sessionDir: input.sessionDir,
+          expectedRunHead: input.expectedRunHead,
+          stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
+        });
+        const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
+        await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
+        assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
+        commitAttempted = true;
+        commitStagedWorkflowEvidence(candidate, trustBundleFile);
+        commitSucceeded = true;
+        await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
+        const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
+        const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
+        return {
+          state: "attached",
+          report: immutableReport({
+            run_id: run.runId, status: run.state.status, current_step: run.state.current_step,
+            attached: synchronized.attached, awaiting_evidence: !synchronized.attached,
+            next_action: updatedSidecar.next_action ?? null,
+            gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
+            command_observations: gateVerdict.observations,
+          }),
+        } satisfies EvidenceTransactionSuccess;
+      } catch (error) {
+        const attachment = receipt
+          ? await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeEvidence)
+          : await canonicalManifestStillUnchanged(input.projectRoot, input.slug, beforeEvidence) ? "unattached" : "unknown";
+        if (attachment === "attached") {
+          if (commitAttempted && !commitSucceeded) return { state: "recovery_required", error: new Error(`workflow evidence is canonically attached; no retry is required, but candidate commit needs recovery: ${errorMessage(error)}`) };
+          try {
+            if (!commitSucceeded) {
+              commitAttempted = true;
+              commitStagedWorkflowEvidence(candidate, trustBundleFile);
+              commitSucceeded = true;
+            }
+            const recovered = await recoverBuilderFlowSession({ sessionDir: input.sessionDir });
+            const gateVerdict = readGateVerdict(trustBundleFile, receipt!.expectation);
+            return {
+              state: "recovered",
+              report: immutableReport({
+                run_id: recovered.run.runId, status: recovered.run.state.status, current_step: recovered.run.state.current_step,
+                attached: true, awaiting_evidence: false, next_action: recovered.projection.next_action ?? null,
+                gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
+                command_observations: gateVerdict.observations, recovery: { committed: true, retry: "none" },
+              }),
+            };
+          } catch (commitError) {
+            return { state: "recovery_required", error: new Error(`workflow evidence is canonically attached; no retry is required: ${errorMessage(commitError)}`) };
+          }
+        }
+        if (attachment !== "unattached") return { state: "recovery_required", error };
+        try {
+          assertCanonicalBaselineUnchanged(candidate, trustBundleFile);
+          if (!appendWriterTransactionAbort(candidate.abortCapability, candidate.transaction_id, new Date().toISOString())) {
+            return { state: "recovery_required", error: new Error(`workflow evidence retained staged candidate but could not append its correlated abort marker: ${errorMessage(error)}`) };
+          }
+          return { state: "safely_rolled_back", error };
+        } catch (abortError) {
+          return { state: "recovery_required", error: evidenceRollbackError(error, abortError) };
+        }
+      }
+    });
   } catch (error) {
-    return await classifyEvidenceTransactionFailure(input, transactionId, abortCapability, trustBundle, writtenTrust, directories, receipt, beforeEvidence, error);
-  } finally {
-    if (writtenTrust) {
-      try { fs.closeSync(writtenTrust.descriptor); } catch { /* descriptor already closed */ }
-    }
-    closeEvidenceDirectoryIdentity(directories);
+    return error instanceof StagedEvidenceSetupRecoveryRequiredError
+      ? { state: "recovery_required", error }
+      : { state: "safely_rolled_back", error };
   }
 }
 
-async function classifyEvidenceTransactionFailure(
-  input: { sessionDir: string; slug: string; projectRoot: string; requestedStatus: string }, transactionId: string, abortCapability: WriterTransactionAbortCapability,
-  trustBundle: EvidenceFileSnapshot, writtenTrust: EvidenceWrittenFile | null, directories: EvidenceDirectoryIdentity, receipt: EvidenceReceipt | null,
-  beforeEvidence: readonly JsonRecord[], error: unknown,
-): Promise<EvidenceTransactionResult> {
-  const attachment = await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeEvidence);
-  if (attachment === "attached") {
-    try {
-      const recovered = await recoverBuilderFlowSession({ sessionDir: input.sessionDir });
-      const gateVerdict = readGateVerdict(path.join(input.sessionDir, "trust.bundle"), receipt!.expectation);
-      return {
-        state: "recovered",
-        report: immutableReport({
-          run_id: recovered.run.runId,
-          status: recovered.run.state.status,
-          current_step: recovered.run.state.current_step,
-          attached: true,
-          awaiting_evidence: false,
-          next_action: recovered.projection.next_action ?? null,
-          gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
-          command_observations: gateVerdict.observations,
-          recovery: { committed: true, retry: "none" },
-        }),
-      };
-    }
-    catch (recoveryError) { return { state: "recovery_required", error: evidenceRecoveryError(error, recoveryError) }; }
-  }
-  if (attachment !== "unattached") return { state: "recovery_required", error };
-  if (!writtenTrust) return { state: "recovery_required", error };
+async function canonicalManifestStillUnchanged(projectRoot: string, slug: string, beforeEvidence: readonly JsonRecord[]): Promise<boolean> {
   try {
-    restoreTrustBundleSnapshot(trustBundle, writtenTrust, directories);
-    if (!appendWriterTransactionAbort(abortCapability, transactionId, new Date().toISOString())) {
-      return { state: "recovery_required", error: new Error(`workflow evidence preserved command-log.jsonl but could not append its abort marker: ${errorMessage(error)}`) };
-    }
-    return { state: "safely_rolled_back", error };
-  } catch (rollbackError) {
-    return { state: "recovery_required", error: evidenceRollbackError(error, rollbackError) };
-  }
-}
-
-function snapshotEvidenceFile(file: string): EvidenceFileSnapshot {
-  try {
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`workflow evidence refuses to snapshot non-regular file ${file}`);
-    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-      const opened = fs.fstatSync(descriptor);
-      if (!opened.isFile()) throw new Error(`workflow evidence refuses to snapshot non-regular file ${file}`);
-      return { file, exists: true, bytes: fs.readFileSync(descriptor) };
-    } finally {
-      fs.closeSync(descriptor);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { file, exists: false, bytes: null };
-    throw error;
-  }
-}
-
-function snapshotTransactionWrittenFile(file: string): EvidenceWrittenFile {
-  const descriptor = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
-  try {
-    const opened = fs.fstatSync(descriptor);
-    const current = fs.lstatSync(file);
-    if (!opened.isFile() || current.isSymbolicLink() || !current.isFile() || opened.dev !== current.dev || opened.ino !== current.ino) {
-      throw new Error("workflow evidence cannot bind the transaction-written trust.bundle identity");
-    }
-    const bytes = readDescriptorBytes(descriptor);
-    return {
-      file,
-      descriptor,
-      identity: { dev: opened.dev, ino: opened.ino },
-      digest: createHash("sha256").update(bytes).digest("hex"),
-    };
-  } catch (error) {
-    fs.closeSync(descriptor);
-    throw error;
-  }
-}
-
-function snapshotEvidenceDirectoryIdentity(sessionDir: string): EvidenceDirectoryIdentity {
-  const artifactRoot = path.dirname(sessionDir);
-  const artifact = snapshotDirectoryIdentity(artifactRoot, "artifact root");
-  try {
-    const session = snapshotDirectoryIdentity(sessionDir, "session directory");
-    if (path.dirname(session.realpath) !== artifact.realpath) {
-      fs.closeSync(session.descriptor);
-      throw new Error("workflow evidence session directory is not canonically contained by its artifact root");
-    }
-    return { artifactRoot, sessionDir, artifact, session };
-  } catch (error) {
-    fs.closeSync(artifact.descriptor);
-    throw error;
-  }
-}
-
-function snapshotDirectoryIdentity(directory: string, label: string): { dev: number; ino: number; realpath: string; descriptor: number } {
-  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-  try {
-    const stat = fs.fstatSync(descriptor);
-    const current = fs.lstatSync(directory);
-    if (!stat.isDirectory() || current.isSymbolicLink() || !current.isDirectory() || stat.dev !== current.dev || stat.ino !== current.ino) {
-      throw new Error(`workflow evidence ${label} must be a stable non-symlink directory`);
-    }
-    return { dev: stat.dev, ino: stat.ino, realpath: fs.realpathSync.native(directory), descriptor };
-  } catch (error) {
-    fs.closeSync(descriptor);
-    throw error;
-  }
-}
-
-function closeEvidenceDirectoryIdentity(identity: EvidenceDirectoryIdentity): void {
-  try { fs.closeSync(identity.session.descriptor); } catch { /* closed */ }
-  try { fs.closeSync(identity.artifact.descriptor); } catch { /* closed */ }
-}
-
-function assertEvidenceDirectoryIdentity(identity: EvidenceDirectoryIdentity): void {
-  const current = snapshotEvidenceDirectoryIdentity(identity.sessionDir);
-  try {
-    if (current.artifactRoot !== identity.artifactRoot
-      || current.artifact.dev !== identity.artifact.dev || current.artifact.ino !== identity.artifact.ino || current.artifact.realpath !== identity.artifact.realpath
-      || current.session.dev !== identity.session.dev || current.session.ino !== identity.session.ino || current.session.realpath !== identity.session.realpath) {
-      throw new Error("workflow evidence recovery refused: artifact-root or session-directory identity changed");
-    }
-  } finally {
-    closeEvidenceDirectoryIdentity(current);
-  }
-}
-
-function restoreTrustBundleSnapshot(snapshot: EvidenceFileSnapshot, written: EvidenceWrittenFile, directories: EvidenceDirectoryIdentity): void {
-  assertEvidenceDirectoryIdentity(directories);
-  assertTransactionWrittenFileIdentity(written);
-  if (!snapshot.exists) {
-    workflowEvidenceTransactionTestHooks?.beforeTrustUnlink?.();
-    assertEvidenceDirectoryIdentity(directories);
-    assertTransactionWrittenFileIdentity(written);
-    const quarantine = path.join(path.dirname(snapshot.file), `.trust.bundle.aborted-${randomBytes(16).toString("hex")}`);
-    fs.renameSync(snapshot.file, quarantine);
-    const quarantined = fs.lstatSync(quarantine);
-    if (!quarantined.isFile() || quarantined.dev !== written.identity.dev || quarantined.ino !== written.identity.ino) {
-      throw new Error("workflow evidence recovery refused: trust.bundle identity changed during quarantine");
-    }
-    fsyncPinnedSessionDirectory(directories);
-    return;
-  }
-  workflowEvidenceTransactionTestHooks?.beforeTrustRename?.();
-  assertEvidenceDirectoryIdentity(directories);
-  assertTransactionWrittenFileIdentity(written);
-  fs.writeSync(written.descriptor, snapshot.bytes!, 0, snapshot.bytes!.length, 0);
-  fs.ftruncateSync(written.descriptor, snapshot.bytes!.length);
-  fs.fsyncSync(written.descriptor);
-  assertTransactionWrittenFileIdentity(written, createHash("sha256").update(snapshot.bytes!).digest("hex"));
-  fsyncPinnedSessionDirectory(directories);
-}
-
-function assertTransactionWrittenFileIdentity(written: EvidenceWrittenFile, expectedDigest = written.digest): void {
-  const descriptor = fs.fstatSync(written.descriptor);
-  const current = fs.lstatSync(written.file);
-  if (!descriptor.isFile() || current.isSymbolicLink() || !current.isFile()
-    || descriptor.dev !== written.identity.dev || descriptor.ino !== written.identity.ino
-    || current.dev !== written.identity.dev || current.ino !== written.identity.ino) {
-    throw new Error("workflow evidence recovery refused: transaction-written trust.bundle identity changed");
-  }
-  const digest = createHash("sha256").update(readDescriptorBytes(written.descriptor)).digest("hex");
-  if (digest !== expectedDigest) throw new Error("workflow evidence recovery refused: transaction-written trust.bundle bytes changed");
+    const raw = await loadRun(slug, projectRoot);
+    return isDeepStrictEqual(manifestEvidenceIdentity(raw.manifest as JsonRecord), beforeEvidence);
+  } catch { return false; }
 }
 
 function readDescriptorBytes(descriptor: number): Buffer {
@@ -829,17 +915,6 @@ function readDescriptorBytes(descriptor: number): Buffer {
     offset += read;
   }
   return bytes;
-}
-
-function fsyncPinnedSessionDirectory(directories: EvidenceDirectoryIdentity): void {
-  workflowEvidenceTransactionTestHooks?.beforeTrustDirectoryFsync?.();
-  assertEvidenceDirectoryIdentity(directories);
-  const stat = fs.fstatSync(directories.session.descriptor);
-  if (!stat.isDirectory() || stat.dev !== directories.session.dev || stat.ino !== directories.session.ino) {
-    throw new Error("workflow evidence recovery refused: pinned session directory identity changed");
-  }
-  fs.fsyncSync(directories.session.descriptor);
-  assertEvidenceDirectoryIdentity(directories);
 }
 
 function captureEvidenceReceipt(
@@ -1024,10 +1099,6 @@ async function canonicalEvidenceAttachment(projectRoot: string, slug: string, re
 
 function evidenceRollbackError(operationError: unknown, rollbackError: unknown): Error {
   return new Error(`workflow evidence failed and rollback was incomplete: ${errorMessage(operationError)}; rollback error: ${errorMessage(rollbackError)}`);
-}
-
-function evidenceRecoveryError(operationError: unknown, recoveryError: unknown): Error {
-  return new Error(`workflow evidence canonical attachment succeeded but projection recovery is required and incomplete: ${errorMessage(operationError)}; recovery error: ${errorMessage(recoveryError)}`);
 }
 
 function errorMessage(error: unknown): string {

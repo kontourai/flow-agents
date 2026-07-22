@@ -83,29 +83,10 @@ const {
   CHAIN_GENESIS,
   canonicalJsonForChain,
   computeChainHash,
+  verifyCommandLogRaw,
+  acquireGenerationLock,
+  releaseGenerationLock,
 } = require('../lib/command-log-chain.js');
-
-/**
- * Read the last entry from command-log.jsonl that has a `_chain` block.
- * Returns { seq, hash } of that entry, or { seq: -1, hash: CHAIN_GENESIS }
- * when the log is absent, empty, or all existing entries are legacy (no _chain).
- *
- * We scan from the end so we can stop as soon as we find a chained entry
- * without loading the whole file (practical optimization for long logs).
- */
-function readLastChainState(logFile) {
-  let raw = '';
-  try { raw = fs.readFileSync(logFile, 'utf8'); } catch { return { seq: -1, hash: CHAIN_GENESIS }; }
-  const lines = raw.split('\n').filter(l => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let entry;
-    try { entry = JSON.parse(lines[i]); } catch { continue; }
-    if (entry && entry._chain && typeof entry._chain.hash === 'string' && typeof entry._chain.seq === 'number') {
-      return { seq: entry._chain.seq, hash: entry._chain.hash };
-    }
-  }
-  return { seq: -1, hash: CHAIN_GENESIS };
-}
 
 // ─── Concurrency-safe append (lockfile) ──────────────────────────────────────
 //
@@ -114,50 +95,11 @@ function readLastChainState(logFile) {
 // concurrently (e.g. parallel agents in one workspace) can both read the same
 // prevHash and append entries with an identical seq/prevHash — forking the chain
 // and tripping the tamper-evidence verifier on a benign race. We serialize the
-// section with an atomic create-exclusive lockfile.
+// section with append-only, create-exclusive lock generations.
 //
-// FAIL-OPEN, like the rest of this hook: if the lock cannot be acquired we still
-// append (capture must NEVER block the agent or drop evidence), accepting the
-// small residual race rather than losing the record. A crashed holder's stale
-// lock is stolen after LOCK_STALE_MS so a dead process can't wedge capture.
-const LOCK_RETRY_MS = 5;        // backoff between attempts
-const LOCK_MAX_TRIES = 200;     // ~1s total acquisition budget
-const LOCK_STALE_MS = 10000;    // steal a lock older than this (crashed holder)
-
-/** Synchronous sleep without busy-spinning. Best-effort; no-ops if unavailable. */
-function sleepSync(ms) {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
-  catch { /* SharedArrayBuffer/Atomics unavailable — skip the backoff */ }
-}
-
-/**
- * Acquire an exclusive lock via atomic create-exclusive (O_CREAT|O_EXCL).
- * Returns a file descriptor on success, or null on failure (caller fails open).
- */
-function acquireLock(lockFile) {
-  for (let i = 0; i < LOCK_MAX_TRIES; i++) {
-    try {
-      const fd = fs.openSync(lockFile, 'wx');
-      try { fs.writeSync(fd, String(process.pid)); } catch { /* pid is advisory only */ }
-      return fd;
-    } catch (err) {
-      if (!err || err.code !== 'EEXIST') return null; // unexpected — fail open
-      // Lock held: steal it if the holder appears dead (stale), else back off.
-      try {
-        const st = fs.statSync(lockFile);
-        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) { fs.unlinkSync(lockFile); continue; }
-      } catch { continue; } // lock vanished between open and stat — retry immediately
-      sleepSync(LOCK_RETRY_MS);
-    }
-  }
-  return null;
-}
-
-/** Release a lock acquired by acquireLock. Best-effort. */
-function releaseLock(fd, lockFile) {
-  try { fs.closeSync(fd); } catch { /* already closed */ }
-  try { fs.unlinkSync(lockFile); } catch { /* already removed */ }
-}
+// FAIL-OPEN, like the rest of this hook: if the lock cannot be acquired the hook
+// returns without blocking the agent. Active, stale, malformed, or replaced
+// generations are never stolen or deleted.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parseJson(raw) {
@@ -386,17 +328,22 @@ function run(rawInput) {
 
     // Serialize the read→compute→append critical section so concurrent captures
     // (parallel agents sharing this log) cannot fork the hash-chain. Fail-open:
-    // a null fd means we could not lock — we still append rather than drop the
-    // record. The lock is always released in finally.
+    // a null capability means we could not establish safe append authority.
+    // The hook fails open without modifying the log.
     const lockFile = logFile + '.lock';
-    const lockFd = acquireLock(lockFile);
+    const lock = acquireGenerationLock(lockFile, { wait: true, attempts: 2000, retryMs: 5 });
+    if (lock === null) return rawInput;
     try {
       // Hash-chain integrity: compute _chain before appending. Fail-open: any
       // error in chain computation falls back to the plain record (no _chain).
       // A chain failure must NEVER block capture or corrupt the log.
       let recordToWrite = record;
       try {
-        const { seq: prevSeq, hash: prevHash } = readLastChainState(logFile);
+        let raw = '';
+        try { raw = fs.readFileSync(logFile, 'utf8'); } catch {}
+        const authority = verifyCommandLogRaw(raw).append;
+        if (!authority) throw new Error('command-log has no safe append authority');
+        const { seq: prevSeq, hash: prevHash } = authority;
         const seq = prevSeq + 1;
         const hash = computeChainHash(prevHash, record);
         // Spread record fields then add _chain so the chain field is appended last
@@ -406,7 +353,7 @@ function run(rawInput) {
 
       fs.appendFileSync(logFile, JSON.stringify(recordToWrite) + '\n');
     } finally {
-      if (lockFd !== null) releaseLock(lockFd, lockFile);
+      releaseGenerationLock(lock);
     }
   } catch { /* fail-open: capture never blocks or corrupts */ }
   return rawInput;

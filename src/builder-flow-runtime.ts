@@ -54,6 +54,13 @@ export interface BuilderFlowSessionInput {
   flowId?: BuilderFlowId;
   /** Exact canonical Flow state authorized for a subsequent evidence attachment. */
   expectedRunHead?: string;
+  /** Internal staged evidence source. Omission preserves canonical trust.bundle behavior. */
+  stagedTrustBundle?: {
+    file: string;
+    descriptor: number;
+    identity: { dev: number; ino: number };
+    expectedSha256: string;
+  };
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -166,7 +173,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle);
 }
 
 /**
@@ -554,6 +561,7 @@ async function syncAndProject(
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
   expectedRunHead?: string,
+  stagedTrustBundle?: BuilderFlowSessionInput["stagedTrustBundle"],
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -562,8 +570,8 @@ async function syncAndProject(
   if (run.state.status === "active" && gates.length !== 1) {
     throw new BuilderBuildRunInputError("flow_run.open_gates", `expected exactly one gate for active step ${run.state.current_step}, found ${gates.length}`);
   }
-  if (gates.length === 1 && fs.existsSync(context.bundleFile)) {
-    const snapshot = stageTrustBundleSnapshot(context);
+  if (gates.length === 1 && (stagedTrustBundle || fs.existsSync(context.bundleFile))) {
+    const snapshot = stagedTrustBundle ? verifiedStagedTrustBundleSnapshot(context, stagedTrustBundle) : stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
       const gateEvidence = await bundleGateEvidence(
@@ -606,7 +614,7 @@ async function syncAndProject(
         }
       }
     } finally {
-      removeTrustBundleSnapshot(snapshot);
+      if (!stagedTrustBundle) removeTrustBundleSnapshot(snapshot);
     }
   }
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
@@ -624,6 +632,43 @@ async function syncAndProject(
     progressSnapshot,
     attached,
   };
+}
+
+function verifiedStagedTrustBundleSnapshot(
+  context: SessionContext,
+  staged: NonNullable<BuilderFlowSessionInput["stagedTrustBundle"]>,
+): TrustBundleSnapshot {
+  const file = path.resolve(staged.file);
+  const relative = path.relative(context.sessionDir, file);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle.file", "must be retained beneath the exact workflow session");
+  }
+  const opened = fs.fstatSync(staged.descriptor);
+  const current = fs.lstatSync(file);
+  if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
+    || opened.dev !== staged.identity.dev || opened.ino !== staged.identity.ino
+    || current.dev !== staged.identity.dev || current.ino !== staged.identity.ino) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle", "descriptor and pathname must identify the same retained regular candidate");
+  }
+  const raw = readDescriptorBuffer(staged.descriptor);
+  const sha256 = createHash("sha256").update(raw).digest("hex");
+  if (sha256 !== staged.expectedSha256.toLowerCase()) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle.expectedSha256", "does not match the descriptor bytes");
+  }
+  return { file, raw, sha256 };
+}
+
+function readDescriptorBuffer(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new BuilderBuildRunInputError("stagedTrustBundle", "must be a readable regular file");
+  const raw = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < raw.length) {
+    const count = fs.readSync(descriptor, raw, offset, raw.length - offset, offset);
+    if (count === 0) throw new BuilderBuildRunInputError("stagedTrustBundle", "descriptor reread ended early");
+    offset += count;
+  }
+  return raw;
 }
 
 function assertLifecycleResolutionAttestation(context: SessionContext, run: BuilderFlowRunResult): void {

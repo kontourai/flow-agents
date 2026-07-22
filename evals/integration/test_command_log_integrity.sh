@@ -171,17 +171,18 @@ else
   _fail "T2: expected broken on reorder, got $chain_reorder"
 fi
 
-# Test: delete middle entry (restore then delete entry 0 so entry 1's prevHash is wrong)
-write_chained_log "$T2" t2  # re-append fresh entries (now 4 total — but that's fine for test)
-# Write a fresh log with just 2 entries and then delete the first
+# Test: delete a predecessor from a fresh valid two-entry chain. The shared
+# append authority correctly refuses to extend the deliberately broken reorder
+# above, so reset only this disposable fixture's log before creating the case.
+: > "$LOG2"
+write_chained_log "$T2" t2
+# Delete the first entry, leaving the second with an unreachable parent.
 LOG2_FRESH="$T2/.kontourai/flow-agents/t2/command-log.jsonl"
 python3 - "$LOG2_FRESH" << 'PY'
 import sys
 lines = [l for l in open(sys.argv[1]).read().strip().split('\n') if l.strip()]
-# Keep only the last 2 entries (fresh from second write_chained_log call above)
-last2 = lines[-2:]
-# Delete entry[0] of the last2 → only entry[1] remains, whose prevHash won't match genesis
-open(sys.argv[1], 'w').write(last2[1] + '\n')
+# Delete entry[0] → only entry[1] remains, whose prevHash is unreachable.
+open(sys.argv[1], 'w').write(lines[1] + '\n')
 PY
 
 chain_delete=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.kontourai/flow-agents/t2'); console.log(r.status);")

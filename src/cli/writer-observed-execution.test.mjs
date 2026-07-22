@@ -97,6 +97,61 @@ test("mutating writer metadata after the fact breaks the entry's self-hash", (t)
   assert.equal(verifyCommandLogChain(dir).status, "broken");
 });
 
+test("shared raw verification gives identical legacy-prefix and mid-chain gap semantics", (t) => {
+  const dir = tempSession(t);
+  const { entry } = hookEntry(chain.CHAIN_GENESIS, 0, { command: "echo hi", observedResult: "pass", exitCode: 0, capturedAt: NOW });
+  const variants = ["not-json", "[]", "null", "42", JSON.stringify({ source: "legacy" })];
+  for (const prefix of variants) {
+    const raw = `${prefix}\n${JSON.stringify(entry)}\n`;
+    fs.writeFileSync(path.join(dir, "command-log.jsonl"), raw);
+    assert.equal(chain.verifyCommandLogRaw(raw).status, "ok", `${prefix} is a tolerated legacy prefix`);
+    assert.equal(verifyCommandLogChain(dir).status, "ok");
+
+    const gapRaw = `${JSON.stringify(entry)}\n${prefix}\n`;
+    fs.writeFileSync(path.join(dir, "command-log.jsonl"), gapRaw);
+    assert.equal(chain.verifyCommandLogRaw(gapRaw).status, "broken", `${prefix} is a mid-chain gap`);
+    assert.equal(verifyCommandLogChain(dir).status, "broken");
+  }
+});
+
+test("persistent generation locks fail closed on active malformed stale and replaced highest generations", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const first = chain.acquireGenerationLock(base);
+  assert.ok(first);
+  assert.equal(chain.acquireGenerationLock(base), null, "an active highest generation blocks the next generation");
+  const stale = new Date(Date.now() - 60_000);
+  fs.utimesSync(first.file, stale, stale);
+  assert.equal(chain.acquireGenerationLock(base), null, "a stale active generation is never stolen");
+  assert.equal(chain.releaseGenerationLock(first), true);
+
+  const second = chain.acquireGenerationLock(base);
+  assert.equal(second.generation, 1);
+  const parked = `${second.file}.parked`;
+  fs.renameSync(second.file, parked);
+  fs.writeFileSync(second.file, "foreign replacement\n");
+  assert.equal(chain.releaseGenerationLock(second), false, "descriptor release detects pathname replacement");
+  assert.equal(fs.readFileSync(second.file, "utf8"), "foreign replacement\n");
+  assert.equal(chain.acquireGenerationLock(base), null, "a malformed replaced highest generation fails closed");
+});
+
+test("persistent generation locks serialize the next generation without unlinking history", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const zero = chain.acquireGenerationLock(base);
+  assert.equal(chain.releaseGenerationLock(zero), true);
+  const one = chain.acquireGenerationLock(base);
+  assert.equal(one.generation, 1);
+  assert.equal(chain.acquireGenerationLock(base), null);
+  assert.equal(chain.releaseGenerationLock(one), true);
+  const two = chain.acquireGenerationLock(base);
+  assert.equal(two.generation, 2);
+  assert.equal(chain.releaseGenerationLock(two), true);
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.includes(".lock.")).sort(), [
+    "command-log.jsonl.lock.0", "command-log.jsonl.lock.1", "command-log.jsonl.lock.2",
+  ]);
+});
+
 test("append is fail-open: an unwritable session dir does not throw", () => {
   assert.doesNotThrow(() => appendWriterObservedCommands("/nonexistent/definitely-missing", [{ command: "x", exit_code: 0, output_sha256: "e".repeat(64) }], NOW));
 });

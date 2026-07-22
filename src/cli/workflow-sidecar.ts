@@ -66,13 +66,58 @@ function quarantineTrustBundle(file: string): void {
   fs.renameSync(file, quarantine);
 }
 
-function writeTrustBundleAtomically(file: string, payload: AnyObj): void {
+export type TrustBundleWriterTarget = {
+  file: string;
+  descriptor: number;
+  identity: { dev: number; ino: number };
+  parentDescriptor: number;
+  parentIdentity: { dev: number; ino: number };
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+};
+
+function writeBufferFully(descriptor: number, bytes: Buffer, write: typeof fs.writeSync = fs.writeSync): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = write(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error("trust.bundle candidate write returned zero or an invalid byte count");
+    offset += count;
+  }
+}
+
+function assertTrustBundleWriterTarget(target: TrustBundleWriterTarget): void {
+  const opened = fs.fstatSync(target.descriptor);
+  const current = fs.lstatSync(target.file);
+  const parent = fs.fstatSync(target.parentDescriptor);
+  if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
+    || opened.dev !== target.identity.dev || opened.ino !== target.identity.ino
+    || current.dev !== target.identity.dev || current.ino !== target.identity.ino
+    || !parent.isDirectory() || parent.dev !== target.parentIdentity.dev || parent.ino !== target.parentIdentity.ino) {
+    throw new Error("trust.bundle candidate target identity changed");
+  }
+}
+
+function writeTrustBundleAtomically(file: string, payload: AnyObj, target?: TrustBundleWriterTarget): void {
+  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`);
+  if (target) {
+    assertTrustBundleWriterTarget(target);
+    writeBufferFully(target.descriptor, bytes, target.write);
+    fs.ftruncateSync(target.descriptor, bytes.length);
+    fs.fsyncSync(target.descriptor);
+    target.beforeReread?.(target.descriptor);
+    assertTrustBundleWriterTarget(target);
+    const reread = readRegularFileDescriptor(target.descriptor);
+    if (!reread.equals(bytes)) throw new Error("trust.bundle candidate reread did not match the staged bytes");
+    fs.fsyncSync(target.parentDescriptor);
+    assertTrustBundleWriterTarget(target);
+    return;
+  }
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true });
   const temporary = path.join(directory, `.trust.bundle.${process.pid}.${Date.now()}.tmp`);
   const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
-    fs.writeFileSync(descriptor, `${JSON.stringify(payload, null, 2)}\n`);
+    fs.writeFileSync(descriptor, bytes);
     fs.fsyncSync(descriptor);
   } finally { fs.closeSync(descriptor); }
   let renamed = false;
@@ -87,6 +132,19 @@ function writeTrustBundleAtomically(file: string, payload: AnyObj): void {
   } finally {
     try { fs.rmSync(temporary, { force: true }); } catch { /* rename completed or cleanup best effort */ }
   }
+}
+
+function readRegularFileDescriptor(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error("trust.bundle candidate is not a readable regular file");
+  const bytes = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) throw new Error("trust.bundle candidate reread ended early");
+    offset += count;
+  }
+  return bytes;
 }
 // Single-line but readable "key": "value" form. Built by collapsing the
 // structural whitespace from an indented stringify — corruption-proof, unlike a
@@ -1385,7 +1443,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -1432,7 +1490,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
     }
-    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle);
+    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle, writerTarget);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -3141,50 +3199,23 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
 // gate-claim write itself. Decision record: docs/decisions/writer-observed-execution.md.
 export const WRITER_OBSERVATION_SOURCE = "canonical-writer-execution";
 const WRITER_LOCK_RETRY_MS = 5;
-const WRITER_LOCK_MAX_TRIES = 200;
-const WRITER_LOCK_STALE_MS = 10000;
+const WRITER_LOCK_MAX_TRIES = 2000;
 
-function loadCommandLogChain(): { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string } {
+type CommandLogGenerationLock = { fd: number; file: string; generation: number; nonce: string; identity: { dev: number; ino: number } };
+type CommandLogChain = {
+  CHAIN_GENESIS: string;
+  computeChainHash: (prevHash: string, record: AnyObj) => string;
+  verifyCommandLogRaw: (raw: string) => { status: "legacy" | "ok" | "forked" | "broken"; append: { seq: number; hash: string } | null };
+  readDescriptorFully: (descriptor: number) => string;
+  writeDescriptorFully: (descriptor: number, bytes: Buffer, position: number | null, write?: typeof fs.writeSync) => void;
+  acquireGenerationLock: (base: string, options?: { wait?: boolean; attempts?: number; retryMs?: number }) => CommandLogGenerationLock | null;
+  releaseGenerationLock: (lock: CommandLogGenerationLock) => boolean;
+};
+
+function loadCommandLogChain(): CommandLogChain {
   const _req = createRequire(import.meta.url);
   const chainPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/command-log-chain.js");
-  return _req(chainPath) as { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string };
-}
-
-function writerSleepSync(ms: number): void {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
-  catch { /* SharedArrayBuffer/Atomics unavailable — skip the backoff */ }
-}
-
-function writerAcquireLock(lockFile: string): number | null {
-  for (let i = 0; i < WRITER_LOCK_MAX_TRIES; i++) {
-    try {
-      const fd = fs.openSync(lockFile, "wx");
-      try { fs.writeSync(fd, String(process.pid)); } catch { /* pid is advisory only */ }
-      return fd;
-    } catch (err) {
-      if (!err || (err as NodeJS.ErrnoException).code !== "EEXIST") return null;
-      try {
-        const st = fs.statSync(lockFile);
-        if (Date.now() - st.mtimeMs > WRITER_LOCK_STALE_MS) { fs.unlinkSync(lockFile); continue; }
-      } catch { continue; }
-      writerSleepSync(WRITER_LOCK_RETRY_MS);
-    }
-  }
-  return null;
-}
-
-function writerReadLastChainState(logFile: string, genesis: string): { seq: number; hash: string } {
-  let raw = "";
-  try { raw = fs.readFileSync(logFile, "utf8"); } catch { return { seq: -1, hash: genesis }; }
-  const lines = raw.split("\n").filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let entry: AnyObj;
-    try { entry = JSON.parse(lines[i]!); } catch { continue; }
-    if (entry && entry._chain && typeof entry._chain.hash === "string" && typeof entry._chain.seq === "number") {
-      return { seq: entry._chain.seq, hash: entry._chain.hash };
-    }
-  }
-  return { seq: -1, hash: genesis };
+  return _req(chainPath) as CommandLogChain;
 }
 
 export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string, transactionId?: string): void {
@@ -3193,9 +3224,14 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
     const chain = loadCommandLogChain();
     const logFile = path.join(dir, "command-log.jsonl");
     const lockFile = `${logFile}.lock`;
-    const fd = writerAcquireLock(lockFile);
+    const lock = chain.acquireGenerationLock(lockFile, { wait: true, attempts: WRITER_LOCK_MAX_TRIES, retryMs: WRITER_LOCK_RETRY_MS });
+    if (lock === null) return;
     try {
-      let { seq, hash: prevHash } = writerReadLastChainState(logFile, chain.CHAIN_GENESIS);
+      let raw = "";
+      try { raw = fs.readFileSync(logFile, "utf8"); } catch { /* absent log has genesis authority */ }
+      const authority = chain.verifyCommandLogRaw(raw).append;
+      if (authority === null) throw new Error("command-log has no safe append authority");
+      let { seq, hash: prevHash } = authority;
       const lines: string[] = [];
       for (const entry of observed) {
         const record: AnyObj = {
@@ -3219,7 +3255,7 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
       }
       fs.appendFileSync(logFile, `${lines.join("\n")}\n`);
     } finally {
-      if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } try { fs.unlinkSync(lockFile); } catch { /* removed */ } }
+      chain.releaseGenerationLock(lock);
     }
   } catch (error) {
     process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
@@ -3239,7 +3275,12 @@ export interface WriterTransactionAbortCapability {
 }
 
 /** Test-only fault boundary for the fail-closed abort journal. */
-export let writerTransactionAbortTestHooks: { beforeExclusiveCreate?: () => void } | undefined;
+export let writerTransactionAbortTestHooks: {
+  beforeExclusiveCreate?: () => void;
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+  beforeLockRelease?: (lockFile: string) => void;
+} | undefined;
 export function setWriterTransactionAbortTestHooksForTest(hooks: typeof writerTransactionAbortTestHooks): void {
   writerTransactionAbortTestHooks = hooks;
 }
@@ -3266,39 +3307,6 @@ function assertWriterTransactionAbortCapability(capability: WriterTransactionAbo
   if (!sameWriterDirectoryIdentity(current.parent, capability.parent) || !sameWriterDirectoryIdentity(current.session, capability.session)) {
     throw new Error("workflow evidence abort journal refused: artifact-root or session-directory identity changed");
   }
-}
-
-function writerAcquireAbortLock(lockFile: string): { fd: number; identity: { dev: number; ino: number } } | null {
-  for (let i = 0; i < WRITER_LOCK_MAX_TRIES; i++) {
-    try {
-      const fd = fs.openSync(lockFile, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-      const stat = fs.fstatSync(fd);
-      if (!stat.isFile()) { fs.closeSync(fd); return null; }
-      return { fd, identity: { dev: stat.dev, ino: stat.ino } };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") return null;
-      let stat: fs.Stats;
-      try { stat = fs.lstatSync(lockFile); } catch { continue; }
-      if (stat.isSymbolicLink() || !stat.isFile()) return null;
-      if (Date.now() - stat.mtimeMs > WRITER_LOCK_STALE_MS) {
-        // A stale pathname is not ownership authority. Deleting it after an
-        // identity check would retain a check/use race and could remove a
-        // foreign replacement. Abort persistence therefore fails closed and
-        // leaves stale-lock recovery to an explicit operator action.
-        return null;
-      }
-      writerSleepSync(WRITER_LOCK_RETRY_MS);
-    }
-  }
-  return null;
-}
-
-function writerReleaseAbortLock(lockFile: string, lock: { fd: number; identity: { dev: number; ino: number } }): void {
-  try { fs.closeSync(lock.fd); } catch { /* closed */ }
-  try {
-    const current = fs.lstatSync(lockFile);
-    if (!current.isSymbolicLink() && current.isFile() && current.dev === lock.identity.dev && current.ino === lock.identity.ino) fs.unlinkSync(lockFile);
-  } catch { /* lock was already removed or replaced */ }
 }
 
 function writerOpenAbortLog(logFile: string): { fd: number; created: boolean; identity: { dev: number; ino: number } } | null {
@@ -3328,84 +3336,54 @@ function writerAssertAbortLogIdentity(logFile: string, identity: { dev: number; 
   } catch { return false; }
 }
 
-function writerReadLastChainStateFromDescriptor(
-  descriptor: number,
-  chain: { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string },
-): { seq: number; hash: string } | null {
-  let raw = "";
-  try { raw = fs.readFileSync(descriptor, "utf8"); } catch { return null; }
-  const lines = raw.split("\n").filter((line) => line.trim());
-  const entries: AnyObj[] = [];
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as unknown;
-      if (entry && typeof entry === "object" && !Array.isArray(entry)) entries.push(entry as AnyObj);
-    } catch { /* malformed legacy lines have no chain authority */ }
-  }
-  const hasAnyChain = entries.some((entry) => entry._chain && typeof entry._chain.hash === "string");
-  if (!hasAnyChain) return { seq: -1, hash: chain.CHAIN_GENESIS };
-  const reachable = new Set([chain.CHAIN_GENESIS]);
-  const parentSources = new Map<string, unknown[]>();
-  let previousWasChained = false;
-  let tip: { seq: number; hash: string } | null = null;
-  for (const entry of entries) {
-    const link = entry._chain;
-    if (!link || typeof link.hash !== "string") {
-      if (previousWasChained) return null;
-      continue;
-    }
-    if (typeof link.prevHash !== "string" || !Number.isSafeInteger(link.seq) || link.seq < 0) return null;
-    if (link.hash !== chain.computeChainHash(link.prevHash, entry) || !reachable.has(link.prevHash)) return null;
-    const sources = parentSources.get(link.prevHash) ?? [];
-    sources.push(entry.source);
-    parentSources.set(link.prevHash, sources);
-    if (sources.length > 1
-      && !sources.every((source) => source === "postToolUse-capture" || source === WRITER_OBSERVATION_SOURCE)) return null;
-    reachable.add(link.hash);
-    previousWasChained = true;
-    tip = { seq: link.seq, hash: link.hash };
-  }
-  return tip;
-}
-
 export function appendWriterTransactionAbort(capability: WriterTransactionAbortCapability, transactionId: string, timestamp: string): boolean {
   try {
     assertWriterTransactionAbortCapability(capability);
     const chain = loadCommandLogChain();
     const logFile = path.join(capability.directory, "command-log.jsonl");
     const lockFile = `${logFile}.lock`;
-    const lock = writerAcquireAbortLock(lockFile);
+    const lock = chain.acquireGenerationLock(lockFile, { wait: false });
     if (lock === null) return false;
+    let appendResult = false;
+    let releaseResult = false;
     try {
-      const log = writerOpenAbortLog(logFile);
-      if (log === null) return false;
-      try {
-        assertWriterTransactionAbortCapability(capability);
-        if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
-        const priorChain = writerReadLastChainStateFromDescriptor(log.fd, chain);
-        if (priorChain === null) return false;
-        const { seq, hash: prevHash } = priorChain;
-        const record: AnyObj = {
-          source: "workflow-evidence-transaction",
-          capturedAt: timestamp,
-          transaction: { id: transactionId, outcome: "aborted" },
-        };
-        const hash = chain.computeChainHash(prevHash, record);
-        record._chain = { seq: seq + 1, prevHash, hash };
-        fs.writeSync(log.fd, `${JSON.stringify(record)}\n`);
-        fs.fsyncSync(log.fd);
-        assertWriterTransactionAbortCapability(capability);
-        if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
-        if (log.created) {
-          const directoryDescriptor = fs.openSync(capability.directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
-          try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+      appendResult = (() => {
+        const log = writerOpenAbortLog(logFile);
+        if (log === null) return false;
+        try {
           assertWriterTransactionAbortCapability(capability);
-        }
-        return true;
-      } finally { fs.closeSync(log.fd); }
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          const priorChain = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd)).append;
+          if (priorChain === null) return false;
+          const { seq, hash: prevHash } = priorChain;
+          const record: AnyObj = {
+            source: "workflow-evidence-transaction",
+            capturedAt: timestamp,
+            transaction: { id: transactionId, outcome: "aborted" },
+          };
+          const hash = chain.computeChainHash(prevHash, record);
+          record._chain = { seq: seq + 1, prevHash, hash };
+          const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
+          chain.writeDescriptorFully(log.fd, bytes, null, writerTransactionAbortTestHooks?.write);
+          fs.fsyncSync(log.fd);
+          writerTransactionAbortTestHooks?.beforeReread?.(log.fd);
+          const reread = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd));
+          if (reread.append?.hash !== hash) return false;
+          assertWriterTransactionAbortCapability(capability);
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          if (log.created) {
+            const directoryDescriptor = fs.openSync(capability.directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+            try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+            assertWriterTransactionAbortCapability(capability);
+          }
+          return true;
+        } finally { fs.closeSync(log.fd); }
+      })();
     } finally {
-      writerReleaseAbortLock(lockFile, lock);
+      writerTransactionAbortTestHooks?.beforeLockRelease?.(lock.file);
+      releaseResult = chain.releaseGenerationLock(lock);
     }
+    return appendResult && releaseResult;
   } catch {
     return false;
   }
@@ -4405,7 +4383,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false, writerTransactionId?: string): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false, writerTransactionId?: string, writerTarget?: TrustBundleWriterTarget): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -4566,7 +4544,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
   return 0;
 }
 
@@ -7789,7 +7767,7 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export type PublicWorkflowInvocation = { writerTransactionId?: string };
+export type PublicWorkflowInvocation = { writerTransactionId?: string; writerTarget?: TrustBundleWriterTarget };
 
 export function mainFromPublicWorkflow(argv: string[], invocation?: PublicWorkflowInvocation): Promise<number> {
   if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
@@ -7907,7 +7885,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId, invocation?.writerTarget);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);

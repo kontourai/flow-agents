@@ -319,16 +319,34 @@ an explicit `fail` or `not_verified`; a failing or ambiguous command can prevent
 observations (ordinal, command digest, exit code, output digest, and outcome), rather than
 echoing command text or command output. The same redaction applies to default command errors.
 
-If synchronization fails before canonical attachment, the public command restores only its
-transaction-owned `trust.bundle`. `command-log.jsonl` is append-only: it receives an abort marker
-instead of a whole-file rollback, preserving concurrent capture records. When the canonical
-attachment is absent, the caller can correct the reported problem and run the evidence command
-again. When attachment identity, session identity, or another canonical fact is uncertain,
-destructive recovery is refused and the command reports recovery required; inspect and recover
-the canonical workflow state before attempting another evidence command. When the attachment is
-proved committed and projection recovery succeeds, the command succeeds and reports committed
-recovery in JSON (`recovery.committed: true`, `recovery.retry: "none"`) and text (`No retry is
-required`); do not submit the evidence again.
+The public evidence command first writes a transaction-unique, non-authoritative candidate under
+`.workflow-evidence-transaction-<id>/trust.bundle.candidate`. It verifies the candidate through its
+open descriptor, fsyncs the candidate and its pinned parent directory, and asks Flow to attach only
+that exact digest. The candidate directory and file are retained as correlated recovery residue;
+the command never automatically renames, unlinks, or cleans them up.
+
+Before staging, the command pins the canonical `trust.bundle` baseline. If synchronization fails
+and the exact attachment is proved absent, canonical trust remains at that baseline and the
+append-only `command-log.jsonl` receives a transaction-correlated abort record. The original error
+is then safe to correct and retry. If attachment or baseline identity is unknown, the command does
+not roll anything back: it returns `recovery required` and retains the candidate for inspection.
+If the exact candidate digest is proved attached, the operation is committed even when a later
+projection or presentation step fails; successful recovery reports
+`recovery.committed: true`, `recovery.retry: "none"` in JSON and `No retry is required` in text.
+Do not submit that evidence again.
+
+For an existing canonical bundle, commit writes the verified candidate bytes only through the
+pinned original descriptor and refuses a changed pathname. For an absent canonical bundle,
+publish is only an atomic create-if-absent hard link from the retained candidate inode. `EEXIST`,
+`EXDEV`, unsupported hard links, inode/digest mismatch, NFS or other filesystem uncertainty, and
+directory-fsync uncertainty fail closed with no rename/copy fallback and no overwrite of a foreign
+target. Preserve both canonical and staged residue and perform explicit recovery.
+
+Command-log serialization likewise leaves audit residue. Locks are persistent
+`command-log.jsonl.lock.<generation>` files whose highest valid generation must be durably
+`released` before the next generation can be acquired. Active, stale, malformed, or replaced
+highest generations are never stolen or deleted. There is no automatic lock-generation cleanup;
+retain them with the session until an explicit artifact-lifecycle action is appropriate.
 
 Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
 the default report does not echo command text, command arguments remain local evidence; use a

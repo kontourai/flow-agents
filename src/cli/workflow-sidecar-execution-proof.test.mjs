@@ -127,14 +127,66 @@ test("transaction abort journal refuses to extend a valid-hash non-benign fork",
 
 test("transaction abort journal never deletes a stale foreign lock", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-stale-lock-"));
-  const lockFile = path.join(directory, "command-log.jsonl.lock");
-  fs.writeFileSync(lockFile, "foreign stale lock\n");
+  const lockFile = path.join(directory, "command-log.jsonl.lock.0");
+  const contents = `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`;
+  fs.writeFileSync(lockFile, contents);
   const stale = new Date(Date.now() - 60_000);
   fs.utimesSync(lockFile, stale, stale);
 
   assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-stale-lock"), false);
-  assert.equal(fs.readFileSync(lockFile, "utf8"), "foreign stale lock\n");
+  assert.equal(fs.readFileSync(lockFile, "utf8"), contents);
   assert.equal(fs.existsSync(path.join(directory, "command-log.jsonl")), false);
+});
+
+test("transaction abort journal loops partial writes and rejects zero writes", () => {
+  const partialDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-partial-write-"));
+  workflowSidecar.setWriterTransactionAbortTestHooksForTest({
+    write: (fd, buffer, offset, length, position) => fs.writeSync(fd, buffer, offset, Math.min(length, 3), position),
+  });
+  try {
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(partialDirectory), "transaction-partial"), true);
+  } finally {
+    workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(partialDirectory, "command-log.jsonl"), "utf8")).transaction.id, "transaction-partial");
+
+  const zeroDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-zero-write-"));
+  workflowSidecar.setWriterTransactionAbortTestHooksForTest({ write: () => 0 });
+  try {
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(zeroDirectory), "transaction-zero"), false);
+  } finally {
+    workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
+  }
+});
+
+test("transaction abort journal rereads and rejects post-fsync corruption", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-reread-corruption-"));
+  workflowSidecar.setWriterTransactionAbortTestHooksForTest({
+    beforeReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
+  });
+  try {
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-corrupt"), false);
+  } finally {
+    workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
+  }
+});
+
+test("transaction abort journal rejects lock replacement during descriptor release", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-lock-replacement-"));
+  let replacement = "";
+  workflowSidecar.setWriterTransactionAbortTestHooksForTest({
+    beforeLockRelease: (lockFile) => {
+      fs.renameSync(lockFile, `${lockFile}.parked`);
+      replacement = `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`;
+      fs.writeFileSync(lockFile, replacement);
+    },
+  });
+  try {
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-lock-replaced"), false);
+  } finally {
+    workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
+  }
+  assert.equal(fs.readFileSync(path.join(directory, "command-log.jsonl.lock.0"), "utf8"), replacement);
 });
 
 test("explicit gate verdicts remain authoritative over successful and failing command observations", () => {
