@@ -1,13 +1,16 @@
 // #799: the config-protection hook's interpreter-write detector (checkInterpreterWriteToProtected)
 // blocked any `python3 -c` / `node -e` segment that merely contained a protected-path token as a
 // literal substring, with no notion of read vs write. That trained agents into false-positive
-// blocks on provably-read-only one-liners, which erodes the hook's real coverage (per the
-// hook's own "runtime path construction evades it" admission -- every wrongly-blocked read
-// teaches an agent to construct paths at runtime instead).
+// blocks on provably-read-only reads, which erodes the hook's real coverage (every wrongly-
+// blocked read teaches an agent to construct paths at runtime instead).
 //
-// This suite pins BOTH halves of the fix: the real false positives from 2026-07-20 now pass
-// (ALLOW), and the full adversarial write matrix still blocks (BLOCK) -- the read-only grammar
-// is a narrow positive allowlist, not a relaxation of the write detector.
+// v2 (post-adversarial-review): the fix is an EXACT-TEMPLATE allowlist -- only
+// `<py> -m json.tool <path>` and `cat <path> | <py> -m json.tool` fast-pass, under a raw
+// charset gate that structurally excludes quotes, expansions, redirections, and every shell
+// separator except a single `|`. Interpreter-body analysis ("Grammar B") was removed: review
+// showed it was a deny-list, not a proof. Blocked reads get a remediation hint naming the
+// sanctioned idiom, so the false-positive COST is fixed even though arbitrary read one-liners
+// stay blocked.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
@@ -26,48 +29,47 @@ function runBash(command, cwd = packageRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// The three real false positives from 2026-07-20 (per #799) -- must now ALLOW.
+// Sanctioned read idioms -- must ALLOW.
 // ---------------------------------------------------------------------------
 
-test("#799 false positive: python3 -m json.tool on a real checkpoint path allows (was never blocked, locked in as a regression guard)", () => {
+test("#799 sanctioned read: python3 -m json.tool on a real checkpoint path allows", () => {
   const res = runBash("python3 -m json.tool delivery/x/trust.checkpoint.json");
-  assert.equal(res.exitCode, 0);
-});
-
-test("#799 false positive: python3 -c reading trust.bundle claims via json.load+open+print now allows", () => {
-  const res = runBash(
-    `python3 -c "import json;print(json.load(open('.kontourai/flow-agents/slug/trust.bundle'))['claims'][0])"`,
-  );
   assert.equal(res.exitCode, 0, res.stderr);
 });
 
-test("#799 false positive: compound cd + read-only grep status print on state.json allows (was never blocked, locked in)", () => {
+test("#799 sanctioned read: json.tool directly on a protected trust.bundle path allows", () => {
+  const res = runBash("python3 -m json.tool .kontourai/flow-agents/slug/trust.bundle");
+  assert.equal(res.exitCode, 0, res.stderr);
+});
+
+test("#799 sanctioned read: cat piped into python3 -m json.tool allows", () => {
+  const res = runBash("cat .kontourai/flow-agents/slug/state.json | python3 -m json.tool");
+  assert.equal(res.exitCode, 0, res.stderr);
+});
+
+test("#799: compound cd + read-only grep status print on state.json allows (no interpreter token; was never blocked, locked in)", () => {
   const res = runBash(`cd /repo && grep -oE '"status":"[a-z]+"' .kontourai/flow-agents/slug/state.json`);
   assert.equal(res.exitCode, 0);
 });
 
-test("#799 grammar A: cat piped into python3 -m json.tool allows", () => {
-  const res = runBash("cat .kontourai/flow-agents/slug/state.json | python3 -m json.tool");
-  assert.equal(res.exitCode, 0);
-});
-
-test("#799 grammar B: node -e reading state.json via fs.readFileSync + console.log allows", () => {
-  const res = runBash(
-    `node -e "console.log(JSON.parse(require('fs').readFileSync('.kontourai/flow-agents/slug/state.json','utf8')).status)"`,
-  );
-  assert.equal(res.exitCode, 0, res.stderr);
-});
-
-test("#799 grammar B: a leading cd prefix before a read-only python -c still allows", () => {
-  const res = runBash(
-    `cd /repo && python3 -c "print(json.load(open('.kontourai/flow-agents/slug/trust.bundle')))"`,
-  );
-  assert.equal(res.exitCode, 0, res.stderr);
-});
-
 // ---------------------------------------------------------------------------
-// Block message gains a read-remediation line (AC2).
+// v2 regression pins: interpreter-body reads that v1's Grammar B fast-passed now BLOCK, and
+// the block message names the sanctioned idiom (the remediation hint carries the UX fix).
 // ---------------------------------------------------------------------------
+
+const bodyReadsNowBlocked = [
+  ["python3 -c json.load+open+print read of trust.bundle", `python3 -c "import json;print(json.load(open('.kontourai/flow-agents/slug/trust.bundle'))['claims'][0])"`],
+  ["node -e readFileSync+console.log read of state.json", `node -e "console.log(JSON.parse(require('fs').readFileSync('.kontourai/flow-agents/slug/state.json','utf8')).status)"`],
+  ["cd prefix + read-only python -c", `cd /repo && python3 -c "print(json.load(open('.kontourai/flow-agents/slug/trust.bundle')))"`],
+];
+
+for (const [label, cmd] of bodyReadsNowBlocked) {
+  test(`v2 (body analysis removed, must block with hint): ${label}`, () => {
+    const res = runBash(cmd);
+    assert.equal(res.exitCode, 2, `expected BLOCK for: ${cmd}`);
+    assert.match(res.stderr, /json\.tool/, "block message must name the sanctioned read idiom");
+  });
+}
 
 test("blocked interpreter-write message names the read remediation (python3 -m json.tool)", () => {
   const res = runBash(`python3 -c "open('.kontourai/flow-agents/slug/state.json','w').write('{}')"`);
@@ -76,8 +78,7 @@ test("blocked interpreter-write message names the read remediation (python3 -m j
 });
 
 // ---------------------------------------------------------------------------
-// Adversarial suite: every one of these MUST still BLOCK. The read-only grammar is a narrow
-// positive allowlist -- it must not create a new write-side gap.
+// Adversarial suite: every one of these MUST still BLOCK.
 // ---------------------------------------------------------------------------
 
 const mustBlock = [
@@ -102,11 +103,11 @@ const mustBlock = [
     `python3 -c "open(__import__('os').path.join('.kontourai','flow-agents','slug','trust.bundle'), 'w')"`,
   ],
   [
-    "eval() escape hatch alongside an otherwise read-shaped body",
+    "eval() escape hatch in a read-shaped body",
     `python3 -c "eval(open('.kontourai/flow-agents/slug/trust.bundle').read())"`,
   ],
   [
-    "subprocess escape hatch alongside an otherwise read-shaped body",
+    "subprocess escape hatch in a read-shaped body",
     `python3 -c "import subprocess,json;print(json.load(open('.kontourai/flow-agents/slug/trust.bundle')))"`,
   ],
   [
@@ -116,6 +117,10 @@ const mustBlock = [
   [
     "multi-statement body: read+print followed by a hidden write",
     `python3 -c "import json;print(json.load(open('.kontourai/flow-agents/slug/trust.bundle')));open('.kontourai/flow-agents/slug/trust.bundle','a').write('x')"`,
+  ],
+  [
+    "unlisted mutator (os.truncate) in an otherwise read-shaped body -- the class that killed Grammar B",
+    `python3 -c "import os,json;print(json.load(open('.kontourai/flow-agents/slug/trust.bundle')));os.truncate('.kontourai/flow-agents/slug/trust.bundle',0)"`,
   ],
   [
     "an extra non-cd/cat segment alongside the -c invocation disqualifies the fast pass",
@@ -147,8 +152,8 @@ for (const [label, cmd, opts] of mustBlock) {
 }
 
 // ---------------------------------------------------------------------------
-// Direct grammar unit tests (lib/read-only-grammar.js), independent of the hook's substring
-// pre-filter -- pins the grammar's own decision surface.
+// Direct grammar unit tests (lib/read-only-grammar.js) -- pins the grammar's own decision
+// surface, including every misclassified-input class from the adversarial review.
 // ---------------------------------------------------------------------------
 
 test("isProvablyReadOnlyCommand: grammar unit matrix", () => {
@@ -156,27 +161,73 @@ test("isProvablyReadOnlyCommand: grammar unit matrix", () => {
   const allow = [
     `python3 -m json.tool state.json`,
     `python -m json.tool state.json`,
+    `python2 -m json.tool state.json`,
+    `python3 -m json.tool .kontourai/flow-agents/slug/trust.bundle`,
     `cat state.json | python3 -m json.tool`,
+    `cat delivery/x/trust.checkpoint.json | python -m json.tool`,
+  ];
+  const block = [
+    ``,
+    // v1 Grammar B shapes: body analysis is gone, none of these fast-pass anymore.
     `python3 -c "print(json.load(open('trust.bundle')))"`,
     `python3 -c "print(open('trust.bundle').read())"`,
     `node -e "console.log(require('fs').readFileSync('trust.bundle','utf8'))"`,
     `cd /tmp && python3 -c "print(json.load(open('trust.bundle')))"`,
-  ];
-  const block = [
-    ``,
+    // Writes and escape hatches (unchanged expectations).
     `python3 -c "open('trust.bundle','w')"`,
-    `python3 -c "open('trust.bundle','w').write('x')"`,
     `python3 -c "json.dump({}, open('trust.bundle','w'))"`,
     `node -e "require('fs').writeFileSync('trust.bundle','x')"`,
     `sed -i 's/a/b/' trust.bundle`,
     `perl -e 'print 1' trust.bundle`,
     `python3 -c "print(1)" > trust.bundle`,
     `python3 -c "eval(open('trust.bundle').read())"`,
-    `python3 -c "print(1)" "print(2)"`, // two body args -- unrecognized shape
-    `ls && python3 -c "print(json.load(open('trust.bundle')))"`, // extra segment
+    `ls && python3 -c "print(json.load(open('trust.bundle')))"`,
+    // Review HIGH: json.tool's write-capable positional OUTFILE and any option shape.
+    `python3 -m json.tool in.json trust.bundle`,
+    `python3 -m json.tool state.json extra.json more.json`,
+    `python3 -m json.tool --indent 2 state.json`,
+    `python3 -m json.tool -`,
+    `python3 -m json.tool`,
+    // Review HIGH: cat side must be exactly `cat <path>`.
+    `cat -v state.json | python3 -m json.tool`,
+    `cat a.json b.json | python3 -m json.tool`,
+    `cat | python3 -m json.tool`,
+    `cat - | python3 -m json.tool`,
+    `tac state.json | python3 -m json.tool`,
+    // Review HIGH: substitutions, expansions, quoting, and redirection forms -- all excluded
+    // by the raw charset gate.
+    "cat `x` | python3 -m json.tool",
+    `cat $(touch pwned) | python3 -m json.tool`,
+    `cat "state.json" | python3 -m json.tool`,
+    `python3 -m json.tool 'state.json'`,
+    `python3 -m json.tool $FILE`,
+    `python3 -m json.tool state.json > trust.bundle`,
+    `python3 -m json.tool state.json 2>err`,
+    `python3 -m json.tool <(sh evil)`,
+    `python3 -m json.tool state.json < in`,
+    `python3 -m json.tool state.json & rm x`,
+    `python3 -m json.tool state.json; rm x`,
+    `python3 -m json.tool state.json\nrm x`,
+    `python3 -m json.tool state\\.json`,
+    `python3 -m json.tool ~/state.json`,
+    `python3 -m json.tool *.json`,
+    // Pipe structure: only exactly `cat <path> | <py> -m json.tool`.
+    `cat state.json | python3 -m json.tool | cat`,
+    `cat state.json | tee x | python3 -m json.tool`,
+    `cat state.json |`,
+    `| python3 -m json.tool`,
+    `cat state.json || python3 -m json.tool`,
+    `cat state.json | python3 -m json.tool state.json | cat state.json`,
+    // cd prefixes are no longer recognized (separators other than `|` are out of the alphabet).
+    `cd /tmp && python3 -m json.tool state.json`,
+    // Length cap.
+    `python3 -m json.tool ${"a/".repeat(300)}state.json`,
   ];
   for (const cmd of allow) {
     assert.equal(isProvablyReadOnlyCommand(cmd, deps), true, `expected ALLOW: ${cmd}`);
+    // The grammar is self-contained under the charset gate: deps are accepted for call-site
+    // compatibility but not required for a correct decision.
+    assert.equal(isProvablyReadOnlyCommand(cmd), true, `expected ALLOW without deps: ${cmd}`);
   }
   for (const cmd of block) {
     assert.equal(isProvablyReadOnlyCommand(cmd, deps), false, `expected fall-through (not fast-passed): ${cmd}`);

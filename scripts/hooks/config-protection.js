@@ -665,11 +665,12 @@ const INTERPRETER_GLOBAL_TOKENS = new Set([
  *
  * #799: BEFORE any block decision, checks isProvablyReadOnlyCommand(command, {tokenize,
  * splitSegments}) -- a narrow, POSITIVE-match grammar (see lib/read-only-grammar.js) that
- * recognizes only `py(2|3)? -m json.tool <path>` and single `py -c` / `node -e` bodies
- * whose ONLY file interaction is a read (open/json.load/readFileSync) followed by output
- * (print/console.log), with no write indicator and no escape hatch (eval/exec/subprocess/...)
- * anywhere. Anything else -- multi-statement bodies, heredocs, ambiguous parses -- is NOT
- * fast-passed and falls through to the substring-match detection below exactly as before.
+ * recognizes only two exact templates -- `py(2|3)? -m json.tool <path>` and
+ * `cat <path> | py(2|3)? -m json.tool` -- under a raw charset gate that excludes quotes,
+ * expansions, redirections, and every separator except a single `|`. Interpreter BODIES are
+ * never analyzed (a v1 body heuristic was removed after adversarial review showed it was a
+ * deny-list, not a proof). Anything else is NOT fast-passed and falls through to the
+ * substring-match detection below exactly as before.
  *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
