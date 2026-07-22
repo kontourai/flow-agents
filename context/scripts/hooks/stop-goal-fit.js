@@ -1877,6 +1877,38 @@ function hasSidecarPresence(artifactDir) {
   return fs.existsSync(path.join(artifactDir, 'state.json')) || fs.existsSync(path.join(artifactDir, 'trust.bundle'));
 }
 
+function loadCanonicalFlowValidator() {
+  const scriptsDir = path.dirname(__dirname);
+  if (path.basename(__dirname) !== 'hooks' || path.basename(scriptsDir) !== 'scripts') {
+    throw new Error('Flow validator cannot derive the hook-owned bundle root');
+  }
+  const scriptsContainer = path.dirname(scriptsDir);
+  const bundleRoot = path.basename(scriptsContainer) === 'context' ? path.dirname(scriptsContainer) : scriptsContainer;
+  const bundledValidator = path.join(bundleRoot, 'build', 'src', 'vendor', 'flow-validator.cjs');
+  let flow;
+  if (fs.existsSync(bundledValidator)) {
+    const validatorStat = fs.lstatSync(bundledValidator);
+    const realBundleRoot = fs.realpathSync(bundleRoot);
+    const realValidator = fs.realpathSync(bundledValidator);
+    const relativeValidator = path.relative(realBundleRoot, realValidator);
+    if (validatorStat.isSymbolicLink() || !validatorStat.isFile() || relativeValidator.startsWith(`..${path.sep}`) || relativeValidator === '..' || path.isAbsolute(relativeValidator)) {
+      throw new Error('bundled Flow validator must be a regular file contained by the hook-owned bundle root');
+    }
+    flow = require(bundledValidator);
+  } else {
+    const packageFile = path.join(bundleRoot, 'package.json');
+    const packageIdentity = fs.existsSync(packageFile) ? JSON.parse(fs.readFileSync(packageFile, 'utf8')) : null;
+    if (!packageIdentity || packageIdentity.name !== '@kontourai/flow-agents') {
+      throw new Error(`hook-owned bundled Flow validator is unavailable at ${bundledValidator}`);
+    }
+    flow = require('@kontourai/flow');
+  }
+  if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') {
+    throw new Error('hook-owned Flow validator does not expose the required consistency API');
+  }
+  return flow;
+}
+
 function canonicalFlowState(root, artifactDir) {
   if (!artifactDir) return { state: null, definition: null, error: null };
   const slug = path.basename(artifactDir);
@@ -1894,7 +1926,8 @@ function canonicalFlowState(root, artifactDir) {
     const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
     const persistedState = stateRead.value;
     const startDefinition = definitionRead.value;
-    const { definitionDigest, validateRunStateConsistency } = require('@kontourai/flow');
+    const flow = loadCanonicalFlowValidator();
+    const { definitionDigest, validateRunStateConsistency } = flow;
     const validated = validateRunStateConsistency(startDefinition, persistedState, { runId: slug });
     const state = validated.state;
     const definition = validated.definition;
@@ -1928,7 +1961,7 @@ function canonicalFlowState(root, artifactDir) {
     assertSecureDirectoriesStable(parents);
     return { state: { ...state, definition_digest: digest }, definition, error: null };
   } catch (error) {
-    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 500)}` };
   }
 }
 
