@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.6.2](https://github.com/kontourai/flow-agents/compare/v4.6.1...v4.6.2) (2026-07-22)
+
+
+### Fixes
+
+* **ci:** require conventional pull request titles ([cf37e3d](https://github.com/kontourai/flow-agents/commit/cf37e3d3c31302057370b3cacbadd80188f51a52)), closes [#832](https://github.com/kontourai/flow-agents/issues/832)
+
+## [4.6.1](https://github.com/kontourai/flow-agents/compare/v4.6.0...v4.6.1) (2026-07-22)
+
+
+### Fixes
+
+* **settings:** provider repo matchers accept dotted repository names ([#841](https://github.com/kontourai/flow-agents/issues/841)) ([92dd188](https://github.com/kontourai/flow-agents/commit/92dd18899c62e03bf81eaea67562f92e268f5e32)), closes [#840](https://github.com/kontourai/flow-agents/issues/840)
+
+
+### Documentation
+
+* publish reviewed grounding example ([#836](https://github.com/kontourai/flow-agents/issues/836)) ([f643a46](https://github.com/kontourai/flow-agents/commit/f643a464a5eb0c4b07fb89b23d7f30b70d55e7c9))
+* **spec:** capture the orchestration-native capability set (issue [#86](https://github.com/kontourai/flow-agents/issues/86) decision) ([#835](https://github.com/kontourai/flow-agents/issues/835)) ([0806639](https://github.com/kontourai/flow-agents/commit/0806639ad91a46b1546e92afd18caf84dcc7d49b))
+
 ## [4.6.0](https://github.com/kontourai/flow-agents/compare/v4.5.0...v4.6.0) (2026-07-22)
 
 

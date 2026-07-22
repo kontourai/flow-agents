@@ -20,7 +20,7 @@ function loadSettings(file: string): SettingsDocument | null {
 }
 
 function repoFromText(text: string): Repo | null {
-  const match = text.trim().match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/);
+  const match = text.trim().match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
   return match ? { owner: match[1]!, name: match[2]! } : null;
 }
 

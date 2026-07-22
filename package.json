@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "4.6.0",
+  "version": "4.6.2",
   "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
