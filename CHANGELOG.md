@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.2](https://github.com/kontourai/flow-agents/compare/v4.6.1...v4.6.2) (2026-07-22)
+
+
+### Fixes
+
+* **ci:** require conventional pull request titles ([cf37e3d](https://github.com/kontourai/flow-agents/commit/cf37e3d3c31302057370b3cacbadd80188f51a52)), closes [#832](https://github.com/kontourai/flow-agents/issues/832)
+
 ## [4.6.1](https://github.com/kontourai/flow-agents/compare/v4.6.0...v4.6.1) (2026-07-22)
 
 
