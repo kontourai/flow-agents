@@ -92,6 +92,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/declared-artifact-roots.js", { category: "shared hook library", requiredNeedles: ["isCandidateWithinDeclaredRoots", "FAIL-CLOSED"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
+  ["scripts/hooks/lib/read-only-grammar.js", { category: "shared hook library", requiredNeedles: ["isProvablyReadOnlyCommand", "fail closed"] }],
   ["scripts/hooks/lib/kit-catalog.js", { category: "shared hook library", requiredNeedles: ["readKitManifests", "workflowTriggersFor"] }],
   ["scripts/hooks/lib/liveness-heartbeat.js", { category: "shared hook library", requiredNeedles: ["maybeEmitHeartbeat", "resolveHeartbeatThrottleSeconds"] }],
   ["scripts/hooks/lib/liveness-policy.js", { category: "shared hook library", requiredNeedles: ["isLivenessEnabled", "resolveTtlSeconds"] }],

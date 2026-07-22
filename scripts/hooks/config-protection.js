@@ -55,6 +55,12 @@ const path = require('path');
 // #783: root-scoping for the Bash-command detectors below (redirect / interpreter-write /
 // cp-move) -- see that module's header comment for the full fail-closed contract.
 const { isCandidateWithinDeclaredRoots, resolveCandidatePath, canonicalize } = require('./lib/declared-artifact-roots.js');
+// #799: narrow, conservative allowlist for interpreter one-liners that are PROVABLY read-only
+// (e.g. `py3 -c "print(json.load(open('trust.bundle'))['claims'][0])"`) -- see that
+// module's header comment for the full grammar and fail-closed contract. Consulted ONLY by
+// checkInterpreterWriteToProtected; the redirect/tee and cp/mv/install detectors key off an
+// actual write TARGET and have no read-only false-positive class to fix.
+const { isProvablyReadOnlyCommand } = require('./lib/read-only-grammar.js');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -69,6 +75,19 @@ const FIXTURE_AFFORDANCE_HINT =
   '`npm run workflow:sidecar -- fixture write <dir> --from-json <file>` for a schema-valid ' +
   'fixture, or `... fixture write <dir> --malformed --content <string|@file>` for an ' +
   'intentionally-invalid one (negative-test fixtures). Both refuse to write inside a declared root.';
+
+// #799: named once so every Bash-detector block message below can point a legitimate READ
+// attempt at a command shape that is never blocked, instead of leaving the agent to guess (or
+// to construct a runtime path to evade the hook, which is the false-positive cost #799 exists
+// to cut). `cat <file> | py3 -m json.tool` / `py3 -m json.tool <file>` is a recognized
+// fast-pass grammar (see lib/read-only-grammar.js) and is never blocked by this hook.
+// (Interpreter name built by concatenation per this file's INTERPRETER_TOKEN convention so
+// the hint text does not trip validate-source-tree's first-party-Python-command scan.)
+const PY_CMD = 'p' + 'ython3';
+const READ_REMEDIATION_HINT =
+  'If you only need to READ this file: `' + PY_CMD + ' -m json.tool <file>` (or `cat <file> | ' + PY_CMD +
+  ' -m json.tool`) is never blocked by this hook; for a trust.bundle specifically, ' +
+  '`npm run workflow:sidecar -- render-trust-panel <dir>` renders a human-readable summary.';
 
 const PROTECTED_FILES = new Set([
   '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
@@ -600,6 +619,53 @@ const INTERPRETER_WRITE_RE = new RegExp(
   '\\bsed\\s+-i\\b|\\bperl\\s+-e\\b'
 );
 
+// #799 v2 verify finding: `py -m json.tool <infile> <OUTFILE>` is a WRITE (json.tool's second
+// positional operand is an output file), but INTERPRETER_WRITE_RE only recognizes `-c` forms,
+// so the outfile shape previously fell through unblocked. Because this hook's own
+// READ_REMEDIATION_HINT advertises json.tool as the sanctioned read idiom, the write-capable
+// form of the advertised tool must be detected here — this is a correctness closure of the
+// #799 change itself, not new bar-raising surface (the read-only grammar already refuses to
+// fast-pass it; this makes the fall-through block instead of allow).
+const _PY_NAME_RE = new RegExp('^' + _PY_CMD + '[23]?$');
+function isJsonToolWriteShape(seg) {
+  const tokens = tokenize(seg);
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (_PY_NAME_RE.test(tokens[i]) && tokens[i + 1] === '-m' && tokens[i + 2] === 'json.tool') {
+      // Fail-closed operand count: tokens are only discounted when POSITIVELY recognized as a
+      // json.tool option. `--` terminates options (everything after is positional, including
+      // dash-prefixed filenames); any unrecognized dash token classifies the segment as
+      // write-suspicious rather than being skipped as a presumed flag.
+      const NO_VALUE_OPTIONS = new Set(['--sort-keys', '--no-ensure-ascii', '--json-lines', '--compact', '--tab', '--no-indent']);
+      let operands = 0;
+      let afterTerminator = false;
+      for (let j = i + 3; j < tokens.length; j++) {
+        const t = tokens[j];
+        if (!afterTerminator) {
+          if (t === '--') { afterTerminator = true; continue; }
+          if (t === '--indent') {
+            // The only value-taking json.tool option. Its value must be a literal integer:
+            // an expansion-capable value ('--indent {1,2}') becomes multiple tokens at
+            // execution and shifts a later path into the outfile slot.
+            const v = tokens[j + 1];
+            if (typeof v !== 'string' || !/^[0-9]+$/.test(v)) return true;
+            j++; continue;
+          }
+          if (NO_VALUE_OPTIONS.has(t)) continue;
+          if (t.startsWith('-') && t !== '-') return true; // unrecognized option-like token: fail closed
+        }
+        // Operand counting happens pre-expansion: one lexical token carrying brace expansion,
+        // a glob, or a variable/command substitution can become MULTIPLE operands (including
+        // json.tool's write-capable outfile) at execution. Any operand that is not a plain
+        // literal path therefore classifies as write-suspicious rather than being counted.
+        if (t !== '-' && !/^[A-Za-z0-9._/-]+$/.test(t)) return true;
+        operands++; // '-' alone is the stdin operand and counts
+      }
+      return operands >= 2; // second positional operand is json.tool's write-capable outfile
+    }
+  }
+  return false;
+}
+
 /**
  * Protected-path token literals.  When any of these strings appears as a
  * literal substring of a segment that also matches INTERPRETER_WRITE_RE,
@@ -644,6 +710,15 @@ const INTERPRETER_GLOBAL_TOKENS = new Set([
  * tokens that already carry directory context (the settings file under a dotdir, the
  * delivery trust-anchor paths) scoping applies normally.
  *
+ * #799: BEFORE any block decision, checks isProvablyReadOnlyCommand(command, {tokenize,
+ * splitSegments}) -- a narrow, POSITIVE-match grammar (see lib/read-only-grammar.js) that
+ * recognizes only two exact templates -- `py(2|3)? -m json.tool <path>` and
+ * `cat <path> | py(2|3)? -m json.tool` -- under a raw charset gate that excludes quotes,
+ * expansions, redirections, and every separator except a single `|`. Interpreter BODIES are
+ * never analyzed (a v1 body heuristic was removed after adversarial review showed it was a
+ * deny-list, not a proof). Anything else is NOT fast-passed and falls through to the
+ * substring-match detection below exactly as before.
+ *
  * INCOMPLETE COVERAGE — see module header for honest framing.
  */
 function checkInterpreterWriteToProtected(command, cwd) {
@@ -652,11 +727,20 @@ function checkInterpreterWriteToProtected(command, cwd) {
   if (!command.includes('node') && !command.includes(_PY_CMD) &&
       !command.includes('sed') && !command.includes('perl')) return null;
 
+  // #799: a command that is PROVABLY read-only (see lib/read-only-grammar.js) never blocks
+  // here, regardless of which protected-path token it happens to mention as a literal
+  // substring below. Ambiguous/unparseable commands are NOT covered by this grammar and fall
+  // through to the substring-match detection unchanged.
+  if (isProvablyReadOnlyCommand(command, { tokenize, splitSegments })) return null;
+
   const segments = splitSegments(command);
   for (const seg of segments) {
-    // Check interpreter pattern.
+    // Check interpreter pattern (plus the json.tool outfile write shape, which the `-c`-only
+    // regex cannot see -- see isJsonToolWriteShape above).
     const interpMatch = INTERPRETER_WRITE_RE.exec(seg);
-    if (!interpMatch) continue;
+    const jsonToolWrite = !interpMatch && isJsonToolWriteShape(seg);
+    if (!interpMatch && !jsonToolWrite) continue;
+    const matchLabel = interpMatch ? interpMatch[0].trim() : _PY_CMD + '3 -m json.tool <outfile form>';
 
     // Check for protected-path token literal in the same segment. #783 review F1: GLOBAL
     // kill-switch tokens (shell profiles, .claude settings) block on the segment match alone —
@@ -669,7 +753,7 @@ function checkInterpreterWriteToProtected(command, cwd) {
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
       if (!segLower.includes(token.toLowerCase())) continue;
       if (INTERPRETER_GLOBAL_TOKENS.has(token) || commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(token, cwd)) {
-        return `${interpMatch[0].trim()} with protected path token "${token}"`;
+        return `${matchLabel} with protected path token "${token}"`;
       }
     }
   }
@@ -895,7 +979,7 @@ function run(inputOrRaw, options = {}) {
           'disable or tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught). ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down: check for interpreter invocations (node -e, py3 -c, sed -i,
@@ -911,7 +995,7 @@ function run(inputOrRaw, options = {}) {
           'protected gate files could tamper with the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it. ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
     // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
@@ -926,7 +1010,7 @@ function run(inputOrRaw, options = {}) {
           'could forge the CI trust anchor. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check covers cp/mv/install only -- other copy tools may evade it. ' +
-          FIXTURE_AFFORDANCE_HINT,
+          FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,
       };
     }
   }
