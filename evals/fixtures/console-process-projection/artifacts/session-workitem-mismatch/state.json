@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-workitem-mismatch",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:45:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Keep implementing; this session's own bound work item has a clean review history."
+  },
+  "work_item_refs": ["github:kontourai/flow-agents#778"]
+}

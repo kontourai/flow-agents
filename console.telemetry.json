@@ -8,7 +8,7 @@
     {
       "id": "flow-agents-workflow-state",
       "label": "Workflow state",
-      "root": "product:flow-agents:.flow-agents",
+      "root": "product:flow-agents:.kontourai/flow-agents",
       "files": [
         "state.json"
       ],
@@ -25,13 +25,15 @@
         "phase": "phase",
         "outcome": "outcome",
         "title": "summary",
-        "observedAt": "updated_at"
+        "observedAt": "updated_at",
+        "nextActionStatus": "next_action.status",
+        "nextActionSummary": "next_action.summary"
       }
     },
     {
       "id": "flow-agents-acceptance",
       "label": "Acceptance criteria",
-      "root": "product:flow-agents:.flow-agents",
+      "root": "product:flow-agents:.kontourai/flow-agents",
       "files": [
         "acceptance.json"
       ],
@@ -50,7 +52,7 @@
     {
       "id": "flow-agents-evidence",
       "label": "Verification evidence (trust-backed refs use Hachure trust.bundle format when present)",
-      "root": "product:flow-agents:.flow-agents",
+      "root": "product:flow-agents:.kontourai/flow-agents",
       "files": [
         "evidence.json"
       ],
@@ -72,7 +74,7 @@
     {
       "id": "flow-agents-handoffs",
       "label": "Handoffs",
-      "root": "product:flow-agents:.flow-agents",
+      "root": "product:flow-agents:.kontourai/flow-agents",
       "files": [
         "handoff.json"
       ],
@@ -94,7 +96,7 @@
     {
       "id": "flow-agents-learning",
       "label": "Learning records",
-      "root": "product:flow-agents:.flow-agents",
+      "root": "product:flow-agents:.kontourai/flow-agents",
       "files": [
         "learning.json"
       ],

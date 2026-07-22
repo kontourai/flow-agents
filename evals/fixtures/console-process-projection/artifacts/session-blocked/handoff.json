@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-blocked",
+  "summary": "Session is blocked waiting on external access.",
+  "next_steps": ["Provision upstream API credentials", "Resume once access is confirmed"],
+  "blockers": [
+    "Upstream API credentials not provisioned",
+    "CI runner quota exhausted"
+  ]
+}

@@ -3816,7 +3816,11 @@ function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
   for (const c of incoming) if (c && c.id) byId.set(c.id, c);
   return [...byId.values()];
 }
-function critiquesFromBundle(dir: string): AnyObj[] {
+// Exported for src/cli/console-process-projection.ts (issue #778 review finding 1): the
+// Console interactive-session review_pending projection must read the AUTHORITATIVE
+// trust.bundle critique state (this function), not the retired critique.json sidecar —
+// critique.json is no longer written (see the Phase 4c comment above readBundleState).
+export function critiquesFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const c of bundle.claims) requireStampedClaim(c, dir);
