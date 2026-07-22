@@ -88,6 +88,16 @@ test("json.tool outfile form via stdin operand targeting a protected path BLOCKS
   assert.equal(res.exitCode, 2, res.stderr);
 });
 
+test("json.tool outfile hidden behind the -- option terminator BLOCKS end-to-end (round-3 finding)", () => {
+  const res = runBash("python3 -m json.tool -- -in.json delivery/trust.checkpoint.json");
+  assert.equal(res.exitCode, 2, res.stderr);
+});
+
+test("json.tool with an unrecognized option-like token and a protected path BLOCKS end-to-end (fail closed)", () => {
+  const res = runBash("python3 -m json.tool --mystery delivery/trust.checkpoint.json");
+  assert.equal(res.exitCode, 2, res.stderr);
+});
+
 test("json.tool with a formatting option and a single input operand still ALLOWS end-to-end (read; not fast-passed, but not a write shape)", () => {
   const res = runBash("python3 -m json.tool --indent 2 .kontourai/flow-agents/slug/state.json");
   assert.equal(res.exitCode, 0, res.stderr);

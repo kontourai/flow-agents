@@ -631,12 +631,22 @@ function isJsonToolWriteShape(seg) {
   const tokens = tokenize(seg);
   for (let i = 0; i + 2 < tokens.length; i++) {
     if (_PY_NAME_RE.test(tokens[i]) && tokens[i + 1] === '-m' && tokens[i + 2] === 'json.tool') {
+      // Fail-closed operand count: tokens are only discounted when POSITIVELY recognized as a
+      // json.tool option. `--` terminates options (everything after is positional, including
+      // dash-prefixed filenames); any unrecognized dash token classifies the segment as
+      // write-suspicious rather than being skipped as a presumed flag.
+      const NO_VALUE_OPTIONS = new Set(['--sort-keys', '--no-ensure-ascii', '--json-lines', '--compact', '--tab', '--no-indent']);
       let operands = 0;
+      let afterTerminator = false;
       for (let j = i + 3; j < tokens.length; j++) {
         const t = tokens[j];
-        if (t === '--indent') { j++; continue; } // the only value-taking json.tool option
-        if (t.startsWith('-') && t !== '-') continue; // flags ('-' alone is the stdin operand)
-        operands++;
+        if (!afterTerminator) {
+          if (t === '--') { afterTerminator = true; continue; }
+          if (t === '--indent') { j++; continue; } // the only value-taking json.tool option
+          if (NO_VALUE_OPTIONS.has(t)) continue;
+          if (t.startsWith('-') && t !== '-') return true; // unrecognized option-like token: fail closed
+        }
+        operands++; // '-' alone is the stdin operand and counts
       }
       return operands >= 2; // second positional operand is json.tool's write-capable outfile
     }
