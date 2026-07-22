@@ -492,6 +492,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# CLI: invalid Dispatch attempt ceiling is rejected before provider invocation
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "--- cli: invalid dispatch attempt ceiling ---"
+
+if node "$ROOT/build/src/cli.js" utterance-check check \
+   --utterance "The test coverage is 92%." \
+   --extractor anthropic \
+   --max-attempts 0 \
+   >"$TMPDIR_EVAL/invalid-attempts.out" 2>"$TMPDIR_EVAL/invalid-attempts.err"
+then
+  _fail "CLI accepted --max-attempts 0"
+else
+  exit_code=$?
+  if [[ "$exit_code" -eq 3 ]] && grep -q -- '--max-attempts must be a positive integer' "$TMPDIR_EVAL/invalid-attempts.err"; then
+    _pass "CLI rejects an invalid Dispatch attempt ceiling"
+  else
+    _fail "CLI invalid --max-attempts should exit 3 with guidance, got: $exit_code"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # CLI: utterance check registers as a valid flow-agents command
 # ---------------------------------------------------------------------------
 
