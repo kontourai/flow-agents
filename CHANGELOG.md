@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.6.0](https://github.com/kontourai/flow-agents/compare/v4.5.0...v4.6.0) (2026-07-22)
+
+
+### Features
+
+* **providers:** importable TypeScript interfaces for the four provider roles ([#819](https://github.com/kontourai/flow-agents/issues/819)) ([11c70d7](https://github.com/kontourai/flow-agents/commit/11c70d7a101a2e490b85012f2a14266e4dea3ae4))
+* **telemetry:** project workflow states onto Console's interactive process vocabulary ([#828](https://github.com/kontourai/flow-agents/issues/828)) ([6f47d1b](https://github.com/kontourai/flow-agents/commit/6f47d1b2e4f10281f8c74304760352b0a4f0c09a))
+
+
+### Fixes
+
+* **config-protection:** provably-read-only interpreter grammar for gate-file reads ([#799](https://github.com/kontourai/flow-agents/issues/799)) ([#822](https://github.com/kontourai/flow-agents/issues/822)) ([e933b17](https://github.com/kontourai/flow-agents/commit/e933b17ef9dfb421af3c40805850665bfc9baf57))
+* **sidecar:** accept playwright test in the tests-evidence execution-proof screen ([#827](https://github.com/kontourai/flow-agents/issues/827)) ([435dd38](https://github.com/kontourai/flow-agents/commit/435dd384ccb4135e1a1f3e5cf398d5c09b046930))
+
 ## [4.5.0](https://github.com/kontourai/flow-agents/compare/v4.4.0...v4.5.0) (2026-07-21)
 
 
