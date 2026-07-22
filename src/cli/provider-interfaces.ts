@@ -164,31 +164,23 @@ export interface WorkItemReadiness {
 }
 
 /**
- * The contract's NORMATIVE five-value drift-outcome vocabulary, verbatim from
- * work-item-contract.md's "Planning Base And Drift" table: `no_material_drift` (aligned),
- * `scope_drift` (scope/acceptance criteria changed), `dependency_drift` (assumed
- * blockers/prerequisites moved), `contract_drift` (relevant docs/contracts/schemas/policy
- * changed), `conflict_risk` (changed files or active work overlap likely execution scope).
+ * The contract's NORMATIVE revision-freshness vocabulary (work-item-contract.md, "Planning Base
+ * And Drift" → "Revision-freshness outcomes"), derived directly from `pull-work-provider.ts`'s
+ * own exported `referenceAdapterFreshnessDiagnostics` runtime const array (#777 review finding 5),
+ * so this type cannot silently drift from what `classifyRevisionFreshness()` actually returns.
  *
- * KNOWN GAP (#777 review finding 2, flagged for upstream reconciliation — file/track a follow-up
- * issue to either implement this vocabulary in `pull-work-provider.ts` or narrow the contract
- * prose to match the reference adapter): `classifyRevisionFreshness()` does NOT currently emit
- * this vocabulary. It emits the coarser, CLI-actual `ReferenceAdapterFreshnessDiagnostic` union
- * below instead. Do not treat the two as interchangeable or silently map one onto the other — a
- * caller that needs the contract's normative five-value classification cannot get it from the
- * shipped CLI today; that gap is represented here as two DISTINCT types rather than smoothed into
- * one that overclaims contract compliance.
- */
-export type WorkItemDriftOutcome = "no_material_drift" | "scope_drift" | "dependency_drift" | "contract_drift" | "conflict_risk";
-
-/**
- * The reference adapter's CURRENT, coarser freshness diagnostic — derived directly from
- * `pull-work-provider.ts`'s own exported `referenceAdapterFreshnessDiagnostics` runtime const
- * array (#777 review finding 5), so this type cannot silently drift from what
- * `classifyRevisionFreshness()` actually returns. This is explicitly NOT `WorkItemDriftOutcome`
- * (the contract's normative vocabulary, above) — see that type's doc comment for the flagged gap
- * between contract prose and the reference CLI's actual behavior. `WorkItemRevisionFreshness`
- * carries THIS diagnostic, not a value from the wider contract vocabulary the CLI does not emit.
+ * RESOLVED (#818, following #777 review finding 2): an earlier draft of this module also exported
+ * a hand-typed `WorkItemDriftOutcome` five-value union (`no_material_drift`/`scope_drift`/
+ * `dependency_drift`/`contract_drift`/`conflict_risk`) copied from a prior draft of the contract
+ * table, with no runtime array backing it and no `WorkItemProvider` adapter that emitted it. #818
+ * confirmed the five-way split is not mechanically computable from `classifyRevisionFreshness()`'s
+ * available inputs without new data (`dependency_drift` needs blocker-resolution state that stays
+ * deliberately separate from freshness in `dependencyImpacts()`; `conflict_risk` needs visibility
+ * into other work items' active claimed scope, which no `WorkItemProvider` input carries at
+ * classification time) and narrowed the contract table to match this type instead of carrying an
+ * unemitted parallel vocabulary. This is now the ONLY normative revision-freshness/drift-outcome
+ * type this module exports; do not reintroduce a second one without also updating
+ * `pull-work-provider.ts` to emit it.
  */
 export type ReferenceAdapterFreshnessDiagnostic = (typeof referenceAdapterFreshnessDiagnostics)[number];
 
@@ -207,8 +199,8 @@ export interface WorkItemRevisionFreshness {
   planning_scope_refs: string[];
   planning_scope_intersections: string[];
   commits_since_planned_base: number | null;
-  /** The reference adapter's coarse diagnostic — NOT the contract's normative
-   * `WorkItemDriftOutcome` vocabulary. See `ReferenceAdapterFreshnessDiagnostic`'s doc comment. */
+  /** The contract's normative revision-freshness classification. See
+   * `ReferenceAdapterFreshnessDiagnostic`'s doc comment (#818). */
   classification: ReferenceAdapterFreshnessDiagnostic;
   route_recommendation?: WorkItemRevisionFreshnessRouteRecommendation;
   reasons: WorkItemReadinessReason[];

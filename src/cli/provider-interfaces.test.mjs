@@ -64,7 +64,7 @@ test("workItemReadinessClassifications (pull-work-provider.ts) is the vocabulary
   assert.deepEqual([...workItemReadinessClassifications], ["ready", "blocked", "in_progress", "stale", "related-only"]);
 });
 
-test("referenceAdapterFreshnessDiagnostics (pull-work-provider.ts) is the vocabulary this codebase currently intends — deliberately narrower than the contract's WorkItemDriftOutcome (see provider-interfaces.ts's flagged gap, #777 review finding 2)", () => {
+test("referenceAdapterFreshnessDiagnostics (pull-work-provider.ts) is the vocabulary this codebase currently intends — also the contract's NORMATIVE revision-freshness vocabulary since #818 narrowed work-item-contract.md to match (retiring the unemitted five-value WorkItemDriftOutcome from #777 review finding 2)", () => {
   assert.deepEqual([...referenceAdapterFreshnessDiagnostics], ["not_verified", "fresh", "stale", "drifted"]);
 });
 

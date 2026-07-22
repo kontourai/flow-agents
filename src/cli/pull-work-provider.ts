@@ -212,16 +212,21 @@ function freshnessContext(item: Record<string, unknown>, inputs: FreshnessInputs
 }
 
 /**
- * The reference adapter's CURRENT freshness diagnostic vocabulary — `classifyRevisionFreshness()`
+ * The reference adapter's freshness diagnostic vocabulary — `classifyRevisionFreshness()`
  * below never returns any value outside this array. Exported as a runtime value (not just a type)
  * per #777 review finding 2 so `provider-interfaces.ts`'s `ReferenceAdapterFreshnessDiagnostic`
  * type derives from THIS array (`typeof referenceAdapterFreshnessDiagnostics[number]`) instead of
  * a hand-copied literal union that could silently drift from what this function actually emits.
- * This is deliberately NOT named after the work-item contract's normative five-value drift-outcome
- * table (`no_material_drift`/`scope_drift`/`dependency_drift`/`contract_drift`/`conflict_risk`,
- * work-item-contract.md "Planning Base And Drift") — this reference adapter does not yet implement
- * that more granular vocabulary; see `WorkItemDriftOutcome` in `provider-interfaces.ts` for the
- * contract's normative union and its doc comment for the flagged gap.
+ *
+ * This is now also the work-item contract's NORMATIVE revision-freshness vocabulary
+ * (work-item-contract.md "Planning Base And Drift" → "Revision-freshness outcomes", #818). An
+ * earlier contract draft instead listed a five-value `no_material_drift`/`scope_drift`/
+ * `dependency_drift`/`contract_drift`/`conflict_risk` taxonomy (#777 review finding 2 flagged that
+ * nothing emitted it); #818 found that taxonomy was not mechanically computable from this
+ * function's available inputs without new data (dependency-resolution and cross-item active-scope
+ * state neither of which reaches this function) and narrowed the contract to match what this array
+ * actually emits, retiring the unemitted five-value type. Keep this array and the contract table in
+ * lockstep — a change here that isn't mirrored in work-item-contract.md's table re-opens the gap.
  */
 export const referenceAdapterFreshnessDiagnostics = ["not_verified", "fresh", "stale", "drifted"] as const;
 const [FRESHNESS_NOT_VERIFIED, FRESHNESS_FRESH, FRESHNESS_STALE, FRESHNESS_DRIFTED] = referenceAdapterFreshnessDiagnostics;
