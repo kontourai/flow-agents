@@ -117,7 +117,7 @@ export async function continuePausedFlowGateFromSurvey(
   const trustBundle = buildSurveyTrustBundle(resolved.surveyInput, {
     projectionContextId: surveyProjectionContext(resolved.record, input.gate),
   }) as unknown as JsonObject;
-  assertBundleBinding(trustBundle, run.state.subject, run.definition, run.config, input.gate);
+  assertBundleBinding(trustBundle, derived.results, run.state.subject, run.definition, run.config, input.gate);
 
   const snapshot = await writeInvocationSnapshot(trustBundle);
   try {
@@ -234,6 +234,9 @@ function assertSurveyProjectionBinding(
     if (!reviewItem) {
       throw new SurveyFlowGateInputError("surveyInput.reviewOutcomes", `claim ${claim.id} is not bound to a canonical replayed ReviewItem`);
     }
+    if (claim.status !== undefined && claim.status !== result.status) {
+      throw new SurveyFlowGateInputError("surveyInput.claims.status", `claim ${claim.id} overrides the canonical review status`);
+    }
     assertReviewedProjectionMatches({ surveyInput, claim, candidateSet, candidate, review, result, reviewItem });
   }
 }
@@ -262,6 +265,7 @@ function assertReviewedProjectionMatches(input: {
 
   same("candidateSets.target", input.candidateSet.target, input.reviewItem.spec.target);
   same("candidateSets.status", input.candidateSet.status, input.reviewItem.spec.candidateSetStatus);
+  same("candidateSets.rationale", input.candidateSet.rationale, input.reviewItem.spec.rationale);
   same("claims.id", input.claim.id, target?.claimId);
   same("claims.subjectType", input.claim.subjectType, target?.subjectType);
   same("claims.subjectId", input.claim.subjectId, target?.subjectId);
@@ -269,11 +273,19 @@ function assertReviewedProjectionMatches(input: {
   same("claims.claimType", input.claim.claimType, target?.claimType);
   same("claims.fieldOrBehavior", input.claim.fieldOrBehavior, target?.fieldOrBehavior);
   same("claims.impactLevel", input.claim.impactLevel, target?.impactLevel);
+  same("claims.collectedBy", input.claim.collectedBy, target?.collectedBy);
+  same("claims.evidenceType", input.claim.evidenceType, target?.evidenceType);
+  same("claims.evidenceMethod", input.claim.evidenceMethod, target?.evidenceMethod);
+  same("claims.derivedFrom", input.claim.derivedFrom, target?.derivedFrom);
   same("claims.candidateSetId", input.claim.candidateSetId, projection?.candidateSetId);
   same("claims.candidateId", input.candidate.id, projection?.candidateId);
   same("reviewOutcomes.id", input.review.id, projection?.reviewOutcomeId);
   same("candidates.id", input.candidate.id, input.result.selectedCandidateId);
+  same("candidates.extractionId", input.candidate.extractionId, projection?.extractionId);
   same("candidates.value", input.candidate.value, input.result.effectiveValue);
+  same("candidates.confidence", input.candidate.confidence, reviewedCandidate?.confidence);
+  same("candidates.sourceRank", input.candidate.sourceRank, reviewedCandidate?.sourceRank);
+  same("candidates.rejectionReason", input.candidate.rejectionReason, reviewedCandidate?.rejectionReason);
   same("candidateSets.selectedCandidateId", input.candidateSet.selectedCandidateId, input.candidate.id);
   if (input.claim.value !== undefined) same("claims.value", input.claim.value, input.result.effectiveValue);
 
@@ -286,23 +298,33 @@ function assertReviewedProjectionMatches(input: {
   same("rawSources.fetchedAt", boundRawSource.fetchedAt, reviewedCandidate?.source?.fetchedAt);
   same("rawSources.checksum", boundRawSource.checksum, reviewedCandidate?.source?.checksum);
   same("rawSources.locatorScheme", boundRawSource.locatorScheme, reviewedCandidate?.source?.locatorScheme);
+  same("rawSources.locatorScheme", boundRawSource.locatorScheme, reviewedCandidate?.locator?.scheme);
   same("extractions.id", boundExtraction.id, reviewedCandidate?.extraction?.extractionId);
   same("extractions.target", boundExtraction.target, reviewedCandidate?.extraction?.target);
   same("extractions.confidence", boundExtraction.confidence, reviewedCandidate?.extraction?.confidence);
   same("extractions.extractor", boundExtraction.extractor, reviewedCandidate?.extraction?.extractor);
   same("extractions.extractedAt", boundExtraction.extractedAt, reviewedCandidate?.extraction?.extractedAt);
   same("extractions.value", boundExtraction.value, input.result.effectiveValue);
+  same("extractions.locator", boundExtraction.locator, reviewedCandidate?.locator?.locator);
+  same("extractions.excerpt", boundExtraction.excerpt, reviewedCandidate?.locator?.excerpt);
 
   same("reviewOutcomes.status", input.review.status, decision?.status);
   same("reviewOutcomes.actor", input.review.actor, decision?.actor?.id);
   same("reviewOutcomes.reviewedAt", input.review.reviewedAt, decision?.reviewedAt);
   same("reviewOutcomes.resolution", input.review.resolution, decision?.resolution);
   same("reviewOutcomes.resolutionReason", input.review.resolutionReason, decision?.resolutionReason);
+  same("reviewOutcomes.attemptEvidenceIds", input.review.attemptEvidenceIds, decision?.attemptEvidenceIds);
+  same("reviewOutcomes.rationale", input.review.rationale, decision?.rationale);
+  same("reviewOutcomes.evidenceIds", input.review.evidenceIds, decision?.evidenceIds);
+  same("reviewOutcomes.withinComfortZone", input.review.withinComfortZone, decision?.withinComfortZone);
+  same("reviewOutcomes.comfortZoneNote", input.review.comfortZoneNote, decision?.comfortZoneNote);
+  same("reviewOutcomes.authorizing", input.review.authorizing, decision?.authorizing);
   same("reviewOutcomes.editedValue", decision?.editedValue, input.result.editedValue);
 }
 
 function assertBundleBinding(
   bundle: JsonObject,
+  results: readonly any[],
   subject: string,
   definition: unknown,
   config: unknown,
@@ -316,6 +338,10 @@ function assertBundleBinding(
   for (const claim of relevant) {
     if (!isRecord(claim.metadata) || claim.metadata.workflow_subject_ref !== subject) {
       throw new SurveyFlowGateInputError("trustBundle.claims.metadata.workflow_subject_ref", "must match the persisted Flow Run subject");
+    }
+    const result = results.find((entry) => entry?.reviewDecision?.status?.appliedToClaimIds?.includes(claim.id));
+    if (!result || claim.status !== result.status) {
+      throw new SurveyFlowGateInputError("trustBundle.claims.status", `claim ${String(claim.id)} must retain the canonical review status`);
     }
   }
 }

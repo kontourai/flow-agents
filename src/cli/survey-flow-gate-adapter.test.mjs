@@ -13,6 +13,7 @@ import {
 } from "@kontourai/flow";
 import {
   createServerReviewSessionRecord,
+  deriveServerReviewSessionApplyResult,
 } from "@kontourai/survey/review-workbench/server-review-session";
 import { buildReviewSessionEvents } from "@kontourai/survey/review-workbench";
 import {
@@ -106,6 +107,9 @@ function session({ decision = "accept-proposed", name = "survey-gate-session" } 
           extractor: "survey-gate-test",
           extractedAt: TIME,
         },
+        locator: {
+          scheme: "structured-field",
+        },
         claimTarget: {
           claimId: "claim.review",
           subjectType: "work-item",
@@ -194,6 +198,34 @@ function surveyInput({ status = "verified", subject = SUBJECT, workflowSubject =
 }
 
 function resolvedReview(review, projection = surveyInput()) {
+  let derived;
+  try {
+    derived = deriveServerReviewSessionApplyResult({
+      record: review.record,
+      events: review.events,
+      currentSnapshot: review.currentSnapshot ?? review.snapshot,
+      currentEventCount: review.currentEventCount ?? review.events.length,
+      requiredResolvedItems: "all",
+    });
+  } catch {
+    derived = undefined;
+  }
+  if (derived?.ok) {
+    for (const outcome of projection.reviewOutcomes) {
+      const decision = derived.decisions.find((entry) => entry.spec.projection?.reviewOutcomeId === outcome.id);
+      if (!decision) continue;
+      for (const field of [
+        "attemptEvidenceIds",
+        "rationale",
+        "evidenceIds",
+        "withinComfortZone",
+        "comfortZoneNote",
+        "authorizing",
+      ]) {
+        if (decision.spec[field] !== undefined) outcome[field] = structuredClone(decision.spec[field]);
+      }
+    }
+  }
   return {
     ...review,
     currentSnapshot: review.currentSnapshot ?? review.snapshot,
@@ -335,6 +367,23 @@ test("a server-derived rejected review is inspectable but leaves Flow state muta
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
 
+test("a verified claim override cannot turn a canonical rejection into passing evidence", async () => {
+  const cwd = workspace();
+  const run = await pausedRun(cwd, "status-override");
+  const before = flowSnapshot(cwd, run.state.run_id);
+  const projection = surveyInput({ status: "rejected" });
+  projection.claims[0].status = "verified";
+  const dependencies = resolver({
+    rejected: resolvedReview(session({ decision: "reject-proposed", name: "status-override-review" }), projection),
+  });
+
+  await assert.rejects(
+    () => continuePausedFlowGateFromSurvey(request(run, "rejected"), dependencies),
+    /overrides the canonical review status/,
+  );
+  assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
+});
+
 test("a stale Flow run head fails before the Survey bundle reaches Flow", async () => {
   const cwd = workspace();
   const run = await pausedRun(cwd, "stale-head");
@@ -384,6 +433,40 @@ test("a valid unrelated review cannot be repurposed into the gated Survey projec
   await assert.rejects(
     () => continuePausedFlowGateFromSurvey(request(run, "unrelated"), dependencies),
     /canonical replayed ReviewItem/,
+  );
+  assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
+});
+
+test("a resolver projection cannot change evidence-affecting candidate or claim fields", async () => {
+  const cwd = workspace();
+  const run = await pausedRun(cwd, "projection-field-mismatch");
+  const before = flowSnapshot(cwd, run.state.run_id);
+  const projection = surveyInput();
+  projection.candidateSets[0].candidates[0].confidence = 0.99;
+  const dependencies = resolver({
+    mismatch: resolvedReview(session({ name: "projection-field-mismatch-review" }), projection),
+  });
+
+  await assert.rejects(
+    () => continuePausedFlowGateFromSurvey(request(run, "mismatch"), dependencies),
+    /surveyInput\.candidates\.confidence/,
+  );
+  assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
+});
+
+test("a resolver projection cannot change the canonical candidate-set rationale", async () => {
+  const cwd = workspace();
+  const run = await pausedRun(cwd, "projection-rationale-mismatch");
+  const before = flowSnapshot(cwd, run.state.run_id);
+  const projection = surveyInput();
+  projection.candidateSets[0].rationale = "caller-selected rationale";
+  const dependencies = resolver({
+    mismatch: resolvedReview(session({ name: "projection-rationale-mismatch-review" }), projection),
+  });
+
+  await assert.rejects(
+    () => continuePausedFlowGateFromSurvey(request(run, "mismatch"), dependencies),
+    /surveyInput\.candidateSets\.rationale/,
   );
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
