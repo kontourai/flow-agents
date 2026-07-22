@@ -2986,8 +2986,9 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
   // norm (kontourai/flow-agents#826). With no explicit target, the proof comes from spec files in
   // the conventional test directories — anchored on a config actually existing at the root: no
   // config means the runner would discover nothing, so there is no proof to grant.
-  const npxPlaywright = executableName === "npx" && tokens[1] !== undefined
-    && path.basename(tokens[1]) === "playwright" && tokens[2] === "test";
+  // Bare token only — `npx ./vendored/playwright test` would re-open the binary-substitution
+  // channel the direct form's `executable === executableName` guard closes (review finding H1).
+  const npxPlaywright = executableName === "npx" && tokens[1] === "playwright" && tokens[2] === "test";
   if ((executableName === "playwright" && executable === executableName && tokens[1] === "test") || npxPlaywright) {
     if (tokens.some((token) => /pass.?with.?no.?tests/i.test(token))) return null;
     const configNames = ["js", "cjs", "mjs", "ts", "cts", "mts"].map((ext) => `playwright.config.${ext}`);

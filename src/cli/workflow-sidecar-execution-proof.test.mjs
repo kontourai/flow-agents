@@ -111,7 +111,11 @@ test("playwright without a config, without specs, or shadowed is not proof (#826
     "tests/x.spec.ts": 'import { test } from "@playwright/test";\ntest("x", () => {});\n',
   });
   assert.equal(testExecutionProof("playwright test --pass-with-no-tests", covered), null);
+  assert.equal(testExecutionProof("npx playwright test --pass-with-no-tests", covered), null);
   assert.equal(testExecutionProof("./playwright test", covered), null);
+  // H1 refusal: a path-qualified npx spec is the same binary-substitution channel as ./playwright.
+  assert.equal(testExecutionProof("npx ./fake/playwright test", covered), null);
+  assert.equal(testExecutionProof("npx /tmp/evil/playwright test", covered), null);
 });
 
 test("cargo and go require substantive local test sources", () => {
