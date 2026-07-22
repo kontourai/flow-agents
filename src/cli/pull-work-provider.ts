@@ -211,29 +211,44 @@ function freshnessContext(item: Record<string, unknown>, inputs: FreshnessInputs
   };
 }
 
-function classifyRevisionFreshness(ctx: FreshnessContext, inputs: FreshnessInputs): { classification: string; reasons: Record<string, unknown>[]; route_recommendation?: Record<string, unknown> } {
+/**
+ * The reference adapter's CURRENT freshness diagnostic vocabulary — `classifyRevisionFreshness()`
+ * below never returns any value outside this array. Exported as a runtime value (not just a type)
+ * per #777 review finding 2 so `provider-interfaces.ts`'s `ReferenceAdapterFreshnessDiagnostic`
+ * type derives from THIS array (`typeof referenceAdapterFreshnessDiagnostics[number]`) instead of
+ * a hand-copied literal union that could silently drift from what this function actually emits.
+ * This is deliberately NOT named after the work-item contract's normative five-value drift-outcome
+ * table (`no_material_drift`/`scope_drift`/`dependency_drift`/`contract_drift`/`conflict_risk`,
+ * work-item-contract.md "Planning Base And Drift") — this reference adapter does not yet implement
+ * that more granular vocabulary; see `WorkItemDriftOutcome` in `provider-interfaces.ts` for the
+ * contract's normative union and its doc comment for the flagged gap.
+ */
+export const referenceAdapterFreshnessDiagnostics = ["not_verified", "fresh", "stale", "drifted"] as const;
+const [FRESHNESS_NOT_VERIFIED, FRESHNESS_FRESH, FRESHNESS_STALE, FRESHNESS_DRIFTED] = referenceAdapterFreshnessDiagnostics;
+
+function classifyRevisionFreshness(ctx: FreshnessContext, inputs: FreshnessInputs): { classification: (typeof referenceAdapterFreshnessDiagnostics)[number]; reasons: Record<string, unknown>[]; route_recommendation?: Record<string, unknown> } {
   const reasons: Record<string, unknown>[] = [];
   const materialFiles = materialFreshnessFiles(inputs.changedFiles);
 
   if (!ctx.plannedBaseSha) {
     reasons.push({ code: "missing_planned_base_sha", message: "Work item has no planned_base_sha; freshness cannot be verified without inventing certainty." });
-    return { classification: "not_verified", reasons };
+    return { classification: FRESHNESS_NOT_VERIFIED, reasons };
   }
 
   if (!inputs.currentSha) {
     reasons.push({ code: "missing_current_sha", message: "Current target SHA was not provided; pass --current-sha from the caller's refreshed provider/repo context." });
-    return { classification: "not_verified", reasons };
+    return { classification: FRESHNESS_NOT_VERIFIED, reasons };
   }
 
   if (ctx.plannedBaseSha === inputs.currentSha && ctx.scopeIntersections.length === 0) {
     reasons.push({ code: "base_matches_current", message: "Planned base SHA matches current target SHA and no planning scope changes were reported." });
-    return { classification: "fresh", reasons };
+    return { classification: FRESHNESS_FRESH, reasons };
   }
 
   if (ctx.plannedBaseSha !== inputs.currentSha) reasons.push({ code: "base_sha_changed", message: "Current target SHA differs from the planned base SHA." });
   if (ctx.commitsSince === undefined && inputs.changedFiles.length === 0) {
     reasons.push({ code: "missing_drift_evidence", message: "Current target moved, but commits-since and changed-file evidence were not provided." });
-    return { classification: "not_verified", reasons };
+    return { classification: FRESHNESS_NOT_VERIFIED, reasons };
   }
   if ((ctx.commitsSince ?? 0) > 0) reasons.push({ code: "commits_since_planned_base", message: `${ctx.commitsSince} commits were reported since planned_base_sha.` });
   if (ctx.scopeIntersections.length) reasons.push({ code: "planning_scope_changed", message: "Reported changed files intersect planning_scope_refs.", intersections: ctx.scopeIntersections });
@@ -242,7 +257,7 @@ function classifyRevisionFreshness(ctx: FreshnessContext, inputs: FreshnessInput
 
   const stale = materialFiles.length > 0 || ctx.scopeIntersections.length > 0 || (ctx.commitsSince ?? 0) >= 10 || (ctx.plannedAgeDays !== null && ctx.plannedAgeDays >= 30);
   return {
-    classification: stale ? "stale" : "drifted",
+    classification: stale ? FRESHNESS_STALE : FRESHNESS_DRIFTED,
     route_recommendation: stale ? { target: "idea-to-backlog", reason: "Stale revision freshness should be reshaped before implementation planning." } : undefined,
     reasons,
   };
@@ -776,20 +791,30 @@ function liveBoardDoc(settings: Record<string, unknown>): Record<string, unknown
   return { items, issues };
 }
 
+/**
+ * The reference adapter's readiness-classification vocabulary — `classify()` below never returns
+ * any value outside this array. Exported as a runtime value (not just a type) per #777 review
+ * finding 5 so `provider-interfaces.ts`'s `WorkItemReadinessClassification` type derives from THIS
+ * array instead of a hand-copied literal union that could silently drift from what this function
+ * actually emits.
+ */
+export const workItemReadinessClassifications = ["ready", "blocked", "in_progress", "stale", "related-only"] as const;
+const [READINESS_READY, READINESS_BLOCKED, READINESS_IN_PROGRESS, READINESS_STALE, READINESS_RELATED_ONLY] = workItemReadinessClassifications;
+
 function classify(item: Record<string, unknown>, settings: Record<string, unknown>, resolved: Record<string, string>): Record<string, unknown> {
   const selection = (settings.selection ?? {}) as Record<string, unknown>;
   const filters = (selection.filters ?? {}) as Record<string, unknown>;
   const wip = (selection.wip_policy ?? {}) as Record<string, unknown>;
   const status = String(item.status ?? "");
   const labels = new Set((item.labels as string[] ?? []).map((label) => label.toLowerCase()));
-  if ((wip.active_statuses as string[] ?? []).includes(status) || ["review", "verification"].includes(status)) return { classification: "in_progress", reasons: [{ code: "active_status", message: `Item status is active: ${status}` }] };
+  if ((wip.active_statuses as string[] ?? []).includes(status) || ["review", "verification"].includes(status)) return { classification: READINESS_IN_PROGRESS, reasons: [{ code: "active_status", message: `Item status is active: ${status}` }] };
   const open = (item.blockers as Record<string, unknown>[] ?? []).filter((blocker) => {
     const ref = blocker.ref as Record<string, unknown> | undefined;
     return !isBlockerResolved(ref, resolved);
   });
   if (status === "blocked" || open.length || labels.has("blocked")) {
     return {
-      classification: "blocked",
+      classification: READINESS_BLOCKED,
       reasons: [{
         code: "blocking_evidence",
         message: "Item has unresolved blocker evidence.",
@@ -801,11 +826,11 @@ function classify(item: Record<string, unknown>, settings: Record<string, unknow
     };
   }
   const title = String(item.title ?? "").toLowerCase();
-  if (labels.has("research") || labels.has("spike") || status === "research" || title.includes("research")) return { classification: "related-only", reasons: [{ code: "parallel_research", message: "Research/spike item is related but not the implementation pickup." }] };
+  if (labels.has("research") || labels.has("spike") || status === "research" || title.includes("research")) return { classification: READINESS_RELATED_ONLY, reasons: [{ code: "parallel_research", message: "Research/spike item is related but not the implementation pickup." }] };
   const readyStatuses = (filters.ready_statuses as string[] | undefined) ?? ["ready"];
   const body = String(item.body ?? "").toLowerCase();
-  if (readyStatuses.includes(status) || (status === "todo" && body.includes("## scope") && body.includes("## acceptance criteria"))) return { classification: "ready", reasons: [{ code: "pickup_contract", message: "Item has scope, acceptance criteria, and no unresolved blockers." }] };
-  return { classification: "stale", reasons: [{ code: "insufficient_readiness", message: `Status ${JSON.stringify(status)} is not ready and no pickup contract was found.` }] };
+  if (readyStatuses.includes(status) || (status === "todo" && body.includes("## scope") && body.includes("## acceptance criteria"))) return { classification: READINESS_READY, reasons: [{ code: "pickup_contract", message: "Item has scope, acceptance criteria, and no unresolved blockers." }] };
+  return { classification: READINESS_STALE, reasons: [{ code: "insufficient_readiness", message: `Status ${JSON.stringify(status)} is not ready and no pickup contract was found.` }] };
 }
 
 function resolveSettings(doc: Record<string, unknown>): Record<string, unknown> {

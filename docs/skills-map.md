@@ -14,6 +14,11 @@ For practical operator instructions and copy/paste prompts, see https://github.c
 Flow Definitions own step order, gates, route-backs, and trust expectations;
 the role matrix only maps each skill to that Flow-owned behavior.
 
+For the Builder build flow, `execute` exposes only the declared correction
+`plan_gap -> plan`, with Flow-owned bounded attempt accounting (three attempts,
+then block). A skill or handoff cannot create that permission: `plan_gap` is valid
+only while the active gate definition declares it, and status/sync do not backtrack.
+
 | Role | Skills | Activation |
 | --- | --- | --- |
 | Entrypoint | `builder-shape`, `deliver` | User selects the Builder product workflow; the skill coordinates but owns no step evidence. |

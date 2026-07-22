@@ -946,6 +946,13 @@ echo ""
 echo "--- Packed Package Builder Entry ---"
 PACKAGE_CONSUMER="$TMPDIR_EVAL/package-consumer"
 PACKAGE_PROJECT="$TMPDIR_EVAL/package-project"
+mkdir -p "$PACKAGE_PROJECT"
+git -C "$PACKAGE_PROJECT" init -q
+git -C "$PACKAGE_PROJECT" config user.email bundle-install@example.invalid
+git -C "$PACKAGE_PROJECT" config user.name "Bundle Install Eval"
+printf '.kontourai/\n' > "$PACKAGE_PROJECT/.gitignore"
+git -C "$PACKAGE_PROJECT" add .gitignore
+git -C "$PACKAGE_PROJECT" commit -qm "seed bundle install fixture"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
 mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
@@ -1017,6 +1024,46 @@ for (const file of files.sort()) {
 }
 NODE
   mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
+  && node -e 'const fs=require("node:fs");const flow=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const execute=flow.gates?.["execute-gate"];if(JSON.stringify(execute?.on_route_back)!==JSON.stringify({plan_gap:"plan"}))process.exit(1);if(JSON.stringify(execute?.route_back_policy)!==JSON.stringify({max_attempts:3,on_exceeded:"block"}))process.exit(1)' "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/kits/builder/flows/build.flow.json" \
+  && node - "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+
+void (async () => {
+  const [consumer, project] = process.argv.slice(2);
+  const requireFromConsumer = createRequire(path.join(consumer, 'package.json'));
+  const flow = requireFromConsumer('@kontourai/flow');
+  const packagedFile = path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'kits', 'builder', 'flows', 'build.flow.json');
+  const packaged = JSON.parse(fs.readFileSync(packagedFile, 'utf8'));
+  const published = structuredClone(packaged);
+  published.version = '1.1';
+  delete published.gates['execute-gate'].on_route_back;
+  delete published.gates['execute-gate'].route_back_policy;
+  const fixtureRoot = path.join(project, 'packed-flow-amendment');
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  const publishedFile = path.join(fixtureRoot, 'builder-build-1.1.json');
+  fs.writeFileSync(publishedFile, JSON.stringify(published));
+  const runId = 'packed-builder-build-amendment';
+  await flow.startRun(publishedFile, { cwd: fixtureRoot, runId, params: { subject: 'acme/builder#packed-amendment' } });
+  const before = await flow.loadRun(runId, fixtureRoot);
+  await flow.amendRunDefinition(runId, {
+    cwd: fixtureRoot,
+    definition: packaged,
+    request: {
+      reason: 'upgrade the packed published builder.build@1.1 fixture',
+      expected_run_head: flow.flowRunHead(before.state),
+      expected_definition: flow.definitionIdentity(published),
+      successor_digest: flow.definitionDigest(packaged),
+      authority: { kind: 'user_request', actor: 'bundle-install-test', request_ref: 'test:packed-amendment', requested_at: '2026-07-20T00:00:00.000Z' },
+    },
+  });
+  const amended = await flow.loadRun(runId, fixtureRoot);
+  if (JSON.stringify(amended.startDefinition) !== JSON.stringify(published)
+    || JSON.stringify(amended.definition) !== JSON.stringify(packaged)) process.exit(1);
+})().catch((error) => { console.error(error); process.exit(1); });
+NODE
+  _pass "packed published Builder 1.1 run amends to the exact installed 1.3 definition" \
   && printf 'Selected Work Item: acme/builder#901\n' > "$PACKAGE_SESSION/acme-builder-901--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
     --flow builder.build --work-item acme/builder#901 --assignment-provider local-file --summary "Packed public workflow contract fixture." >/dev/null \
@@ -1054,8 +1101,14 @@ NODE
   && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-plan --status pass \
     --summary "Packed fixture records the declared implementation plan artifact." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--plan-work.md\",\"summary\":\"Durable implementation plan artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-scope --status fail --route-reason plan_gap \
+    --summary "Packed fixture finds a declared planning gap at execute." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Durable execution scope artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-plan --status pass \
+    --summary "Packed fixture revises the plan through the declared plan-gap route." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--plan-work.md\",\"summary\":\"Durable implementation plan artifact.\"}" >/dev/null \
   && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-scope --status pass \
-    --summary "Packed fixture records the declared execution scope artifact." \
+    --summary "Packed fixture records the declared execution scope artifact after the plan-gap route." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Durable execution scope artifact.\"}" >/dev/null \
   && ! package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation tests-evidence --status pass \
     --command "$PACKAGE_TEST_COMMAND" --criterion-json "$PACKAGE_CRITERION_JSON" \

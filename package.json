@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "4.2.1",
-  "description": "Flow Agents — a Kontour product that applies Flow and Veritas discipline as a portable process layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, pi, and GitHub Actions — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "version": "4.6.2",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -29,7 +29,8 @@
       "types": "./build/src/index.d.ts",
       "import": "./build/src/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./schemas/*.json": "./schemas/*.json"
   },
   "repository": {
     "type": "git",
@@ -43,6 +44,7 @@
     "flow-agents-build-bundles": "build/src/cli.js",
     "flow-agents-capability-matrix": "build/src/cli.js",
     "flow-agents-console-learning-projection": "build/src/cli.js",
+    "flow-agents-console-process-projection": "build/src/cli.js",
     "flow-agents-context-map": "build/src/cli.js",
     "flow-agents-effective-backlog-settings": "build/src/cli.js",
     "flow-agents-effective-change-provider-settings": "build/src/cli.js",
@@ -149,16 +151,22 @@
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit",
-    "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources"
+    "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
+    "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs"
   },
   "devDependencies": {
+    "@kontourai/lookout": "0.3.2",
+    "@kontourai/surface": "2.13.0",
+    "@kontourai/survey": "1.19.0",
+    "@kontourai/traverse": "0.19.1",
     "@types/node": "^26.1.1",
     "gcp-metadata": "7.0.1",
     "promptfoo": "^0.121.18",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/flow": "3.5.0"
+    "@kontourai/flow": "3.6.2",
+    "esbuild": "0.28.1"
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.11.0",

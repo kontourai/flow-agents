@@ -98,6 +98,17 @@ function isTerminalDeliveredState(state) {
   return TERMINAL_STATUSES.has(status) || phase === 'done';
 }
 
+// #793: "delivered"/"verified" are PARKING statuses, not the genuinely-terminal
+// accepted/archived ones — those already require phase:learning at the advance-state
+// transition (workflow-sidecar's terminal_jump_rejected guard). A session can sit at
+// delivered/verified past the release phase forever with no learning.json and no
+// learning-evidence claim ever recorded, and the stop-gate previously went silent for it
+// (sidecarGuidance's status-summary warning deliberately stops emitting once status is in
+// TERMINAL_STATUSES, and a terminal task's blockRe narrows to HARD_BLOCK-only). See
+// learningGateOutstandingWarning below, which closes that silent gap.
+const LEARNING_GATE_STATUSES = new Set(['delivered', 'verified']);
+const RELEASE_OR_LATER_PHASES = new Set(['release', 'learning', 'done']);
+
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
 }
@@ -1866,6 +1877,38 @@ function hasSidecarPresence(artifactDir) {
   return fs.existsSync(path.join(artifactDir, 'state.json')) || fs.existsSync(path.join(artifactDir, 'trust.bundle'));
 }
 
+function loadCanonicalFlowValidator() {
+  const scriptsDir = path.dirname(__dirname);
+  if (path.basename(__dirname) !== 'hooks' || path.basename(scriptsDir) !== 'scripts') {
+    throw new Error('Flow validator cannot derive the hook-owned bundle root');
+  }
+  const scriptsContainer = path.dirname(scriptsDir);
+  const bundleRoot = path.basename(scriptsContainer) === 'context' ? path.dirname(scriptsContainer) : scriptsContainer;
+  const bundledValidator = path.join(bundleRoot, 'build', 'src', 'vendor', 'flow-validator.cjs');
+  let flow;
+  if (fs.existsSync(bundledValidator)) {
+    const validatorStat = fs.lstatSync(bundledValidator);
+    const realBundleRoot = fs.realpathSync(bundleRoot);
+    const realValidator = fs.realpathSync(bundledValidator);
+    const relativeValidator = path.relative(realBundleRoot, realValidator);
+    if (validatorStat.isSymbolicLink() || !validatorStat.isFile() || relativeValidator.startsWith(`..${path.sep}`) || relativeValidator === '..' || path.isAbsolute(relativeValidator)) {
+      throw new Error('bundled Flow validator must be a regular file contained by the hook-owned bundle root');
+    }
+    flow = require(bundledValidator);
+  } else {
+    const packageFile = path.join(bundleRoot, 'package.json');
+    const packageIdentity = fs.existsSync(packageFile) ? JSON.parse(fs.readFileSync(packageFile, 'utf8')) : null;
+    if (!packageIdentity || packageIdentity.name !== '@kontourai/flow-agents') {
+      throw new Error(`hook-owned bundled Flow validator is unavailable at ${bundledValidator}`);
+    }
+    flow = require('@kontourai/flow');
+  }
+  if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') {
+    throw new Error('hook-owned Flow validator does not expose the required consistency API');
+  }
+  return flow;
+}
+
 function canonicalFlowState(root, artifactDir) {
   if (!artifactDir) return { state: null, definition: null, error: null };
   const slug = path.basename(artifactDir);
@@ -1881,8 +1924,13 @@ function canonicalFlowState(root, artifactDir) {
     const parents = components.map(component => secureDirectoryIdentity(component, 'canonical Flow run parent'));
     const stateRead = readSecureCanonicalJson(path.join(runDir, 'state.json'), 'canonical Flow state', parents, MAX_CANONICAL_FLOW_STATE_BYTES);
     const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
-    const state = stateRead.value;
-    const definition = definitionRead.value;
+    const persistedState = stateRead.value;
+    const startDefinition = definitionRead.value;
+    const flow = loadCanonicalFlowValidator();
+    const { definitionDigest, validateRunStateConsistency } = flow;
+    const validated = validateRunStateConsistency(startDefinition, persistedState, { runId: slug });
+    const state = validated.state;
+    const definition = validated.definition;
     if (!state || typeof state !== 'object' || Array.isArray(state)
       || !CANONICAL_FLOW_STATUSES.has(state.status)
       || state.run_id !== slug
@@ -1898,8 +1946,12 @@ function canonicalFlowState(root, artifactDir) {
       || definition.steps.some(step => !step || typeof step !== 'object' || Array.isArray(step) || typeof step.id !== 'string' || !step.id)) {
       return { state: null, definition: null, error: 'canonical Flow definition is malformed' };
     }
+    const digest = definitionDigest(definition);
     if (state.definition_id !== definition.id || state.definition_version !== definition.version) {
-      return { state: null, definition: null, error: 'canonical Flow definition identity does not match state' };
+      return { state: null, definition: null, error: 'canonical Flow effective definition id or version does not match state' };
+    }
+    if (Array.isArray(state.definition_amendments) && state.definition_amendments.length > 0 && (typeof state.definition_digest !== 'string' || state.definition_digest !== digest)) {
+      return { state: null, definition: null, error: 'canonical Flow effective definition digest does not match state' };
     }
     if (!definition.steps.some(step => step.id === state.current_step)) {
       return { state: null, definition: null, error: 'canonical Flow current_step is not present in definition' };
@@ -1907,9 +1959,9 @@ function canonicalFlowState(root, artifactDir) {
     assertSecureCanonicalReadStable(stateRead);
     assertSecureCanonicalReadStable(definitionRead);
     assertSecureDirectoriesStable(parents);
-    return { state, definition, error: null };
+    return { state: { ...state, definition_digest: digest }, definition, error: null };
   } catch (error) {
-    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 500)}` };
   }
 }
 
@@ -2096,6 +2148,98 @@ const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence 
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
 const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
 
+// #793: deliberately NOT folded into HARD_BLOCK/FULL_BLOCK above. Those two constants are
+// reused by isHardStopWarning() to decide whether the AC2 MAX_BLOCKS escape valve is allowed
+// to auto-release (see run()) — a genuine HARD_BLOCK match (tamper/integrity/dispute) must
+// NEVER auto-release. "Learning outstanding" is exactly the opposite case: it is a real,
+// intentional gap (the issue's own valve requirement), so it must block on its own (via the
+// dedicated OR-branch in analyze()'s `blocking` computation below) while staying OUT of
+// isHardStopWarning's classification — after MAX_BLOCKS identical blocks it releases and hands
+// the decision to the operator, exactly like an ordinary (non-hard) block.
+const LEARNING_GATE_PATTERN = / learning outstanding — /;
+
+/**
+ * #793: true once learning has been recorded for this session — either the plain
+ * learning.json sidecar (learning-review's local record) or a learning-evidence claim in
+ * trust.bundle (the Flow-bound gate-claim producer `gate-claim-learning-evidence`, or the
+ * `advance-state --skip-learning` accepted-gap check, id "learning-evidence-skip"). Matches
+ * on the check id substring "learning-evidence" rather than an exact id so either producer
+ * satisfies it without this file needing to know both ids by name.
+ */
+// Codex-review-hardened (#798, second pass): authoritative producer ids ONLY — no suffix
+// inference. Suffix/regex matching was bypassable via path segments ("foo/no-learning-evidence"
+// defeats a boundary regex because claimCheckId strips only the first segment) and via
+// deliberately-suffixed forgeries. The leaf of the check id must equal a known producer id
+// exactly: learning-review's record-evidence check, advance-state's reserved skip check, or
+// the flow-bound gate-claim producer.
+// Producer shapes only, verified against the real bundle writer: subjectId is
+// `${slug}/${check.id}` and claimCheckId strips exactly the slug segment, so the
+// remainder must EQUAL a producer id — no splitting, no leaf inference (Codex verify
+// round 2: leaf-splitting recreated the collision via "unrelated/learning-evidence").
+// Status is positive-only PER id: real learning evidence must be pass; only the
+// waiver-stamped skip check may be not_verified.
+// Statuses are checked on BOTH layers of a real bundle claim (Codex verify round 3):
+// the serializer derives claim.status via Surface ("pass" check -> "verified" claim,
+// waived check -> "assumed") while claim.value carries the raw check status. Either
+// layer matching its id's allowed set counts; synthetic single-layer shapes still work.
+const LEARNING_EVIDENCE_STATUS_BY_ID = new Map([
+  ['learning-evidence', new Set(['pass', 'verified'])],
+  ['gate-claim-learning-evidence', new Set(['pass', 'verified'])],
+  ['learning-evidence-skip', new Set(['not_verified', 'assumed'])],
+]);
+
+function nonblank(v) { return typeof v === 'string' && v.trim().length > 0; }
+
+function hasLearningEvidence(artifactDir) {
+  // learning.json must be SEMANTIC evidence: status "learned" AND at least one record
+  // object carrying real content. The canonical workflow-learning schema's semantic
+  // fields are interpretation/facts/outcome (no "summary"); legacy records used
+  // "summary" — accept content in either shape, never placeholders (Codex round 3).
+  const lj = readJsonFile(path.join(artifactDir, 'learning.json'));
+  if (lj && String(lj.status || '') === 'learned' && Array.isArray(lj.records)
+      && lj.records.some(r => r && typeof r === 'object' && (nonblank(r.interpretation) || nonblank(r.facts) || nonblank(r.summary)))) return true;
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const claims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
+  return claims.some(c => {
+    if (!c || typeof c.subjectId !== 'string') return false;
+    const id = String(claimCheckId(c.subjectId) || '').trim().toLowerCase();
+    const allowed = LEARNING_EVIDENCE_STATUS_BY_ID.get(id);
+    if (!allowed) return false;
+    const statusOk = allowed.has(String(c.status ?? '').toLowerCase()) || allowed.has(String(c.value ?? '').toLowerCase());
+    if (!statusOk) return false;
+    // The skip id is only a waiver when it carries the advance-state-minted stamp
+    // (record-evidence scrubs caller-supplied skip_learning, so the stamp is
+    // unforgeable via --check-json). An ordinary waiver or bare check on the skip id
+    // is not learning evidence.
+    if (id === 'learning-evidence-skip') {
+      const md = c && typeof c.metadata === 'object' ? c.metadata : null;
+      return !!(md && md.waiver && md.waiver.skip_learning === true);
+    }
+    return true;
+  });
+}
+
+/**
+ * #793 STOP-GATE rule: a session parked at status delivered/verified with phase release (or
+ * later) and no learning evidence at all must keep being flagged — never go silent just
+ * because the status happens to be in TERMINAL_STATUSES. Returns null when the rule does not
+ * apply (wrong status/phase) or is already satisfied (learning evidence present).
+ */
+function learningGateOutstandingWarning(root, artifactDir, state) {
+  if (!state) return null;
+  const status = normalizedStatus(state.status || '');
+  const phase = normalizedStatus(state.phase || '');
+  if (!LEARNING_GATE_STATUSES.has(status)) return null;
+  if (!RELEASE_OR_LATER_PHASES.has(phase)) return null;
+  if (hasLearningEvidence(artifactDir)) return null;
+  const base = relative(root, artifactDir);
+  // Review-hardened (#798): the message must not contain the bare token "status:" —
+  // FULL_BLOCK pattern-matches it, which would let isHardStopWarning classify this
+  // warning as hard under an active turn authority and defeat the MAX_BLOCKS release
+  // valve (the exact opposite of the design intent documented at LEARNING_GATE_PATTERN).
+  return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
+}
+
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
@@ -2237,6 +2381,12 @@ async function analyze(root, now = Date.now()) {
   const preExecution = isPreExecution(latestArtifactDir, status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
 
+  // #793 STOP-GATE: flag (and block, see `blocking` below) a session parked at
+  // delivered/verified past the release phase with no learning evidence, instead of
+  // going silent just because `terminal` (above) is true for status:delivered.
+  const learningGateWarning = learningGateOutstandingWarning(root, latestArtifactDir, gateState);
+  if (learningGateWarning) warnings.push(learningGateWarning);
+
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
@@ -2276,6 +2426,14 @@ async function analyze(root, now = Date.now()) {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     if (activeTurnAuthority.valid && isOrdinaryActiveGateWarning(w, relPath)) return false;
+    // #793: "learning outstanding" is WARN-ONLY — always emitted (never silent) but
+    // never blocking. The CI goal-fit baseline (12 assertions) and real operations
+    // encode that a terminal delivered/done session with valid sidecars is releasable;
+    // blocking on outstanding learning broke that contract (Runtime and Kit lane,
+    // 2026-07-20). Persistent loud nagging on every stop is the enforcement; the
+    // blocking teeth live in advance-state's terminal guard (+ --skip-learning) and
+    // the #800 CI receipt-closeout backstop.
+    if (LEARNING_GATE_PATTERN.test(w)) return false;
     return blockingRe.test(w);
   });
   return {
@@ -2353,6 +2511,10 @@ function isOrdinaryActiveGateWarning(warning, relPath) {
 
 function isHardStopWarning(warning, relPath, activeTurnAuthority) {
   if (/\[backstop in warn mode — not blocking\]/.test(warning)) return false;
+  // #798 review-hardened: the learning-outstanding warning is never hard — it must always
+  // remain eligible for the MAX_BLOCKS operator release valve (belt-and-braces with the
+  // message wording that avoids FULL_BLOCK tokens; see learningGateOutstandingWarning).
+  if (LEARNING_GATE_PATTERN.test(warning)) return false;
   if (!activeTurnAuthority) return HARD_BLOCK.test(warning);
   return FULL_BLOCK.test(warning) && !isOrdinaryActiveGateWarning(warning, relPath);
 }
@@ -2837,4 +2999,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence };

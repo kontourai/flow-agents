@@ -21,6 +21,8 @@ export const MAX_CONTINUATION_TURN_RESULT_BYTES = 74_000;
 export function validateSnapshot(value: ContinuationSnapshot): ContinuationSnapshot {
   if (!value || typeof value !== "object") throw new Error("continuation runtime returned an invalid canonical snapshot");
   for (const field of ["run_id", "definition_id", "status", "current_step"] as const) if (typeof value[field] !== "string" || value[field].length === 0) throw new Error(`continuation snapshot ${field} must be a non-empty string`);
+  if (value.definition_version !== undefined && (typeof value.definition_version !== "string" || value.definition_version.length === 0)) throw new Error("continuation snapshot definition_version must be a non-empty string");
+  if (value.definition_digest !== undefined && (typeof value.definition_digest !== "string" || !/^[a-f0-9]{64}$/.test(value.definition_digest))) throw new Error("continuation snapshot definition_digest must be a SHA-256 digest");
   if (!new Set(["continue", "waiting", "done", "failed"]).has(value.disposition)) throw new Error("continuation snapshot disposition is invalid");
   if (value.next_action !== null && (typeof value.next_action !== "object" || Array.isArray(value.next_action))) throw new Error("continuation snapshot next_action must be an object or null");
   if (value.gate_action_envelope !== undefined) validateGateActionEnvelope(value.gate_action_envelope, value);
@@ -41,6 +43,14 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   if (!safeTaskSlug(value.flow.run_id)) throw new Error("continuation snapshot gate-action run id is not a safe task slug");
   if (value.flow.run_id !== snapshot.run_id || value.flow.definition_id !== snapshot.definition_id
     || value.flow.current_step !== snapshot.current_step || value.flow.status !== snapshot.status) throw new Error("continuation snapshot gate-action identity does not match the canonical snapshot");
+  if (snapshot.definition_version !== undefined && value.flow.definition_version !== snapshot.definition_version) throw new Error("continuation snapshot gate-action definition version does not match the canonical snapshot");
+  if (snapshot.definition_digest !== undefined && value.flow.definition_digest !== snapshot.definition_digest) throw new Error("continuation snapshot gate-action definition digest does not match the canonical snapshot");
+  if (snapshot.progress_snapshot && (!isDeepStrictEqual(value.progress.canonical_evidence, snapshot.progress_snapshot.canonical_evidence)
+    || !isDeepStrictEqual(value.progress.observed_artifacts, snapshot.progress_snapshot.observed_artifacts)
+    || (snapshot.progress_snapshot.definition_version !== undefined && value.flow.definition_version !== snapshot.progress_snapshot.definition_version)
+    || (snapshot.progress_snapshot.definition_digest !== undefined && value.flow.definition_digest !== snapshot.progress_snapshot.definition_digest))) {
+    throw new Error("continuation snapshot gate-action progress does not match the canonical progress snapshot");
+  }
   if (!value.stop_condition.scope || value.stop_condition.scope.run_id !== snapshot.run_id
     || value.stop_condition.scope.current_step !== snapshot.current_step || value.stop_condition.scope.current_gate_only !== true
     || !isDeepStrictEqual(value.stop_condition.scope.gate_ids, value.flow.gate_ids)) throw new Error("continuation snapshot gate-action scope does not match the canonical snapshot");
@@ -50,9 +60,6 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   const sessionArgument = `.kontourai/flow-agents/${value.flow.run_id}`;
   const packageIdentity = validateStatusInterface(value, sessionArgument);
   const authority = installedBuilderGateActionAuthority(value.flow.definition_id, value.flow.current_step, value.flow.run_id);
-  if (value.flow.definition_version !== authority.definition_version) {
-    throw new Error("continuation snapshot gate-action definition version does not match installed Builder authority");
-  }
   validateExternalCapability(value);
   const declaredSkillIds = value.action.skills.map((skill) => skill.id);
   const declaredOperations = value.action.operations;
@@ -257,8 +264,9 @@ function hasExactKeys(value: object, expected: string[]): boolean {
 }
 
 function validateFixedEnvelopeShape(value: GateActionEnvelope): void {
-  if (!hasExactKeys(value.flow, ["run_id", "definition_id", "definition_version", "status", "current_step", "gate_ids"])
+  if (!hasExactKeys(value.flow, ["run_id", "definition_id", "definition_version", "definition_digest", "status", "current_step", "gate_ids"])
     || typeof value.flow.definition_version !== "string" || value.flow.definition_version.length === 0
+    || typeof value.flow.definition_digest !== "string" || !/^[a-f0-9]{64}$/.test(value.flow.definition_digest)
     || !Array.isArray(value.flow.gate_ids) || !sameUniqueGateIds(value.flow.gate_ids)) {
     throw new Error("continuation snapshot gate-action flow binding is malformed");
   }
@@ -451,6 +459,8 @@ export function validateState(state: ContinuationDriverState): void {
   if (state.context_policy !== undefined && !new Set(["warm", "fresh"]).has(state.context_policy)) throw new Error("continuation driver context_policy must be warm or fresh");
   if (!Number.isSafeInteger(state.turns_started) || state.turns_started < 0 || state.turns_started > state.max_turns) throw new Error("continuation driver turns_started is outside its mission budget");
   if (state.active_turn_step !== undefined && state.active_turn_step !== null && (typeof state.active_turn_step !== "string" || state.active_turn_step.length === 0)) throw new Error("continuation driver active_turn_step must be a non-empty string or null");
+  if (state.active_turn_definition_version !== undefined && state.active_turn_definition_version !== null && (typeof state.active_turn_definition_version !== "string" || state.active_turn_definition_version.length === 0)) throw new Error("continuation driver active_turn_definition_version must be a non-empty string or null");
+  if (state.active_turn_definition_digest !== undefined && state.active_turn_definition_digest !== null && (typeof state.active_turn_definition_digest !== "string" || !/^[a-f0-9]{64}$/.test(state.active_turn_definition_digest))) throw new Error("continuation driver active_turn_definition_digest must be a SHA-256 hex digest or null");
   if (state.active_turn_public_key_digest !== undefined && state.active_turn_public_key_digest !== null && (typeof state.active_turn_public_key_digest !== "string" || !/^[a-f0-9]{64}$/.test(state.active_turn_public_key_digest))) throw new Error("continuation driver active_turn_public_key_digest must be a SHA-256 hex digest or null");
   if (state.active_turn_phase !== undefined && state.active_turn_phase !== null && !new Set(["prepared", "started", "measured"]).has(state.active_turn_phase)) throw new Error("continuation driver active_turn_phase must be prepared, started, measured, or null");
   if (state.active_turn_progress) validateProgressSnapshot(state.active_turn_progress);
@@ -483,6 +493,8 @@ function validateContextStrategy(value: unknown): void {
 
 function validateProgressSnapshot(value: GateActionProgressSnapshot): void {
   if (!value || typeof value !== "object" || typeof value.current_step !== "string" || value.current_step.length === 0
+    || (value.definition_version !== undefined && (typeof value.definition_version !== "string" || value.definition_version.length === 0))
+    || (value.definition_digest !== undefined && (typeof value.definition_digest !== "string" || !/^[a-f0-9]{64}$/.test(value.definition_digest)))
     || (value.canonical_status !== undefined && (typeof value.canonical_status !== "string" || value.canonical_status.length === 0))
     || !Array.isArray(value.canonical_evidence) || !value.canonical_evidence.every((entry) => typeof entry === "string")
     || !Array.isArray(value.observed_artifacts) || !value.observed_artifacts.every((entry) => typeof entry === "string")) throw new Error("continuation driver progress snapshot is malformed");

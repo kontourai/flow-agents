@@ -8,6 +8,7 @@ import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapsho
 import {
   evaluateGate,
   expectationsForGate,
+  flowRunHead,
   openGates,
   type FlowGate,
   type FlowExpectation,
@@ -19,7 +20,7 @@ import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
-import { validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
@@ -51,6 +52,8 @@ type AnyRecord = Record<string, any>;
 export interface BuilderFlowSessionInput {
   sessionDir: string;
   flowId?: BuilderFlowId;
+  /** Exact canonical Flow state authorized for a subsequent evidence attachment. */
+  expectedRunHead?: string;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -163,7 +166,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead);
 }
 
 /**
@@ -550,6 +553,7 @@ async function syncAndProject(
   context: SessionContext,
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
+  expectedRunHead?: string,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -587,6 +591,7 @@ async function syncAndProject(
           run = await evaluateBuilderFlowRun({
             cwd: context.projectRoot,
             runId: context.slug,
+            ...(expectedRunHead ? { expectedRunHead } : {}),
             evidence: {
               gate: gates[0]!.id,
               file: path.relative(context.projectRoot, snapshot.file),
@@ -641,9 +646,8 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 }
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(definition, run.state, run.manifest, gate.id, run.config);
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -917,10 +921,7 @@ function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
 }
 
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(
-    JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")),
-    run.state,
-  ) as Array<FlowGate & { id: string }>;
+  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
 async function bundleGateEvidence(
@@ -981,9 +982,39 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
+  const currentGateClaimsForTrust = mergeGateClaimsWithCritiqueHistory(relevant, bundle.claims, claimIsCurrent);
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
+  }
+  if (relevant.some((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (!metadata) return true;
+    if (metadata.origin === "check") return false;
+    if (metadata.origin === "critique") {
+      return claim.claimType !== "workflow.critique.review" || claim.subjectType !== "workflow-critique";
+    }
+    if (metadata.origin === "acceptance") {
+      return claim.claimType !== "workflow.acceptance.criterion" || claim.subjectType !== "flow-step";
+    }
+    return true;
+  })) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.origin", "must match a supported current-gate evidence producer type and subject");
+  }
+  const headBoundGateClaims = relevant.filter((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    return gateClaim !== null || metadata?.origin === "check";
+  });
+  const recordedRunHeads = headBoundGateClaims.map((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    return gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
+  });
+  if (headBoundGateClaims.length > 0 && (recordedRunHeads.some((head) => head === null)
+    || new Set(recordedRunHeads).size !== 1
+    || recordedRunHeads[0] !== flowRunHead(state))) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state authorized when the gate claim was recorded");
   }
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
@@ -1000,7 +1031,12 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "must agree across current-gate claims");
   }
   const routeReason = routeReasons[0] ?? null;
-  if (failed && !routeReason) return null;
+  if (failed && !routeReason) {
+    if (String((gate as AnyRecord).id) === "execute-gate") {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "is required for failed current-gate evidence");
+    }
+    return null;
+  }
   // Passing evidence waits for the complete expectation set. A failing
   // snapshot is complete only when a gate producer explicitly declares its
   // route reason; report-only disputed critique state remains pending.
@@ -1014,9 +1050,63 @@ async function bundleGateEvidence(
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(relevant, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+export function mergeGateClaimsWithCritiqueHistory(
+  relevant: AnyRecord[],
+  bundleClaims: unknown[],
+  claimIsCurrent: (claim: AnyRecord) => boolean,
+): AnyRecord[] {
+  const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const critiqueByHash = new Map<string, AnyRecord>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || claim.metadata.origin !== "critique") continue;
+    if (typeof claim.metadata.critique_record_hash === "string") critiqueByHash.set(claim.metadata.critique_record_hash, claim);
+  }
+  // A same-reviewer recheck can be current while the critique it supersedes predates the
+  // current gate visit. Project the authenticated predecessor closure as audit history so the
+  // resolution validator sees the writer-issued chain rather than an invalid sequence suffix.
+  // Missing or forged links are deliberately not repaired here: graph validation reports the
+  // first unresolved sequence/hash edge and continues to fail closed.
+  const requiredCritiqueHashes = new Set<string>();
+  const pendingCritiqueHashes = relevant.filter((claim) => isRecord(claim.metadata) && claim.metadata.origin === "critique")
+    .map((claim) => String(claim.metadata.critique_record_hash ?? ""))
+    .filter(Boolean);
+  while (pendingCritiqueHashes.length > 0) {
+    const hash = pendingCritiqueHashes.pop()!;
+    if (requiredCritiqueHashes.has(hash)) continue;
+    requiredCritiqueHashes.add(hash);
+    const claim = critiqueByHash.get(hash);
+    const predecessor = isRecord(claim?.metadata) ? claim.metadata.critique_predecessor_hash : null;
+    if (typeof predecessor === "string" && predecessor !== CRITIQUE_CHAIN_GENESIS) pendingCritiqueHashes.push(predecessor);
+  }
+  const merged: AnyRecord[] = [];
+  const seen = new Set<string>();
+  const seenCritiques = new Set<string>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim)) continue;
+    const id = String(claim.id);
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (metadata?.origin === "critique" && (claimIsCurrent(claim) || requiredCritiqueHashes.has(String(metadata.critique_record_hash)))) {
+      const recordId = String(metadata.critique_record_id);
+      if (!seenCritiques.has(recordId)) merged.push(claim);
+      seenCritiques.add(recordId);
+      seen.add(id);
+      continue;
+    }
+    const selected = relevantById.get(id) ?? null;
+    if (!selected || seen.has(id)) continue;
+    merged.push(selected);
+    seen.add(id);
+  }
+  for (const claim of relevant) {
+    const id = String(claim.id);
+    if (!seen.has(id)) merged.push(claim);
+  }
+  return merged;
 }
 
 function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {
@@ -1294,7 +1384,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 }
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
+  const definition = run.definition;
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
@@ -1370,6 +1460,8 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       run_id: run.runId,
       definition_id: run.definitionId,
       definition_version: run.definitionVersion,
+      definition_digest: run.definitionDigest,
+      run_head: flowRunHead(run.state),
       status: run.state.status,
       current_step: run.state.current_step,
       run_ref: path.relative(context.projectRoot, run.dir),

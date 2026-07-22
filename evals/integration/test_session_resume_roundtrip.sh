@@ -484,11 +484,18 @@ cat > "$TASK_DIR5/state.json" <<'JSON'
 JSON
 cat > "$FLOW_DIR5/state.json" <<'JSON'
 {
+  "schema_version": "0.1",
   "run_id": "canonical-guidance-616",
   "definition_id": "builder.build",
   "definition_version": "1.0",
+  "subject": "local:work-item/canonical-guidance-616",
   "status": "active",
-  "current_step": "design-probe"
+  "current_step": "design-probe",
+  "params": {"subject":"local:work-item/canonical-guidance-616"},
+  "gate_outcomes": [],
+  "transitions": [],
+  "lifecycle": [],
+  "exceptions": []
 }
 JSON
 cat > "$FLOW_DIR5/definition.json" <<'JSON'
@@ -506,7 +513,13 @@ cat > "$FLOW_DIR5/definition.json" <<'JSON'
     {"id":"merge-ready-ci"},
     {"id":"learn"},
     {"id":"done"}
-  ]
+  ],
+  "gates": {
+    "design-probe-gate": {
+      "step": "design-probe",
+      "expects": []
+    }
+  }
 }
 JSON
 cat > "$TASK_DIR5/handoff.json" <<'JSON'
@@ -592,6 +605,22 @@ const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
 sidecar.flow_run.current_step = 'design-probe';
 sidecar.flow_run.status = status;
 flow.status = status;
+if (status === 'paused') {
+  flow.lifecycle = [{
+    action: 'pause',
+    from_status: 'needs_decision',
+    to_status: 'paused',
+    prior_status: 'needs_decision',
+    reason: 'Fixture pause.',
+    authority: {
+      kind: 'operator_request',
+      actor: 'fixture-operator',
+      request_ref: 'fixture://canonical-guidance/pause',
+      requested_at: '2026-07-22T00:00:00.000Z'
+    },
+    at: '2026-07-22T00:00:00.000Z'
+  }];
+}
 fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
 fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
 NODE
@@ -647,6 +676,20 @@ for (const file of process.argv.slice(2)) {
   else {
     value.status = 'canceled';
     value.current_step = 'execute';
+    value.lifecycle.push({
+      action: 'cancel',
+      from_status: 'paused',
+      to_status: 'canceled',
+      prior_status: 'needs_decision',
+      reason: 'Fixture cancellation.',
+      authority: {
+        kind: 'operator_request',
+        actor: 'fixture-operator',
+        request_ref: 'fixture://canonical-guidance/cancel',
+        requested_at: '2026-07-22T00:01:00.000Z'
+      },
+      at: '2026-07-22T00:01:00.000Z'
+    });
   }
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }

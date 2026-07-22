@@ -44,7 +44,8 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 
 **What lands in the workspace:**
 
-- `agents/`, `skills/`, `context/` — skill definitions and shared contracts the agent follows
+- `context/` — shared contracts the agent follows, at the workspace root regardless of runtime
+- Agent and skill definitions, in a runtime-specific location: `.claude/agents/` + `.claude/skills/` for Claude Code, `.codex/agents/` + `.agents/skills/` for Codex, top-level `agents/` + `skills/` for Kiro, `.opencode/agents/` + `.opencode/skills/` for opencode, and `.pi/skills/` for pi
 - `scripts/hooks/` — four canonical policy scripts (steering, quality gate, stop-goal-fit, config protection) wired to the host's native hook surface
 - `kits/builder/` — Builder Kit flows and skills
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
@@ -163,7 +164,20 @@ node build/src/cli.js kit inspect kits/builder
 
 (Or, from a global install: `flow-agents kit inspect kits/builder`)
 
-This prints the kit id, name, declared flows, skills, and conformance level (K0/K1). It does not require a running agent or active session.
+This prints a JSON object with the kit id, name, conformance levels (`k0`/`k1`/`k2`), declared targets, and any third-party extensions — for example:
+
+```json
+{
+  "kit_id": "builder",
+  "kit_name": "Builder Kit",
+  "conformance": { "k0": true, "k1": true, "k2": false },
+  "targets": ["flow", "flow-agents"],
+  "third_party_extensions": [],
+  "trust": "unverified"
+}
+```
+
+It does not require a running agent or active session.
 
 To see the raw flow definitions with their gate expectations:
 

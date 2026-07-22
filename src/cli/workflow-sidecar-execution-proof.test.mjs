@@ -89,6 +89,50 @@ test("runner-shaped executable names require explicit files with test cases", ()
   });
 });
 
+test("playwright test resolves config-discovered specs as local proof (#826)", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { build: "echo build", "test:rendered": "npm run build && playwright test" } }),
+    "playwright.config.mjs": "export default {};\n",
+    "tests/rendered-site.spec.mjs": 'import { test } from "@playwright/test";\ntest("page renders", () => {});\n',
+  });
+
+  // The kontourai.io shape: compound npm-script body whose second segment is bare playwright.
+  assert.deepEqual(testExecutionProof("npm run test:rendered", root), {
+    kind: "local-process-exit",
+    runner: "playwright test",
+    static_test_units: 1,
+  });
+  assert.equal(isMeaningfulTestCommand("playwright test", root), true);
+  assert.deepEqual(testExecutionProof("npx playwright test", root), {
+    kind: "local-process-exit",
+    runner: "npx playwright test",
+    static_test_units: 1,
+  });
+  // Explicit target narrows the proof to the named spec.
+  assert.equal(testExecutionProof("playwright test tests/rendered-site.spec.mjs", root)?.static_test_units, 1);
+});
+
+test("playwright without a config, without specs, or shadowed is not proof (#826)", () => {
+  const noConfig = fixture({
+    "tests/x.spec.mjs": 'import { test } from "@playwright/test";\ntest("x", () => {});\n',
+  });
+  assert.equal(testExecutionProof("playwright test", noConfig), null);
+
+  const noSpecs = fixture({ "playwright.config.ts": "export default {};\n" });
+  assert.equal(testExecutionProof("playwright test", noSpecs), null);
+
+  const covered = fixture({
+    "playwright.config.ts": "export default {};\n",
+    "tests/x.spec.ts": 'import { test } from "@playwright/test";\ntest("x", () => {});\n',
+  });
+  assert.equal(testExecutionProof("playwright test --pass-with-no-tests", covered), null);
+  assert.equal(testExecutionProof("npx playwright test --pass-with-no-tests", covered), null);
+  assert.equal(testExecutionProof("./playwright test", covered), null);
+  // H1 refusal: a path-qualified npx spec is the same binary-substitution channel as ./playwright.
+  assert.equal(testExecutionProof("npx ./fake/playwright test", covered), null);
+  assert.equal(testExecutionProof("npx /tmp/evil/playwright test", covered), null);
+});
+
 test("cargo and go require substantive local test sources", () => {
   const empty = fixture({ "Cargo.toml": "[package]\nname='empty'\nversion='0.1.0'\n", "go.mod": "module example.test/empty\n" });
   assert.equal(testExecutionProof("cargo test", empty), null);

@@ -151,6 +151,8 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_ci_integration_coverage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/static/test_pr_title_validation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/static/test_validate_source_kit_asset_scope.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_declared_scope_forms_documented.sh" || result=1
@@ -214,6 +216,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_promote_gate.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_reviewed_grounding_workflow.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
   echo ""

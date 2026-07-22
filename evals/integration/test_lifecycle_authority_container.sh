@@ -10,19 +10,33 @@ apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
 npm ci --ignore-scripts --silent
 npm run build --silent
+# The privileged coordinator intentionally remains pinned to the audited Flow 3.5.0
+# reducer closure even when the application runtime consumes a newer Flow release.
+pinned_reducer_root="$(mktemp -d)"
+npm install --prefix "$pinned_reducer_root" --ignore-scripts --no-save --silent \
+  @kontourai/flow@3.5.0 \
+  @kontourai/surface@2.13.0 \
+  hachure@0.15.0 \
+  ajv@8.20.0 \
+  ajv-formats@3.0.1 \
+  fast-deep-equal@3.1.3 \
+  fast-uri@3.1.2 \
+  json-schema-traverse@1.0.0 \
+  require-from-string@2.0.2
+pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
-ln -s "$PWD/node_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
+ln -s "$pinned_reducer_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$bad_modules" kontourai-lifecycle-operator >/tmp/rejected-staged-reducer.log 2>&1; then
   echo "symlinked staged reducer unexpectedly installed" >&2; exit 1
 fi
 tampered_modules="$(mktemp -d)"
-cp -a node_modules/. "$tampered_modules/"
+cp -a "$pinned_reducer_modules/." "$tampered_modules/"
 printf '\n// tampered fixture\n' >> "$tampered_modules/@kontourai/flow/dist/index.js"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-tampered-reducer.log 2>&1; then
   echo "tampered staged reducer unexpectedly installed" >&2; exit 1
 fi
-scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs node_modules kontourai-lifecycle-operator
+scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$pinned_reducer_modules" kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node
 test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
 visudo -cf /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1 >/dev/null
@@ -87,7 +101,13 @@ fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(pro
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
 fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
-for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e']) await makeSession(slug);
+for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) await makeSession(slug);
+for (const slug of ['legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) {
+  const assignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`);
+  const record = JSON.parse(fs.readFileSync(assignment, 'utf8'));
+  delete record.actor.human;
+  write(assignment, record);
+}
 write(path.join(project, 'fixture.json'), { project, subject, actor, actorKey });
 NODE
 node /work/setup-fixture.mjs
@@ -168,11 +188,66 @@ node /work/make-lifecycle-authorization.mjs cancel stale-e2e /root/lifecycle-aut
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-a.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-b.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel symlink-e2e /root/lifecycle-authorizations/symlink.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-e2e /root/lifecycle-authorizations/legacy.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-mismatch-e2e /root/lifecycle-authorizations/legacy-mismatch.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-same-nonce-e2e /root/lifecycle-authorizations/legacy-same-nonce-valid.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-recovery-e2e /root/lifecycle-authorizations/legacy-recovery.json "$FUTURE"
+node - /root/lifecycle-authorizations/legacy-mismatch.json <<'NODE'
+const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...base } = value;
+const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
+for (const [name, field, replacement] of [['runtime', 'runtime', 'different-runtime'], ['session', 'session_id', 'different-session'], ['host', 'host', 'different-host'], ['human', 'human', 'fixture-human']]) {
+  const unsigned = structuredClone(base); unsigned.assignment_actor[field] = replacement; unsigned.nonce = `${unsigned.nonce}-${name}`;
+  fs.writeFileSync(`/root/lifecycle-authorizations/legacy-mismatch-${name}.json`, JSON.stringify({ ...unsigned, signature: { ...signature, value: crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), key).toString('base64') } }));
+}
+NODE
+node - /root/lifecycle-authorizations/legacy-same-nonce-valid.json /root/lifecycle-authorizations/legacy-same-nonce-mismatch.json <<'NODE'
+const fs = require('node:fs'), crypto = require('node:crypto'); const [input, output] = process.argv.slice(2), value = JSON.parse(fs.readFileSync(input, 'utf8')); const { signature, ...unsigned } = value;
+unsigned.assignment_actor.host = 'different-host'; const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
+fs.writeFileSync(output, JSON.stringify({ ...unsigned, signature: { ...signature, value: crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), key).toString('base64') } }));
+NODE
 node - /root/lifecycle-authorizations/unauthorized.json <<'NODE'
 const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...unsigned } = value;
 value.signature.value = crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64'); fs.writeFileSync(file, JSON.stringify(value));
 NODE
 chown -R node:node "$PROJECT"
+
+cat > /work/check-lifecycle-invocation.mjs <<'NODE'
+import fs from 'node:fs'; import path from 'node:path';
+import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js';
+const [slug, authorizationFile, expected] = process.argv.slice(2), project = '/tmp/lifecycle-authority-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug);
+const assignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`), flow = path.join(project, '.kontourai', 'flow', 'runs', slug, 'state.json');
+const beforeAssignment = fs.readFileSync(assignment, 'utf8'), beforeFlow = fs.readFileSync(flow, 'utf8');
+try {
+  const result = invokeExternalLifecycleAuthority({ action: 'cancel', project_root: project, session_dir: session, authorization_file: authorizationFile });
+  if (result.operation_status !== expected) throw new Error(`expected ${expected}, got ${result.operation_status}`);
+} catch (error) {
+  if (expected !== 'reject' || !/live canonical assignment holder/.test(String(error))) throw error;
+  if (fs.readFileSync(assignment, 'utf8') !== beforeAssignment || fs.readFileSync(flow, 'utf8') !== beforeFlow) throw new Error('mismatched signed actor mutated project state');
+  process.exit(0);
+}
+if (expected === 'reject') throw new Error('mismatched signed actor unexpectedly succeeded');
+if ((expected === 'applied' || expected === 'replayed') && Object.hasOwn(JSON.parse(fs.readFileSync(assignment, 'utf8')).actor, 'human')) throw new Error('legacy assignment actor was rewritten');
+NODE
+
+mkdir -p "$STATE/nonces"
+nonce_before="$(mktemp)"; nonce_after="$(mktemp)"
+find "$STATE/nonces" -maxdepth 1 -type f -printf '%f\n' | sort > "$nonce_before"
+su -s /bin/bash node -c 'node /work/check-lifecycle-invocation.mjs legacy-same-nonce-e2e /root/lifecycle-authorizations/legacy-same-nonce-mismatch.json reject'
+find "$STATE/nonces" -maxdepth 1 -type f -printf '%f\n' | sort > "$nonce_after"
+cmp -s "$nonce_before" "$nonce_after" || { echo "mismatched signed actor persisted a nonce" >&2; exit 1; }
+su -s /bin/bash node -c 'node /work/check-lifecycle-invocation.mjs legacy-same-nonce-e2e /root/lifecycle-authorizations/legacy-same-nonce-valid.json applied'
+su -s /bin/bash node -c 'node /work/check-lifecycle-invocation.mjs legacy-recovery-e2e /root/lifecycle-authorizations/legacy-recovery.json applied'
+node --input-type=module - "$STATE" "$PROJECT" /root/lifecycle-authorizations/legacy-recovery.json <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
+const [state, project, authorizationFile] = process.argv.slice(2), authorization = JSON.parse(fs.readFileSync(authorizationFile, 'utf8'));
+const runId = authorization.run_id, keyId = authorization.signature.key_id, request = { action: 'cancel', project_root: project, session_dir: path.join(project, '.kontourai', 'flow-agents', runId), authorization_file: authorizationFile };
+const operationId = sha256({ project, run_id: runId, action: 'cancel', key_id: keyId, nonce: authorization.nonce });
+const nonceFile = path.join(state, 'nonces', `${sha256(`${keyId}\u0000${authorization.nonce}`)}.json`), completionFile = path.join(state, 'completions', `${operationId}.json`);
+fs.writeFileSync(nonceFile, JSON.stringify({ schema_version: '1.0', operation_id: operationId, authorization_sha256: sha256(canonicalJson(authorization)), key_id: keyId, nonce: authorization.nonce, request_sha256: sha256(request), status: 'prepared' }));
+fs.rmSync(completionFile, { force: true });
+NODE
+su -s /bin/bash node -c 'node /work/check-lifecycle-invocation.mjs legacy-recovery-e2e /root/lifecycle-authorizations/legacy-recovery.json applied'
+su -s /bin/bash node -c 'node /work/check-lifecycle-invocation.mjs legacy-recovery-e2e /root/lifecycle-authorizations/legacy-recovery.json replayed'
 
 cat > /work/operator-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -204,6 +279,9 @@ fs.writeFileSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt
 const run = path.join(project, '.kontourai', 'flow', 'runs', 'resolve-e2e'); for (const file of ['evidence/manifest.json', 'state.json', 'report.json', 'report.md']) if (!fs.existsSync(path.join(run, file))) throw new Error(`missing canonical Flow write ${file}`); if (!JSON.parse(fs.readFileSync(path.join(run, 'evidence/manifest.json'), 'utf8')).evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest missing authority attachment');
 const canceled = invoke('cancel', 'archive-e2e', '/root/lifecycle-authorizations/cancel.json'); if (canceled.operation_status !== 'applied') throw new Error('cancel was not applied'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'archive-e2e.json'), 'utf8')).status !== 'released') throw new Error('cancel did not release assignment'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'archive-e2e', 'state.json'), 'utf8')).status !== 'canceled') throw new Error('cancel did not update canonical Flow state');
 const archived = invoke('archive', 'archive-e2e', '/root/lifecycle-authorizations/archive.json'); if (archived.operation_status !== 'applied' || fs.existsSync(session('archive-e2e')) || !fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'archive', 'archive-e2e', 'state.json'))) throw new Error('archive behavior is invalid');
+const legacyAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'legacy-e2e.json'); if (Object.hasOwn(JSON.parse(fs.readFileSync(legacyAssignment, 'utf8')).actor, 'human')) throw new Error('legacy fixture was rewritten before redemption');
+const legacyCanceled = invoke('cancel', 'legacy-e2e', '/root/lifecycle-authorizations/legacy.json'); if (legacyCanceled.operation_status !== 'applied') throw new Error('legacy assignment was not redeemed'); const releasedLegacy = JSON.parse(fs.readFileSync(legacyAssignment, 'utf8')); if (releasedLegacy.status !== 'released' || Object.hasOwn(releasedLegacy.actor, 'human')) throw new Error('legacy assignment compatibility rewrote the persisted actor');
+const legacyMismatchAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'legacy-mismatch-e2e.json'), legacyMismatchRun = path.join(project, '.kontourai', 'flow', 'runs', 'legacy-mismatch-e2e', 'state.json'); const beforeLegacyMismatchAssignment = fs.readFileSync(legacyMismatchAssignment, 'utf8'), beforeLegacyMismatchRun = fs.readFileSync(legacyMismatchRun, 'utf8'); for (const field of ['runtime', 'session', 'host', 'human']) { expectReject(() => invoke('cancel', 'legacy-mismatch-e2e', `/root/lifecycle-authorizations/legacy-mismatch-${field}.json`), /live canonical assignment holder/); if (fs.readFileSync(legacyMismatchAssignment, 'utf8') !== beforeLegacyMismatchAssignment || fs.readFileSync(legacyMismatchRun, 'utf8') !== beforeLegacyMismatchRun) throw new Error(`mismatched legacy ${field} actor mutated canonical state`); }
 expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale.json'), /authorization is expired/);
 const staleAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'stale-e2e.json'); const staleRecord = JSON.parse(fs.readFileSync(staleAssignment, 'utf8')); staleRecord.actor_key = 'stale-holder'; fs.writeFileSync(staleAssignment, JSON.stringify(staleRecord)); expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale-holder.json'), /live canonical assignment holder/); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'stale-e2e', 'state.json'), 'utf8')).status !== 'active') throw new Error('stale assignment canceled Flow');
 const concurrentCode = `import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js'; import path from 'node:path'; const project = process.argv[1], auth = process.argv[2]; invokeExternalLifecycleAuthority({ action: 'cancel', project_root: project, session_dir: path.join(project, '.kontourai', 'flow-agents', 'concurrent-e2e'), authorization_file: auth });`;
@@ -212,7 +290,7 @@ const concurrentResults = await Promise.all([concurrent('/root/lifecycle-authori
 const swapped = session('symlink-e2e'), rootSentinel = '/tmp/lifecycle-root-target/sentinel'; fs.rmSync(swapped, { recursive: true, force: true }); fs.symlinkSync('/tmp/lifecycle-root-target', swapped); expectReject(() => invoke('cancel', 'symlink-e2e', '/root/lifecycle-authorizations/symlink.json'), /session_dir must identify/); if (fs.readFileSync(rootSentinel, 'utf8') !== 'root-owned sentinel\n') throw new Error('symlink swap escaped into a root-owned path');
 expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authorizations/unauthorized.json'), /authorization signature is invalid/);
 expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
-console.log('PASS: signed resolve/cancel/archive E2E, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
+console.log('PASS: signed resolve/cancel/archive E2E, legacy actor compatibility, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
 NODE
 su -s /bin/bash node -c 'node /work/operator-e2e.mjs'
 CONTAINER

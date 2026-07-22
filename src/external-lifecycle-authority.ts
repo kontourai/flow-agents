@@ -19,6 +19,33 @@ export interface ExternalLifecycleMutationResult {
 }
 type JsonRecord = Record<string, unknown>;
 
+/**
+ * The small filesystem boundary used while validating the immutable helper
+ * installation.  It is injectable only so the installation checks can be
+ * exercised without consulting the machine's privileged helper or an
+ * authorization file.  `invokeExternalLifecycleAuthority` always supplies
+ * the real host and the fixed helper path below.
+ */
+export interface LifecycleAuthorityHelperHost {
+  platform: string;
+  getuid?: () => number;
+  lstatSync(file: string): { isSymbolicLink(): boolean; isFile(): boolean; uid: number; mode: number };
+  accessSync(file: string, mode: number): void;
+  openSync(file: string, flags: number): number;
+  fstatSync(descriptor: number): { isFile(): boolean; uid: number; mode: number };
+  closeSync(descriptor: number): void;
+}
+
+const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
+  platform: process.platform,
+  getuid: typeof process.getuid === "function" ? () => process.getuid!() : undefined,
+  lstatSync: (file) => fs.lstatSync(file),
+  accessSync: (file, mode) => fs.accessSync(file, mode),
+  openSync: (file, flags) => fs.openSync(file, flags),
+  fstatSync: (descriptor) => fs.fstatSync(descriptor),
+  closeSync: (descriptor) => fs.closeSync(descriptor),
+};
+
 function record(value: unknown): value is JsonRecord { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function exact(value: JsonRecord, fields: string[], label: string): void {
   if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...fields].sort())) throw new Error(`${label} contains unexpected or missing fields`);
@@ -91,26 +118,34 @@ function trustedCompletionVerificationKey() {
   } finally { fs.closeSync(descriptor); }
 }
 
-function trustedHelper(): string {
-  if (process.platform === "win32") throw new Error("secure lifecycle authority helper ownership is unavailable without a platform adapter");
-  const helper = LIFECYCLE_AUTHORITY_HELPER_PATH;
+/**
+ * Validate a proposed installation location without authorizing an operation.
+ * This is deliberately separate from invocation: production invocation always
+ * calls it with the immutable `LIFECYCLE_AUTHORITY_HELPER_PATH` and real host.
+ */
+export function validateLifecycleAuthorityHelperInstallation(helper: string, host: LifecycleAuthorityHelperHost = lifecycleAuthorityHelperHost): string {
+  if (host.platform === "win32") throw new Error("secure lifecycle authority helper ownership is unavailable without a platform adapter");
   let cursor = path.parse(helper).root;
   for (const component of helper.slice(cursor.length).split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, component);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority helper is not installed at ${helper}`); }
+    let stat: ReturnType<LifecycleAuthorityHelperHost["lstatSync"]>;
+    try { stat = host.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority helper is not installed at ${helper}`); }
     if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority helper path must not contain symlinks");
     if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority helper and every parent must be OS-owned and non-writable by group or world");
-    try { fs.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority helper path must not be writable by the runtime user"); }
+    try { host.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority helper path must not be writable by the runtime user"); }
     catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
   }
-  const descriptor = fs.openSync(helper, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const descriptor = host.openSync(helper, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const stat = fs.fstatSync(descriptor);
+    const stat = host.fstatSync(descriptor);
     if (!stat.isFile() || (stat.mode & 0o111) === 0 || stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority helper must be an OS-owned protected executable regular file");
-  } finally { fs.closeSync(descriptor); }
-  if (typeof process.getuid === "function" && process.getuid() === 0) throw new Error("lifecycle authority helper is unavailable to a root caller without a platform privilege adapter");
+  } finally { host.closeSync(descriptor); }
+  if (host.getuid?.() === 0) throw new Error("lifecycle authority helper is unavailable to a root caller without a platform privilege adapter");
   return helper;
+}
+
+function trustedHelper(): string {
+  return validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH);
 }
 
 export function validateLifecycleAuthorityResponse(output: string, action: string, requestSha256: string): JsonRecord {

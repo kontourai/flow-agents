@@ -295,7 +295,7 @@ fi
 GATE_SESSION="$ARTIFACT_ROOT/gate-command"
 mkdir -p "$GATE_SESSION"
 cat >"$GATE_SESSION/state.json" <<'JSON'
-{"schema_version":"1.0","task_slug":"gate-command","status":"active","phase":"execution","flow_run":{"definition_id":"builder.build","current_step":"execute"}}
+{"schema_version":"1.0","task_slug":"gate-command","status":"active","phase":"execution","flow_run":{"definition_id":"builder.build","current_step":"execute","run_head":"0000000000000000000000000000000000000000000000000000000000000000"}}
 JSON
 cp "$SESSION/trust.bundle" "$GATE_SESSION/trust.bundle"
 if node "$ROOT/build/src/cli/workflow-sidecar.js" record-gate-claim "$GATE_SESSION" --status pass --summary reject \

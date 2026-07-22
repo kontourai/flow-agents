@@ -772,10 +772,6 @@ require_text "$USAGE_GUIDE" 'decision_gap' "usage guide documents decision gap r
 require_text "$USAGE_GUIDE" 'pickup or planning alignment gaps, `decision_gap -> design-probe` means returning to the pickup Probe' "usage guide interprets decision gap route-back"
 require_text "$BUILDER_BUILD_FLOW" '"on_route_back"' "Builder build flow declares route-back mappings"
 require_text "$BUILDER_BUILD_FLOW" '"route_back_policy"' "Builder build flow declares route-back policy"
-require_text "$BUILDER_BUILD_FLOW" '"missing_evidence": "verify"' "Builder build flow routes missing evidence to verify"
-require_text "$BUILDER_BUILD_FLOW" '"implementation_defect": "execute"' "Builder build flow routes implementation defects to execute"
-require_text "$BUILDER_BUILD_FLOW" '"plan_gap": "plan"' "Builder build flow routes plan gaps to plan"
-require_text "$BUILDER_BUILD_FLOW" '"decision_gap": "design-probe"' "Builder build flow routes decision gaps to design-probe"
 require_text "$BUILDER_BUILD_FLOW" '"pull-work", "next": "design-probe"' "Builder build flow routes pull-work to design-probe"
 require_text "$BUILDER_BUILD_FLOW" '"design-probe", "next": "plan"' "Builder build flow routes design-probe to plan"
 require_text "$BUILDER_BUILD_FLOW" '"pickup-probe-readiness"' "Builder build flow requires pickup Probe readiness"
@@ -799,6 +795,13 @@ require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"exports"' "Builder publish-learn fl
 if node - "$BUILDER_BUILD_FLOW" <<'NODE'; then
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const executeGate = flow.gates?.["execute-gate"];
+if (JSON.stringify(executeGate?.on_route_back) !== JSON.stringify({ plan_gap: "plan" })) {
+  throw new Error("execute-gate must declare exactly plan_gap -> plan without defaults or unrelated reasons");
+}
+if (JSON.stringify(executeGate?.route_back_policy) !== JSON.stringify({ max_attempts: 3, on_exceeded: "block" })) {
+  throw new Error("execute-gate must use the bounded Flow-owned 3-attempt block policy");
+}
 const expectations = Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []);
 if (!expectations.length) throw new Error("no Builder Kit gate expectations found");
 for (const expectation of expectations) {

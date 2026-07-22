@@ -13,6 +13,7 @@ import { EVIDENCE_REF_JSON_SCHEMA, installedBuilderGateActionAuthority } from ".
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
+const TEST_DEFINITION_DIGEST = "0".repeat(64);
 
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
@@ -30,6 +31,8 @@ function snapshot(step, status = "active") {
   return {
     run_id: "run-251",
     definition_id: "builder.build",
+    definition_version: "1.3",
+    definition_digest: TEST_DEFINITION_DIGEST,
     status,
     disposition,
     current_step: step,
@@ -47,7 +50,7 @@ function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationA
   const unresolvedRequiredSet = new Set(unresolvedRequired);
   value.gate_action_envelope = {
     schema_version: "3.0",
-    flow: { run_id: value.run_id, definition_id: value.definition_id, definition_version: authority.definition_version, current_step: step, status, gate_ids: [authority.gate_id] },
+    flow: { run_id: value.run_id, definition_id: value.definition_id, definition_version: authority.definition_version, definition_digest: TEST_DEFINITION_DIGEST, current_step: step, status, gate_ids: [authority.gate_id] },
     action: { ...structuredClone(authority.action), ...(implementationAllowed === undefined ? {} : { implementation_allowed: implementationAllowed }) },
     public_interfaces: {
       status: {
@@ -322,6 +325,20 @@ test("gate-action envelope pins executable workflow interfaces and package ident
   assert.throws(() => validateSnapshot(configuredOperation), /configured operation cannot report an external capability gap/);
 });
 
+test("gate-action envelope rejects a stale gate visit after canonical progress changes", () => {
+  const stale = envelopeSnapshot("execute", { evidence: ["plan-gate:old-plan"] });
+  stale.progress_snapshot = {
+    current_step: "execute",
+    canonical_status: "active",
+    canonical_evidence: ["plan-gate:old-plan", "execute-gate:route-back", "plan-gate:revised-plan"],
+    observed_artifacts: [],
+  };
+  assert.throws(() => validateSnapshot(stale), /gate-action progress does not match the canonical progress snapshot/);
+
+  stale.gate_action_envelope.progress.canonical_evidence = [...stale.progress_snapshot.canonical_evidence];
+  assert.doesNotThrow(() => validateSnapshot(stale));
+});
+
 function terminalProgressSnapshot(status, { step = "learn", evidence = [], artifacts = [] } = {}) {
   const value = snapshot(step, status);
   value.progress_snapshot = {
@@ -375,7 +392,12 @@ function writeAuthorityAssignment(sessionDir, actorKey, extra = {}) {
 function bindAuthoritySigner(sessionDir, issued) {
   const missionFile = path.join(sessionDir, "continuation-driver", "state.json");
   const mission = JSON.parse(fs.readFileSync(missionFile, "utf8"));
-  fs.writeFileSync(missionFile, JSON.stringify({ ...mission, active_turn_public_key_digest: issued.publicKeyDigest }));
+  fs.writeFileSync(missionFile, JSON.stringify({
+    ...mission,
+    active_turn_definition_version: issued.record.definition_version,
+    active_turn_definition_digest: issued.record.definition_digest,
+    active_turn_public_key_digest: issued.publicKeyDigest,
+  }));
 }
 
 function canonicalBytes(value) {
@@ -645,7 +667,7 @@ test("reinvoked missions compare synchronized progress with the durable baseline
 });
 
 test("reinvocation counts one interrupted unchanged turn as no progress exactly once", async () => {
-  const baseline = { current_step: "execute", canonical_evidence: [], observed_artifacts: [] };
+  const baseline = { current_step: "execute", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_evidence: [], observed_artifacts: [] };
   const store = memoryStore({
     schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
     adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
@@ -670,12 +692,61 @@ test("reinvocation counts one interrupted unchanged turn as no progress exactly 
   assert.equal(store.events.filter((event) => event.type === "turn_recovered").length, 1);
 });
 
+test("interruption recovery treats legacy missing-to-present definition identity as canonical progress", async () => {
+  const baseline = { current_step: "execute", canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
+  const store = memoryStore({
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
+    adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
+    active_turn_public_key_digest: null, active_turn_phase: "started", active_turn_progress: baseline,
+    last_progress: baseline, prior_progress: null, pending_barrier: null, updated_at: "2026-07-13T12:00:00.000Z",
+  });
+  const barrier = { kind: "deadline", at: "2026-07-14T12:00:00.000Z" };
+  await runContinuationDriver({
+    maxTurns: 2,
+    store,
+    runtime: {
+      inspect: async () => envelopeSnapshot("execute"),
+      synchronize: async () => envelopeSnapshot("execute"),
+      execute: async () => ({ status: "wait", barrier }),
+    },
+    waitForBarrier: async () => "pending",
+  });
+  const recovered = store.events.find((event) => event.type === "turn_recovered");
+  assert.equal(recovered.progress.step_advanced, true);
+  assert.equal(recovered.progress.no_progress, false);
+  assert.equal(recovered.progress.consecutive_no_progress, 0);
+
+  const legacyStore = memoryStore({
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
+    adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
+    active_turn_public_key_digest: null, active_turn_phase: "started", active_turn_progress: baseline,
+    last_progress: baseline, prior_progress: null, pending_barrier: null, updated_at: "2026-07-13T12:00:00.000Z",
+  });
+  const legacySnapshot = snapshot("execute");
+  delete legacySnapshot.definition_version;
+  delete legacySnapshot.definition_digest;
+  legacySnapshot.progress_snapshot = structuredClone(baseline);
+  await runContinuationDriver({
+    maxTurns: 2,
+    store: legacyStore,
+    runtime: {
+      inspect: async () => legacySnapshot,
+      synchronize: async () => legacySnapshot,
+      execute: async () => ({ status: "wait", barrier }),
+    },
+    waitForBarrier: async () => "pending",
+  });
+  const legacyRecovered = legacyStore.events.find((event) => event.type === "turn_recovered");
+  assert.equal(legacyRecovered.progress.step_advanced, false, "both-missing legacy identities remain compatible");
+  assert.equal(legacyRecovered.progress.no_progress, true);
+});
+
 test("interrupted turns are reconciled before waiting and terminal disposition branches", async (t) => {
   for (const [name, canonical, expectedOutcome] of [
     ["waiting", envelopeSnapshot("verify", { status: "paused" }), "waiting"],
     ["terminal", terminalProgressSnapshot("completed", { step: "verify" }), "done"],
   ]) await t.test(name, async () => {
-    const baseline = { current_step: "verify", canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
+    const baseline = { current_step: "verify", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
     const store = memoryStore({
       schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
       adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "verify",
@@ -1212,7 +1283,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
   const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-"));
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
-  const canonicalState = { run_id: runId, definition_id: "builder.build", current_step: "plan", status: "active" };
+  const canonicalState = { run_id: runId, definition_id: "builder.build", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, current_step: "plan", status: "active" };
   writeAuthorityAssignment(sessionDir, "codex:authority-test", { audit_trail: "x".repeat(20 * 1024) });
   let issued;
 
@@ -1222,6 +1293,8 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       schema_version: "1.0",
       run_id: runId,
       definition_id: "builder.build",
+      active_turn_definition_version: "1.3",
+      active_turn_definition_digest: TEST_DEFINITION_DIGEST,
       max_turns: 2,
       adapter_command_identity: "adapter-identity",
       status: "active",
@@ -1234,6 +1307,8 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       sessionDir,
       runId,
       definitionId: "builder.build",
+      definitionVersion: "1.3",
+      definitionDigest: TEST_DEFINITION_DIGEST,
       currentStep: "plan",
       iteration: 1,
       maxTurns: 2,
@@ -1270,6 +1345,13 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       assignmentActor: "codex:authority-test",
       canonicalState: { ...canonicalState, current_step: "verify" },
     }).valid, true, "canonical Flow-owned progression remains authorized");
+    assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+      assignmentActor: "codex:authority-test",
+      canonicalState: { ...canonicalState, definition_version: "1.3", definition_digest: "f".repeat(64) },
+    }).valid, false, "an authority issued before a Flow amendment cannot authorize the amended head");
     assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
       sessionDir,
       runId: issued.runId,
@@ -1359,7 +1441,7 @@ test("authority cleanup leaves an expiring record when a parent is replaced", (t
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1399,7 +1481,7 @@ test("authority write leaves its temporary record when a parent is replaced", (t
   };
   try {
     assert.throws(() => activeTurnAuthority.issueActiveTurnAuthority({
-      sessionDir, runId, definitionId: "builder.build", currentStep: "plan", iteration: 1, maxTurns: 1,
+      sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
       adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
     }), /injected parent replacement/);
   } finally {
@@ -1424,7 +1506,7 @@ test("a signed authority rejects a stale lock from an exited driver", (t) => {
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1448,7 +1530,7 @@ test("authority validation rejects an active-turn file atomically replaced after
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1491,7 +1573,8 @@ test("canonical Flow state rejects final-path replacement after descriptor read"
   const state = { run_id: slug, definition_id: "builder.build", definition_version: "1.0", status: "active", current_step: "plan" };
   fs.writeFileSync(stateFile, JSON.stringify(state));
   fs.writeFileSync(replacement, JSON.stringify(state));
-  fs.writeFileSync(path.join(runDir, "definition.json"), JSON.stringify({ id: "builder.build", version: "1.0", steps: [{ id: "plan" }] }));
+  const installedDefinition = JSON.parse(fs.readFileSync(new URL("../../kits/builder/flows/build.flow.json", import.meta.url), "utf8"));
+  fs.writeFileSync(path.join(runDir, "definition.json"), JSON.stringify(installedDefinition));
   const originalReadFile = fs.readFileSync;
   let replaced = false;
   fs.readFileSync = (target, ...args) => {
@@ -1524,7 +1607,7 @@ test("canonical Flow state rejects an unknown definition step and a replaced run
   const definition = { id: "builder.build", version: "1.0", steps: [{ id: "plan" }] };
   fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify(state));
   fs.writeFileSync(path.join(runDir, "definition.json"), JSON.stringify(definition));
-  assert.match(stopGoalFit.canonicalFlowState(root, sessionDir).error, /current_step is not present/);
+  assert.match(stopGoalFit.canonicalFlowState(root, sessionDir).error, /unavailable or malformed/);
 
   fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify({ ...state, current_step: "plan" }));
   const originalReadFile = fs.readFileSync;
@@ -1549,6 +1632,69 @@ test("canonical Flow state rejects an unknown definition step and a replaced run
     assert.match(result.error, /identity changed|parent identity changed/);
   } finally {
     fs.readFileSync = originalReadFile;
+  }
+});
+
+test("canonical Flow state rejects every Flow-schema-invalid amendment before resolving its successor", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-canonical-amendment-schema-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const slug = "canonical-amendment-run";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const flow = require("@kontourai/flow");
+  const packaged = JSON.parse(fs.readFileSync(new URL("../../kits/builder/flows/build.flow.json", import.meta.url), "utf8"));
+  const published = structuredClone(packaged);
+  published.version = "1.1";
+  delete published.gates["execute-gate"].on_route_back;
+  delete published.gates["execute-gate"].route_back_policy;
+  const publishedFile = path.join(root, "published-builder-build-1.1.json");
+  fs.writeFileSync(publishedFile, JSON.stringify(published));
+  await flow.startRun(publishedFile, { cwd: root, runId: slug, params: { subject: "continuation-schema-test" } });
+  const before = await flow.loadRun(slug, root);
+  await flow.amendRunDefinition(slug, {
+    cwd: root,
+    definition: packaged,
+    request: {
+      reason: "exercise canonical Stop amendment validation",
+      expected_run_head: flow.flowRunHead(before.state),
+      expected_definition: flow.definitionIdentity(published),
+      successor_digest: flow.definitionDigest(packaged),
+      authority: { kind: "user_request", actor: "continuation-driver-test", request_ref: "test:canonical-amendment-schema", requested_at: "2026-07-20T00:00:00.000Z" },
+    },
+  });
+  const stateFile = path.join(root, ".kontourai", "flow", "runs", slug, "state.json");
+  const valid = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(stopGoalFit.canonicalFlowState(root, sessionDir).error, null, "a Flow-created amendment remains canonical");
+
+  const mutations = [
+    ["missing authority", (state) => { delete state.definition_amendments[0].authority; }],
+    ["malformed authority", (state) => { state.definition_amendments[0].authority = {}; }],
+    ["missing reason", (state) => { delete state.definition_amendments[0].reason; }],
+    ["missing timestamp", (state) => { delete state.definition_amendments[0].at; }],
+    ["unsupported amendment field", (state) => { state.definition_amendments[0].forged = true; }],
+    ["corrupt prior state", (state) => { state.definition_amendments[0].prior_state.run_id = "forged-run"; }],
+    ["corrupt prior head", (state) => { state.definition_amendments[0].prior_run_head = "f".repeat(64); }],
+    ["schema-valid forged route-back history", (state) => { state.transitions.push({
+      type: "route_back", from_step: "execute", to_step: "plan", status: "blocked", reason: "plan_gap",
+      gate_id: "execute-gate", route_reason: "plan_gap", selected_route: "plan", recovery_step: "plan",
+      attempt: 1, retry_epoch: 1, max_attempts: 2, limit_exceeded: false,
+      invalidated_steps: ["execute", "verify", "merge-ready", "pr-open", "publish-learn"],
+      evidence_refs: [], expectation_ids: [], at: "2026-07-20T00:00:01.000Z",
+    }); }],
+    ["corrupt prefix before a valid-looking successor", (state) => {
+      const corrupt = structuredClone(state.definition_amendments[0]);
+      corrupt.prior_state.run_id = "forged-prefix";
+      state.definition_amendments.unshift(corrupt);
+    }],
+  ];
+  for (const [name, mutate] of mutations) {
+    const corrupted = structuredClone(valid);
+    mutate(corrupted);
+    fs.writeFileSync(stateFile, JSON.stringify(corrupted));
+    await assert.rejects(() => flow.loadRun(slug, root), undefined, `${name} is rejected by Flow loadRun`);
+    const hook = stopGoalFit.canonicalFlowState(root, sessionDir);
+    assert.equal(hook.state, null, `${name} is rejected by Stop before effective-definition resolution`);
+    assert.match(hook.error, /unavailable or malformed/, `${name} is fail-closed in Stop`);
   }
 });
 
@@ -1626,7 +1772,22 @@ test("Stop keeps a base-valid signed session selected across paused and complete
   fs.writeFileSync(path.join(artifactRoot, "current.json"), JSON.stringify({ active_slug: unrelatedSlug }));
   fs.mkdirSync(path.join(artifactRoot, "current"), { recursive: true });
   fs.writeFileSync(path.join(artifactRoot, "current", "pointer-actor.json"), JSON.stringify({ active_slug: unrelatedSlug }));
-  fs.writeFileSync(path.join(runDir, "definition.json"), JSON.stringify({ id: "builder.build", version: "1.0", steps: [{ id: "plan" }] }));
+  const installedDefinition = JSON.parse(fs.readFileSync(new URL("../../kits/builder/flows/build.flow.json", import.meta.url), "utf8"));
+  const flow = require("@kontourai/flow");
+  const installedDefinitionDigest = flow.definitionDigest(installedDefinition);
+  const canonicalState = (status) => {
+    const state = flow.initialState(installedDefinition, exactSlug, { subject: "exact-scope" });
+    state.current_step = "plan";
+    state.status = status;
+    if (status === "paused") {
+      state.lifecycle = [{
+        action: "pause", from_status: "active", to_status: "paused", prior_status: "active",
+        reason: "pause exact scope fixture", authority: { kind: "user_request", actor: "continuation-driver-test", request_ref: "test:exact-scope", requested_at: "2026-07-20T00:00:00.000Z" }, at: "2026-07-20T00:00:00.000Z",
+      }];
+    }
+    return state;
+  };
+  fs.writeFileSync(path.join(runDir, "definition.json"), JSON.stringify(installedDefinition));
   writeAuthorityAssignment(exactDir, "driver-actor");
   writeAuthorityAssignment(unrelatedDir, "driver-actor");
   const lock = { pid: process.pid, token: "exact-scope", created_at: new Date().toISOString() };
@@ -1637,7 +1798,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
     active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", currentStep: "plan", iteration: 1, maxTurns: 2,
+    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: installedDefinitionDigest, currentStep: "plan", iteration: 1, maxTurns: 2,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "driver-actor", assignmentActorStruct: authorityActorStruct,
     lock, timeoutMs: 30_000,
   });
@@ -1651,9 +1812,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
   process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = issued.turnSecret;
   process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = issued.runId;
   try {
-    fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify({
-      run_id: exactSlug, definition_id: "builder.build", definition_version: "1.0", status: "active", current_step: "plan",
-    }));
+    fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify(canonicalState("active")));
     fs.writeFileSync(path.join(exactDir, "state.json"), JSON.stringify(sidecar(exactSlug, "active", "delivered")));
     const terminalSidecar = await stopGoalFit.analyze(root);
     assert.equal(terminalSidecar.activeTurnAuthority, false, "a terminal sidecar cannot relax an active canonical Flow gate");
@@ -1661,9 +1820,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
 
     for (const canonicalStatus of ["paused", "needs_decision", "completed"]) {
       const terminal = canonicalStatus === "completed";
-      fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify({
-        run_id: exactSlug, definition_id: "builder.build", definition_version: "1.0", status: canonicalStatus, current_step: "plan",
-      }));
+      fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify(canonicalState(canonicalStatus)));
       fs.writeFileSync(path.join(exactDir, "state.json"), JSON.stringify(sidecar(exactSlug, canonicalStatus, terminal ? "delivered" : "planned")));
       const analyzed = await stopGoalFit.analyze(root);
       assert.equal(analyzed.latestArtifactDir, exactDir, `${canonicalStatus} remains scoped to the signed run`);

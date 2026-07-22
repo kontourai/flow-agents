@@ -46,7 +46,7 @@ semantics stay in Flow contracts and sidecars. Repository and project metadata
 are stable cross-user workspace identifiers when present. Local working-directory
 paths stay out of the descriptor so Console display metadata does not expose
 usernames or machine-local paths; records without a repository identifier should
-fall back to their logical product root such as `product:flow-agents:.flow-agents`.
+fall back to their logical product root such as `product:flow-agents:.kontourai/flow-agents` (the runtime artifact root; #778 corrected the descriptor's own record-source roots to match after they drifted from the `.flow-agents` -> `.kontourai/flow-agents` runtime-root migration).
 
 Packaged setup modes are:
 

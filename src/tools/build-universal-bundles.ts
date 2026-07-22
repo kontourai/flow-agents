@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { buildSync } from "esbuild";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
 import { CODEX_REASONING_EFFORTS, codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
@@ -454,6 +455,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
+  writeBundledFlowValidator(targetRoot);
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -462,6 +464,109 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   if (fs.existsSync(capabilityDeclJson)) {
     writeText(path.join(targetRoot, "build/generated/capability-declarations.json"), readText(capabilityDeclJson));
   }
+}
+
+/**
+ * Stop hooks run from universal bundles without an npm installation. Bundle the
+ * exact Flow consistency validator and its schemas so installed hooks retain
+ * Flow's complete schema, lifecycle, amendment-ledger, and retry-history checks
+ * without resolving code from the consumer checkout.
+ */
+function writeBundledFlowValidator(targetRoot: string): void {
+  const flowSchemas = path.join(root, "node_modules/@kontourai/flow/schemas");
+  const stateSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "flow-run.schema.json"));
+  const manifestSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "gate-evidence.schema.json"));
+  const temporaryFlowRoot = path.join(targetRoot, "build/.flow-validator-source");
+  const temporaryFlowDist = path.join(temporaryFlowRoot, "dist");
+  let outputText: string | null = null;
+  try {
+    fs.cpSync(path.join(root, "node_modules/@kontourai/flow/dist"), temporaryFlowDist, { recursive: true });
+    for (const dependency of ["ajv", "ajv-formats", "fast-deep-equal", "fast-uri", "json-schema-traverse", "require-from-string"]) {
+      const destination = path.join(temporaryFlowRoot, "node_modules", dependency);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.cpSync(path.join(root, "node_modules", dependency), destination, { recursive: true });
+    }
+    const validatorSource = path.join(temporaryFlowRoot, "flow-run-validator.mjs");
+    writeText(validatorSource, `
+import Ajv from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import { validateRunLifecycle } from ${JSON.stringify(path.join(temporaryFlowDist, "runtime/flow-run-lifecycle.js"))};
+const stateSchema = ${JSON.stringify(stateSchema)};
+const manifestSchema = ${JSON.stringify(manifestSchema)};
+let validateState;
+let validateManifest;
+function compileSchema(schema) {
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  addFormats(ajv);
+  return ajv.compile(schema);
+}
+function schemaError(validate, contract) {
+  const details = (validate.errors ?? []).slice(0, 5)
+    .map((error) => \`${"${error.instancePath || '/'}"} ${"${error.message ?? 'is invalid'}"}\`).join("; ");
+  return new Error(\`${"${contract}"}: ${"${details}"}\`);
+}
+export function validateRunStateSchema(state) {
+  validateState ??= compileSchema(stateSchema);
+  if (validateState(state)) return validateRunLifecycle(state);
+  throw schemaError(validateState, "run state does not satisfy flow-run.schema.json");
+}
+export function validateEvidenceManifestSchema(manifest) {
+  validateManifest ??= compileSchema(manifestSchema);
+  if (validateManifest(manifest)) return manifest;
+  throw schemaError(validateManifest, "evidence manifest does not satisfy gate-evidence.schema.json");
+}
+`);
+    const temporaryAmendment = path.join(temporaryFlowDist, "runtime/flow-run-definition-amendment.js");
+    const amendmentSource = readText(temporaryAmendment);
+    const validatorImport = 'from "./flow-run-validator.js"';
+    if (!amendmentSource.includes(validatorImport)) {
+      throw new Error("installed Flow amendment runtime no longer imports the expected run-state validator");
+    }
+    writeText(temporaryAmendment, amendmentSource.replace(
+      validatorImport,
+      `from ${JSON.stringify(validatorSource)}`,
+    ));
+    const result = buildSync({
+      absWorkingDir: temporaryFlowRoot,
+      stdin: {
+        contents: `
+import { validateRunStateSchema } from ${JSON.stringify(validatorSource)};
+import { normalizeRunStateLifecycle, validateDefinition } from ${JSON.stringify(path.join(temporaryFlowDist, "definition/flow-definition.js"))};
+import { definitionDigest, resolveEffectiveDefinition } from ${JSON.stringify(temporaryAmendment)};
+import { validateRetryAuthorizationHistory } from ${JSON.stringify(path.join(temporaryFlowDist, "runtime/flow-run-retry-proof.js"))};
+export { definitionDigest };
+export function validateRunStateConsistency(startDefinitionValue, stateValue, options = {}) {
+  const startDefinition = validateDefinition(startDefinitionValue);
+  validateRunStateSchema(stateValue);
+  const state = normalizeRunStateLifecycle(stateValue);
+  const definition = resolveEffectiveDefinition(startDefinition, state);
+  const runId = options.runId ?? state.run_id;
+  if (state.run_id !== runId) throw new Error(\`run state run_id mismatch: expected ${"${runId}"}, got ${"${state.run_id}"}\`);
+  if (state.definition_id !== definition.id) throw new Error(\`run state definition_id mismatch: expected ${"${definition.id}"}, got ${"${state.definition_id}"}\`);
+  if (state.definition_version !== definition.version) throw new Error(\`run state definition_version mismatch: expected ${"${definition.version}"}, got ${"${state.definition_version}"}\`);
+  validateRetryAuthorizationHistory(definition, state);
+  return { startDefinition, definition, state };
+}
+`,
+        resolveDir: temporaryFlowRoot,
+        sourcefile: "flow-validator-entry.mjs",
+      },
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      target: "node22",
+      minifyWhitespace: true,
+      legalComments: "none",
+      write: false,
+    });
+    const output = result.outputFiles?.[0];
+    if (!output) throw new Error("flow validator bundle produced no output");
+    outputText = output.text;
+  } finally {
+    fs.rmSync(temporaryFlowRoot, { recursive: true, force: true });
+  }
+  if (outputText === null) throw new Error("flow validator bundle produced no output");
+  writeText(path.join(targetRoot, "build/src/vendor/flow-validator.cjs"), outputText);
 }
 function installScript(label: string, capability: BundleCapability, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }, stampConfig?: { runtime: string; version: string }): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" \\( -path "$DEST/AGENTS.md" -o -path "$DEST/CLAUDE.md" \\) -prune -o -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";

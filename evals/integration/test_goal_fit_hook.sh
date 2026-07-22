@@ -2806,10 +2806,31 @@ cat > "$AUTHORITY_REPO/.kontourai/flow-agents/current.json" <<'JSON'
 { "active_slug": "continuation-authority" }
 JSON
 cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
-{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "pull-work" }
+{
+  "schema_version": "0.1",
+  "run_id": "continuation-authority",
+  "definition_id": "builder.build",
+  "definition_version": "1.0",
+  "subject": "local:work-item/continuation-authority",
+  "status": "active",
+  "current_step": "pull-work",
+  "params": { "subject": "local:work-item/continuation-authority" },
+  "gate_outcomes": [],
+  "transitions": [],
+  "lifecycle": [],
+  "exceptions": []
+}
 JSON
 cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/definition.json" <<'JSON'
-{ "id": "builder.build", "version": "1.0", "steps": [{ "id": "pull-work" }, { "id": "design-probe" }] }
+{
+  "id": "builder.build",
+  "version": "1.0",
+  "steps": [{ "id": "pull-work", "next": "design-probe" }, { "id": "design-probe" }],
+  "gates": {
+    "pull-work-gate": { "step": "pull-work", "expects": [] },
+    "design-probe-gate": { "step": "design-probe", "expects": [] }
+  }
+}
 JSON
 AUTHORITY_PID="$$"
 AUTHORITY_TOKEN="authority-lock"
@@ -2825,21 +2846,27 @@ fs.writeFileSync(path.join(process.env.AUTHORITY_SESSION, 'continuation-driver',
   adapter_command_identity: 'adapter-identity', status: 'active', turns_started: 1, active_turn_step: 'pull-work', pending_barrier: null,
 }));
 const actor = { runtime: 'explicit-override', session_id: 'driver-actor', host: 'fixture-host', human: null };
+const definition = JSON.parse(fs.readFileSync(path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow', 'runs', 'continuation-authority', 'definition.json'), 'utf8'));
+const definitionDigest = require('@kontourai/flow').definitionDigest(definition);
 const assignment = path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow-agents', 'assignment', 'continuation-authority.json');
 fs.mkdirSync(path.dirname(assignment), { recursive: true });
 fs.writeFileSync(assignment, JSON.stringify({ schema_version: '1.0', role: 'AssignmentClaimRecord', subject_id: 'continuation-authority', actor, actor_key: 'driver-actor', artifact_dir: 'continuation-authority', status: 'claimed' }));
 const authority = require(path.join(process.env.AUTHORITY_ROOT, 'scripts', 'hooks', 'lib', 'continuation-turn-authority.js'));
-const turn = authority.issueActiveTurnAuthority({ sessionDir: process.env.AUTHORITY_SESSION, runId: 'continuation-authority', definitionId: 'builder.build', currentStep: 'pull-work', iteration: 1, maxTurns: 2, adapterCommandIdentity: 'adapter-identity', assignmentActor: 'driver-actor', assignmentActorStruct: actor, lock, timeoutMs: 60_000 });
+const turn = authority.issueActiveTurnAuthority({ sessionDir: process.env.AUTHORITY_SESSION, runId: 'continuation-authority', definitionId: 'builder.build', definitionVersion: '1.0', definitionDigest, currentStep: 'pull-work', iteration: 1, maxTurns: 2, adapterCommandIdentity: 'adapter-identity', assignmentActor: 'driver-actor', assignmentActorStruct: actor, lock, timeoutMs: 60_000 });
 const missionFile = path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'state.json');
 const mission = JSON.parse(fs.readFileSync(missionFile, 'utf8'));
-fs.writeFileSync(missionFile, JSON.stringify({ ...mission, active_turn_public_key_digest: turn.publicKeyDigest }));
+fs.writeFileSync(missionFile, JSON.stringify({ ...mission, active_turn_definition_version: '1.0', active_turn_definition_digest: definitionDigest, active_turn_public_key_digest: turn.publicKeyDigest }));
 fs.writeFileSync(process.env.AUTHORITY_ENV, JSON.stringify({ runId: turn.runId, turnSecret: turn.turnSecret }));
 NODE
 AUTHORITY_TURN_SECRET="$(node -p "require(process.argv[1]).turnSecret" "$AUTHORITY_ENV")"
 AUTHORITY_RUN_ID="$(node -p "require(process.argv[1]).runId" "$AUTHORITY_ENV")"
-cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
-{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "design-probe" }
-JSON
+AUTHORITY_REPO="$AUTHORITY_REPO" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const stateFile = path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow', 'runs', 'continuation-authority', 'state.json');
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+fs.writeFileSync(stateFile, `${JSON.stringify({ ...state, current_step: 'design-probe' }, null, 2)}\n`);
+NODE
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-valid.out" 2>"$TMPDIR_EVAL/authority-valid.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
 JSON
@@ -2908,25 +2935,104 @@ else
   _fail "continuation authority fixture could not build a Codex bundle: $(cat "$TMPDIR_EVAL/authority-bundle-build.err")"
 fi
 AUTHORITY_INSTALLED_HOME="$AUTHORITY_BUNDLE_DIST/codex"
+AUTHORITY_BUNDLED_VALIDATOR="$AUTHORITY_INSTALLED_HOME/build/src/vendor/flow-validator.cjs"
+if grep -Fq "$ROOT" "$AUTHORITY_BUNDLED_VALIDATOR"; then
+  _fail "bundled Flow validator leaked its maintainer checkout: $(grep -F "$ROOT" "$AUTHORITY_BUNDLED_VALIDATOR" | head -1)"
+elif grep -Fq '.flow-validator-source' "$AUTHORITY_BUNDLED_VALIDATOR"; then
+  _fail "bundled Flow validator leaked its temporary staging path"
+elif [ -e "$AUTHORITY_INSTALLED_HOME/build/.flow-validator-source" ]; then
+  _fail "bundled Flow validator left its temporary source tree"
+else
+  _pass "bundled Flow validator contains no maintainer checkout path or temporary source tree"
+fi
+AUTHORITY_BUNDLED_VALIDATOR="$AUTHORITY_BUNDLED_VALIDATOR" AUTHORITY_REPO="$AUTHORITY_REPO" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-validator-equivalence.err"
+const assert = require('assert/strict');
+const fs = require('fs');
+const path = require('path');
+const flow = require('@kontourai/flow');
+const bundled = require(process.env.AUTHORITY_BUNDLED_VALIDATOR);
+const runDir = path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow', 'runs', 'continuation-authority');
+const definition = JSON.parse(fs.readFileSync(path.join(runDir, 'definition.json'), 'utf8'));
+const state = JSON.parse(fs.readFileSync(path.join(runDir, 'state.json'), 'utf8'));
+const cases = [
+  state,
+  { ...state, definition_id: 'wrong.definition' },
+  { ...state, current_step: 'missing-step' },
+  Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'exceptions')),
+];
+const outcome = (validator, candidate) => {
+  try {
+    const result = validator.validateRunStateConsistency(definition, candidate, { runId: 'continuation-authority' });
+    return { accepted: true, state: result.state, definition: result.definition };
+  } catch (error) {
+    return { accepted: false, message: error instanceof Error ? error.message : String(error) };
+  }
+};
+for (const candidate of cases) {
+  const expected = outcome(flow, candidate);
+  const actual = outcome(bundled, candidate);
+  assert.equal(actual.accepted, expected.accepted);
+  if (expected.accepted) {
+    assert.deepEqual(actual.state, expected.state);
+    assert.deepEqual(actual.definition, expected.definition);
+  }
+}
+assert.equal(bundled.definitionDigest(definition), flow.definitionDigest(definition));
+NODE
+if [[ "$?" -eq 0 ]]; then
+  _pass "bundle-installed Flow validator matches the pinned public validator for accepted and rejected states"
+else
+  _fail "bundle-installed Flow validator diverged from the pinned public validator: $(cat "$TMPDIR_EVAL/authority-validator-equivalence.err")"
+fi
 AUTHORITY_FAKE_PATH="$TMPDIR_EVAL/authority-hostile-path"
 AUTHORITY_PATH_MARKER="$TMPDIR_EVAL/authority-path-validator-ran"
+AUTHORITY_AMBIENT_FLOW_MARKER="$TMPDIR_EVAL/authority-ambient-flow-ran"
+AUTHORITY_CONTEXT_FLOW_MARKER="$TMPDIR_EVAL/authority-context-flow-ran"
 mkdir -p "$AUTHORITY_FAKE_PATH"
 cat > "$AUTHORITY_FAKE_PATH/flow-agents" <<'SH'
 #!/usr/bin/env bash
 printf 'ran\n' > "$AUTHORITY_PATH_MARKER"
 SH
 chmod +x "$AUTHORITY_FAKE_PATH/flow-agents"
-if PATH="$AUTHORITY_FAKE_PATH:$PATH" AUTHORITY_PATH_MARKER="$AUTHORITY_PATH_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$AUTHORITY_INSTALLED_HOME/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-installed-hook.out" 2>"$TMPDIR_EVAL/authority-installed-hook.err" <<JSON
+mkdir -p "$AUTHORITY_INSTALLED_HOME/node_modules/@kontourai/flow"
+cat > "$AUTHORITY_INSTALLED_HOME/node_modules/@kontourai/flow/package.json" <<'JSON'
+{ "name": "@kontourai/flow", "version": "0.0.0-hostile", "main": "index.js" }
+JSON
+cat > "$AUTHORITY_INSTALLED_HOME/node_modules/@kontourai/flow/index.js" <<'JS'
+require('fs').writeFileSync(process.env.AUTHORITY_AMBIENT_FLOW_MARKER, 'ran');
+throw new Error('ambient Flow must not override the bundled validator');
+JS
+if PATH="$AUTHORITY_FAKE_PATH:$PATH" AUTHORITY_PATH_MARKER="$AUTHORITY_PATH_MARKER" AUTHORITY_AMBIENT_FLOW_MARKER="$AUTHORITY_AMBIENT_FLOW_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$AUTHORITY_INSTALLED_HOME/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-installed-hook.out" 2>"$TMPDIR_EVAL/authority-installed-hook.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
 JSON
 then
-  if [ ! -e "$AUTHORITY_PATH_MARKER" ] && [ ! -e "$AUTHORITY_CONSUMER_MARKER" ] && ! grep -q 'Flow Agents validator is unavailable' "$TMPDIR_EVAL/authority-installed-hook.err"; then
-    _pass "bundle-installed continuation hook uses its own compiled validator and ignores PATH code"
+  if [ ! -e "$AUTHORITY_PATH_MARKER" ] && [ ! -e "$AUTHORITY_CONSUMER_MARKER" ] && [ ! -e "$AUTHORITY_AMBIENT_FLOW_MARKER" ] && ! grep -q 'Flow Agents validator is unavailable' "$TMPDIR_EVAL/authority-installed-hook.err"; then
+    _pass "bundle-installed continuation hook uses its own compiled validator and ignores PATH, consumer, and ambient package code"
   else
-    _fail "bundle-installed hook used untrusted code or failed to recognize its compiled validator"
+    _fail "bundle-installed hook used untrusted PATH, consumer, or ambient package code"
   fi
 else
   _fail "installed continuation hook trapped a signed driver handback: $(cat "$TMPDIR_EVAL/authority-installed-hook.err")"
+fi
+AUTHORITY_CONTEXT_ROOT="$AUTHORITY_INSTALLED_HOME/con""text"
+cp -R "$AUTHORITY_INSTALLED_HOME/scripts/lib" "$AUTHORITY_CONTEXT_ROOT/scripts/lib"
+cp -R "$AUTHORITY_INSTALLED_HOME/scripts/hooks/lib/." "$AUTHORITY_CONTEXT_ROOT/scripts/hooks/lib/"
+mkdir -p "$AUTHORITY_CONTEXT_ROOT/bu""ild/src/vendor"
+cat > "$AUTHORITY_CONTEXT_ROOT/bu""ild/src/vendor/flow-validator.cjs" <<'JS'
+require('fs').writeFileSync(process.env.AUTHORITY_CONTEXT_FLOW_MARKER, 'ran');
+throw new Error('consumer context build validator must never execute');
+JS
+if AUTHORITY_AMBIENT_FLOW_MARKER="$AUTHORITY_AMBIENT_FLOW_MARKER" AUTHORITY_CONTEXT_FLOW_MARKER="$AUTHORITY_CONTEXT_FLOW_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$AUTHORITY_CONTEXT_ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-context-hook.out" 2>"$TMPDIR_EVAL/authority-context-hook.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  if [ ! -e "$AUTHORITY_AMBIENT_FLOW_MARKER" ] && [ ! -e "$AUTHORITY_CONTEXT_FLOW_MARKER" ]; then
+    _pass "bundle context-mirror hook resolves only the contained hook-owned validator"
+  else
+    _fail "bundle context-mirror hook loaded ambient or consumer context build validator code"
+  fi
+else
+  _fail "bundle context-mirror hook could not use the bundled validator: $(cat "$TMPDIR_EVAL/authority-context-hook.err")"
 fi
 rm -f "$AUTHORITY_REPO/package.json"
 rm -rf "$AUTHORITY_REPO/build"

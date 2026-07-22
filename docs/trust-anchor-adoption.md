@@ -19,19 +19,29 @@ model and threat analysis.
    control, it runs your declared verify command (build + tests + lint). Real exit
    codes. No agent influence.
 
-2. **Reconciles the delivered bundle.** If the agent published a `delivery/trust.bundle`
-   with the PR, the anchor cross-checks every claimed-pass command against CI's own
+2. **Reconciles the delivered bundle.** If the agent published a canonical
+   `delivery/<task-slug>/trust.bundle` (or legacy `delivery/trust.bundle`) with the PR,
+   the anchor cross-checks every claimed-pass command against CI's own
    fresh results. Divergences (claimed pass + CI fail, laundered command, claim with
    no evidence, checkpoint-only bundle) fail the job with a clear diagnostic.
 
 3. **Fails closed on compile-only.** If no comprehensive verify command is configured,
    the anchor refuses to pass — preventing a "build only" attestation that misses tests.
 
+4. **Makes bundle absence explicit.** `missing-bundle-policy: required` is the stable,
+   fail-closed default for an armed gate. During advisory adoption, set
+   `missing-bundle-policy: advisory`: fresh verification must still pass, while a missing
+   current bundle is reported without failing the job. Bundle divergence and failed fresh
+   verification always fail; the legacy `fail-on-divergence` input no longer weakens the gate.
+
 ## Step 1 — The Agent Publishes a Bundle
 
-Flow Agents' deliver skill calls `publishDelivery`, which writes `delivery/trust.bundle`
-to the repository with `git add -f` during the `record-release` step. This file carries
-the session's evidence and claims to CI so the anchor can reconcile them.
+Flow Agents' deliver skill calls `publishDelivery`, which writes
+`delivery/<task-slug>/trust.bundle` to the repository with `git add -f` during the
+`record-release` step. This file carries the session's evidence and claims to CI so the
+anchor can reconcile them. The action delegates ownership-aware discovery to the reconciler,
+which selects the newest bundle that attests the change across per-session and legacy flat
+paths.
 
 You do not need to configure this — it is part of the deliver skill workflow. The bundle
 is gitignored by default (the deliver skill force-adds it for the PR commit only).
@@ -69,13 +79,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Ownership checks compare bundle commits through git ancestry.
+          fetch-depth: 0
 
       - uses: kontourai/flow-agents/.github/actions/trust-verify@<SHA>
         with:
           # Declare your comprehensive verify command: build + tests + lint.
           # The agent must run this same command locally (via trust-reconcile-verify).
           verify-command: "npm run build && npm test && npm run lint"
-          # bundle: defaults to delivery/trust.bundle (auto-discovered if present)
+          # Use advisory only while the check is not yet required in branch protection.
+          missing-bundle-policy: required
+          # bundle: leave empty for ownership-aware discovery across legacy flat and
+          # per-session delivery paths; set only for a deliberate explicit path
           # sign: false (set to true + add id-token: write for Sigstore attestation)
 ```
 
@@ -98,6 +114,11 @@ The action reports results but is advisory until you arm it server-side:
 
 Once armed, no PR can merge past a `Trust Verify` failure — including ones pushed by
 the agent.
+
+Use `missing-bundle-policy: advisory` only during a deliberate observation period before
+arming the status check. Change it to `required` when the check becomes required. This
+setting controls bundle absence only: a failed fresh verification still fails in either
+mode.
 
 ## Step 4 — Protect the Verify Config
 
@@ -223,10 +244,10 @@ The `flow-agents verify` CLI subcommand runs the same trust-reconcile logic loca
 # Install (or npx):
 npm install -D @kontourai/flow-agents
 
-# Re-run verify + reconcile against a delivered bundle:
+# Re-run verify + reconcile against a delivered bundle explicitly:
 npx @kontourai/flow-agents verify \
   --commands "npm run build,npm test" \
-  --bundle delivery/trust.bundle
+  --bundle delivery/<task-slug>/trust.bundle
 
 # Auto-discover bundle + verify command from package.json:
 npx @kontourai/flow-agents verify
@@ -255,9 +276,11 @@ Flow Agents uses the same pattern in its own repository:
 
 ## Adoption Checklist
 
-- [ ] Deliver skill is configured and publishes `delivery/trust.bundle`.
+- [ ] Deliver skill is configured and publishes `delivery/<task-slug>/trust.bundle`.
 - [ ] `.github/workflows/trust-verify.yml` added and the composite action is pinned.
 - [ ] `verify-command` declares a comprehensive verify (build + tests + lint).
+- [ ] `missing-bundle-policy` matches the adoption phase (`advisory` while observing,
+      `required` before branch protection is armed).
 - [ ] `Trust Verify` added as a required, no-bypass status check on `main`.
 - [ ] CODEOWNERS entry protects `trust-verify.yml` and `package.json`.
 - [ ] (Optional) `scripts["trust-reconcile-verify"]` in `package.json` for local use.

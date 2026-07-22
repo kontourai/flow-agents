@@ -10,6 +10,8 @@ import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
+import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -88,6 +90,70 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   fs.appendFileSync(file, `${line}\n`);
 }
 function die(message: string): never { throw new Error(message); }
+export class FlowProjectionRegenerationRequiredError extends Error {
+  readonly code = "flow_projection_regeneration_required";
+  constructor(sessionDir: string) {
+    super(`current Flow projection is missing a valid run_head; regenerate it and re-record evidence with: flow-agents workflow evidence --session-dir ${JSON.stringify(sessionDir)} <evidence options>; inspect the recovered result with: flow-agents workflow status --session-dir ${JSON.stringify(sessionDir)} --json`);
+    this.name = "FlowProjectionRegenerationRequiredError";
+  }
+}
+
+/**
+ * #783: sanctioned fixture authoring. `fixture write <dir> [--from-json <file> | --malformed
+ * --content <string|@file>]` writes a state.json fixture for TESTS — never real session state.
+ *
+ * Contract (mirrors the config-protection hook's scoping, same fail-closed resolver):
+ * - The target dir must be PROVABLY OUTSIDE every declared artifact root
+ *   (isProvablyOutsideDeclaredRoots; ambiguity refuses). A fixture writer that disagreed with
+ *   the hook about root containment would let an agent forge real sidecar state by routing
+ *   through this command, so the refusal is non-negotiable.
+ * - Default (--from-json) validates against schemas/workflow-state.schema.json with the SAME
+ *   validator the artifact validator uses (mini-json-schema), so a "valid fixture" here is
+ *   valid everywhere.
+ * - --malformed writes the provided content VERBATIM (negative-test fixtures: corrupt JSON,
+ *   schema-violating shapes). Allowed only because the outside-roots proof already succeeded.
+ */
+function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
+  const action = p.positional[0] || die("fixture requires an action: write");
+  if (action !== "write") die(`unknown fixture action: ${action} (only "write" is supported)`);
+  const dirArg = p.positional[1] || die("fixture write requires a target directory");
+  const dir = path.resolve(dirArg);
+  const cwd = process.cwd();
+  if (!isProvablyOutsideDeclaredRoots(dir, cwd)) {
+    die(
+      `fixture write refused: ${dir} is inside — or cannot be proven outside — the declared ` +
+        `artifact roots (repo/workspace .kontourai/flow-agents, .flow-agents, delivery/). ` +
+        `Fixtures belong in a scratch or temp directory. Root detection fails closed by design.`,
+    );
+  }
+  const malformed = p.flags.has("malformed") || p.opts["malformed"] !== undefined;
+  const target = path.join(dir, "state.json");
+  let mode: string;
+  if (malformed) {
+    const contentArg = opt(p, "content") || die("fixture write --malformed requires --content <string|@file>");
+    const content = contentArg.startsWith("@") ? read(contentArg.slice(1)) : contentArg;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, content);
+    mode = "malformed (verbatim, schema deliberately NOT enforced)";
+  } else {
+    const fromJson = opt(p, "from-json") || die("fixture write requires --from-json <file> (or --malformed --content)");
+    const value = loadJsonInputFile(fromJson);
+    const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "schemas", "workflow-state.schema.json");
+    const schema = JSON.parse(read(schemaPath));
+    const issues: SchemaIssue[] = [];
+    validateSchemaValue("state.json", value, schema, "state", issues);
+    if (issues.length > 0) {
+      die(`fixture write refused: content does not satisfy workflow-state.schema.json:\n${issues.map((i) => `  - ${i.message}`).join("\n")}\n(use --malformed --content to author an intentionally-invalid fixture)`);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`);
+    mode = "schema-valid";
+  }
+  process.stdout.write(
+    `${JSON.stringify({ written: target, mode, allowed_because: "target is provably outside every declared artifact root" }, null, 2)}\n`,
+  );
+  return 0;
+}
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
 /** Derives a deterministic, filesystem-safe slug from a canonical work-item ref like `kontourai/flow-agents#161`.
  * Format: `<owner>-<repo>-<id>` e.g. `kontourai-flow-agents-161`.
@@ -1016,6 +1082,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
         .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
       : null;
+    const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
+      && typeof check._verification_workspace_snapshot === "object"
+      && !Array.isArray(check._verification_workspace_snapshot)
+      ? check._verification_workspace_snapshot as AnyObj
+      : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -1026,6 +1097,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
+    const gateClaimFlowRunHead = typeof check._gate_claim_flow_run_head === "string" ? check._gate_claim_flow_run_head : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1049,11 +1121,13 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
       ...(Array.isArray(check._producer_self_produced_trust_slices) ? { self_produced_trust_slices: check._producer_self_produced_trust_slices } : {}),
       ...(waiver ? { waiver } : {}),
+      ...(Array.isArray(check._waiver_history) && check._waiver_history.length ? { waiver_history: check._waiver_history } : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
+      ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -1116,7 +1190,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -2342,6 +2416,18 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
     md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${acceptanceCriteria.map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
+    // #793 ENSURE-SESSION notice: every session ensure-session creates is deliver-type
+    // (the "type: deliver" markdown header above, always), and terminal states
+    // (accepted/archived) plus the learn-gate (stop-goal-fit.js's #793 STOP-GATE rule,
+    // and advance-state's terminal_jump_rejected guard) are only reachable/meaningful for a
+    // session bound to a canonical Flow run. Without --flow-id (or a subsequent
+    // `builder.build` binding), this session can advance through delivered/release but can
+    // never legally reach accepted/archived, and has no learn-gate at all — make that gap
+    // loud at creation instead of silently discoverable only much later. Full default-binding
+    // is tracked as a follow-up (see #793); this is the smallest defensible fix: a notice.
+    if (!entry.flowId) {
+      process.stderr.write(`[ensure-session] NOTICE: session ${JSON.stringify(slug)} has no canonical Flow bound — terminal states (accepted/archived) are unreachable and the learn-gate is absent; pass --flow-id <flow> (e.g. builder.build) to bind one now, or run builder.build later to bind it.\n`);
+    }
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
@@ -2924,6 +3010,27 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     const units = targets.reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), runner), 0);
     return units > 0 ? { kind: "local-process-exit", runner: `npx ${runner}`, static_test_units: units } : null;
   }
+  // `playwright test` discovers specs through playwright.config.*, so a bare invocation is the
+  // norm (kontourai/flow-agents#826). With no explicit target, the proof comes from spec files in
+  // the conventional test directories — anchored on a config actually existing at the root: no
+  // config means the runner would discover nothing, so there is no proof to grant.
+  // Bare token only — `npx ./vendored/playwright test` would re-open the binary-substitution
+  // channel the direct form's `executable === executableName` guard closes (review finding H1).
+  const npxPlaywright = executableName === "npx" && tokens[1] === "playwright" && tokens[2] === "test";
+  if ((executableName === "playwright" && executable === executableName && tokens[1] === "test") || npxPlaywright) {
+    if (tokens.some((token) => /pass.?with.?no.?tests/i.test(token))) return null;
+    const configNames = ["js", "cjs", "mjs", "ts", "cts", "mts"].map((ext) => `playwright.config.${ext}`);
+    if (!configNames.some((name) => fs.existsSync(path.join(projectRoot, name)))) return null;
+    const explicit = tokens.slice(npxPlaywright ? 3 : 2)
+      .filter((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token))
+      .flatMap((token) => /[*?\[]/.test(token) ? fs.globSync(token, { cwd: projectRoot }) : [token]);
+    const discovered = ["tests", "test", "e2e", "specs"]
+      .flatMap((dir) => [`${dir}/**/*.spec.*`, `${dir}/**/*.test.*`])
+      .flatMap((pattern) => fs.globSync(pattern, { cwd: projectRoot, exclude: ["node_modules/**", ".git/**"] }));
+    const files = explicit.length > 0 ? explicit : discovered;
+    const units = [...new Set(files)].reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), "playwright"), 0);
+    return units > 0 ? { kind: "local-process-exit", runner: npxPlaywright ? "npx playwright test" : "playwright test", static_test_units: units } : null;
+  }
   if (executableName === "node" && tokens.includes("--test")) {
     const testFlag = tokens.indexOf("--test");
     const targets = tokens.slice(testFlag + 1)
@@ -3304,8 +3411,17 @@ function critiqueSnapshotDigest(critique: AnyObj): string | null {
 // BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
 // enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
 // before, and superseding a STAMPED existing id is now rejected too.
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd()): AnyObj {
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd(), allowSkipLearningStamp = false): AnyObj {
   const check = { ...raw };
+  // Codex verify round 3/4: the _waiver.skip_learning stamp is minted ONLY by
+  // advance-state's --skip-learning path (which passes allowSkipLearningStamp). Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json)
+  // flows through here — scrubbing at this single choke point makes the stamp
+  // unforgeable regardless of ingestion route.
+  if (!allowSkipLearningStamp && check._waiver && typeof check._waiver === "object" && (check._waiver as AnyObj).skip_learning !== undefined) {
+    check._waiver = { ...(check._waiver as AnyObj) };
+    delete (check._waiver as AnyObj).skip_learning;
+  }
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -3588,6 +3704,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
     return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
   };
+  const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    const snapshot = md && typeof md === "object" ? md.verification_workspace_snapshot : undefined;
+    return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as AnyObj : undefined;
+  };
   const applyProducerStamp = (check: AnyObj, claim: AnyObj): void => {
     const md = claim.metadata as AnyObj;
     if (md && typeof md.expected_producer === "string") check._producer = md.expected_producer;
@@ -3613,6 +3734,7 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
+    if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -3666,11 +3788,17 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3686,11 +3814,17 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3764,7 +3898,11 @@ function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
   for (const c of incoming) if (c && c.id) byId.set(c.id, c);
   return [...byId.values()];
 }
-function critiquesFromBundle(dir: string): AnyObj[] {
+// Exported for src/cli/console-process-projection.ts (issue #778 review finding 1): the
+// Console interactive-session review_pending projection must read the AUTHORITATIVE
+// trust.bundle critique state (this function), not the retired critique.json sidecar —
+// critique.json is no longer written (see the Phase 4c comment above readBundleState).
+export function critiquesFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const c of bundle.claims) requireStampedClaim(c, dir);
@@ -4095,7 +4233,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -4104,8 +4242,10 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const summary = opt(p, "summary") || die("--summary is required");
   const expectationId = opt(p, "expectation");
   const routeReason = opt(p, "route-reason");
+  const requestedFlowRunHead = opt(p, "flow-run-head");
   if (routeReason && statusVal !== "fail") die("--route-reason is only valid with --status fail");
   if (routeReason && !/^[a-z][a-z0-9_-]*$/.test(routeReason)) die("--route-reason must be a lowercase classifier identifier");
+  if (requestedFlowRunHead && !/^[a-f0-9]{64}$/i.test(requestedFlowRunHead)) die("--flow-run-head must be a SHA-256 hex digest");
 
   // Prefer the exact session's canonical Flow projection. Actor/global current pointers are
   // ambient navigation state and may legitimately point at another run or lag this run.
@@ -4116,6 +4256,16 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
     ? sidecarState.flow_run as AnyObj
     : null;
+  const projectedFlowRunHead = projectedRun && typeof projectedRun.run_head === "string" && /^[a-f0-9]{64}$/i.test(projectedRun.run_head)
+    ? projectedRun.run_head.toLowerCase()
+    : null;
+  if ((projectedRun && !projectedFlowRunHead) || (requestedFlowRunHead && !projectedFlowRunHead)) {
+    throw new FlowProjectionRegenerationRequiredError(dir);
+  }
+  if (requestedFlowRunHead && projectedFlowRunHead && requestedFlowRunHead.toLowerCase() !== projectedFlowRunHead) {
+    die("--flow-run-head must match the exact session Flow projection");
+  }
+  const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
@@ -4186,6 +4336,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
+    ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
   };
 
   // Include structured evidence refs if provided
@@ -4212,6 +4363,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
+  if (mustRunTests && publicWorkflowAuthority) {
+    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
+    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
+      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
+    }
+    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
@@ -4344,7 +4502,55 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (!phases.includes(phase)) die(`phase must be one of: ${phases.join(", ")}`);
   if (target && !phases.includes(target)) die(`target phase must be one of: ${phases.join(", ")}`);
   const prev = loadJson(path.join(dir, "state.json"));
-  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") {
+    // #793: --skip-learning <reason> is the ONLY way past this guard without a real
+    // phase:learning transition, and it never bypasses silently — it first records a loud,
+    // reviewable accepted-gap check into the session's trust.bundle, then permits the
+    // transition. Absent the flag, behavior is byte-for-byte unchanged (still rejected).
+    const skipLearningProvided = p.flags.has("skip-learning") || opts(p, "skip-learning").length > 0;
+    const skipLearningReason = opt(p, "skip-learning").trim();
+    if (skipLearningProvided && !skipLearningReason) die('--skip-learning requires a non-empty reason, e.g. --skip-learning "customer escalation; learning-review deferred to next sprint"');
+    // Review-hardened (#798): ADR 0020's convention makes the approver a SEPARATE, mandatory
+    // argument (parseWaiver requires --waived-by distinct from --accepted-gap-reason). Mirror
+    // that forcing function here instead of silently deriving the approver from the invoking
+    // actor — the actor performing the skip must still name who approved it.
+    const skipWaivedBy = opt(p, "waived-by").trim();
+    if (skipLearningReason && !skipWaivedBy) die('--skip-learning also requires --waived-by <actor> (ADR 0020 accepted-gap convention: the approver is named explicitly, not derived from the invoking actor)');
+    if (!skipLearningReason) diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+    // Mirrors the repo's existing accepted-gap convention (ADR 0020, parseWaiver/
+    // --accepted-gap-reason/--waived-by): kind:"external" (session-local attestation — a
+    // command-backed check reconciles against CI and can never be waived), status:"not_verified"
+    // (the check-level status a waived gap carries), plus a _waiver record so no reviewer or
+    // reconciler can mistake it for a genuine pass. The check id ("learning-evidence-skip")
+    // deliberately contains "learning-evidence" so stop-goal-fit.js's hasLearningEvidence()
+    // (#793 STOP-GATE) recognizes it as satisfying the learning-gate requirement.
+    const _skipTs = opt(p, "timestamp", now());
+    const _skipSlug = taskSlugFor(dir, opt(p, "task-slug"));
+    const _skipActor = resolveReadActorKey(p);
+    const _skipExistingState = readBundleState(dir);
+    // Codex-review-hardened (#798): "learning-evidence-skip" is a RESERVED id. If a check
+    // with that id already exists and is not itself a skip-waiver, refuse — mergeChecksById
+    // is last-writer-wins and would destroy genuine evidence. Repeated skips supersede the
+    // gate-facing check but preserve every prior waiver in an append-only history so the
+    // audit trail (each reason, approver, recorder) survives.
+    const _skipPrior = (_skipExistingState.checks as any[]).find((c) => c && c.id === "learning-evidence-skip");
+    // Codex verify round 2: an existing check carrying an ORDINARY accepted-gap waiver is
+    // still genuine evidence — only a check stamped as a prior learning-skip may be
+    // superseded. Skip waivers are self-identified via _waiver.skip_learning below.
+    if (_skipPrior && !(_skipPrior._waiver && _skipPrior._waiver.skip_learning === true)) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" and is not a prior learning-skip waiver — resolve that collision instead of overwriting evidence');
+    const _skipHistory = [...(Array.isArray(_skipPrior?._waiver_history) ? _skipPrior._waiver_history : []), ...(_skipPrior?._waiver ? [_skipPrior._waiver] : [])];
+    const skipCheck = normalizeCheck({
+      id: "learning-evidence-skip",
+      kind: "external",
+      status: "not_verified",
+      summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
+      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor, skip_learning: true },
+      ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
+    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir), true);
+    const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
+    assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
+    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, approved by ${skipWaivedBy}, recorded by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
+  }
   const flow = opt(p, "flow-definition");
   // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).
   // Fires when the active flow's gate for prev.phase declares a route_back_policy
@@ -4787,9 +4993,9 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
 // is skipped gracefully (no error surfaced to the caller).
 
 /** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
-function resolveCommitSha(): string | null {
+function resolveCommitSha(projectRoot?: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execFileSync("git", ["rev-parse", "HEAD"], { ...(projectRoot ? { cwd: projectRoot } : {}), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -4810,11 +5016,20 @@ function resolveCommitSha(): string | null {
  *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
-export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+export type TrustCheckpointSealResult = {
+  checkpointPath: string;
+  attestationPath: string;
+  companionPath: string;
+  status: "signed" | "unsigned";
+  checkpointSha256: string;
+  bundleSha256: string;
+};
+
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<TrustCheckpointSealResult | null> {
   const bundlePath = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundlePath)) return null; // no bundle — skip gracefully
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return null; // Surface unavailable
 
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const report = surface.buildTrustReport(bundle as Record<string, unknown>);
@@ -4835,17 +5050,25 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     status,
     phase,
     sealed_at: sealedAt,
-    commit_sha: resolveCommitSha(),
+    commit_sha: resolveCommitSha(projectRoot),
     checkpoint,
   };
   writeJson(checkpointPath, envelope);
+
+  // Every seal owns a fresh, mutually-exclusive companion set. Removing all prior
+  // companions before signing prevents an old .sig/.intoto or pointer file from
+  // satisfying a later existence-only check when this attempt emits nothing.
+  for (const name of ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"]) {
+    fs.rmSync(path.join(dir, name), { force: true });
+  }
 
   // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
   // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
   // The .catch() at the call site already guards the parent command; this inner
   // catch is defense-in-depth so signing never propagates an error upward.
-  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
+  return await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
     process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
   });
 }
 
@@ -4874,11 +5097,11 @@ async function signCheckpointAttestation(
   surface: SurfaceModule,
   bundle: AnyObj,
   checkpointPath: string,
-): Promise<void> {
+): Promise<TrustCheckpointSealResult | null> {
   // Guard: both primitives must be present (consumed from Surface, never reimplemented).
   if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
     process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
-    return;
+    return null;
   }
 
   // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
@@ -4935,6 +5158,15 @@ async function signCheckpointAttestation(
   // in-toto statement ties it back to the checkpoint without breaking the digest.
   const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
   writeJson(attestationPath, attestation);
+  const companionPath = path.join(dir, String(attestation.path));
+  return {
+    checkpointPath,
+    attestationPath,
+    companionPath,
+    status: attestation.status as "signed" | "unsigned",
+    checkpointSha256: sha256hex,
+    bundleSha256: createHash("sha256").update(fs.readFileSync(path.join(dir, "trust.bundle"))).digest("hex"),
+  };
 }
 
 /**
@@ -5146,6 +5378,37 @@ export class RepoHeadMismatchError extends Error {
 }
 
 /**
+ * Distinct, identifiable error for a publish attempt against a `dir` with no `trust.bundle` to
+ * publish — NOT a generic Error, and NOT one of the three tiers above (shape/hold/head-mismatch),
+ * so every publishDelivery() call site keeps its existing distinguishing behavior. This is the
+ * FIFTH tier, but unlike the other four it is deliberately positioned BEFORE any of them run
+ * (there is nothing to check the shape/hold/ancestry of when there is no bundle at all) and is
+ * the one tier every internal auto-publish call site (advanceState/recordRelease/promote) is
+ * EXPECTED to keep tolerating as best-effort: none of those catch handlers name this class, so it
+ * falls through to their existing generic `[caller] WARNING: publish-delivery failed: ...` swallow
+ * exactly like any other non-distinguished failure did before this class existed — advance-state's
+ * release path and record-release's own fail-soft behavior (a session that was never sealed
+ * must not block a release write) are both unaffected.
+ *
+ * The direct `publish-delivery` CLI subcommand (`publishDeliveryCmd`) has no such catch, so this
+ * error propagates all the way to the process exit code — the fix this class exists for: prior to
+ * it, a missing trust.bundle made `publishDeliveryCmd` return silently with exit 0 and no output,
+ * which was the real-world footgun of passing the OUTPUT dir (`delivery/<name>`) instead of the
+ * session artifact dir (`.kontourai/flow-agents/<slug>`), or invoking publish against a session
+ * that was never sealed (seal-checkpoint/record-release never ran). Both root causes manifest
+ * identically here (there is no trust.bundle at `dir`), so one error/one message covers both.
+ */
+export class SessionNotPublishableError extends Error {
+  readonly code = "PUBLISH_DELIVERY_NO_TRUST_BUNDLE" as const;
+  readonly dir: string;
+  constructor(dir: string) {
+    super(`no trust.bundle at ${dir} — pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint`);
+    this.name = "SessionNotPublishableError";
+    this.dir = dir;
+  }
+}
+
+/**
  * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
  * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
  * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
@@ -5330,7 +5593,19 @@ export function runReconcilePreflight(
   // package.json trust-reconcile-verify tiers apply locally; a repo with neither and no
   // manifest source resolves to the same empty legacy fallback CI itself would in that case.
   const canonicalCommands = tr.resolveCanonicalCommands({ commands: [] }, repoRoot) ?? [];
-  const manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  // A delivery published from a repository must be checked against the same
+  // repository-owned manifest that hosted CI will resolve.  In particular, do
+  // not let an ambient TRUST_RECONCILE_MANIFEST make a locally invalid bundle
+  // appear publishable; CI intentionally does not inherit the caller's shell.
+  const ambientManifest = process.env.TRUST_RECONCILE_MANIFEST;
+  delete process.env.TRUST_RECONCILE_MANIFEST;
+  let manifestResolution: AnyObj;
+  try {
+    manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  } finally {
+    if (ambientManifest === undefined) delete process.env.TRUST_RECONCILE_MANIFEST;
+    else process.env.TRUST_RECONCILE_MANIFEST = ambientManifest;
+  }
   const manifestByCmd = new Map<string, AnyObj>();
   for (const e of manifestResolution.entries) manifestByCmd.set(tr.normalizeCmd(e.command), e);
 
@@ -5911,7 +6186,14 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * trust.checkpoint.intoto.json / trust.checkpoint.sig.json / trust.checkpoint.attestation.json
  * from the session artifact dir to <repoRoot>/delivery/<slug>/.
  *
- * Fail-soft on a missing bundle: if trust.bundle is absent, returns without throwing.
+ * Fail-CLOSED on a missing bundle: if trust.bundle is absent at `dir`, throws
+ * `SessionNotPublishableError` naming the path and the fix (pass the session artifact dir;
+ * build it with record-evidence then seal-checkpoint) — see that class's own doc comment for
+ * why this positively-identifiable error is safe for the internal auto-publish call sites
+ * (advanceState/recordRelease/promote) to keep tolerating as best-effort (none of their catch
+ * handlers name it, so it falls through to their existing generic WARNING-and-swallow, same as
+ * before this became a throw) while still making the direct `publish-delivery` CLI subcommand
+ * (which has no such catch) fail loudly with a non-zero exit instead of silently exiting 0.
  * Fail-CLOSED on repo-root resolution: repoRoot must be a real, resolved kits/ ancestor
  * (see findRepoRootFromDirStrict) — null (no ancestor found) skips the publish with a
  * visible warning instead of writing to whatever process.cwd() happens to be. This
@@ -5961,18 +6243,29 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * protection for that case relies on the shape-check and verify-hold gates above, which correctly
  * no-op (allow) when there is no git repo to inspect, same as this gate.
  *
- * There are now FOUR fail-closed/fail-soft TIERS in this function, and they must never be
- * conflated in prose or in a call site's catch handler: (1) fail-SOFT bundle absence /
- * repo-root resolution (silent no-op / visible warning, unchanged from before #356), (2)
+ * There are now FIVE fail-closed/fail-soft TIERS in this function, and they must never be
+ * conflated in prose or in a call site's catch handler: (0) fail-CLOSED bundle absence
+ * (`SessionNotPublishableError` — loud for the direct CLI, but still tolerated as best-effort
+ * WARNING by the internal auto-publish call sites since none of their catches name it), (1)
+ * fail-SOFT repo-root resolution (visible warning, unchanged from before #356), (2)
  * fail-CLOSED bundle shape (#356, `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293,
  * `NotFreshHolderError`), (4) fail-CLOSED repo-HEAD-vs-checkpoint mismatch (#413 Facet A,
  * `RepoHeadMismatchError`) — see this tier's own gate below for the undeterminable-shallow
- * carve-out. Tiers run in this fixed order (shape, then verify-hold, then HEAD-mismatch); a
- * bundle that fails an earlier tier throws that tier's error specifically, never a later one's.
+ * carve-out. Tiers run in this fixed order (bundle absence, then repo-root, then shape, then
+ * verify-hold, then HEAD-mismatch); a bundle that fails an earlier tier throws that tier's error
+ * specifically, never a later one's.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundleSrc)) {
+    // Fail-CLOSED (tier 0): see SessionNotPublishableError's own doc comment above for why this
+    // is safe for the internal auto-publish call sites to keep tolerating as best-effort while
+    // making the direct `publish-delivery` CLI subcommand fail loudly instead of silently exiting
+    // 0 with no output — the real-world footgun this fixes (wrong dir passed, or a session that
+    // was never sealed via record-evidence + seal-checkpoint).
+    process.stderr.write(`[publish-delivery] REFUSING to publish — no trust.bundle at ${dir}: pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint.\n`);
+    throw new SessionNotPublishableError(dir);
+  }
 
   if (!repoRoot) {
     process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/ seal. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
@@ -6037,14 +6330,17 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
     "trust.checkpoint.sig.json",
     "trust.checkpoint.attestation.json",
   ];
+  const copiedCompanions: string[] = [];
   for (const filename of companions) {
     const src = path.join(dir, filename);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(sessionDeliveryDir, filename));
+      copiedCompanions.push(filename);
     }
   }
 
-  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${sessionDeliveryDir} (per-session path, #379)\n`);
+  const writtenFiles = ["trust.bundle", ...copiedCompanions].join(", ");
+  process.stderr.write(`[publish-delivery] published ${writtenFiles} to ${sessionDeliveryDir} (per-session path, #379)\n`);
 }
 
 /**
@@ -6171,6 +6467,54 @@ function critiqueClean(dir: string): boolean {
     });
   }
   return false;
+}
+
+/**
+ * Read-only release-boundary freshness check for the public workflow facade.
+ * Reuses the canonical critique graph and workspace-snapshot validation rather
+ * than treating a newly stamped checkpoint as proof that older evidence covered
+ * the current source. A changed HEAD or worktree therefore requires canonical
+ * review and verification to be recorded again before delivery can be published.
+ */
+export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
+  const fail = (): never => {
+    throw new Error("workflow publish-delivery requires current canonical review and test verification evidence bound to the exact same source snapshot; re-run critique and verification after any HEAD or workspace change");
+  };
+  if (!evidenceClean(dir)) fail();
+  const bundle = loadTrustBundleForTrustMachinery(dir);
+  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
+  if (current.kind !== "git-worktree" || typeof current.head_sha !== "string") fail();
+  const critiqueClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "critique")
+    : [];
+  if (critiqueClaims.length === 0) fail();
+  const state = loadJson(path.join(dir, "state.json"));
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+    ? state.work_item_refs[0]
+    : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+  if (!graph.valid) fail();
+  const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+  if (!graph.live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return critique && critiqueIsSubstantivePass(critique)
+      && isDeepStrictEqual(critique.review_target?.workspace_snapshot, current);
+  })) fail();
+  const testsClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
+      && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
+      && claim.value === "pass" && claim.status === "verified")
+    : [];
+  if (testsClaims.length !== 1) fail();
+  const metadata = testsClaims[0]!.metadata as AnyObj;
+  const observed = metadata.observed_commands;
+  const expected = metadata.verification_workspace_snapshot;
+  if (!Array.isArray(observed) || observed.length === 0
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
+    || !expected || typeof expected !== "object" || Array.isArray(expected)
+    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  if (!isDeepStrictEqual(expected, current)) fail();
+  return structuredClone(current);
 }
 function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
@@ -7275,6 +7619,59 @@ export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
   return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
 }
 
+/**
+ * Single source of truth for the `help` command's listing — one short line per subcommand
+ * dispatched by main()'s switch below, in the SAME order as those `case` labels. `help` itself
+ * is intercepted before dispatch (see main()) and is not a switch case, so it is listed last and
+ * excluded when workflow-sidecar-help.test.mjs greps this file's own source for main()'s `case
+ * "...":` labels and asserts they match this array's other keys exactly — an added, removed, or
+ * renamed command that forgets to update this list fails that test rather than silently
+ * drifting out of sync with the real dispatcher.
+ */
+const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
+  ["ensure-session", "Create or resume a workflow session's artifact directory and state."],
+  ["current", "Print the current session pointer (active flow/step) for an artifact root."],
+  ["record-agent-event", "Append a JSONL agent-activity event for an artifact root."],
+  ["init-plan", "Write the initial plan/handoff artifact for a session."],
+  ["record-evidence", "Record a verification check (pass/fail/waived) into the trust bundle."],
+  ["record-gate-claim", "Record a workflow gate claim (e.g. human-approval) into the trust bundle."],
+  ["record-check", "Run a command, capture its output, and record it as evidence."],
+  ["promote", "Record a durable-residue promotion claim (or none) for a session."],
+  ["advance-state", "Advance a session's status/phase; auto-seals and publishes on delivery."],
+  ["record-critique", "Record a review critique verdict into the trust bundle."],
+  ["resolve-critique", "Resolve a pending critique (public workflow interface only)."],
+  ["import-critique", "Import an externally-authored critique into the trust bundle."],
+  ["record-release", "Record a release-readiness decision; auto-seals and publishes."],
+  ["record-learning", "Record a post-delivery learning/follow-up entry."],
+  ["dogfood-pass", "Run the dogfood self-check pass for an artifact root."],
+  ["gate-review", "Review outstanding gate blocks/misses for a session."],
+  ["render-trust-panel", "Render a human-readable trust panel from a trust bundle."],
+  ["trust-mcp", "Serve trust-bundle explanations over the MCP protocol."],
+  ["liveness", "Claim/heartbeat/release or inspect session liveness/holder status."],
+  ["claim", "Look up a claim's status, evidence, and how-to-verify guidance."],
+  ["resolve-slug", "Resolve a work-item reference to its deterministic session slug."],
+  ["fixture", "Write a test fixture state.json OUTSIDE declared artifact roots (write <dir> --from-json <file> | --malformed --content <string|@file>)."],
+  ["seal-checkpoint", "Seal a trust checkpoint snapshot for the current session state."],
+  ["publish-delivery", "Publish a session's trust bundle to the repo's committed delivery/ path."],
+  ["reconcile-preflight", "Run the same bundle shape check publish-delivery enforces, standalone."],
+  ["verify-hold", "Check whether the calling actor is the fresh holder of a subject."],
+  ["takeover-preflight", "Check whether a subject is safely takeable-over by a new actor."],
+  ["help", "Print this command list."],
+];
+
+function printHelp(): void {
+  const width = Math.max(...COMMAND_DESCRIPTIONS.map(([name]) => name.length));
+  const lines = [
+    "workflow-sidecar <command> [args...]",
+    "",
+    "Commands:",
+    ...COMMAND_DESCRIPTIONS.map(([name, description]) => `  ${name.padEnd(width)}  ${description}`),
+    "",
+    "Run `workflow-sidecar <command> --help` for per-command usage where supported.",
+  ];
+  console.log(lines.join("\n"));
+}
+
 export async function main(argv: string[] = process.argv.slice(2), authority?: symbol): Promise<number> {
   const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
@@ -7293,6 +7690,16 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     }
   }
   const p = parseArgs(_argvForParse);
+  // `help` / `--help` / `-h` as the command itself: print the command list and return, before
+  // any lock/artifact-dir resolution runs (this is not one of the dispatched subcommands, so it
+  // must never touch the filesystem — see workflow-sidecar-help.test.mjs's side-effect-free
+  // assertion). Scoped strictly to the top-level command position: a per-command `<cmd> --help`
+  // (e.g. reconcile-preflight/verify-hold/takeover-preflight already handle their own `--help`
+  // internally with tailored usage) is unaffected since those flags never reach `p.command`.
+  if (p.command === "help" || p.command === "--help" || p.command === "-h") {
+    printHelp();
+    return 0;
+  }
   if (!p.command) die("workflow-sidecar command is required");
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
@@ -7305,6 +7712,9 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   // immediately below and is scoped to the `whoami` action only: `liveness status` (a read path)
   // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
   // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
+  // #783: `fixture` writes only OUTSIDE declared artifact roots by contract, so it must not
+  // acquire (or create) a session lock inside any artifact root; lock-free like resolve-slug.
+  const isFixture = p.command === "fixture";
   const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
   // #320 AC1: `liveness verdict` is read-only and lock-free, exactly like `whoami` above — it
   // must never acquire the workflow-sidecar lock. Same bypass shape, scoped to the `verdict`
@@ -7312,7 +7722,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   const isLivenessVerdict = p.command === "liveness" && p.positional[0] === "verdict";
   const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami && !isLivenessVerdict)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict || isFixture) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
@@ -7320,7 +7730,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
@@ -7339,6 +7749,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
       case "resolve-slug": return resolveSlugCmd(p);
+      case "fixture": return fixtureCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       case "reconcile-preflight": return reconcilePreflightCmd(p);

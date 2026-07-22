@@ -40,6 +40,15 @@
 #      HEAD to compare against. The pre-existing "no checkpoint / no commit_sha -> allow"
 #      no-opinion case (already covered by TEST 1/2/5/6 above, which use bare mkdir -p repos with
 #      no checkpoint at all) stays exactly the same allow behavior.
+#  11. LOUD-DIRECT-CLI-NO-BUNDLE: the direct `publish-delivery` subcommand (unlike the internal
+#      auto-publish call sites record-release/advance-state/promote, which stay FAIL-SOFT per
+#      TEST 5 above) REFUSES loudly when the given dir has no trust.bundle -- non-zero exit, a
+#      diagnostic naming the path and the fix (record-evidence then seal-checkpoint), nothing
+#      copied to delivery/. This is the fix for the real-world footgun of passing the OUTPUT dir
+#      (delivery/<name>) instead of the session artifact dir (.kontourai/flow-agents/<slug>), or
+#      invoking publish-delivery against a session that was never sealed. Distinct from TEST 5:
+#      TEST 5 proves the INTERNAL record-release path stays soft; this proves the DIRECT CLI
+#      subcommand is now loud -- both are required, neither regresses the other.
 #
 # Deterministic, no model spend, self-cleaning.
 # Usage: bash evals/integration/test_publish_delivery.sh
@@ -350,10 +359,11 @@ FIXTURE6="$TMP/fixture6.json"
 write_bundle_to "$FIXTURE6" "node --version" "true"
 setup_session "$AROOT6" "$SLUG6" "$FIXTURE6"
 
-# Deliberately NO TRUST_RECONCILE_COMMANDS env var here — "node --version" resolves to no
-# manifest entry in this scratch repo (no run-baseline.sh/package.json manifest source
-# either), so the bundle is shape-invalid (not-run: command not in the reconcile manifest).
-shape_out=$(flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR6"   --repo-root "$REPO6" 2>&1)
+# An ambient manifest override must not authorize publication: hosted CI does not inherit
+# the publisher's shell, so "node --version" still resolves to no repository-owned manifest
+# entry in this scratch repo and the bundle remains shape-invalid.
+shape_out=$(TRUST_RECONCILE_MANIFEST='[{"id":"ambient-bypass","command":"node --version"}]' \
+  flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR6" --repo-root "$REPO6" 2>&1)
 shape_exit=$?
 
 if [[ $shape_exit -ne 0 ]]; then
@@ -668,6 +678,64 @@ fi
 # mismatchKind:"none" (the same "no opinion, allow" result as the genuinely no-checkpoint case) --
 # never the iteration-2 Fix 5 non-git-repo refuse arm, which this test's own removal proves is
 # gone.
+
+# ==== TEST 11: LOUD-DIRECT-CLI-NO-BUNDLE ============================
+# The direct `publish-delivery` subcommand must REFUSE loudly (non-zero exit, diagnostic naming
+# the path and the fix) when the given dir has no trust.bundle -- unlike the internal auto-publish
+# call sites (record-release/advance-state/promote), which TEST 5 above proves stay fail-soft.
+echo ""
+echo "=== TEST 11: LOUD-DIRECT-CLI-NO-BUNDLE ==="
+
+REPO11="$TMP/repo11"
+AROOT11="$REPO11/.flow-agents"
+SLUG11="pd-loud-no-bundle-test"
+SESSION_DIR11="$AROOT11/$SLUG11"
+mkdir -p "$REPO11/kits"
+
+# A session that was set up (ensure-session/init-plan/record-evidence/record-critique) but never
+# sealed -- no trust.bundle exists at the session dir, exactly the "never ran seal-checkpoint"
+# real-world root cause. Mirrors TEST 5 FAIL-SOFT's own setup: setup_session's record-evidence
+# call writes ITS OWN trust.bundle as a side effect (ADR 0010: bundle is the primary artifact),
+# so it must be removed afterward to genuinely simulate "no trust.bundle at this path".
+setup_session "$AROOT11" "$SLUG11" ""
+rm -f "$SESSION_DIR11/trust.bundle"
+if [[ -f "$SESSION_DIR11/trust.bundle" ]]; then
+  _fail "TEST 11 setup: expected no trust.bundle at $SESSION_DIR11, but one exists"
+else
+  _pass "TEST 11 setup: $SESSION_DIR11 genuinely has no trust.bundle"
+fi
+
+loud_out=$(flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR11" --repo-root "$REPO11" 2>&1)
+loud_exit=$?
+
+if [[ $loud_exit -ne 0 ]]; then
+  _pass "LOUD-DIRECT-CLI-NO-BUNDLE: publish-delivery exits non-zero for a missing trust.bundle"
+else
+  _fail "LOUD-DIRECT-CLI-NO-BUNDLE: expected non-zero exit, got 0 -- $loud_out"
+fi
+
+if echo "$loud_out" | grep -qF "$SESSION_DIR11"; then
+  _pass "LOUD-DIRECT-CLI-NO-BUNDLE: diagnostic names the session artifact dir path"
+else
+  _fail "LOUD-DIRECT-CLI-NO-BUNDLE: expected the session dir path in the diagnostic, got: $loud_out"
+fi
+
+if echo "$loud_out" | grep -q "record-evidence" && echo "$loud_out" | grep -q "seal-checkpoint"; then
+  _pass "LOUD-DIRECT-CLI-NO-BUNDLE: diagnostic names the next command (record-evidence then seal-checkpoint)"
+else
+  _fail "LOUD-DIRECT-CLI-NO-BUNDLE: expected next-command guidance (record-evidence/seal-checkpoint) in the diagnostic, got: $loud_out"
+fi
+
+if [[ ! -d "$REPO11/delivery/$SLUG11" ]]; then
+  _pass "LOUD-DIRECT-CLI-NO-BUNDLE: delivery/$SLUG11/ NOT created for a missing trust.bundle"
+else
+  _fail "LOUD-DIRECT-CLI-NO-BUNDLE: delivery/$SLUG11/ was created despite the missing trust.bundle"
+fi
+
+# Mutation-test note: this test passes ONLY because publishDelivery()'s missing-bundle branch was
+# changed from a silent `return` to `throw new SessionNotPublishableError(dir)` -- prior to that
+# fix, the direct CLI subcommand would have exited 0 with no output here, exactly the silent
+# footgun this test guards against.
 
 # ---- Summary ----
 echo ""

@@ -4,6 +4,8 @@
 
 This contract defines the provider-neutral vocabulary for selecting, planning, and handing off backlog work. It is the source shape for provider-backed workflows such as `pull-work`; provider-specific adapters map into this model without making GitHub, Jira, Linear, or any other provider the generic language.
 
+Native hosts should consume this vocabulary from `@kontourai/flow-agents` instead of hand-mirroring it: the package exports `workItemStatuses` (the ordered `WorkItemStatus` lifecycle array below) and the `WorkItem`, `SourceProvider`, and `BoardMembership` TypeScript interfaces from its library entry (`src/lib/work-item-vocabulary.ts`). The shipped JSON Schemas, including `backlog-provider-settings.schema.json` whose status enums this vocabulary summarizes, are also resolvable via the package's `./schemas/*` export subpath instead of `require.resolve` path math.
+
 ## Provider Roles
 
 - `WorkItemProvider`: supplies issue-like records that represent requested work, defects, chores, or decisions.
@@ -14,7 +16,7 @@ A single external system can implement both roles. For example, GitHub Issues is
 
 ## Work Item Shape
 
-Every provider-backed work item should preserve the stable fields below when the provider can supply them.
+Every provider-backed work item should preserve the stable fields below when the provider can supply them. `@kontourai/flow-agents` exports this shape as the `WorkItem` TypeScript interface (with `SourceProvider` and `BoardMembership` for the corresponding nested fields).
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -68,6 +70,168 @@ Pickup Probe drift outcomes:
 | `conflict_risk` | Changed files or active work overlap likely execution scope; require worktree, rebase, sequencing, or coordination before planning. |
 
 If a legacy work item lacks `planned_base_sha`, pickup Probe should record the gap and use current main plus provider history as the best available baseline instead of inventing certainty.
+
+## Mutations
+
+Selection and planning are read-only. Hosts that render boards (for example a Tasks board) also
+need provider-neutral **write-back**: transitioning a work item's status, updating a field, or
+posting a comment, without growing bespoke per-host sync logic. This section is the engine
+contract extension for that write-back (issue #776), owner-ratified alongside the read-only shape
+above. `@kontourai/flow-agents` exports the mutation types from its library entry
+(`src/lib/work-item-mutations.ts`), the same way it exports the read-only `WorkItem` vocabulary
+(`src/lib/work-item-vocabulary.ts`) — hosts should import these instead of hand-mirroring them.
+
+### Operations
+
+Three provider-neutral mutation operations cover the write-back surface a board host needs. Each
+is defined without assuming any one provider's representation:
+
+| Operation | Meaning | Payload |
+| --- | --- | --- |
+| `status_transition` | Move a work item to a different provider-neutral lifecycle status. | `{ to_status, to_status_raw? }` — `to_status` (and `base.status`, below) must be one of `workItemStatuses` (`src/lib/work-item-vocabulary.ts`, #775) and nothing looser; `to_status_raw` carries the provider's native status text when the caller already resolved one (e.g. a board column name), so the adapter does not have to re-derive it, but never substitutes for `to_status`. |
+| `field_update` | Set a single named field's value (a custom board field, or a mapped field such as `priority`/`size`/`risk`). | `{ field, value }` — `value` is a string, number, boolean, or `null` (`null` clears the field; see "GitHub Mutations" for how each adapter represents clearing and why the GitHub adapter rejects booleans). |
+| `comment` | Post a comment on the work item. | `{ body, idempotency_key? }` — see "Comment Idempotency" below. |
+
+A mutation request is a single provider-neutral shape regardless of operation:
+
+```json
+{
+  "schema_version": "1.0",
+  "operation": "status_transition",
+  "work_item_ref": { "id": "github:owner/repo#123", "owner": "owner", "repo": "repo", "number": 123 },
+  "base": { "status": "in_progress" },
+  "payload": { "to_status": "review" }
+}
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `schema_version` | yes | `"1.0"`. |
+| `operation` | yes | `status_transition`, `field_update`, or `comment`. |
+| `work_item_ref` | yes | The target work item's stable id (`WorkItem.id`) plus provider coordinates when known (`owner`, `repo`, `number`), matching the "Work Item Shape" `id` convention. The GitHub adapter additionally *requires* `owner`/`repo`/`number` and rejects rendering without them — see "Render Target Identity Guard". |
+| `base` | operation-dependent (see Conflict Policy) | The provider state the mutation was computed from — the write-side counterpart to `planned_base_ref`/`planned_base_sha`. |
+| `payload` | yes | The operation-specific payload from the table above. |
+
+A mutation result reports what actually happened, never a silent best-effort guess:
+
+| `status` | Meaning |
+| --- | --- |
+| `rendered` | The adapter produced the exact provider-native operation (e.g. `gh` argv) for the host to execute; the adapter itself did not execute it (see "Render, Don't Execute" below). |
+| `applied` | The adapter executed the mutation directly (only adapters with write access to their own storage, such as a local-file provider, return this). |
+| `conflict` | The declared `base` diverged from the provider's current observed state; nothing was rendered or applied (see Conflict Policy). |
+| `rejected` | The request was invalid for this provider/operation (e.g. an unresolvable field, a missing required `base`). |
+| `not_verified` | The adapter could not determine whether the mutation is safe to apply (e.g. no current observation was available to compare against `base`). |
+
+### Conflict Policy: Provider Wins, With Staleness Detection
+
+Two-way sync creates a clobber risk: an agent's mutation was computed against a snapshot of the
+work item that may no longer be current by the time it is applied (a human edited the board, or
+another agent already transitioned the status). This contract's policy is **provider wins, with
+staleness detection** — the same shape as "Planning Base And Drift" above, applied to mutations
+instead of planning scope:
+
+- Every mutation request carries the `base` state it was computed from — the minimum needed to
+  detect drift for that operation, not a full work-item snapshot.
+  - `status_transition` requires `base.status`: the status the caller last observed.
+  - `field_update` requires `base.field_values[payload.field]`: the value the caller last observed
+    for that specific field. A request missing its required `base` entry is `rejected` — mutating
+    without a declared base would defeat staleness detection, so this contract treats it as
+    invalid input rather than a permissive default.
+  - `comment` mutations are append-only and do not clobber concurrent state, so `base` is optional
+    for `comment`; a missing or stale `base` never blocks a comment.
+- Before rendering or applying, the adapter compares the request's `base` against the current
+  observed provider state for the same field. If they match, the mutation proceeds
+  (`rendered`/`applied`). If they diverge, the **current provider state wins**: the adapter returns
+  `conflict` with the observed value and does not clobber it. The caller must re-fetch current
+  state (the same remediation pickup Probe already asks for on scope drift) and recompute the
+  mutation before retrying.
+- This mirrors the read-side drift table's spirit (`no_material_drift` vs. `scope_drift` /
+  `conflict_risk`) but is deliberately a smaller, two-outcome vocabulary (`no conflict` /
+  `conflict`) scoped to a single field's before/after value, not the broader repository-scope drift
+  classification pickup Probe performs.
+
+#### GitHub Render-Time Caveat
+
+The staleness check above is only as strong as the gap between "when it ran" and "when the
+mutation actually takes effect." For the **local-file adapter** those are the same instant: the
+check and the write happen inside one `withSubjectLock`-serialized critical section (see "Render,
+Don't Execute"), so `applied` is an authoritative guarantee — nothing else could have changed the
+record in between. For the **GitHub adapter** they are NOT the same instant: `renderGithubMutation`
+only *renders* `gh` argv; a host executes it later, out of process, after an unbounded gap (human
+review, queued retry, network latency). Provider state can drift again in that gap. This contract
+is explicit rather than silently overselling a guarantee it cannot make: **the GitHub adapter's
+conflict check is advisory at render time only.** A `rendered` or `conflict` GitHub result carries
+`advisory: true` as a machine-readable marker of this (see "GitHub Mutations"). A host that needs a
+stronger guarantee must re-observe current state immediately before executing the rendered
+`gh_commands` and discard/re-render if it has drifted since; this contract does not itself add an
+execution-time precondition mechanism (e.g. a `gh` conditional-request equivalent), matching the
+deliberate, minimal scope this section already draws around #776.
+
+### Render, Don't Execute
+
+Mutation adapters keep the same render/execute split already established for GitHub write paths in
+this repository (`context/contracts/assignment-provider-contract.md`'s "Implementation Note", and
+`publish-change-helper.ts`): a GitHub mutation adapter is a **pure function** that renders the exact
+`gh` argv for a mutation and never shells out itself. The calling host executes the rendered argv
+(or declines to, on `conflict`/`rejected`) and is responsible for any retry/backoff. A provider
+adapter with its own direct storage access (for example a local-file backlog used by tracker-less
+repos and evals) may instead apply the mutation itself (`status: "applied"`) — the operation and
+conflict-policy vocabulary above is identical either way; only whether execution happens inside or
+outside the adapter differs. This is the deliberate, minimal scope for #776: an authenticated
+self-executing GitHub mutation path (mirroring `publish-change`'s Wave 2B `ChangeProvider`) is a
+distinct, larger trust decision this contract does not make.
+
+### Render Target Identity Guard
+
+Because rendering and executing are split across a trust boundary (see "Render, Don't Execute"), a
+mismatched render target is a confused-deputy risk, not just a bug: a caller could render a
+mutation carrying one work item's payload against a `target` that names a different repository,
+issue, or Projects v2 item — deliberately or by a stale-cache accident — and, without a check, the
+adapter would happily produce valid-looking `gh` argv against the WRONG work item. Every GitHub
+mutation adapter therefore validates, before rendering any command, that the render target's
+repository and number exactly match `request.work_item_ref`'s `owner`/`repo`/`number` (required for
+this reason — see the `work_item_ref` field table above). A mismatch, or a `work_item_ref` missing
+those coordinates entirely, returns `rejected` with a reason naming both the target and the
+declared ref; zero `gh_commands` are rendered. This check runs before the conflict check above and
+applies to all three operations, including `comment` (a redirected comment would land on the wrong
+issue too).
+
+### Comment Idempotency
+
+Comment mutations are **at-least-once**, not exactly-once, across every adapter in this contract: a
+retry after a timeout or a transport failure between rendering/applying and the caller learning the
+outcome can result in the same comment being posted twice, because there is no read-before-write
+staleness check to fall back on (`comment`'s `base` is optional and non-blocking — see the Conflict
+Policy above). A caller that needs to avoid duplicate comments supplies
+`payload.idempotency_key`; every adapter that receives one embeds it as a stable, greppable marker
+— `<!-- flow-agents:mutation-comment:<idempotency_key> -->` on its own line before the caller's
+body, mirroring `assignment-provider.ts`'s `claim_comment_marker` convention — in the
+rendered/applied comment body. The **local-file adapter** goes one step further and uses the marker
+itself: before appending, it scans the item's existing comments for one already carrying the same
+key and, if found, returns `applied` without appending a duplicate (a real, adapter-side dedupe,
+possible because the adapter has direct read access to prior comments). The **GitHub render
+adapter** cannot dedupe itself — it is a pure function with no access to the issue's existing
+comments — so the marker is instead the mechanism a HOST uses: search prior comments for the marker
+before executing a rendered comment mutation, and skip execution if it is already present.
+
+### Mutation Capability Flags
+
+A provider declares which mutation operations it supports separately from the read-only capability
+flags above (`issues`, `comments`, etc. describe reading, not writing):
+
+| Capability | Meaning |
+| --- | --- |
+| `status_transition` | Provider can move a work item to a different lifecycle status. |
+| `field_update` | Provider can set a named field's value. |
+| `comment` | Provider can post a comment. |
+
+`backlog-provider-settings.schema.json`'s optional `mutation_policy` declares `supported_operations`
+(this enum) plus `conflict_policy` (currently only `provider_wins_with_staleness_detection`, matching
+the policy above) and, for GitHub, which native surface a mutation targets:
+`status_transition_target` is `board_status_field` (a GitHub Projects v2 status field) or `labels`;
+`field_update_target` is `board_custom_field` (a GitHub Projects v2 custom field) or `labels`. Absent
+`mutation_policy`, no mutation capability is assumed; this keeps the addition additive to existing
+settings documents.
 
 ## Publish Change Shape
 
@@ -183,7 +347,7 @@ Capabilities are descriptive, not discovery settings. Provider settings and conf
 
 ## Status Guidance
 
-Adapters may keep the provider's original status in metadata, but workflow-facing status should be mapped to a small neutral category when possible:
+Adapters may keep the provider's original status in metadata, but workflow-facing status should be mapped to a small neutral category when possible. `@kontourai/flow-agents` exports this list as the ordered `workItemStatuses` array (and the `WorkItemStatus` type):
 
 - `todo`: known work that is not ready or started.
 - `ready`: scoped work that can be selected.
@@ -238,6 +402,29 @@ GitHub capability flags should reflect what the current token and project config
 | `evidence_refs` | Workflow sidecars, verification summaries, CI URLs, check run URLs, review artifacts, and release-readiness records linked from the pull request. |
 
 GitHub is the first adapter/example for publish-change. Core workflow text should still say `change_ref`, `provider_checks`, and `closing_reference_check` unless it is inside a GitHub mapping or example.
+
+### GitHub Mutations
+
+The GitHub mutation adapter renders `gh` argv and never executes it (see "Render, Don't Execute"
+above). Every rendered record carries `{ operation, status, work_item_ref, base_ref, gh_commands?,
+conflict?, advisory? }`, where `base_ref` is the `owner/repo#number` coordinate the argv targets and
+`gh_commands` (present only when `status` is `rendered`) is a JSON array of argv arrays — one
+element per `gh` argument, matching the `assignment-provider-contract.md` `gh_commands` execution
+contract: the host must run each entry as argv, never reconstruct or concatenate it into a shell
+string. `advisory: true` is present on `rendered`/`conflict` results for `status_transition`/
+`field_update` — see "GitHub Render-Time Caveat" above; it is never present on `comment` (no
+conflict check applies) or on `not_verified`/`rejected` (nothing was checked or matched).
+
+| Operation | Default GitHub representation | With `mutation_policy` project-field target |
+| --- | --- | --- |
+| `status_transition` | Swap a `status:<value>` label (remove the label for `base.status`, add the label for `payload.to_status`) — the same label-prefix convention `priority`/`size`/`risk` already use above. | `gh project item-edit --field-id <status field> --single-select-option-id <option>` against the configured GitHub Projects v2 item. |
+| `field_update` | Swap a `<field>:<value>` label the same way; `value: null` removes the label without adding a replacement (a clear, not a swap-to-empty-string). Boolean `value` is rejected (`status: "rejected"`) — neither labels nor a Projects v2 field has an unambiguous boolean representation here; callers that need one should model the field as a string (`"true"`/`"false"`) or a single-select option instead. | `gh project item-edit --field-id <field>` with `--text` or `--number` chosen from the payload value's type; `value: null` renders `--clear` (the field's actual clearing form) instead of a text/number flag. Boolean `value` is rejected the same as the labels case. |
+| `comment` | `gh issue comment <number> --repo <owner>/<repo> --body <text>`, where `<text>` is the idempotency-marker-prefixed body from "Comment Idempotency" when `payload.idempotency_key` is present. | Same — comments are not project-field-scoped. |
+
+A `conflict` result never renders `gh_commands` — the host receives the observed divergence instead
+and must re-fetch before retrying, per the Conflict Policy above. A `rejected` result (invalid
+shape, a render-target mismatch, or an unsupported value like a boolean `field_update`) also never
+renders `gh_commands`.
 
 ## Artifact References
 

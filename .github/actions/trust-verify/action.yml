@@ -18,10 +18,15 @@
 #   verify-command    [required]  Your comprehensive verify command (build + tests +
 #                                 lint). What the agent ran locally should match what
 #                                 this reruns in CI.
-#   bundle            [optional]  Path to the delivered trust.bundle (default:
-#                                 delivery/trust.bundle). Auto-discovered if present.
-#   fail-on-divergence [optional] Fail the job on any divergence (default: true).
-#                                 Set to false for observability-only mode.
+#   bundle            [optional]  Explicit path to the delivered trust.bundle. When
+#                                 omitted, the reconciler performs ownership-aware
+#                                 discovery across flat and per-session delivery paths.
+#   fail-on-divergence [deprecated] Accepted for caller compatibility but no longer
+#                                 weakens the gate. Use missing-bundle-policy for the
+#                                 narrow advisory-adoption case.
+#   missing-bundle-policy [optional] `required` fails when no current bundle or
+#                                 DECLARED exemption exists; `advisory` reports the
+#                                 missing evidence after fresh verification (default: required).
 #   sign              [optional]  Mint a signed in-toto attestation after a clean
 #                                 reconcile (default: false). Requires id-token: write.
 #   node-version      [optional]  Node.js version (default: 24).
@@ -46,8 +51,8 @@
 #
 # The agent publishes delivery/trust.bundle during the deliver skill. When that file
 # is present in the PR's checkout, this action reconciles per-command claimed passes
-# against fresh CI truth. When absent, only the fresh verify is enforced (fail-open
-# on bundle absence; fail-closed on divergence when the bundle is present).
+# against fresh CI truth. When absent, missing-bundle-policy selects required (the
+# fail-closed default) or advisory reporting after fresh verification passes.
 #
 # See docs/trust-anchor-adoption.md for the full adoption guide.
 
@@ -65,17 +70,25 @@ inputs:
     required: true
   bundle:
     description: >
-      Path to the delivered trust.bundle (relative to workspace root).
-      Auto-discovers delivery/trust.bundle if this input is not set.
+      Explicit path to the delivered trust.bundle (relative to workspace root).
+      Leave empty for ownership-aware discovery across legacy flat and per-session
+      delivery paths.
     required: false
-    default: "delivery/trust.bundle"
+    default: ""
   fail-on-divergence:
     description: >
-      Fail the job when divergence is detected (default: true). Set to false for
-      observability-only mode (the step still reports divergence but does not
-      fail the job).
+      Deprecated compatibility input. Divergence and fresh verification failures
+      always fail. Use missing-bundle-policy=advisory only to observe missing
+      delivery evidence during adoption.
     required: false
     default: "true"
+  missing-bundle-policy:
+    description: >
+      Policy when no bundle for the current change is present. `required` fails
+      closed unless a governed DECLARED exemption applies; `advisory` reports the
+      missing evidence without failing after fresh verification passes.
+    required: false
+    default: "required"
   sign:
     description: >
       Mint a signed in-toto attestation after a clean reconcile (default: false).
@@ -107,18 +120,21 @@ runs:
         ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
         npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
 
-    # Resolve the bundle path: use the input value if the file exists, otherwise
-    # pass an empty string (trust-reconcile.js auto-discovers or operates fail-open).
+    # Explicit caller paths remain explicit. When omitted, trust-reconcile.js owns
+    # discovery so its ownership, staleness, and prefer-newest checks cannot be bypassed
+    # by a wrapper converting an auto-discovered path into a trusted explicit path.
     - name: Trust verify
       id: trust-verify
       shell: bash
       env:
         VERIFY_COMMAND: ${{ inputs.verify-command }}
         BUNDLE_INPUT: ${{ inputs.bundle }}
-        FAIL_ON_DIVERGENCE: ${{ inputs.fail-on-divergence }}
+        MISSING_BUNDLE_POLICY: ${{ inputs.missing-bundle-policy }}
+        TRUST_RECONCILE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        TRUST_RECONCILE_EVENT: ${{ github.event_name }}
       run: |
-        # Resolve bundle path: use the input if the file exists, empty otherwise.
-        if [ -n "$BUNDLE_INPUT" ] && [ -f "$BUNDLE_INPUT" ]; then
+        if [ -n "$BUNDLE_INPUT" ]; then
+          echo "[trust-verify] using caller-selected delivery bundle: $BUNDLE_INPUT"
           BUNDLE_ARG="--bundle $BUNDLE_INPUT"
         else
           BUNDLE_ARG=""
@@ -129,13 +145,8 @@ runs:
         node "${{ github.action_path }}/../../../scripts/ci/trust-reconcile.js" \
           --commands "$VERIFY_COMMAND" \
           --repo-root "${{ github.workspace }}" \
-          $BUNDLE_ARG || {
-          code=$?
-          if [ "$FAIL_ON_DIVERGENCE" = "true" ]; then
-            exit $code
-          fi
-          echo "[trust-verify] divergence detected (fail-on-divergence=false — continuing)"
-        }
+          --missing-bundle-policy "$MISSING_BUNDLE_POLICY" \
+          $BUNDLE_ARG
 
     # Phase 2 (optional): mint a signed in-toto attestation over CI's own fresh results.
     # Only runs when sign=true and the trust-verify step passed.

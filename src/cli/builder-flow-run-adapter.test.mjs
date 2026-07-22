@@ -9,6 +9,12 @@ import {
   FLOW_RUN_EVIDENCE_MANIFEST_PATH,
   FLOW_RUN_REPORT_JSON_FILE,
   FLOW_RUN_STATE_FILE,
+  amendRunDefinition,
+  definitionDigest,
+  definitionIdentity,
+  flowRunHead,
+  pauseRun,
+  resumeRun,
   runDir,
   startRun,
 } from "@kontourai/flow";
@@ -16,6 +22,7 @@ import {
 import {
   BUILDER_BUILD_FLOW_ID,
   evaluateBuilderBuildRun,
+  loadBuilderBuildRun,
   startBuilderBuildRun,
 } from "../../build/src/builder-flow-run-adapter.js";
 
@@ -187,6 +194,20 @@ async function advanceParentPrefixThroughVerify(cwd, runId) {
   assert.equal(snapshotRun(cwd, runId).state.current_step, "verify", "sequential parent-prefix setup must reach verify");
 }
 
+async function advanceParentPrefixThroughExecute(cwd, runId) {
+  await startActiveRun(cwd, runId);
+  const steps = [
+    ["pull-work-gate", "builder.pull-work.selected", "work-item"],
+    ["design-probe-gate", "builder.design-probe.pickup-readiness", "work-item"],
+    ["design-probe-gate", "builder.design-probe.decisions", "decision"],
+    ["plan-gate", "builder.plan.implementation", "artifact"],
+  ];
+  for (const [gate, claimType, subjectType] of steps) {
+    await evaluateBuilderBuildRun({ cwd, runId, evidence: gateEvidence(cwd, { gate, claimType, subjectType, name: claimType }) });
+  }
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "execute", "sequential parent-prefix setup must reach execute");
+}
+
 test("start is creation-only and persists canonical id/version", async () => {
   const cwd = makeWorkspace();
   const runId = "start-creation-only";
@@ -195,15 +216,112 @@ test("start is creation-only and persists canonical id/version", async () => {
   const persisted = snapshotRun(cwd, runId);
 
   assert.equal(result.definitionId, BUILDER_BUILD_FLOW_ID);
-  assert.equal(result.definitionVersion, "1.1");
+  assert.equal(result.definitionVersion, "1.3");
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.1");
+  assert.equal(persisted.state.definition_version, "1.3");
   assert.equal(persisted.state.subject, SUBJECT);
   assert.equal(persisted.state.status, "active");
   assert.equal(persisted.state.current_step, "pull-work");
   assert.deepEqual(persisted.state.gate_outcomes, []);
   assert.deepEqual(persisted.state.transitions, []);
   assert.deepEqual(persisted.manifest.evidence, []);
+});
+
+test("a published 1.1 start definition amends through Flow to the exact packaged 1.3 successor", async () => {
+  const cwd = makeWorkspace();
+  const runId = "published-1-1-amendment";
+  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-3-reference", subject: SUBJECT })).definition;
+  const published = structuredClone(packaged);
+  published.version = "1.1";
+  delete published.gates["execute-gate"].on_route_back;
+  delete published.gates["execute-gate"].route_back_policy;
+  const publishedFile = path.join(cwd, "published-builder-build-1.1.json");
+  writeJson(publishedFile, published);
+
+  await startRun(publishedFile, { cwd, runId, params: { subject: SUBJECT } });
+  const before = readJson(runFile(cwd, runId, FLOW_RUN_STATE_FILE));
+  await amendRunDefinition(runId, {
+    cwd,
+    definition: packaged,
+    request: {
+      reason: "upgrade a published builder.build@1.1 run to the packaged 1.3 definition",
+      expected_run_head: flowRunHead(before),
+      expected_definition: definitionIdentity(published),
+      successor_digest: definitionDigest(packaged),
+      authority: {
+        kind: "user_request",
+        actor: "builder-flow-run-adapter-test",
+        request_ref: "test:published-1-1-amendment",
+        requested_at: FIXTURE_NOW,
+      },
+    },
+  });
+
+  const loaded = await loadBuilderBuildRun({ cwd, runId });
+  assert.deepEqual(loaded.startDefinition, published, "the old published start bytes remain immutable");
+  assert.deepEqual(loaded.definition, packaged, "the effective definition is the exact packaged successor");
+  assert.equal(loaded.definitionVersion, "1.3");
+  assert.equal(loaded.definitionDigest, definitionDigest(packaged));
+  assert.deepEqual(readJson(runFile(cwd, runId, "definition.json")), published, "Flow never overwrites the immutable origin");
+});
+
+test("a raw 1.2 amendment corrects append-only to the exact packaged 1.3 composition", async () => {
+  const cwd = makeWorkspace();
+  const runId = "raw-1-2-composition-correction";
+  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-3-correction-reference", subject: SUBJECT })).definition;
+  const published = structuredClone(packaged);
+  published.version = "1.1";
+  delete published.gates["execute-gate"].on_route_back;
+  delete published.gates["execute-gate"].route_back_policy;
+  const publishedFile = path.join(cwd, "published-builder-build-1.1.json");
+  writeJson(publishedFile, published);
+  await startRun(publishedFile, { cwd, runId, params: { subject: SUBJECT } });
+
+  const raw = readJson(BUILDER_BUILD_DEFINITION);
+  raw.version = "1.2";
+  const beforeRaw = snapshotRun(cwd, runId).state;
+  await amendRunDefinition(runId, {
+    cwd,
+    definition: raw,
+    request: {
+      reason: "record the previously accepted raw 1.2 successor",
+      expected_run_head: flowRunHead(beforeRaw),
+      expected_definition: definitionIdentity(published),
+      successor_digest: definitionDigest(raw),
+      authority: {
+        kind: "user_request",
+        actor: "builder-flow-run-adapter-test",
+        request_ref: "test:raw-1-2-amendment",
+        requested_at: FIXTURE_NOW,
+      },
+    },
+  });
+
+  const beforeCorrection = snapshotRun(cwd, runId).state;
+  await amendRunDefinition(runId, {
+    cwd,
+    definition: packaged,
+    request: {
+      reason: "correct the raw successor to the exact packaged composition",
+      expected_run_head: flowRunHead(beforeCorrection),
+      expected_definition: definitionIdentity(raw),
+      successor_digest: definitionDigest(packaged),
+      authority: {
+        kind: "user_request",
+        actor: "builder-flow-run-adapter-test",
+        request_ref: "test:packaged-1-3-correction",
+        requested_at: FIXTURE_NOW,
+      },
+    },
+  });
+
+  const loaded = await loadBuilderBuildRun({ cwd, runId });
+  assert.deepEqual(loaded.definition, packaged);
+  assert.equal(loaded.definitionVersion, "1.3");
+  assert.equal(loaded.state.definition_amendments.length, 2);
+  assert.equal(loaded.state.definition_amendments[0].successor_definition.version, "1.2");
+  assert.equal(loaded.state.definition_amendments[1].successor_definition.digest, definitionDigest(packaged));
+  assert.deepEqual(readJson(runFile(cwd, runId, "definition.json")), published);
 });
 
 test("verified evidence for another run subject is rejected before mutation", async () => {
@@ -217,6 +335,29 @@ test("verified evidence for another run subject is rejected before mutation", as
     runId,
     evidence: gateEvidence(cwd, { gate: "pull-work-gate", claimType: "builder.pull-work.selected", subjectType: "work-item", subjectId: FOREIGN_SUBJECT }),
   }), assertAdapterRejectedInput);
+
+  assertSnapshotUnchanged(before, snapshotRun(cwd, runId));
+});
+
+test("evidence attachment rejects a stale authorized run head without mutation", async () => {
+  const cwd = makeWorkspace();
+  const runId = "stale-authorized-head";
+  await startActiveRun(cwd, runId);
+  const authorizedHead = flowRunHead(snapshotRun(cwd, runId).state);
+  const authority = { kind: "user_request", actor: "builder-flow-run-adapter-test", request_ref: "test:stale-authorized-head", requested_at: FIXTURE_NOW };
+  await pauseRun(runId, { cwd, reason: "advance the canonical head", authority, at: "2026-07-09T20:00:01.000Z" });
+  await resumeRun(runId, { cwd, reason: "restore the active gate", authority, at: "2026-07-09T20:00:02.000Z" });
+  const before = snapshotRun(cwd, runId);
+
+  await assert.rejects(
+    () => evaluateBuilderBuildRun({
+      cwd,
+      runId,
+      expectedRunHead: authorizedHead,
+      evidence: gateEvidence(cwd, { gate: "pull-work-gate", claimType: "builder.pull-work.selected", subjectType: "work-item" }),
+    }),
+    /flow\.run_head\.stale/,
+  );
 
   assertSnapshotUnchanged(before, snapshotRun(cwd, runId));
 });
@@ -460,7 +601,7 @@ test("result identity comes from the persisted canonical run", async () => {
     assert.equal(result.definitionVersion, persisted.state.definition_version);
   }
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.1");
+  assert.equal(persisted.state.definition_version, "1.3");
 });
 
 test("failed verify evidence routes back only after sequential prefix advancement", async () => {
@@ -494,4 +635,45 @@ test("failed verify evidence routes back only after sequential prefix advancemen
   assert.equal(transition.from_step, "verify");
   assert.equal(transition.to_step, "execute");
   assert.deepEqual(transition.expectation_ids, ["tests-evidence"]);
+});
+
+test("failed execute evidence routes declared plan_gap to plan without replacing the run", async () => {
+  const cwd = makeWorkspace();
+  const runId = "execute-plan-gap";
+  await advanceParentPrefixThroughExecute(cwd, runId);
+  const before = snapshotRun(cwd, runId);
+
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "execute-gate",
+      claimType: "builder.execute.scope",
+      subjectType: "change",
+      status: "failed",
+      routeReason: "plan_gap",
+      expectationIds: ["implementation-scope"],
+    }),
+  });
+
+  const persisted = snapshotRun(cwd, runId);
+  const outcome = persisted.state.gate_outcomes.at(-1);
+  const transition = persisted.state.transitions.at(-1);
+  assert.equal(persisted.state.current_step, "plan");
+  assert.equal(persisted.state.status, "active");
+  assert.equal(persisted.state.subject, SUBJECT);
+  assert.equal(persisted.state.run_id, before.state.run_id);
+  assert.equal(outcome.gate_id, "execute-gate");
+  assert.equal(outcome.status, "route-back");
+  assert.equal(outcome.route_reason, "plan_gap");
+  assert.equal(outcome.route_back_to, "plan");
+  assert.equal(outcome.attempt, 1);
+  assert.equal(outcome.max_attempts, 3);
+  assert.equal(transition.type, "route_back");
+  assert.equal(transition.from_step, "execute");
+  assert.equal(transition.to_step, "plan");
+  assert.equal(transition.route_reason, "plan_gap");
+  assert.equal(transition.gate_id, "execute-gate");
+  assert.deepEqual(transition.expectation_ids, ["implementation-scope"]);
+  assert.equal(persisted.state.transitions.length, before.state.transitions.length + 1);
 });
