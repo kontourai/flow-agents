@@ -278,6 +278,19 @@ export {
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
 export {
+  createSurveyFlowGateAdapter,
+  continuePausedFlowGateFromSurvey,
+  SurveyFlowGateInputError,
+} from "./survey-flow-gate-adapter.js";
+export type {
+  ContinuePausedFlowGateFromSurveyInput,
+  ContinuePausedFlowGateFromSurveyResult,
+  ResolvedSurveyFlowGateReviewSession,
+  SurveyFlowGateAdapterDependencies,
+  SurveyFlowGateReviewSessionResolver,
+} from "./survey-flow-gate-adapter.js";
+
+export {
   deriveBuilderGateActionEnvelope,
   gateActionProgressSnapshot,
   withGateActionPriorProgress,
