@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-blocked",
+  "status": "blocked",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:00:00Z",
+  "next_action": {
+    "status": "blocked",
+    "summary": "Waiting on upstream API access."
+  }
+}

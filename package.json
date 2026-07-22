@@ -44,6 +44,7 @@
     "flow-agents-build-bundles": "build/src/cli.js",
     "flow-agents-capability-matrix": "build/src/cli.js",
     "flow-agents-console-learning-projection": "build/src/cli.js",
+    "flow-agents-console-process-projection": "build/src/cli.js",
     "flow-agents-context-map": "build/src/cli.js",
     "flow-agents-effective-backlog-settings": "build/src/cli.js",
     "flow-agents-effective-change-provider-settings": "build/src/cli.js",

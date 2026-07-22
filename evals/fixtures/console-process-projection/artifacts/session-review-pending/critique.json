@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-review-pending",
+  "status": "pending",
+  "required": true,
+  "updated_at": "2026-07-20T10:10:00Z",
+  "critiques": []
+}
