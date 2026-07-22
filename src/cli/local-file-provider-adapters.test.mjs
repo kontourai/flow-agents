@@ -221,3 +221,35 @@ test("createLocalFileMutationProvider exported from the package root entry is th
     assert.equal(result.status, "applied");
   });
 });
+
+test("CLI list filters on canonical actor_key for explicit-override records (#777 review regression)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const cli = path.resolve(here, "..", "..", "build", "src", "cli", "assignment-provider.js");
+  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fa3-cli-list-"));
+  // An explicit-override record whose stored actor_key deliberately diverges from
+  // serializeActor(actor) — the exact shape the pre-fix CLI list() failed to match.
+  const record = {
+    schema_version: "1.0",
+    role: "AssignmentClaimRecord",
+    subject_id: "fa3-regress-1",
+    actor: { runtime: "explicit-override", session_id: "sess-1", host: "host-1" },
+    actor_key: "explicit-override-canonical-key",
+    claimed_at: "2026-07-21T00:00:00Z",
+    ttl_seconds: 1800,
+    status: "claimed",
+    audit_trail: [],
+  };
+  fs.mkdirSync(path.join(artifactRoot, "assignment"), { recursive: true });
+  fs.writeFileSync(
+    path.join(artifactRoot, "assignment", "fa3-regress-1.json"),
+    `${JSON.stringify(record, null, 2)}\n`,
+  );
+  const out = execFileSync(
+    process.execPath,
+    [cli, "list", "--artifact-root", artifactRoot, "--provider", "local-file", "--actor", "explicit-override-canonical-key"],
+    { encoding: "utf8" },
+  );
+  assert.match(out, /fa3-regress-1/, "list --actor <canonical actor_key> must return the holder's subject");
+});

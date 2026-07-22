@@ -1251,7 +1251,9 @@ function listCommand(argv: string[]): number {
     for (const name of files) {
       const record = readJson(path.join(dir, name)) as AssignmentClaimRecord;
       if (record.status !== "claimed") continue;
-      if (actorFilter && loadActorIdentityHelper().serializeActor(record.actor) !== actorFilter) continue;
+      // #777 review: filter on the CANONICAL holder key (stored actor_key first, serialized
+      // actor as fallback) — explicit-override actors deliberately diverge between the two.
+      if (actorFilter && canonicalHolderActorKey(record) !== actorFilter) continue;
       subjectIds.push(record.subject_id);
     }
   } else if (provider === "github") {
@@ -1263,7 +1265,8 @@ function listCommand(argv: string[]): number {
     for (const issue of issues) {
       const assignment = githubAssignmentStatus(issue, labelName, marker);
       if (!assignment.record || assignment.record.status !== "claimed") continue;
-      if (actorFilter && loadActorIdentityHelper().serializeActor(assignment.record.actor) !== actorFilter) continue;
+      // #777 review: same canonical-key rule as the local-file branch above.
+      if (actorFilter && canonicalHolderActorKey(assignment.record) !== actorFilter) continue;
       subjectIds.push(assignment.record.subject_id);
     }
   } else {
