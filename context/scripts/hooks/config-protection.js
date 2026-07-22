@@ -642,7 +642,14 @@ function isJsonToolWriteShape(seg) {
         const t = tokens[j];
         if (!afterTerminator) {
           if (t === '--') { afterTerminator = true; continue; }
-          if (t === '--indent') { j++; continue; } // the only value-taking json.tool option
+          if (t === '--indent') {
+            // The only value-taking json.tool option. Its value must be a literal integer:
+            // an expansion-capable value ('--indent {1,2}') becomes multiple tokens at
+            // execution and shifts a later path into the outfile slot.
+            const v = tokens[j + 1];
+            if (typeof v !== 'string' || !/^[0-9]+$/.test(v)) return true;
+            j++; continue;
+          }
           if (NO_VALUE_OPTIONS.has(t)) continue;
           if (t.startsWith('-') && t !== '-') return true; // unrecognized option-like token: fail closed
         }
