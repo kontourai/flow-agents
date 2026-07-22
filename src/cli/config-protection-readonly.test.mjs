@@ -71,6 +71,28 @@ for (const [label, cmd] of bodyReadsNowBlocked) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// v2 verify finding 3 (end-to-end): json.tool's second positional operand is a write-capable
+// OUTFILE. The grammar refuses to fast-pass it AND the hook must BLOCK it (the `-c`-only
+// interpreter regex cannot see `-m` forms; isJsonToolWriteShape closes that fall-through).
+// ---------------------------------------------------------------------------
+
+test("json.tool outfile form targeting a protected path BLOCKS end-to-end", () => {
+  const res = runBash("python3 -m json.tool in.json .kontourai/flow-agents/slug/trust.bundle");
+  assert.equal(res.exitCode, 2, res.stderr);
+  assert.match(res.stderr, /json\.tool/);
+});
+
+test("json.tool outfile form via stdin operand targeting a protected path BLOCKS end-to-end", () => {
+  const res = runBash("python3 -m json.tool - delivery/trust.checkpoint.json");
+  assert.equal(res.exitCode, 2, res.stderr);
+});
+
+test("json.tool with a formatting option and a single input operand still ALLOWS end-to-end (read; not fast-passed, but not a write shape)", () => {
+  const res = runBash("python3 -m json.tool --indent 2 .kontourai/flow-agents/slug/state.json");
+  assert.equal(res.exitCode, 0, res.stderr);
+});
+
 test("blocked interpreter-write message names the read remediation (python3 -m json.tool)", () => {
   const res = runBash(`python3 -c "open('.kontourai/flow-agents/slug/state.json','w').write('{}')"`);
   assert.equal(res.exitCode, 2);
@@ -222,7 +244,15 @@ test("isProvablyReadOnlyCommand: grammar unit matrix", () => {
     `cd /tmp && python3 -m json.tool state.json`,
     // Length cap.
     `python3 -m json.tool ${"a/".repeat(300)}state.json`,
+    // Boundary characters outside the charset: tab, CRLF, non-ASCII whitespace.
+    `python3 -m json.tool\tstate.json`,
+    `python3 -m json.tool state.json\r`,
+    `python3 -m json.tool state.json`,
   ];
+  // Non-string inputs fail closed.
+  for (const bad of [null, undefined, 42, {}, ["cat x | python3 -m json.tool"]]) {
+    assert.equal(isProvablyReadOnlyCommand(bad, deps), false, `expected false for non-string input: ${String(bad)}`);
+  }
   for (const cmd of allow) {
     assert.equal(isProvablyReadOnlyCommand(cmd, deps), true, `expected ALLOW: ${cmd}`);
     // The grammar is self-contained under the charset gate: deps are accepted for call-site

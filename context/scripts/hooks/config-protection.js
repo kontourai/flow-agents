@@ -619,6 +619,31 @@ const INTERPRETER_WRITE_RE = new RegExp(
   '\\bsed\\s+-i\\b|\\bperl\\s+-e\\b'
 );
 
+// #799 v2 verify finding: `py -m json.tool <infile> <OUTFILE>` is a WRITE (json.tool's second
+// positional operand is an output file), but INTERPRETER_WRITE_RE only recognizes `-c` forms,
+// so the outfile shape previously fell through unblocked. Because this hook's own
+// READ_REMEDIATION_HINT advertises json.tool as the sanctioned read idiom, the write-capable
+// form of the advertised tool must be detected here — this is a correctness closure of the
+// #799 change itself, not new bar-raising surface (the read-only grammar already refuses to
+// fast-pass it; this makes the fall-through block instead of allow).
+const _PY_NAME_RE = new RegExp('^' + _PY_CMD + '[23]?$');
+function isJsonToolWriteShape(seg) {
+  const tokens = tokenize(seg);
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (_PY_NAME_RE.test(tokens[i]) && tokens[i + 1] === '-m' && tokens[i + 2] === 'json.tool') {
+      let operands = 0;
+      for (let j = i + 3; j < tokens.length; j++) {
+        const t = tokens[j];
+        if (t === '--indent') { j++; continue; } // the only value-taking json.tool option
+        if (t.startsWith('-') && t !== '-') continue; // flags ('-' alone is the stdin operand)
+        operands++;
+      }
+      return operands >= 2; // second positional operand is json.tool's write-capable outfile
+    }
+  }
+  return false;
+}
+
 /**
  * Protected-path token literals.  When any of these strings appears as a
  * literal substring of a segment that also matches INTERPRETER_WRITE_RE,
@@ -688,9 +713,12 @@ function checkInterpreterWriteToProtected(command, cwd) {
 
   const segments = splitSegments(command);
   for (const seg of segments) {
-    // Check interpreter pattern.
+    // Check interpreter pattern (plus the json.tool outfile write shape, which the `-c`-only
+    // regex cannot see -- see isJsonToolWriteShape above).
     const interpMatch = INTERPRETER_WRITE_RE.exec(seg);
-    if (!interpMatch) continue;
+    const jsonToolWrite = !interpMatch && isJsonToolWriteShape(seg);
+    if (!interpMatch && !jsonToolWrite) continue;
+    const matchLabel = interpMatch ? interpMatch[0].trim() : _PY_CMD + '3 -m json.tool <outfile form>';
 
     // Check for protected-path token literal in the same segment. #783 review F1: GLOBAL
     // kill-switch tokens (shell profiles, .claude settings) block on the segment match alone —
@@ -703,7 +731,7 @@ function checkInterpreterWriteToProtected(command, cwd) {
     for (const token of INTERPRETER_PROTECTED_TOKENS) {
       if (!segLower.includes(token.toLowerCase())) continue;
       if (INTERPRETER_GLOBAL_TOKENS.has(token) || commandChangesDirectory(command) || isCandidateWithinDeclaredRoots(token, cwd)) {
-        return `${interpMatch[0].trim()} with protected path token "${token}"`;
+        return `${matchLabel} with protected path token "${token}"`;
       }
     }
   }
