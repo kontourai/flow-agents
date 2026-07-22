@@ -21,6 +21,7 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
+import * as builderFlowRuntime from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
@@ -31,6 +32,7 @@ import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import * as workflowRuntime from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
@@ -171,6 +173,109 @@ const runtimeTestSeams = await loadRuntimeTestSeams();
 const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
 const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
 
+function currentGateVisitForTest(state, step) {
+  assert.equal(typeof builderFlowRuntime.currentGateVisit, "function", "the runtime must expose its canonical current-gate visit seam to internal CLI consumers");
+  return builderFlowRuntime.currentGateVisit(state, step);
+}
+
+test("current gate visit exposes the initial entry boundary", () => {
+  const enteredAt = "2026-07-09T20:00:00.000Z";
+  const visit = currentGateVisitForTest({ transitions: [], updated_at: enteredAt }, "pull-work");
+  assert.deepEqual(visit, { enteredAt: Date.parse(enteredAt), initial: true });
+});
+
+test("current gate visit uses the latest valid re-entry boundary", () => {
+  const firstEntry = "2026-07-09T20:00:00.000Z";
+  const latestEntry = "2026-07-09T22:00:00.000Z";
+  const visit = currentGateVisitForTest({
+    transitions: [
+      { to_step: "verify", at: firstEntry },
+      { to_step: "execute", at: "2026-07-09T21:00:00.000Z" },
+      { to_step: "verify", at: latestEntry },
+    ],
+    updated_at: "2026-07-09T23:00:00.000Z",
+  }, "verify");
+  assert.deepEqual(visit, { enteredAt: Date.parse(latestEntry), initial: false });
+});
+
+test("current gate visit ignores transitions into other steps", () => {
+  const initialEntry = "2026-07-09T20:00:00.000Z";
+  const visit = currentGateVisitForTest({
+    transitions: [{ to_step: "execute", at: "not-a-timestamp" }],
+    updated_at: initialEntry,
+  }, "verify");
+  assert.deepEqual(visit, { enteredAt: Date.parse(initialEntry), initial: true });
+});
+
+test("current gate visit rejects malformed or missing canonical boundary timestamps with a typed input error", () => {
+  for (const at of ["not-a-timestamp", undefined]) {
+    assert.throws(
+      () => currentGateVisitForTest({
+        transitions: [{ to_step: "verify", at }],
+        updated_at: "2026-07-09T20:00:00.000Z",
+      }, "verify"),
+      (error) => error?.name === "BuilderBuildRunInputError"
+        && error.code === "BUILDER_BUILD_RUN_INVALID_INPUT"
+        && error.field === "flow_run.state.transitions.at",
+    );
+  }
+});
+
+test("current gate visit rejects a missing canonical boundary with a typed input error", () => {
+  assert.throws(
+    () => currentGateVisitForTest({ transitions: [], updated_at: "not-a-timestamp" }, "verify"),
+    (error) => error?.name === "BuilderBuildRunInputError"
+      && error.code === "BUILDER_BUILD_RUN_INVALID_INPUT"
+      && error.field === "flow_run.state.updated_at",
+  );
+});
+
+function classifyCanonicalEvidenceAttachmentForTest(receipt, run, beforeEvidenceIds = new Set()) {
+  assert.equal(typeof workflowRuntime.classifyCanonicalEvidenceAttachment, "function", "workflow must expose the exact canonical receipt classifier to its internal tests");
+  return workflowRuntime.classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidenceIds);
+}
+
+test("canonical evidence receipt classifier accepts only one exactly bound live attachment", () => {
+  const enteredAt = "2026-07-09T20:00:00.000Z";
+  const recordedAt = "2026-07-09T20:01:00.000Z";
+  const attachedAt = "2026-07-09T20:02:00.000Z";
+  const receipt = {
+    runId: "receipt-run", subject: SUBJECT, gateId: "pull-work-gate", stepId: "pull-work",
+    expectedRunHead: "a".repeat(64), expectationIds: ["selected-work"], expectation: "selected-work",
+    visit: { enteredAt: Date.parse(enteredAt), initial: true }, recordedAt, digest: "b".repeat(64),
+    claimSubject: SUBJECT, claimStepId: "pull-work", claimExpectation: "selected-work", claimRunHead: "a".repeat(64),
+  };
+  const entry = {
+    id: "receipt-entry", gate_id: "pull-work-gate", sha256: "b".repeat(64), expectation_ids: ["selected-work"], attached_at: attachedAt,
+  };
+  const run = { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [entry] } };
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, run), "attached");
+
+  const cases = [
+    ["run", (value) => { value.runId = "other-run"; }],
+    ["gate", (value) => { value.manifest.evidence[0].gate_id = "other-gate"; }],
+    ["subject", (value) => { value.receipt.claimSubject = "local:work-item/other"; }],
+    ["step", (value) => { value.receipt.claimStepId = "other-step"; }],
+    ["run head", (value) => { value.receipt.claimRunHead = "c".repeat(64); }],
+    ["digest", (value) => { value.manifest.evidence[0].sha256 = "c".repeat(64); }],
+    ["recorded time", (value) => { value.receipt.recordedAt = "not-a-time"; }],
+    ["attached time", (value) => { value.manifest.evidence[0].attached_at = "not-a-time"; }],
+    ["before visit", (value) => { value.manifest.evidence[0].attached_at = "2026-07-09T19:59:00.000Z"; }],
+    ["subset expectations", (value) => { value.receipt.expectationIds = ["selected-work", "additional"]; }],
+    ["superset expectations", (value) => { value.manifest.evidence[0].expectation_ids = ["selected-work", "additional"]; }],
+    ["duplicate", (value) => { value.manifest.evidence.push({ ...value.manifest.evidence[0], id: "duplicate" }); }],
+    ["duplicate identifier", (value) => { value.manifest.evidence.push({ ...value.manifest.evidence[0] }); }],
+    ["superseded-only", (value) => { value.manifest.evidence[0].superseded_by = "later-entry"; }],
+    ["incomplete", (value) => { delete value.manifest.evidence[0].expectation_ids; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const value = { receipt: structuredClone(receipt), ...structuredClone(run) };
+    mutate(value);
+    assert.equal(classifyCanonicalEvidenceAttachmentForTest(value.receipt, value), "unknown", label);
+  }
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { ...run, manifest: { evidence: [] } }), "unattached", "only a clean empty new-entry set permits rollback");
+});
+
 async function loadRuntimeTestSeams() {
   const source = new URL("../../build/src/builder-flow-runtime.js", import.meta.url);
   const transient = new URL(`../../build/src/.builder-flow-runtime.test-seam-${process.pid}-${Date.now()}.mjs`, import.meta.url);
@@ -265,6 +370,108 @@ async function workflowJson(args) {
   assert.equal(output.length, 1, "workflow JSON command emits exactly one report");
   return JSON.parse(output[0]);
 }
+
+async function captureWorkflowPublicResult(args) {
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...values) => output.push(values.join(" "));
+  try {
+    return { rc: await workflowMain(args), output, error: null };
+  } catch (error) {
+    return { rc: null, output, error };
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+function assertPublicDiagnosticRedacted(result, sentinel, label) {
+  assert.doesNotMatch(`${result.output.join("\n")}\n${result.error ? String(result.error) : ""}`, new RegExp(sentinel), label);
+}
+
+test("public workflow evidence never echoes command or output sentinels in default diagnostics", async () => {
+  const sentinel = "FLOW_AGENTS_SECRET_SENTINEL_756";
+  const secretCommand = `sh -c 'printf ${sentinel}; exit 0'`;
+
+  const preflightSession = makeSession("public-evidence-redaction-preflight");
+  claimAmbientSessionAssignment(preflightSession);
+  await startBuilderFlowSession({ sessionDir: preflightSession.sessionDir });
+  const preflight = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", preflightSession.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+    "--command", `${sentinel} prose is not executable`, "--summary", "preflight redaction fixture",
+  ]);
+  assert.ok(preflight.error, "invalid command is rejected before writer execution");
+  assertPublicDiagnosticRedacted(preflight, sentinel, "preflight");
+
+  const writer = makeSession("public-evidence-redaction-writer");
+  claimAmbientSessionAssignment(writer);
+  await startBuilderFlowSession({ sessionDir: writer.sessionDir });
+  const writerFailure = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", writer.sessionDir, "--expectation", "selected-work", "--status", "pass",
+    "--command", `sh -c 'printf ${sentinel}; exit 1'`, "--summary", "writer redaction fixture",
+  ]);
+  assert.ok(writerFailure.error, "a requested pass still rejects a failed observed command");
+  assertPublicDiagnosticRedacted(writerFailure, sentinel, "writer failure");
+
+  const rollback = makeSession("public-evidence-redaction-rollback");
+  claimAmbientSessionAssignment(rollback);
+  await startBuilderFlowSession({ sessionDir: rollback.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ afterRecord: () => {
+    const state = readJson(path.join(rollback.sessionDir, "state.json"));
+    state.work_item_refs = ["local:work-item/redaction-rollback-mutation"];
+    writeJson(path.join(rollback.sessionDir, "state.json"), state);
+  } });
+  try {
+    const rolledBack = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", rollback.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "rollback redaction fixture",
+    ]);
+    assert.ok(rolledBack.error, "unattached mutation is rejected after rollback");
+    assertPublicDiagnosticRedacted(rolledBack, sentinel, "unattached rollback");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+
+  const jsonSession = makeSession("public-evidence-redaction-json");
+  claimAmbientSessionAssignment(jsonSession);
+  await startBuilderFlowSession({ sessionDir: jsonSession.sessionDir });
+  const jsonResult = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", jsonSession.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+    "--command", secretCommand, "--summary", "JSON redaction fixture", "--json",
+  ]);
+  assert.equal(jsonResult.error, null);
+  assertPublicDiagnosticRedacted(jsonResult, sentinel, "JSON success");
+
+  const committed = makeSession("public-evidence-redaction-committed");
+  claimAmbientSessionAssignment(committed);
+  await startBuilderFlowSession({ sessionDir: committed.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforeSidecarRead: () => { throw new Error("post-sync presentation fault"); } });
+  try {
+    const recovered = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", committed.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "committed recovery redaction fixture",
+    ]);
+    assert.equal(recovered.error, null);
+    assert.match(recovered.output.join("\n"), /No retry is required/);
+    assertPublicDiagnosticRedacted(recovered, sentinel, "committed recovery text");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+
+  const recoveryFailure = makeSession("public-evidence-redaction-recovery-failure");
+  claimAmbientSessionAssignment(recoveryFailure);
+  await startBuilderFlowSession({ sessionDir: recoveryFailure.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforeSidecarRead: () => fs.writeFileSync(path.join(recoveryFailure.sessionDir, "trust.bundle"), "{}\n") });
+  try {
+    const failedRecovery = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", recoveryFailure.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "recovery failure redaction fixture",
+    ]);
+    assert.ok(failedRecovery.error, "a failed committed recovery remains recovery-required");
+    assertPublicDiagnosticRedacted(failedRecovery, sentinel, "recovery failure");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
 
 test("shell output cannot spoof an executed-test count", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-count-"));
@@ -384,6 +591,50 @@ test("public workflow evidence preserves valid foreign command-log appends durin
   }
 });
 
+test("public workflow evidence isolates overlapping transaction observations and abort journals", async () => {
+  const sessions = [makeSession("public-evidence-overlap-a"), makeSession("public-evidence-overlap-b")];
+  for (const session of sessions) {
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  }
+  const priorTransactionId = process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID;
+  const delays = [30, 120];
+  const attempts = sessions.map((session, index) => {
+    const mutator = path.join(session.projectRoot, "mutate-after-observation.mjs");
+    fs.writeFileSync(mutator, `
+      import fs from "node:fs";
+      await new Promise((resolve) => setTimeout(resolve, ${delays[index]}));
+      const stateFile = ${JSON.stringify(path.join(session.sessionDir, "state.json"))};
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      state.work_item_refs = ["local:work-item/concurrent-mutation-${index}"];
+      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\\n");
+    `);
+    return workflowMain([
+      "evidence", "--session-dir", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--command", `${process.execPath} ${mutator}`,
+      "--summary", "concurrent transaction isolation fixture",
+    ]);
+  });
+  try {
+    const outcomes = await Promise.allSettled(attempts);
+    assert.ok(outcomes.every((outcome) => outcome.status === "rejected"), "each intentionally mutated session must roll back");
+    for (const session of sessions) {
+      const records = readCommandLog(path.join(session.sessionDir, "command-log.jsonl"));
+      const observation = records.find((record) => record.source === "canonical-writer-execution");
+      const abort = records.find((record) => record.transaction?.outcome === "aborted");
+      assert.ok(observation, "the transaction records its writer observation");
+      assert.ok(abort, "the transaction records its abort journal entry");
+      assert.equal(observation.writer.transaction_id, abort.transaction.id, "observation and abort marker retain only this invocation's transaction id");
+      assertValidCommandLogChain(records);
+    }
+    assert.equal(process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID, priorTransactionId, "no transaction id leaks into ambient process state");
+  } finally {
+    if (priorTransactionId === undefined) delete process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID;
+    else process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID = priorTransactionId;
+  }
+});
+
 test("public workflow evidence refuses recovery after session replacement or trust-file symlink", async () => {
   for (const mode of ["session-replacement", "trust-symlink"]) {
     const session = makeSession(`public-evidence-${mode}`);
@@ -418,23 +669,77 @@ test("public workflow evidence refuses recovery after session replacement or tru
   }
 });
 
-test("public workflow evidence classifies post-sync manifest, sidecar, and verdict-read faults", async () => {
-  for (const fault of ["manifest", "sidecar", "verdict"]) {
-    const session = makeSession(`public-evidence-post-sync-${fault}`);
+test("public workflow evidence refuses trust recovery directory swaps at unlink, rename, and fsync boundaries", async () => {
+  for (const boundary of ["unlink", "rename", "directory-fsync"]) {
+    const session = makeSession(`public-evidence-trust-${boundary}`);
     claimAmbientSessionAssignment(session);
     await startBuilderFlowSession({ sessionDir: session.sessionDir });
-    setWorkflowEvidenceTransactionTestHooksForTest(fault === "manifest" ? { beforePostconditions: () => { throw new Error("manifest fault"); } }
-      : fault === "sidecar" ? { beforeSidecarRead: () => { throw new Error("sidecar fault"); } }
-        : { beforeSidecarRead: () => { fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "{}\n"); } });
+    if (boundary !== "unlink") writeBundle(session.sessionDir, []);
+    const replaceSession = () => {
+      fs.renameSync(session.sessionDir, `${session.sessionDir}-parked`);
+      fs.mkdirSync(session.sessionDir);
+      fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), `${boundary} replacement sentinel\n`);
+    };
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterRecord: () => {
+        const state = readJson(path.join(session.sessionDir, "state.json"));
+        state.work_item_refs = [`local:work-item/trust-${boundary}-mutation`];
+        writeJson(path.join(session.sessionDir, "state.json"), state);
+      },
+      ...(boundary === "unlink" ? { beforeTrustUnlink: replaceSession }
+        : boundary === "rename" ? { beforeTrustRename: replaceSession }
+          : { beforeTrustDirectoryFsync: replaceSession }),
+    });
     try {
       await assert.rejects(
-        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "classify post-sync faults"]),
-        /recovery (is )?required/i,
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", `trust ${boundary} identity fixture`]),
+        /recovery required|identity changed/i,
       );
     } finally {
       setWorkflowEvidenceTransactionTestHooksForTest(undefined);
     }
+    assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), `${boundary} replacement sentinel\n`);
   }
+});
+
+test("public workflow evidence returns committed recovery without rollback after post-sync faults", async () => {
+  for (const fault of ["manifest", "sidecar"]) {
+    const session = makeSession(`public-evidence-post-sync-${fault}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(fault === "manifest" ? { beforePostconditions: () => { throw new Error("manifest fault"); } }
+      : { beforeSidecarRead: () => { throw new Error("sidecar fault"); } });
+    try {
+      const report = await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "classify post-sync faults"]);
+      assert.deepEqual(report.recovery, { committed: true, retry: "none" });
+      assert.equal(report.attached, true, "the successful recovery reports the committed attachment");
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), true, "a committed attachment is retained");
+      assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)).evidence.length, 1);
+      assert.equal(readCommandLog(path.join(session.sessionDir, "command-log.jsonl")).some((record) => record.transaction?.outcome === "aborted"), false, "committed recovery never journals an abort");
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  }
+});
+
+test("public workflow evidence leaves a committed attachment intact when recovery cannot complete", async () => {
+  const session = makeSession("public-evidence-post-sync-recovery-failure");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeSidecarRead: () => { fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "{}\n"); },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "force recovery failure"]),
+      (error) => /recovery required/i.test(String(error)) && !/retry/i.test(String(error)),
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), true, "committed evidence is never rolled back");
+  assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)).evidence.length, 1);
+  assert.equal(readCommandLog(path.join(session.sessionDir, "command-log.jsonl")).some((record) => record.transaction?.outcome === "aborted"), false);
 });
 
 test("pre-chain critique migration is deterministic and never rewrites legacy reviewer attribution", () => {

@@ -313,14 +313,22 @@ flow-agents workflow critique \
 ```
 
 Only the step skill declared for that Flow expectation should publish it.
-Command observations can downgrade a requested `pass`, but never upgrade or replace an
-explicit `fail` or `not_verified` verdict. The JSON result reports the persisted gate verdict
-separately from redacted command observations (ordinal, digest, exit code, and outcome), rather
-than echoing command text. If synchronization fails before canonical attachment, the public
-command restores only its transaction-owned `trust.bundle`. `command-log.jsonl` is append-only:
-it receives an abort marker instead of a whole-file rollback, preserving concurrent capture
-records. If the artifact/session directory identity changes or canonical attachment cannot be
-determined, destructive recovery is refused and the command reports recovery required.
+The requested gate verdict remains authoritative: a successful command never upgrades or replaces
+an explicit `fail` or `not_verified`; a failing or ambiguous command can prevent a requested
+`pass`. The JSON result reports that persisted gate verdict separately from redacted command
+observations (ordinal, command digest, exit code, output digest, and outcome), rather than
+echoing command text or command output. The same redaction applies to default command errors.
+
+If synchronization fails before canonical attachment, the public command restores only its
+transaction-owned `trust.bundle`. `command-log.jsonl` is append-only: it receives an abort marker
+instead of a whole-file rollback, preserving concurrent capture records. When the canonical
+attachment is absent, the caller can correct the reported problem and run the evidence command
+again. When attachment identity, session identity, or another canonical fact is uncertain,
+destructive recovery is refused and the command reports recovery required; inspect and recover
+the canonical workflow state before attempting another evidence command. When the attachment is
+proved committed and projection recovery succeeds, the command succeeds and reports committed
+recovery in JSON (`recovery.committed: true`, `recovery.retry: "none"`) and text (`No retry is
+required`); do not submit the evidence again.
 
 Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
 the default report does not echo command text, command arguments remain local evidence; use a

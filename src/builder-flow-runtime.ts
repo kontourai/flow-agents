@@ -1109,12 +1109,27 @@ export function mergeGateClaimsWithCritiqueHistory(
   return merged;
 }
 
-function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {
+/**
+ * Canonical boundary for the current visit to a Flow step.
+ *
+ * This is intentionally exported only from the internal runtime module so
+ * orchestration code can bind receipts to Flow's persisted transition history
+ * without reconstructing that history itself.
+ */
+export interface CurrentGateVisit {
+  enteredAt: number;
+  initial: boolean;
+}
+
+export function currentGateVisit(state: FlowRunState, step: string): CurrentGateVisit {
   let enteredAt: number | null = null;
   for (const transition of state.transitions ?? []) {
     if (transition.to_step !== step) continue;
     const parsed = parseTimestamp(transition.at);
-    if (parsed !== null) enteredAt = parsed;
+    if (parsed === null) {
+      throw new BuilderBuildRunInputError("flow_run.state.transitions.at", "must establish the current gate visit boundary");
+    }
+    enteredAt = parsed;
   }
   const initial = parseTimestamp(state.updated_at);
   if (enteredAt !== null) return { enteredAt, initial: false };

@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { composeGateVerdict, inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
@@ -15,6 +17,77 @@ function fixture(files) {
   }
   return root;
 }
+
+function writerAbortCapabilityForTest(directory) {
+  assert.equal(typeof workflowSidecar.createWriterTransactionAbortCapability, "function", "the abort journal must receive a pinned writer capability");
+  return workflowSidecar.createWriterTransactionAbortCapability(directory);
+}
+
+function appendTransactionAbortForTest(capability, transactionId = "transaction-test") {
+  assert.equal(typeof workflowSidecar.appendWriterTransactionAbort, "function");
+  return workflowSidecar.appendWriterTransactionAbort(capability, transactionId, "2026-07-22T19:00:00.000Z");
+}
+
+test("transaction abort journal safely appends to present and absent regular logs", () => {
+  for (const present of [false, true]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${present ? "present" : "absent"}-`));
+    const logFile = path.join(directory, "command-log.jsonl");
+    if (present) fs.writeFileSync(logFile, '{"source":"foreign"}\n');
+
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), `transaction-${present}`), true);
+    const records = fs.readFileSync(logFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const record = records.at(-1);
+    assert.deepEqual(record.transaction, { id: `transaction-${present}`, outcome: "aborted" });
+    assert.equal(record._chain.seq, 0);
+    if (!present) assert.equal(fs.statSync(logFile).mode & 0o777, 0o600);
+  }
+});
+
+test("transaction abort journal refuses non-regular log targets without modifying them", () => {
+  for (const kind of ["symlink", "fifo", "directory"]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${kind}-`));
+    const logFile = path.join(directory, "command-log.jsonl");
+    const outside = path.join(directory, "outside.log");
+    if (kind === "symlink") {
+      fs.writeFileSync(outside, "outside sentinel\n");
+      fs.symlinkSync(outside, logFile);
+    } else if (kind === "fifo") {
+      execFileSync("mkfifo", [logFile]);
+    } else {
+      fs.mkdirSync(logFile);
+    }
+
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), `transaction-${kind}`), false);
+    if (kind === "symlink") assert.equal(fs.readFileSync(outside, "utf8"), "outside sentinel\n");
+    else if (kind === "fifo") assert.equal(fs.lstatSync(logFile).isFIFO(), true);
+    else assert.equal(fs.lstatSync(logFile).isDirectory(), true);
+  }
+});
+
+test("transaction abort journal refuses create races and replaced session identities", () => {
+  const racedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-create-race-"));
+  const racedLog = path.join(racedDirectory, "command-log.jsonl");
+  assert.equal(typeof workflowSidecar.setWriterTransactionAbortTestHooksForTest, "function", "the abort journal exposes a deterministic create-race test hook");
+  workflowSidecar.setWriterTransactionAbortTestHooksForTest({ beforeExclusiveCreate: () => fs.writeFileSync(racedLog, "foreign race\n") });
+  try {
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(racedDirectory), "transaction-race"), false);
+  } finally {
+    workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
+  }
+  assert.equal(fs.readFileSync(racedLog, "utf8"), "foreign race\n");
+
+  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-replaced-root-"));
+  const sessionDir = path.join(artifactRoot, "session");
+  fs.mkdirSync(sessionDir);
+  const capability = writerAbortCapabilityForTest(sessionDir);
+  const parked = `${sessionDir}-parked`;
+  fs.renameSync(sessionDir, parked);
+  fs.mkdirSync(sessionDir);
+  const replacementLog = path.join(sessionDir, "command-log.jsonl");
+  fs.writeFileSync(replacementLog, "replacement sentinel\n");
+  assert.equal(appendTransactionAbortForTest(capability, "transaction-replaced"), false);
+  assert.equal(fs.readFileSync(replacementLog, "utf8"), "replacement sentinel\n");
+});
 
 test("explicit gate verdicts remain authoritative over successful and failing command observations", () => {
   const cases = [
