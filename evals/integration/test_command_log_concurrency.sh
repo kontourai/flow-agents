@@ -129,6 +129,49 @@ else
   _fail "persistent lock generation remains active or malformed: $lock_report"
 fi
 
+# ─── Test 2: permanent version fence excludes legacy writers and blocks bad generations ───
+echo ""
+echo "Test: permanent version fence serializes legacy/new writers and fails closed on malformed active state"
+
+# Use an isolated fixture so the assertion is about the protocol boundary rather
+# than the concurrent entries above. A new writer must establish a durable,
+# permanent base fence before immutable generations; legacy O_EXCL ownership then
+# cannot overlap it. Malformed fences and active crashed generations preserve the
+# log and return no authority with a visible blocked diagnostic.
+FENCE="$TMP/fence"
+mkdir -p "$FENCE"
+fence_result=$(node - "$ROOT" "$FENCE" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[2];
+const dir = process.argv[3];
+const chain = require(path.join(root, 'scripts/lib/command-log-chain.js'));
+const base = path.join(dir, 'command-log.jsonl.lock');
+const log = path.join(dir, 'command-log.jsonl');
+fs.writeFileSync(log, 'broken command-log bytes\n');
+const before = fs.readFileSync(log, 'utf8');
+const first = chain.acquireGenerationLock(base, { wait: false });
+if (!first) throw new Error('new writer could not establish a fence');
+if (!fs.existsSync(base)) throw new Error('missing permanent version fence at legacy lock pathname');
+const fence = JSON.parse(fs.readFileSync(base, 'utf8'));
+if (fence.protocol !== 'command-log-generation-fence-v1') throw new Error('malformed or wrong-version permanent fence');
+let legacyWon = false;
+try { fs.openSync(base, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600); legacyWon = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+if (legacyWon) throw new Error('legacy writer acquired base lock after new fence');
+chain.releaseGenerationLock(first);
+const highest = `${base}.1`;
+fs.writeFileSync(highest, JSON.stringify({ generation: 1, nonce: 'crashed', state: 'active' }) + '\n');
+if (chain.acquireGenerationLock(base, { wait: false }) !== null) throw new Error('crashed active generation was silently superseded');
+if (fs.readFileSync(log, 'utf8') !== before) throw new Error('blocked authority mutated command log');
+console.log('OK: visible recovery_required authority block');
+NODE
+)
+if [[ "$fence_result" == "OK: visible recovery_required authority block" ]]; then
+  _pass "permanent version fence excludes legacy overlap and blocks malformed/crashed generations without mutation"
+else
+  _fail "version-fence protocol failure: $fence_result"
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "command-log concurrency test passed."

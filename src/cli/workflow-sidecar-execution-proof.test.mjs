@@ -106,6 +106,25 @@ test("transaction abort journal refuses to extend a broken execution-proof chain
   assert.equal(fs.readFileSync(logFile, "utf8"), broken, "a broken chain remains untouched for explicit recovery");
 });
 
+test("transaction abort denial preserves malformed and gap command-log bytes exactly", () => {
+  const chained = { source: "postToolUse-capture", command: "true" };
+  chained._chain = {
+    seq: 0,
+    prevHash: commandLogChain.CHAIN_GENESIS,
+    hash: commandLogChain.computeChainHash(commandLogChain.CHAIN_GENESIS, chained),
+  };
+  for (const [name, raw] of [
+    ["malformed", `${JSON.stringify(chained)}\nnot json\n`],
+    ["mid-chain-gap", `${JSON.stringify(chained)}\n[]\n`],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-denied-${name}-`));
+    const logFile = path.join(directory, "command-log.jsonl");
+    fs.writeFileSync(logFile, raw);
+    assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), `transaction-denied-${name}`), false, `${name}: denied authority is fail closed`);
+    assert.equal(fs.readFileSync(logFile, "utf8"), raw, `${name}: denied authority leaves log bytes untouched`);
+  }
+});
+
 test("transaction abort journal refuses to extend a valid-hash non-benign fork", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-non-benign-fork-"));
   const logFile = path.join(directory, "command-log.jsonl");

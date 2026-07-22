@@ -336,17 +336,28 @@ projection or presentation step fails; successful recovery reports
 Do not submit that evidence again.
 
 For an existing canonical bundle, commit writes the verified candidate bytes only through the
-pinned original descriptor and refuses a changed pathname. For an absent canonical bundle,
-publish is only an atomic create-if-absent hard link from the retained candidate inode. `EEXIST`,
-`EXDEV`, unsupported hard links, inode/digest mismatch, NFS or other filesystem uncertainty, and
-directory-fsync uncertainty fail closed with no rename/copy fallback and no overwrite of a foreign
-target. Preserve both canonical and staged residue and perform explicit recovery.
+pinned original descriptor and refuses a changed pathname. For an absent canonical bundle, only
+an exact `lstat` result of `ENOENT` proves absence. The command then creates the canonical
+descriptor with `O_CREAT | O_EXCL | O_NOFOLLOW`, copies complete bytes from the pinned staged
+descriptor, and fsyncs, rereads, identity-checks, and parent-directory-fsyncs that new descriptor.
+`EEXIST`, a non-`ENOENT` absence error, short copy, inode/digest mismatch, filesystem uncertainty,
+or directory-fsync uncertainty fail closed: no rename, hard-link, overwrite, or removal of a
+foreign target is permitted. Once exclusive creation has succeeded, any later uncertainty retains
+both the staged candidate and reachable owned canonical residue, returns `recovery required` with
+no retry, and requires explicit recovery rather than rollback.
 
-Command-log serialization likewise leaves audit residue. Locks are persistent
-`command-log.jsonl.lock.<generation>` files whose highest valid generation must be durably
-`released` before the next generation can be acquired. Active, stale, malformed, or replaced
-highest generations are never stolen or deleted. There is no automatic lock-generation cleanup;
-retain them with the session until an explicit artifact-lifecycle action is appropriate.
+Command-log serialization likewise leaves audit residue. The legacy
+`command-log.jsonl.lock` pathname is a permanent versioned fence, created and validated
+exclusively with no-follow semantics and durable descriptor/parent checks before a generation can
+be acquired. Malformed, foreign, or wrong-version fence entries are never overwritten or removed.
+Behind the fence, persistent `command-log.jsonl.lock.<generation>` records serialize writers: the
+highest valid generation must be durably `released` before the next generation can be acquired.
+Active, malformed, stale, or replaced highest generations are never stolen, deleted, or
+automatically superseded. Ordinary capture denied append authority leaves the command log
+byte-for-byte unchanged and emits only a redacted diagnostic; transaction abort remains fail
+closed. There is no automatic crashed-generation recovery or lock cleanup; authenticated recovery
+of that state is explicitly `NOT_VERIFIED` and outside #756, so retain the residue until an
+explicit artifact-lifecycle action is appropriate.
 
 Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
 the default report does not echo command text, command arguments remain local evidence; use a

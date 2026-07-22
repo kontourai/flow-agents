@@ -139,6 +139,15 @@ test("persistent generation locks serialize the next generation without unlinkin
   const dir = tempSession(t);
   const base = path.join(dir, "command-log.jsonl.lock");
   const zero = chain.acquireGenerationLock(base);
+  assert.deepEqual(JSON.parse(fs.readFileSync(base, "utf8")), {
+    protocol: chain.GENERATION_FENCE_PROTOCOL,
+    version: chain.GENERATION_FENCE_VERSION,
+  }, "the legacy base pathname becomes a permanent versioned fence");
+  assert.throws(
+    () => fs.openSync(base, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600),
+    { code: "EEXIST" },
+    "a legacy O_EXCL writer cannot overlap the fenced generation writer",
+  );
   assert.equal(chain.releaseGenerationLock(zero), true);
   const one = chain.acquireGenerationLock(base);
   assert.equal(one.generation, 1);
@@ -150,6 +159,29 @@ test("persistent generation locks serialize the next generation without unlinkin
   assert.deepEqual(fs.readdirSync(dir).filter((name) => name.includes(".lock.")).sort(), [
     "command-log.jsonl.lock.0", "command-log.jsonl.lock.1", "command-log.jsonl.lock.2",
   ]);
+});
+
+test("malformed legacy-base entries fail closed without mutation or automatic takeover", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const foreign = "foreign legacy lock bytes\n";
+  fs.writeFileSync(base, foreign);
+  assert.equal(chain.acquireGenerationLock(base, { wait: false }), null);
+  assert.equal(fs.readFileSync(base, "utf8"), foreign);
+  assert.equal(fs.existsSync(`${base}.0`), false, "no generation is created behind an untrusted base entry");
+});
+
+test("canonical writer authority denial leaves a broken command log byte-identical", (t) => {
+  const dir = tempSession(t);
+  const log = path.join(dir, "command-log.jsonl");
+  const broken = `${JSON.stringify({
+    command: "npm test",
+    source: "postToolUse-capture",
+    _chain: { seq: 0, prevHash: "f".repeat(64), hash: "e".repeat(64) },
+  })}\n`;
+  fs.writeFileSync(log, broken);
+  appendWriterObservedCommands(dir, [{ command: "npm test", exit_code: 0, output_sha256: "a".repeat(64) }], NOW);
+  assert.equal(fs.readFileSync(log, "utf8"), broken, "denied append authority must not manufacture an unchained fallback");
 });
 
 test("append is fail-open: an unwritable session dir does not throw", () => {

@@ -600,8 +600,11 @@ export let workflowEvidenceTransactionTestHooks: {
   candidateWrite?: typeof fs.writeSync;
   beforeCandidateReread?: (descriptor: number) => void;
   beforeCandidateCommit?: () => void;
-  afterCandidateLink?: (canonicalFile: string) => void;
+  candidateCommitWrite?: typeof fs.writeSync;
+  beforeCanonicalCommitReread?: (descriptor: number) => void;
+  afterCanonicalCreate?: (canonicalFile: string) => void;
   beforeCandidateCommitDirectoryFsync?: () => void;
+  candidateResourceClose?: (resource: "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
   candidateResourceClosed?: (resource: "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
 } | undefined;
 export function setWorkflowEvidenceTransactionTestHooksForTest(hooks: typeof workflowEvidenceTransactionTestHooks): void {
@@ -644,6 +647,7 @@ async function withStagedWorkflowEvidenceCandidate<T>(
   let candidateDirectory = "";
   let candidateFile = "";
   let abortCapability: WriterTransactionAbortCapability | null = null;
+  let primaryError: unknown = null;
   try {
     const artifactRoot = path.dirname(sessionDir);
     artifactDescriptor = openStableDirectoryDescriptor(artifactRoot, "artifact root");
@@ -651,15 +655,22 @@ async function withStagedWorkflowEvidenceCandidate<T>(
     sessionDescriptor = openStableDirectoryDescriptor(sessionDir, "session directory");
     workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("session-directory");
 
+    const canonical = path.join(sessionDir, "trust.bundle");
     try {
-      const canonical = path.join(sessionDir, "trust.bundle");
+      const current = fs.lstatSync(canonical);
+      if (current.isSymbolicLink() || !current.isFile()) {
+        throw new StagedEvidenceSetupRecoveryRequiredError("workflow evidence canonical trust entry is present or uncertain; no retry is required");
+      }
       trustDescriptor = fs.openSync(canonical, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
       const stat = fs.fstatSync(trustDescriptor);
-      if (!stat.isFile()) throw new Error("workflow evidence canonical trust snapshot must be a regular file");
+      if (!stat.isFile() || stat.dev !== current.dev || stat.ino !== current.ino) throw new StagedEvidenceSetupRecoveryRequiredError("workflow evidence canonical trust identity is uncertain; no retry is required");
       trustIdentity = { dev: stat.dev, ino: stat.ino };
       trustBytes = readDescriptorBytes(trustDescriptor);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (error instanceof StagedEvidenceSetupRecoveryRequiredError) throw error;
+        throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence canonical trust presence is uncertain; no retry is required: ${errorMessage(error)}`);
+      }
       trustDescriptor = null;
     }
     workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("trust-snapshot");
@@ -715,18 +726,47 @@ async function withStagedWorkflowEvidenceCandidate<T>(
       },
     });
   } catch (error) {
+    primaryError = error;
     if (candidateDirectory && abortCapability) {
       const aborted = appendWriterTransactionAbort(abortCapability, transactionId, new Date().toISOString());
       if (!aborted) throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence staged setup failed and its correlated abort could not be persisted: ${errorMessage(error)}`);
     }
     throw error;
   } finally {
-    if (candidateDescriptor !== null) { fs.closeSync(candidateDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("candidate-file"); }
-    if (candidateDirectoryDescriptor !== null) { fs.closeSync(candidateDirectoryDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("candidate-directory"); }
-    if (trustDescriptor !== null) { fs.closeSync(trustDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("trust-snapshot"); }
-    if (sessionDescriptor !== null) { fs.closeSync(sessionDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("session-directory"); }
-    if (artifactDescriptor !== null) { fs.closeSync(artifactDescriptor); workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.("artifact-directory"); }
+    const cleanupFailures = closeCandidateResources([
+      [candidateDescriptor, "candidate-file"],
+      [candidateDirectoryDescriptor, "candidate-directory"],
+      [trustDescriptor, "trust-snapshot"],
+      [sessionDescriptor, "session-directory"],
+      [artifactDescriptor, "artifact-directory"],
+    ]);
+    if (cleanupFailures.length > 0 && primaryError === null) {
+      throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence cleanup uncertainty requires recovery; no retry is required (${cleanupFailures.join(", ")})`);
+    }
+    if (cleanupFailures.length > 0 && primaryError !== null) {
+      process.stderr.write("[workflow evidence] cleanup uncertainty retained recovery residue after the primary outcome\n");
+    }
   }
+}
+
+type CandidateResourceName = "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory";
+
+/** Close every acquired descriptor even when a prior close is uncertain. */
+function closeCandidateResources(resources: readonly (readonly [number | null, CandidateResourceName])[]): CandidateResourceName[] {
+  const failures: CandidateResourceName[] = [];
+  for (const [descriptor, resource] of resources) {
+    if (descriptor === null) continue;
+    try {
+      workflowEvidenceTransactionTestHooks?.candidateResourceClose?.(resource);
+      fs.closeSync(descriptor);
+    } catch {
+      failures.push(resource);
+    } finally {
+      try { workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.(resource); }
+      catch { if (!failures.includes(resource)) failures.push(resource); }
+    }
+  }
+  return failures;
 }
 
 function openStableDirectoryDescriptor(directory: string, label: string): number {
@@ -748,7 +788,10 @@ function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, 
   workflowEvidenceTransactionTestHooks?.beforeCandidateCommit?.();
   const candidateBytes = readDescriptorBytes(candidate.descriptor);
   const digest = createHash("sha256").update(candidateBytes).digest("hex");
-  if (digest !== candidate.digest) throw new Error("workflow evidence candidate bytes changed before commit");
+  const candidateStat = fs.fstatSync(candidate.descriptor);
+  if (!candidateStat.isFile() || candidateStat.dev !== candidate.identity.dev || candidateStat.ino !== candidate.identity.ino || digest !== candidate.digest) {
+    throw new Error("workflow evidence candidate descriptor identity or bytes changed before commit");
+  }
   if (candidate.baseline.exists) {
     assertCanonicalBaselineUnchanged(candidate, canonicalFile);
     const descriptor = candidate.baseline.descriptor!;
@@ -762,17 +805,32 @@ function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, 
       throw new Error("workflow evidence canonical trust pathname changed during pinned-descriptor commit");
     }
   } else {
-    try { fs.linkSync(candidate.file, canonicalFile); }
-    catch (error) { throw new Error(`workflow evidence candidate create-if-absent commit failed without replacing canonical trust: ${errorMessage(error)}`); }
-    workflowEvidenceTransactionTestHooks?.afterCandidateLink?.(canonicalFile);
-    const current = fs.lstatSync(canonicalFile);
-    if (current.isSymbolicLink() || !current.isFile() || current.dev !== candidate.identity.dev || current.ino !== candidate.identity.ino) {
-      throw new Error("workflow evidence candidate hard-link commit did not preserve staged inode identity");
-    }
-    const canonicalDescriptor = fs.openSync(canonicalFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    assertCanonicalAbsent(canonicalFile);
+    let canonicalDescriptor: number | null = null;
     try {
-      if (!readDescriptorBytes(canonicalDescriptor).equals(candidateBytes)) throw new Error("workflow evidence hard-linked canonical bytes do not match the staged candidate");
-    } finally { fs.closeSync(canonicalDescriptor); }
+      canonicalDescriptor = fs.openSync(canonicalFile, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+      const canonicalIdentity = descriptorIdentity(canonicalDescriptor, "workflow evidence exclusively-created canonical trust");
+      workflowEvidenceTransactionTestHooks?.afterCanonicalCreate?.(canonicalFile);
+      writeDescriptorFully(canonicalDescriptor, candidateBytes, workflowEvidenceTransactionTestHooks?.candidateCommitWrite);
+      fs.ftruncateSync(canonicalDescriptor, candidateBytes.length);
+      fs.fsyncSync(canonicalDescriptor);
+      workflowEvidenceTransactionTestHooks?.beforeCanonicalCommitReread?.(canonicalDescriptor);
+      assertCanonicalDescriptorBytes(canonicalDescriptor, canonicalIdentity, candidateBytes, candidate.digest, canonicalFile);
+      assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
+      const session = fs.fstatSync(candidate.sessionDescriptor);
+      if (!session.isDirectory() || session.dev !== candidate.sessionIdentity.dev || session.ino !== candidate.sessionIdentity.ino) {
+        throw new Error("workflow evidence pinned session directory changed before candidate commit durability");
+      }
+      workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
+      fs.fsyncSync(candidate.sessionDescriptor);
+      assertCanonicalDescriptorBytes(canonicalDescriptor, canonicalIdentity, candidateBytes, candidate.digest, canonicalFile);
+      assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
+    } catch (error) {
+      throw new Error(`workflow evidence exclusively-created canonical commit requires recovery without retry: ${errorMessage(error)}`);
+    } finally {
+      if (canonicalDescriptor !== null) fs.closeSync(canonicalDescriptor);
+    }
+    return;
   }
   workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
   const session = fs.fstatSync(candidate.sessionDescriptor);
@@ -784,7 +842,7 @@ function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, 
 
 function assertCanonicalBaselineUnchanged(candidate: StagedWorkflowEvidenceContext, canonicalFile: string): void {
   if (!candidate.baseline.exists) {
-    if (fs.existsSync(canonicalFile)) throw new Error("workflow evidence canonical trust appeared after absent baseline");
+    assertCanonicalAbsent(canonicalFile);
     return;
   }
   const identity = candidate.baseline.identity!;
@@ -798,10 +856,43 @@ function assertCanonicalBaselineUnchanged(candidate: StagedWorkflowEvidenceConte
   }
 }
 
-function writeDescriptorFully(descriptor: number, bytes: Buffer): void {
+function assertCanonicalAbsent(canonicalFile: string): void {
+  try {
+    fs.lstatSync(canonicalFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new Error(`workflow evidence canonical trust absence is uncertain: ${errorMessage(error)}`);
+  }
+  throw new Error("workflow evidence canonical trust appeared after absent baseline");
+}
+
+function descriptorIdentity(descriptor: number, label: string): { dev: number; ino: number } {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile()) throw new Error(`${label} is not a regular descriptor`);
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function assertCanonicalPathIdentity(canonicalFile: string, identity: { dev: number; ino: number }): void {
+  const current = fs.lstatSync(canonicalFile);
+  if (current.isSymbolicLink() || !current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+    throw new Error("workflow evidence canonical trust pathname changed after exclusive creation");
+  }
+}
+
+function assertCanonicalDescriptorBytes(descriptor: number, identity: { dev: number; ino: number }, expected: Buffer, expectedDigest: string, canonicalFile: string): void {
+  const current = descriptorIdentity(descriptor, "workflow evidence canonical trust");
+  if (current.dev !== identity.dev || current.ino !== identity.ino) throw new Error("workflow evidence canonical trust descriptor identity changed after exclusive creation");
+  const bytes = readDescriptorBytes(descriptor);
+  if (!bytes.equals(expected) || createHash("sha256").update(bytes).digest("hex") !== expectedDigest) {
+    throw new Error("workflow evidence canonical trust reread did not match the staged candidate bytes");
+  }
+  assertCanonicalPathIdentity(canonicalFile, identity);
+}
+
+function writeDescriptorFully(descriptor: number, bytes: Buffer, write: typeof fs.writeSync = fs.writeSync): void {
   let offset = 0;
   while (offset < bytes.length) {
-    const count = fs.writeSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    const count = write(descriptor, bytes, offset, bytes.length - offset, offset);
     if (!Number.isSafeInteger(count) || count <= 0) throw new Error("workflow evidence canonical trust write returned zero or invalid byte count");
     offset += count;
   }

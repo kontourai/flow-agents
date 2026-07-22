@@ -277,6 +277,35 @@ else
   _fail "T4: spurious integrity warning for legacy log: $gate4_out"
 fi
 
+# ─── Test 5: denied append authority must not write a fallback record ───────────────
+echo ""
+echo "Test 5: broken chained log denies capture append authority without changing log bytes"
+
+T5="$TMP/t5"; seed_repo "$T5" t5
+write_chained_log "$T5" t5
+LOG5="$T5/.kontourai/flow-agents/t5/command-log.jsonl"
+python3 - "$LOG5" << 'PY'
+import json, sys
+lines = [line for line in open(sys.argv[1]).read().splitlines() if line]
+entry = json.loads(lines[-1])
+entry['_chain']['hash'] = '0' * 64
+lines[-1] = json.dumps(entry)
+open(sys.argv[1], 'w').write('\n'.join(lines) + '\n')
+PY
+cp "$LOG5" "$LOG5.before"
+capture_t5_err=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm run denied-authority"},"tool_response":{"exitCode":0}}' "$T5" \
+  | node "$CAPTURE" 2>&1 >/dev/null)
+if cmp -s "$LOG5.before" "$LOG5"; then
+  _pass "T5: denied append authority preserves the broken command log byte-for-byte"
+else
+  _fail "T5: denied append authority changed command-log.jsonl (unchained fallback is forbidden)"
+fi
+if echo "$capture_t5_err" | grep -q "append authority unavailable; log left unchanged"; then
+  _pass "T5: denied append authority emits a redacted visible diagnostic"
+else
+  _fail "T5: denied append authority did not emit the visible redacted diagnostic"
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""
 if [[ "$errors" -eq 0 ]]; then

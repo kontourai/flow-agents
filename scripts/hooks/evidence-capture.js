@@ -332,25 +332,24 @@ function run(rawInput) {
     // The hook fails open without modifying the log.
     const lockFile = logFile + '.lock';
     const lock = acquireGenerationLock(lockFile, { wait: true, attempts: 2000, retryMs: 5 });
-    if (lock === null) return rawInput;
+    if (lock === null) {
+      process.stderr.write('[evidence-capture] command-log append authority unavailable; log left unchanged\n');
+      return rawInput;
+    }
     try {
-      // Hash-chain integrity: compute _chain before appending. Fail-open: any
-      // error in chain computation falls back to the plain record (no _chain).
-      // A chain failure must NEVER block capture or corrupt the log.
-      let recordToWrite = record;
-      try {
-        let raw = '';
-        try { raw = fs.readFileSync(logFile, 'utf8'); } catch {}
-        const authority = verifyCommandLogRaw(raw).append;
-        if (!authority) throw new Error('command-log has no safe append authority');
-        const { seq: prevSeq, hash: prevHash } = authority;
-        const seq = prevSeq + 1;
-        const hash = computeChainHash(prevHash, record);
-        // Spread record fields then add _chain so the chain field is appended last
-        // (cosmetic ordering; canonicalJsonForChain excludes it during hashing).
-        recordToWrite = { ...record, _chain: { seq, prevHash, hash } };
-      } catch { /* chain computation failed — write plain record, do not block */ }
-
+      let raw = '';
+      try { raw = fs.readFileSync(logFile, 'utf8'); } catch {}
+      const authority = verifyCommandLogRaw(raw).append;
+      if (!authority) {
+        process.stderr.write('[evidence-capture] command-log append authority unavailable; log left unchanged\n');
+        return rawInput;
+      }
+      const { seq: prevSeq, hash: prevHash } = authority;
+      const seq = prevSeq + 1;
+      const hash = computeChainHash(prevHash, record);
+      // Spread record fields then add _chain so the chain field is appended last
+      // (cosmetic ordering; canonicalJsonForChain excludes it during hashing).
+      const recordToWrite = { ...record, _chain: { seq, prevHash, hash } };
       fs.appendFileSync(logFile, JSON.stringify(recordToWrite) + '\n');
     } finally {
       releaseGenerationLock(lock);

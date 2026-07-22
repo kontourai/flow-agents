@@ -3225,7 +3225,10 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
     const logFile = path.join(dir, "command-log.jsonl");
     const lockFile = `${logFile}.lock`;
     const lock = chain.acquireGenerationLock(lockFile, { wait: true, attempts: WRITER_LOCK_MAX_TRIES, retryMs: WRITER_LOCK_RETRY_MS });
-    if (lock === null) return;
+    if (lock === null) {
+      process.stderr.write("[record-gate-claim] writer observation authority unavailable; command log left unchanged\n");
+      return;
+    }
     try {
       let raw = "";
       try { raw = fs.readFileSync(logFile, "utf8"); } catch { /* absent log has genesis authority */ }

@@ -47,6 +47,8 @@ function computeChainHash(prevHash, record) {
 }
 
 const BENIGN_FORK_SOURCES = new Set(['postToolUse-capture', 'canonical-writer-execution']);
+const GENERATION_FENCE_PROTOCOL = 'command-log-generation-fence-v1';
+const GENERATION_FENCE_VERSION = 1;
 
 /** Parse every non-blank physical line, retaining invalid JSON and non-record JSON as gaps. */
 function parseCommandLog(raw) {
@@ -159,6 +161,58 @@ function readGeneration(file, generation) {
   finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
 }
 
+function generationFenceRecord() {
+  return { protocol: GENERATION_FENCE_PROTOCOL, version: GENERATION_FENCE_VERSION };
+}
+
+/**
+ * The old lock pathname is a permanent protocol fence, never a lease. Its
+ * exclusive creation makes an old O_EXCL writer and a generation writer
+ * mutually exclusive without trusting process liveness or deleting residue.
+ */
+function hasValidGenerationFence(lockBase) {
+  let before;
+  try { before = fs.lstatSync(lockBase); }
+  catch (error) { return error && error.code === 'ENOENT' ? null : false; }
+  if (before.isSymbolicLink() || !before.isFile()) return false;
+  let fd;
+  try {
+    fd = fs.openSync(lockBase, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) return false;
+    const record = JSON.parse(readDescriptorFully(fd));
+    const current = fs.lstatSync(lockBase);
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) return false;
+    return record && record.protocol === GENERATION_FENCE_PROTOCOL && record.version === GENERATION_FENCE_VERSION;
+  } catch { return false; }
+  finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+
+function establishGenerationFence(lockBase) {
+  let fd;
+  try {
+    fd = fs.openSync(lockBase, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const bytes = Buffer.from(`${JSON.stringify(generationFenceRecord())}\n`);
+    writeDescriptorFully(fd, bytes, 0);
+    fs.ftruncateSync(fd, bytes.length);
+    fs.fsyncSync(fd);
+    const opened = fs.fstatSync(fd);
+    const current = fs.lstatSync(lockBase);
+    if (!opened.isFile() || current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
+      || readDescriptorFully(fd) !== bytes.toString('utf8')) throw new Error('generation fence identity or durability check failed');
+    const directoryFd = fs.openSync(path.dirname(lockBase), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
+    return true;
+  } catch (error) {
+    if (error && error.code === 'EEXIST') return null;
+    return false;
+  } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+
+function waitForGenerationLock(retryMs) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryMs || 5); } catch {}
+}
+
 /**
  * Acquire an immutable generation name. No generation is stolen or removed.
  * `wait` is suitable for fail-open ordinary capture; fail-closed abort uses false.
@@ -166,17 +220,19 @@ function readGeneration(file, generation) {
 function acquireGenerationLock(lockBase, options = {}) {
   const attempts = options.wait ? (options.attempts || 200) : 1;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    // A pre-generation writer may still own the legacy pathname. Never steal
-    // or delete it; bounded ordinary writers may wait for that owner to unlink.
-    try {
-      fs.lstatSync(lockBase);
-      if (options.wait) {
-        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.retryMs || 5); } catch {}
-        continue;
+    const fence = hasValidGenerationFence(lockBase);
+    if (fence === null) {
+      const established = establishGenerationFence(lockBase);
+      if (established !== true) {
+        if (established === null && options.wait) { waitForGenerationLock(options.retryMs); continue; }
+        return null;
       }
+    } else if (fence !== true) {
+      // This may be a legacy owner in its critical section, or a malformed / foreign
+      // entry. We never replace it; a bounded ordinary caller may only observe whether
+      // a legacy owner releases it, while fail-closed callers stop immediately.
+      if (options.wait) { waitForGenerationLock(options.retryMs); continue; }
       return null;
-    } catch (error) {
-      if (!error || error.code !== 'ENOENT') return null;
     }
     const generations = lockGenerationFiles(lockBase);
     const highest = generations.at(-1);
@@ -187,7 +243,7 @@ function acquireGenerationLock(lockBase, options = {}) {
         // record is fsynced. Ordinary writers may wait through that window;
         // fail-closed callers never treat malformed/active state as authority.
         if (options.wait && (!prior || prior.record.state === 'active')) {
-          try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.retryMs || 5); } catch {}
+          waitForGenerationLock(options.retryMs);
           continue;
         }
         return null;
@@ -265,6 +321,8 @@ function hasLaunderingOperator(cmd) {
 module.exports = {
   CHAIN_GENESIS,
   BENIGN_FORK_SOURCES,
+  GENERATION_FENCE_PROTOCOL,
+  GENERATION_FENCE_VERSION,
   canonicalJsonForChain,
   computeChainHash,
   parseCommandLog,

@@ -425,7 +425,7 @@ test("sync accepts only the exact staged descriptor digest and pathname identity
 });
 
 test("public staged commit preserves foreign create-if-absent targets and retained residue", async () => {
-  for (const mode of ["eexist", "post-link-mismatch", "directory-fsync"]) {
+  for (const mode of ["eexist", "post-create-mismatch", "directory-fsync"]) {
     const session = makeSession(`staged-commit-${mode}`);
     claimAmbientSessionAssignment(session);
     await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -433,8 +433,8 @@ test("public staged commit preserves foreign create-if-absent targets and retain
     const foreign = `${mode} foreign canonical\n`;
     setWorkflowEvidenceTransactionTestHooksForTest(mode === "eexist" ? {
       beforeCandidateCommit: () => fs.writeFileSync(canonical, foreign),
-    } : mode === "post-link-mismatch" ? {
-      afterCandidateLink: () => { fs.renameSync(canonical, `${canonical}.staged-link`); fs.writeFileSync(canonical, foreign); },
+    } : mode === "post-create-mismatch" ? {
+      afterCanonicalCreate: () => { fs.renameSync(canonical, `${canonical}.staged-link`); fs.writeFileSync(canonical, foreign); },
     } : {
       beforeCandidateCommitDirectoryFsync: () => { throw new Error("candidate directory fsync uncertainty"); },
     });
@@ -451,7 +451,7 @@ test("public staged commit preserves foreign create-if-absent targets and retain
   }
 });
 
-test("public staged commit uses a hard link when absent and the pinned original descriptor when present", async () => {
+test("public staged commit copies the pinned candidate descriptor into an exclusively created absent target", async () => {
   for (const baseline of ["absent", "present"]) {
     const session = makeSession(`staged-commit-success-${baseline}`);
     claimAmbientSessionAssignment(session);
@@ -469,10 +469,125 @@ test("public staged commit uses a hard link when absent and the pinned original 
     assert.deepEqual(fs.readFileSync(canonical), fs.readFileSync(candidate));
     const canonicalStat = fs.statSync(canonical);
     const candidateStat = fs.statSync(candidate);
-    if (baseline === "absent") assert.deepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, { dev: candidateStat.dev, ino: candidateStat.ino }, "absent baseline publishes only by hard link");
+    if (baseline === "absent") assert.notDeepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, { dev: candidateStat.dev, ino: candidateStat.ino }, "absent baseline publishes a distinct exclusively-created canonical inode");
     else assert.deepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, priorIdentity, "present baseline commits through the pinned original inode");
   }
 });
+
+test("prior-absent publication cannot select foreign bytes after the staged pathname is replaced", async () => {
+  const session = makeSession("staged-commit-absent-path-replacement");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  let parked = "";
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeCandidateCommit: () => {
+      const residue = fs.readdirSync(session.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+      const candidate = path.join(session.sessionDir, residue, "trust.bundle.candidate");
+      parked = `${candidate}.pinned`;
+      fs.renameSync(candidate, parked);
+      fs.writeFileSync(candidate, "foreign staged pathname bytes\n");
+    },
+  });
+  try {
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "absent staged pathname replacement"]);
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.deepEqual(fs.readFileSync(canonical), fs.readFileSync(parked), "publication consumes the retained staged descriptor, never its mutable pathname");
+  assert.notEqual(fs.readFileSync(canonical, "utf8"), "foreign staged pathname bytes\n");
+});
+
+test("prior-absent exclusive creation preserves collision and dangling-symlink entries without retry", async () => {
+  for (const kind of ["collision", "dangling-symlink"]) {
+    const session = makeSession(`staged-commit-absent-${kind}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    const foreign = `${kind} foreign canonical\n`;
+    if (kind === "collision") {
+      setWorkflowEvidenceTransactionTestHooksForTest({ beforeCandidateCommit: () => fs.writeFileSync(canonical, foreign) });
+    } else {
+      const target = path.join(session.sessionDir, "missing-foreign-target");
+      fs.symlinkSync(target, canonical);
+    }
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${kind} exclusive create`]),
+        /recovery required.*no retry/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    if (kind === "collision") assert.equal(fs.readFileSync(canonical, "utf8"), foreign, `${kind}: foreign bytes stay byte-identical`);
+    else assert.equal(fs.lstatSync(canonical).isSymbolicLink(), true, `${kind}: foreign dangling symlink stays in place`);
+  }
+});
+
+test("post-create short writes are completed through the canonical descriptor", async () => {
+  const session = makeSession("staged-commit-post-create-short-write");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let writes = 0;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateCommitWrite: (descriptor, bytes, offset, length, position) => {
+      writes += 1;
+      return fs.writeSync(descriptor, bytes, offset, Math.min(length, 5), position);
+    },
+  });
+  try {
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "short canonical copy"]);
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.ok(writes > 1, "the canonical copy seam must be called until a short write completes");
+});
+
+for (const [fault, hooks] of [
+  ["zero-write", { candidateCommitWrite: () => 0 }],
+  ["reread-corruption", { beforeCanonicalCommitReread: (descriptor) => fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0) }],
+  ["identity-replacement", { afterCanonicalCreate: (canonical) => { fs.renameSync(canonical, `${canonical}.owned`); fs.writeFileSync(canonical, "foreign replacement\n"); } }],
+  ["parent-fsync", { beforeCandidateCommitDirectoryFsync: () => { throw new Error("parent fsync uncertainty"); } }],
+]) {
+  test(`post-create ${fault} retains residue and requires no retry`, async () => {
+    const session = makeSession(`staged-commit-post-create-${fault}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(hooks);
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${fault} post-create uncertainty`]),
+        /recovery required.*no retry/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true, `${fault}: staged residue remains available`);
+  });
+}
+
+const cleanupResources = ["candidate-file", "candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"];
+for (const faultAt of cleanupResources) {
+  test(`cleanup continues after ${faultAt} close fault and keeps the writer failure primary`, async () => {
+    const session = makeSession(`staged-cleanup-close-${faultAt}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const closed = [];
+    let injected = false;
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      candidateResourceClose: (resource) => {
+        if (resource === faultAt) {
+          injected = true;
+          throw new Error(`injected close fault ${faultAt}`);
+        }
+      },
+      candidateResourceClosed: (resource) => closed.push(resource),
+    });
+    try {
+      await assert.rejects(
+        () => stageWorkflowEvidenceCandidate(session.sessionDir, ["record-gate-claim", session.sessionDir, "--expectation", "selected-work", "--status", "invalid", "--summary", "cleanup fault primary error", "--timestamp", NOW, "--actor", ACTOR_KEY, "--flow-run-head", readJson(path.join(session.sessionDir, "state.json")).flow_run.run_head]),
+        /status must be one of/,
+      );
+      assert.equal(injected, true, `${faultAt}: close-fault injection seam must be reached`);
+      assert.deepEqual(closed, cleanupResources, `${faultAt}: every close is observed after all later closes are attempted`);
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  });
+}
 
 test("attached prior-present commit preserves both baseline inode and foreign pathname replacement", async () => {
   const session = makeSession("staged-commit-present-path-replacement");
