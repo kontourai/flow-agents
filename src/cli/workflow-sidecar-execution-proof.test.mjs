@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
@@ -15,6 +15,21 @@ function fixture(files) {
   }
   return root;
 }
+
+test("explicit gate verdicts remain authoritative over successful and failing command observations", () => {
+  const cases = [
+    ["pass", "pass", "pass"],
+    ["pass", "fail", "fail"],
+    ["fail", "pass", "fail"],
+    ["fail", "fail", "fail"],
+    ["not_verified", "pass", "not_verified"],
+    ["not_verified", "fail", "not_verified"],
+  ];
+  for (const [requested, observed, expected] of cases) {
+    assert.equal(composeGateVerdict(requested, observed), expected, `${requested} with ${observed}`);
+  }
+  assert.equal(composeGateVerdict("pass", "ambiguous"), "not_verified");
+});
 
 test("fake Vitest-looking stdout is not test execution proof", () => {
   const root = fixture({

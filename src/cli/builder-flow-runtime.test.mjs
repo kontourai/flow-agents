@@ -28,7 +28,7 @@ import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecor
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest } from "../../build/src/cli/workflow.js";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
@@ -63,6 +63,7 @@ childProcess.execFileSync = ((file, args, options) => {
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
 const require = createRequire(import.meta.url);
+const commandLogChain = require("../../scripts/lib/command-log-chain.js");
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const runtimeTestSeams = await loadRuntimeTestSeams();
 const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
@@ -148,6 +149,20 @@ function runWorkflowProcess(args, cwd) {
   });
 }
 
+async function workflowJson(args) {
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...values) => output.push(values.join(" "));
+  try {
+    const rc = await workflowMain([...args, "--json"]);
+    assert.equal(rc, 0);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(output.length, 1, "workflow JSON command emits exactly one report");
+  return JSON.parse(output[0]);
+}
+
 test("shell output cannot spoof an executed-test count", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-count-"));
   fs.mkdirSync(path.join(root, "checks"), { recursive: true });
@@ -155,6 +170,168 @@ test("shell output cannot spoof an executed-test count", () => {
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
   assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
   assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+});
+
+test("public workflow evidence retains an explicit non-pass verdict while reporting a successful command observation", async () => {
+  const session = makeSession("public-evidence-non-pass-observation");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const report = await workflowJson([
+    "evidence",
+    "--session-dir", session.sessionDir,
+    "--expectation", "selected-work",
+    "--status", "not_verified",
+    "--command", "true",
+    "--summary", "The command completed, but selected Work Item provenance remains unverified.",
+  ]);
+
+  assert.deepEqual(report.gate_verdict, {
+    requested_status: "not_verified",
+    persisted_value: "not_verified",
+    persisted_status: "proposed",
+  });
+  assert.deepEqual(report.command_observations, [{
+    ordinal: 1,
+    observation_id: report.command_observations[0].observation_id,
+    exit_code: 0,
+    output_sha256: report.command_observations[0].output_sha256,
+    outcome: "pass",
+  }]);
+  assert.match(report.command_observations[0].observation_id, /^command:[a-f0-9]{64}$/);
+  assert.match(report.command_observations[0].output_sha256, /^[a-f0-9]{64}$/);
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const gateClaim = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === "selected-work");
+  assert.equal(gateClaim.value, "not_verified");
+  assert.equal(gateClaim.status, "proposed");
+  assert.deepEqual(gateClaim.metadata.observed_commands.map((entry) => [entry.command, entry.exit_code]), [["true", 0]]);
+});
+
+test("public workflow evidence restores evidence bytes when synchronization fails before canonical attachment", async () => {
+  const session = makeSession("public-evidence-atomic-rollback");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const commandLogFile = path.join(session.sessionDir, "command-log.jsonl");
+  const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const beforeBundle = fs.readFileSync(bundleFile);
+  const beforeCommandLog = Buffer.from("pre-existing command-log bytes\\n");
+  fs.writeFileSync(commandLogFile, beforeCommandLog);
+  const beforeManifest = fs.readFileSync(manifestFile);
+  const breakSync = path.join(session.projectRoot, "break-sync-subject.mjs");
+  fs.writeFileSync(breakSync, `
+    import fs from "node:fs";
+    const file = ${JSON.stringify(path.join(session.sessionDir, "state.json"))};
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    state.work_item_refs = ["local:work-item/mutated-during-evidence"];
+    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\\n");
+  `);
+
+  await assert.rejects(
+    () => workflowMain([
+      "evidence",
+      "--session-dir", session.sessionDir,
+      "--expectation", "selected-work",
+      "--status", "not_verified",
+      "--command", "node break-sync-subject.mjs",
+      "--summary", "Exercise rollback after a failed synchronization.",
+    ]),
+    /selected Work Item|workflow_subject_ref/,
+  );
+
+  assert.deepEqual(fs.readFileSync(bundleFile), beforeBundle, "trust.bundle is restored byte-for-byte");
+  const afterCommandLog = fs.readFileSync(commandLogFile, "utf8");
+  assert.ok(afterCommandLog.startsWith(beforeCommandLog.toString("utf8")), "pre-existing command evidence is preserved");
+  assert.match(afterCommandLog, /"outcome":"aborted"/, "an append-only abort marker explains the rollback");
+  assert.deepEqual(fs.readFileSync(manifestFile), beforeManifest, "canonical manifest remains unchanged");
+});
+
+test("public workflow evidence preserves valid foreign command-log appends during unattached rollback", async () => {
+  for (const initialLog of [false, true]) {
+    const session = makeSession(`public-evidence-foreign-append-${initialLog ? "present" : "absent"}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const bundleFile = path.join(session.sessionDir, "trust.bundle");
+    const commandLogFile = path.join(session.sessionDir, "command-log.jsonl");
+    const beforeBundle = fs.readFileSync(bundleFile);
+    if (initialLog) appendChainedCommandLogRecord(commandLogFile, { source: "foreign", command: "before" });
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterRecord: () => {
+        appendChainedCommandLogRecord(commandLogFile, { source: "foreign", command: "after" });
+        const state = readJson(path.join(session.sessionDir, "state.json"));
+        state.work_item_refs = ["local:work-item/mutated-during-evidence"];
+        writeJson(path.join(session.sessionDir, "state.json"), state);
+      },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "force unattached rollback"]),
+        /selected Work Item|workflow_subject_ref/,
+      );
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.deepEqual(fs.readFileSync(bundleFile), beforeBundle, "only the transaction-owned bundle is restored");
+    const records = readCommandLog(commandLogFile);
+    assert.ok(records.some((record) => record.source === "foreign" && record.command === "after"), "foreign append survives");
+    assert.ok(records.some((record) => record.transaction?.outcome === "aborted"), "transaction is append-only journaled");
+    assertValidCommandLogChain(records);
+  }
+});
+
+test("public workflow evidence refuses recovery after session replacement or trust-file symlink", async () => {
+  for (const mode of ["session-replacement", "trust-symlink"]) {
+    const session = makeSession(`public-evidence-${mode}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const replacementTrust = path.join(session.projectRoot, `${mode}-sentinel.bundle`);
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterRecord: () => {
+        if (mode === "session-replacement") {
+          const parked = `${session.sessionDir}-original`;
+          fs.renameSync(session.sessionDir, parked);
+          fs.mkdirSync(session.sessionDir);
+          writeJson(path.join(session.sessionDir, "state.json"), { task_slug: session.slug, work_item_refs: [SUBJECT] });
+          fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "replacement bundle\n");
+          return;
+        }
+        fs.writeFileSync(replacementTrust, "sentinel\n");
+        fs.unlinkSync(path.join(session.sessionDir, "trust.bundle"));
+        fs.symlinkSync(replacementTrust, path.join(session.sessionDir, "trust.bundle"));
+      },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "exercise unsafe recovery refusal"]),
+        /recovery required|recovery refused|non-regular/i,
+      );
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    if (mode === "session-replacement") assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), "replacement bundle\n");
+    else assert.equal(fs.readFileSync(replacementTrust, "utf8"), "sentinel\n");
+  }
+});
+
+test("public workflow evidence classifies post-sync manifest, sidecar, and verdict-read faults", async () => {
+  for (const fault of ["manifest", "sidecar", "verdict"]) {
+    const session = makeSession(`public-evidence-post-sync-${fault}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(fault === "manifest" ? { beforePostconditions: () => { throw new Error("manifest fault"); } }
+      : fault === "sidecar" ? { beforeSidecarRead: () => { throw new Error("sidecar fault"); } }
+        : { beforeSidecarRead: () => { fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "{}\n"); } });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "classify post-sync faults"]),
+        /recovery (is )?required/i,
+      );
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  }
 });
 
 test("pre-chain critique migration is deterministic and never rewrites legacy reviewer attribution", () => {
@@ -183,6 +360,32 @@ test("pre-chain critique migration is deterministic and never rewrites legacy re
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readCommandLog(file) {
+  return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function appendChainedCommandLogRecord(file, record) {
+  const records = fs.existsSync(file) ? readCommandLog(file) : [];
+  const previous = records.at(-1)?._chain ?? { seq: -1, hash: commandLogChain.CHAIN_GENESIS };
+  const chained = structuredClone(record);
+  const hash = commandLogChain.computeChainHash(previous.hash, chained);
+  chained._chain = { seq: previous.seq + 1, prevHash: previous.hash, hash };
+  fs.appendFileSync(file, `${JSON.stringify(chained)}\n`);
+}
+
+function assertValidCommandLogChain(records) {
+  let previousHash = commandLogChain.CHAIN_GENESIS;
+  let sequence = 0;
+  for (const record of records) {
+    assert.equal(record._chain.seq, sequence++);
+    assert.equal(record._chain.prevHash, previousHash);
+    const copy = structuredClone(record);
+    delete copy._chain;
+    assert.equal(record._chain.hash, commandLogChain.computeChainHash(previousHash, copy));
+    previousHash = record._chain.hash;
+  }
 }
 
 function consumedAuthorizationRecords(session) {

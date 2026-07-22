@@ -313,6 +313,18 @@ flow-agents workflow critique \
 ```
 
 Only the step skill declared for that Flow expectation should publish it.
+Command observations can downgrade a requested `pass`, but never upgrade or replace an
+explicit `fail` or `not_verified` verdict. The JSON result reports the persisted gate verdict
+separately from redacted command observations (ordinal, digest, exit code, and outcome), rather
+than echoing command text. If synchronization fails before canonical attachment, the public
+command restores only its transaction-owned `trust.bundle`. `command-log.jsonl` is append-only:
+it receives an abort marker instead of a whole-file rollback, preserving concurrent capture
+records. If the artifact/session directory identity changes or canonical attachment cannot be
+determined, destructive recovery is refused and the command reports recovery required.
+
+Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
+the default report does not echo command text, command arguments remain local evidence; use a
+secure environment or file mechanism appropriate to the runner for secrets.
 Run authenticated critique before `tests-evidence`; the delegated reviewer
 invokes the public critique command under a runtime identity distinct from the
 active implementation actor. The command does not accept a caller-selected

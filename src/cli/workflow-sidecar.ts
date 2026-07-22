@@ -670,6 +670,23 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
 }
 
 /**
+ * Combine a caller's requested gate verdict with an independently observed command result.
+ *
+ * A command observation can prevent an unearned pass, but it must never upgrade or replace an
+ * explicitly reported failure or uncertainty.  The observation remains separately persisted in
+ * the claim metadata and command log for reviewers.
+ */
+export function composeGateVerdict(
+  requestedStatus: "pass" | "fail" | "not_verified",
+  observedResult?: "pass" | "fail" | "ambiguous",
+): "pass" | "fail" | "not_verified" {
+  if (requestedStatus !== "pass") return requestedStatus;
+  if (observedResult === "fail") return "fail";
+  if (observedResult === "ambiguous") return "not_verified";
+  return "pass";
+}
+
+/**
  * Build a Hachure trust.bundle from raw check/criterion/critique inputs.
  * trust.bundle is the PRIMARY artifact (ADR 0010 Phase 4a producer inversion).
  * Callers pass raw inputs directly — not bespoke-sidecar-shaped objects.
@@ -965,7 +982,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // checkStatusToEventStatus("not_verified") returns null — no verification event, and the
     // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
     // not an error).
-    const effectiveStatus = captured ? (captured.observedResult === "ambiguous" ? "not_verified" : captured.observedResult) : String(check.status ?? "");
+    const requestedStatus = String(check.status ?? "");
+    const effectiveStatus = ["pass", "fail", "not_verified"].includes(requestedStatus)
+      ? composeGateVerdict(requestedStatus as "pass" | "fail" | "not_verified", captured?.observedResult)
+      : requestedStatus;
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
@@ -2975,7 +2995,6 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
     if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
     if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
     if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence command failed (exit ${entry.exit_code}): ${entry.command}`);
-    if (expectedStatus === "fail" && entry.exit_code === 0) die(`record-gate-claim failing evidence command unexpectedly passed: ${entry.command}`);
     if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence command did not produce a local execution proof: ${entry.command}`);
     if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
     byCommand.set(entry.command, entry as ObservedCommand);
@@ -3042,7 +3061,7 @@ function writerReadLastChainState(logFile: string, genesis: string): { seq: numb
   return { seq: -1, hash: genesis };
 }
 
-export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string): void {
+export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string, transactionId?: string): void {
   if (observed.length === 0) return;
   try {
     const chain = loadCommandLogChain();
@@ -3061,6 +3080,7 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
           source: WRITER_OBSERVATION_SOURCE,
           writer: {
             output_sha256: entry.output_sha256,
+            ...(transactionId ? { transaction_id: transactionId } : {}),
             ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
             ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
           },
@@ -3077,6 +3097,38 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
     }
   } catch (error) {
     process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+/**
+ * Journal an abandoned public-evidence transaction without rewriting the append-only capture
+ * log.  Unlike the ordinary writer append this fails closed: callers use the return value to
+ * decide whether they may honestly report a safe rollback.
+ */
+export function appendWriterTransactionAbort(dir: string, transactionId: string, timestamp: string): boolean {
+  try {
+    const chain = loadCommandLogChain();
+    const logFile = path.join(dir, "command-log.jsonl");
+    const lockFile = `${logFile}.lock`;
+    const fd = writerAcquireLock(lockFile);
+    if (fd === null) return false;
+    try {
+      const { seq, hash: prevHash } = writerReadLastChainState(logFile, chain.CHAIN_GENESIS);
+      const record: AnyObj = {
+        source: "workflow-evidence-transaction",
+        capturedAt: timestamp,
+        transaction: { id: transactionId, outcome: "aborted" },
+      };
+      const hash = chain.computeChainHash(prevHash, record);
+      record._chain = { seq: seq + 1, prevHash, hash };
+      fs.appendFileSync(logFile, `${JSON.stringify(record)}\n`);
+      return true;
+    } finally {
+      try { fs.closeSync(fd); } catch { /* closed */ }
+      try { fs.unlinkSync(lockFile); } catch { /* removed */ }
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -4108,7 +4160,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     : [];
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
-  appendWriterObservedCommands(dir, observedCommands, ts);
+  appendWriterObservedCommands(dir, observedCommands, ts, process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID);
   const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
   let outputSha256: string | null = null;
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
