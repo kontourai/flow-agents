@@ -15,6 +15,11 @@
  * and shapes from `context/contracts/work-item-contract.md`; hosts should
  * import these instead of hand-mirroring them.
  *
+ * `WorkItemProvider`, `BoardProvider`, `AssignmentProvider`, and `WorkItemMutationProvider` are
+ * the four provider-role TypeScript interfaces (#777) for the CLIs those roles are implemented
+ * by; `createLocalFileAssignmentProvider`/`createLocalFileMutationProvider` are local-file
+ * adapters that formally satisfy the latter two.
+ *
  * @module
  */
 import * as path from "node:path";
@@ -373,6 +378,53 @@ export type {
   WorkItemMutationResultStatus,
   WorkItemStatusTransitionPayload,
 } from "./lib/work-item-mutations.js";
+
+// #777: provider-neutral TypeScript interfaces for the four provider roles (WorkItemProvider,
+// BoardProvider, AssignmentProvider, WorkItemMutationProvider) this repository already
+// implements as CLIs, plus the `AssignmentProvider`/`ActorStruct`/`AssignmentClaimRecord`/
+// `AssignmentStatus` shapes those interfaces are typed against (assignment-provider-contract.md,
+// formalizing ADR 0021 §2) and two local-file adapters that formally satisfy
+// `AssignmentProvider`/`WorkItemMutationProvider` (see `local-file-provider-adapters.ts`). Native
+// hosts should import these instead of shelling out to the CLIs or hand-mirroring their I/O
+// shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
+// including flagged discrepancies between contract prose and the reference CLIs' actual
+// behavior.
+export type {
+  AssignmentClaimMeta,
+  AssignmentProvider,
+  AssignmentReleaseMeta,
+  AssignmentSupersedeMeta,
+  BacklogProviderCapability,
+  BacklogProviderRepoRef,
+  BoardIntakeGapItem,
+  BoardProvider,
+  BoardProviderBoardRef,
+  BoardProviderSettings,
+  BoardProviderWarning,
+  BoardReadResult,
+  ClassifiedWorkItem,
+  EffectiveBacklogProviderSettings,
+  WorkItemDependencyImpact,
+  WorkItemListOptions,
+  WorkItemListResult,
+  WorkItemMutationCapability,
+  WorkItemMutationPolicy,
+  WorkItemMutationProvider,
+  WorkItemProvider,
+  WorkItemProviderSettings,
+  WorkItemProviderWarning,
+  WorkItemReadiness,
+  WorkItemReadinessClassification,
+  WorkItemReadinessReason,
+  WorkItemRevisionFreshness,
+  WorkItemRevisionFreshnessClassification,
+  WorkItemRevisionFreshnessRouteRecommendation,
+  WorkItemSelectionFilters,
+  WorkItemSelectionSettings,
+  WorkItemWipPolicy,
+} from "./cli/provider-interfaces.js";
+export type { ActorStruct, AssignmentClaimRecord, AssignmentStatus } from "./cli/assignment-provider.js";
+export { createLocalFileAssignmentProvider, createLocalFileMutationProvider } from "./cli/local-file-provider-adapters.js";
 
 export {
   CAPABILITIES,
