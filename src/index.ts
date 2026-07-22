@@ -390,9 +390,11 @@ export type {
 // Native hosts should import these instead of shelling out to the CLIs or hand-mirroring their
 // I/O shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
 // including flagged discrepancies between contract prose and the reference CLIs' actual behavior
-// — notably `WorkItemDriftOutcome` (the contract's normative drift vocabulary) vs.
-// `ReferenceAdapterFreshnessDiagnostic` (what the reference CLI actually emits today, a narrower,
-// tracked gap).
+// — notably `WorkItemDriftOutcome` (the contract's normative material-drift JUDGMENT vocabulary,
+// produced by pickup Probe for routing) vs. `ReferenceAdapterFreshnessDiagnostic` (the reference
+// CLI's mechanical revision-freshness SEVERITY diagnostic) — two distinct dimensions, not
+// competing vocabularies for one signal; see `WorkItemDriftOutcome`'s doc comment (#818) for how
+// they compose.
 export type {
   AssignmentClaimMeta,
   AssignmentProvider,
