@@ -78,6 +78,7 @@
         "definition_id": { "type": "string", "minLength": 1 },
         "definition_version": { "type": "string", "minLength": 1 },
         "definition_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "run_head": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "status": { "type": "string", "minLength": 1 },
         "current_step": { "type": "string", "minLength": 1 },
         "run_ref": { "type": "string", "minLength": 1 },

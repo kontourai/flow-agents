@@ -1018,6 +1018,45 @@ for (const file of files.sort()) {
 NODE
   mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
   && node -e 'const fs=require("node:fs");const flow=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const execute=flow.gates?.["execute-gate"];if(JSON.stringify(execute?.on_route_back)!==JSON.stringify({plan_gap:"plan"}))process.exit(1);if(JSON.stringify(execute?.route_back_policy)!==JSON.stringify({max_attempts:3,on_exceeded:"block"}))process.exit(1)' "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/kits/builder/flows/build.flow.json" \
+  && node - "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+
+void (async () => {
+  const [consumer, project] = process.argv.slice(2);
+  const requireFromConsumer = createRequire(path.join(consumer, 'package.json'));
+  const flow = requireFromConsumer('@kontourai/flow');
+  const packagedFile = path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'kits', 'builder', 'flows', 'build.flow.json');
+  const packaged = JSON.parse(fs.readFileSync(packagedFile, 'utf8'));
+  const published = structuredClone(packaged);
+  published.version = '1.1';
+  delete published.gates['execute-gate'].on_route_back;
+  delete published.gates['execute-gate'].route_back_policy;
+  const fixtureRoot = path.join(project, 'packed-flow-amendment');
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  const publishedFile = path.join(fixtureRoot, 'builder-build-1.1.json');
+  fs.writeFileSync(publishedFile, JSON.stringify(published));
+  const runId = 'packed-builder-build-amendment';
+  await flow.startRun(publishedFile, { cwd: fixtureRoot, runId, params: { subject: 'acme/builder#packed-amendment' } });
+  const before = await flow.loadRun(runId, fixtureRoot);
+  await flow.amendRunDefinition(runId, {
+    cwd: fixtureRoot,
+    definition: packaged,
+    request: {
+      reason: 'upgrade the packed published builder.build@1.1 fixture',
+      expected_run_head: flow.flowRunHead(before.state),
+      expected_definition: flow.definitionIdentity(published),
+      successor_digest: flow.definitionDigest(packaged),
+      authority: { kind: 'user_request', actor: 'bundle-install-test', request_ref: 'test:packed-amendment', requested_at: '2026-07-20T00:00:00.000Z' },
+    },
+  });
+  const amended = await flow.loadRun(runId, fixtureRoot);
+  if (JSON.stringify(amended.startDefinition) !== JSON.stringify(published)
+    || JSON.stringify(amended.definition) !== JSON.stringify(packaged)) process.exit(1);
+})().catch((error) => { console.error(error); process.exit(1); });
+NODE
+  _pass "packed published Builder 1.1 run amends to the exact installed 1.3 definition" \
   && printf 'Selected Work Item: acme/builder#901\n' > "$PACKAGE_SESSION/acme-builder-901--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
     --flow builder.build --work-item acme/builder#901 --assignment-provider local-file --summary "Packed public workflow contract fixture." >/dev/null \

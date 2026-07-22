@@ -61,18 +61,8 @@ MISSING="$(workflow evidence --session-dir "$SESSION" --expectation implementati
 MISSING_RC=$?
 set -e
 AFTER_MISSING="$(snapshot)"
-[[ "$MISSING_RC" -eq 0 && "$BEFORE_REJECT" != "$AFTER_MISSING" ]] || fail "failed evidence without a route reason did not record as ordinary non-routing evidence: $MISSING"
-node - "$FLOW_RUN/state.json" "$SESSION/state.json" "$MISSING" <<'NODE'
-const fs = require('node:fs');
-const [flowFile, sessionFile, output] = process.argv.slice(2);
-const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
-const session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-const result = JSON.parse(output);
-if (flow.current_step !== 'execute' || session.flow_run?.current_step !== 'execute' || result.current_step !== 'execute') process.exit(1);
-if ((flow.transitions || []).some((entry) => entry.type === 'route_back')) process.exit(1);
-if (session.flow_run?.route_back_attempt != null || session.flow_run?.route_back_max_attempts != null) process.exit(1);
-NODE
-pass 'unsupported reasons reject mutation-free and absent reasons cannot backtrack implicitly'
+[[ "$MISSING_RC" -ne 0 && "$BEFORE_REJECT" == "$AFTER_MISSING" ]] || fail "failed evidence without a route reason did not reject before every durable write: $MISSING"
+pass 'unsupported and absent reasons reject before every durable write'
 
 BEFORE_STATUS="$(snapshot)"
 STATUS="$(workflow status --session-dir "$SESSION" --json)"

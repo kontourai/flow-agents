@@ -8,10 +8,12 @@ import {
   definitionDigest,
   evaluateRun,
   expectationsForGate,
+  flowRunHead,
   loadRun,
   normalizeTrustBundle,
   openGates,
   pauseRun,
+  resolveEffectiveDefinition,
   resumeRun,
   startRun,
   validateDefinition,
@@ -72,6 +74,8 @@ export interface EvaluateBuilderBuildRunInput {
    */
   cwd?: string;
   evidence?: BuilderBuildTrustBundleEvidenceInput;
+  /** Optimistic-concurrency token for the canonical state authorized by the caller. */
+  expectedRunHead?: string;
 }
 
 export interface LoadBuilderBuildRunInput {
@@ -189,6 +193,9 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
 
 export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["now", "gate"]);
+  if (input.expectedRunHead !== undefined && !isSha256(input.expectedRunHead)) {
+    throw new BuilderBuildRunInputError("expectedRunHead", "must be a SHA-256 hex digest");
+  }
   if (Array.isArray(input.evidence)) {
     throw new BuilderBuildRunInputError("evidence", "must be zero or one evidence object, not an array");
   }
@@ -209,7 +216,8 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     }
     const normalized = normalizeTrustBundle(JSON.parse(bytes.toString("utf8")));
     assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
-    const attached = await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence, validatedSha256));
+    const expectedRunHead = input.expectedRunHead ?? flowRunHead(run.state);
+    const attached = await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence, validatedSha256, expectedRunHead));
     if (attached.sha256 !== validatedSha256) {
       throw new BuilderBuildRunInputError("evidence.file", "changed after validation before Flow attachment");
     }
@@ -312,10 +320,17 @@ async function loadCanonicalBuilderFlowRun(
 
 async function assertCanonicalBuilderRunOrigin(
   runId: string,
-  run: Pick<Awaited<ReturnType<typeof loadRun>>, "definition" | "startDefinition">,
+  run: Pick<Awaited<ReturnType<typeof loadRun>>, "definition" | "startDefinition" | "state">,
 ): Promise<void> {
-  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.startDefinition);
-  assertCanonicalDefinition(runId, definition, run.startDefinition);
+  // Flow owns the complete amendment ledger. Resolve it again here so an
+  // adapter never treats an arbitrary immutable start snapshot as sufficient
+  // authority for a newer package definition.
+  const effective = resolveEffectiveDefinition(run.startDefinition, run.state);
+  if (!isDeepStrictEqual(effective, run.definition)) {
+    throw new BuilderBuildRunIdentityError(runId, effective, run.definition, "definition-content");
+  }
+  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.definition);
+  assertCanonicalDefinition(runId, definition, run.definition);
   if (!isBuilderFlowId(run.definition.id)) {
     throw new BuilderBuildRunIdentityError(runId, definition, run.definition, "definition-id");
   }
@@ -448,12 +463,13 @@ function assertBundleSubjects(bundle: unknown, subject: string, gate: unknown): 
   }
 }
 
-function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput, expectedSha256: string): JsonObject {
+function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput, expectedSha256: string, expectedRunHead: string): JsonObject {
   return {
     cwd,
     gate: evidence.gate,
     file: evidence.file,
     expectedSha256,
+    expectedRunHead,
     kind: "trust.bundle",
     bundle: true,
     ...(evidence.status ? { status: evidence.status } : {}),
@@ -474,6 +490,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
 }
 
 function moduleDirectory(): string {

@@ -36,6 +36,8 @@ export type ContinuationTurnRequest = {
   schema_version: "1.0";
   run_id: string;
   definition_id: string;
+  definition_version?: string;
+  definition_digest?: string;
   current_step: string;
   iteration: number;
   max_turns: number;
@@ -80,6 +82,9 @@ export type ContinuationDriverState = {
   turns_started: number;
   // Added after schema 1.0 shipped. Legacy state files may omit it.
   active_turn_step?: string | null;
+  /** Exact effective Flow identity bound to the ephemeral active-turn capability. */
+  active_turn_definition_version?: string | null;
+  active_turn_definition_digest?: string | null;
   // Anchors the ephemeral signer outside active-turn.json. Legacy state files may omit it.
   active_turn_public_key_digest?: string | null;
   /** Durable recovery marker for an adapter turn without a post-turn measurement. */
@@ -301,6 +306,8 @@ function continuationTurnRequest(input: RunContinuationDriverInput, state: Conti
     schema_version: "1.0",
     run_id: snapshot.run_id,
     definition_id: snapshot.definition_id,
+    ...(snapshot.definition_version ? { definition_version: snapshot.definition_version } : {}),
+    ...(snapshot.definition_digest ? { definition_digest: snapshot.definition_digest } : {}),
     current_step: snapshot.current_step,
     iteration: state.turns_started + 1,
     max_turns: input.maxTurns,
@@ -322,6 +329,8 @@ function contextStrategy(policy: ContinuationContextPolicy, iteration: number): 
 function beginContinuationTurn(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, iteration: number, now: () => Date): ContinuationDriverState {
   let started = saveState(store, state, {
     status: "active", turns_started: iteration, active_turn_step: snapshot.current_step,
+    active_turn_definition_version: snapshot.definition_version ?? null,
+    active_turn_definition_digest: snapshot.definition_digest ?? null,
     active_turn_public_key_digest: null, active_turn_phase: "prepared", active_turn_progress: progressSnapshot(snapshot), active_turn_capture: null,
   }, now);
   appendEvent(store, started, snapshot, "turn_started", now);
@@ -457,6 +466,8 @@ function acceptedTurnCapture(request: ContinuationTurnRequest, result: Continuat
 function clearActiveTurn(store: ContinuationStateStore, state: ContinuationDriverState, now: () => Date): ContinuationDriverState {
   return saveState(store, state, {
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -487,7 +498,7 @@ function auditAuthorityCleanup(
 
 function finishBudgetExhausted(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, now: () => Date): ContinuationDriverOutcome {
   const exhausted = saveState(store, state, {
-    status: "budget_exhausted", active_turn_step: null, active_turn_public_key_digest: null,
+    status: "budget_exhausted", active_turn_step: null, active_turn_definition_version: null, active_turn_definition_digest: null, active_turn_public_key_digest: null,
     active_turn_phase: null, active_turn_progress: null, active_turn_capture: null,
   }, now);
   appendEvent(store, exhausted, snapshot, "budget_exhausted", now);
@@ -558,6 +569,8 @@ function loadOrCreateState(
     status: "active",
     turns_started: 0,
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -623,6 +636,8 @@ function reconcileInterruptedTurn(
   const recovered = saveState(store, state, {
     ...(progress ? { last_progress: progress.snapshot, prior_progress: progress.delta } : {}),
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -647,7 +662,7 @@ function sameProgressSnapshot(left: GateActionProgressSnapshot, right: GateActio
 }
 
 function compatibleIdentityField(left: string | undefined, right: string | undefined): boolean {
-  return left === undefined || right === undefined || left === right;
+  return left === right;
 }
 
 function isTerminalCanonicalStatus(status: string | undefined): boolean {
@@ -694,10 +709,8 @@ function measureProgress(
   if (!before || !after) return null;
   const terminalStatusAdvanced = isTerminalCanonicalStatus(after.canonical_status)
     && before.canonical_status !== after.canonical_status;
-  const definitionAdvanced = (before.definition_version !== undefined && after.definition_version !== undefined
-      && before.definition_version !== after.definition_version)
-    || (before.definition_digest !== undefined && after.definition_digest !== undefined
-      && before.definition_digest !== after.definition_digest);
+  const definitionAdvanced = before.definition_version !== after.definition_version
+    || before.definition_digest !== after.definition_digest;
   const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced || definitionAdvanced;
   const evidenceAdded = after.canonical_evidence.filter((entry) => !before.canonical_evidence.includes(entry));
   const artifactChanges = after.observed_artifacts.filter((entry) => !before.observed_artifacts.includes(entry));
@@ -720,6 +733,8 @@ function finishDone(store: ContinuationStateStore, state: ContinuationDriverStat
   const done = saveState(store, state, {
     status: "done",
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -734,6 +749,8 @@ function finishFailed(store: ContinuationStateStore, state: ContinuationDriverSt
   const failed = saveState(store, state, {
     status: "failed",
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -746,7 +763,7 @@ function finishFailed(store: ContinuationStateStore, state: ContinuationDriverSt
 function saveState(
   store: ContinuationStateStore,
   current: ContinuationDriverState,
-  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "active_turn_step" | "active_turn_public_key_digest" | "active_turn_phase" | "active_turn_progress" | "active_turn_capture" | "pending_barrier" | "last_progress" | "prior_progress">>,
+  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "active_turn_step" | "active_turn_definition_version" | "active_turn_definition_digest" | "active_turn_public_key_digest" | "active_turn_phase" | "active_turn_progress" | "active_turn_capture" | "pending_barrier" | "last_progress" | "prior_progress">>,
   now: () => Date,
 ): ContinuationDriverState {
   const next = { ...current, ...patch, updated_at: now().toISOString() };
