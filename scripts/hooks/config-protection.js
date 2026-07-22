@@ -646,6 +646,11 @@ function isJsonToolWriteShape(seg) {
           if (NO_VALUE_OPTIONS.has(t)) continue;
           if (t.startsWith('-') && t !== '-') return true; // unrecognized option-like token: fail closed
         }
+        // Operand counting happens pre-expansion: one lexical token carrying brace expansion,
+        // a glob, or a variable/command substitution can become MULTIPLE operands (including
+        // json.tool's write-capable outfile) at execution. Any operand that is not a plain
+        // literal path therefore classifies as write-suspicious rather than being counted.
+        if (t !== '-' && !/^[A-Za-z0-9._/-]+$/.test(t)) return true;
         operands++; // '-' alone is the stdin operand and counts
       }
       return operands >= 2; // second positional operand is json.tool's write-capable outfile
