@@ -236,9 +236,10 @@ function readRegularJson(fileInput: string, label: string, requireProtected = fa
 function validateActor(value: unknown): ActorStruct {
   if (!isRecord(value)) throw new Error("lifecycle authorization assignment_actor must be an object");
   assertExactKeys(value, ["runtime", "session_id", "host", "human"], "assignment_actor");
-  if (!Object.prototype.hasOwnProperty.call(value, "human")) throw new Error("lifecycle authorization assignment_actor.human is required");
   for (const field of ["runtime", "session_id", "host"] as const) boundedText(value[field], `assignment_actor.${field}`, 256);
   if (value.human !== undefined && value.human !== null) boundedText(value.human, "assignment_actor.human", 256);
+  // Claims persisted before explicit-null canonicalization omit `human`. Keep
+  // that record untouched, but sign the canonical semantic identity.
   return { runtime: value.runtime as string, session_id: value.session_id as string, host: value.host as string, human: value.human == null ? null : value.human as string };
 }
 

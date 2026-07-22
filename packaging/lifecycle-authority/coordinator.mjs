@@ -29,6 +29,13 @@ export function canonicalJson(value) {
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
+export function assignmentActorsMatch(current, authorized) {
+  if (!record(current) || !record(authorized)) return false;
+  const canonicalizeLegacyHuman = (actor) => Object.prototype.hasOwnProperty.call(actor, "human")
+    ? actor
+    : { ...actor, human: null };
+  return canonicalJson(canonicalizeLegacyHuman(current)) === canonicalJson(canonicalizeLegacyHuman(authorized));
+}
 export const sha256 = (value) => crypto.createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : canonicalJson(value)).digest("hex");
 function exact(value, fields, label) {
   if (!record(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson([...fields].sort())) throw new Error(`${label} contains unexpected or missing fields`);
@@ -234,7 +241,7 @@ function releaseAssignment(paths, authorization) {
   if (!fs.existsSync(file)) return false;
   const current = protectedJson(file, "canonical assignment", 256 * 1024);
   if (current.status === "released") return false;
-  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || canonicalJson(current.actor) !== canonicalJson(authorization.assignment_actor)) {
+  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || !assignmentActorsMatch(current.actor, authorization.assignment_actor)) {
     throw new Error("authorization does not bind the canonical assignment holder");
   }
   const at = new Date().toISOString();
@@ -246,7 +253,7 @@ function assertLiveAssignmentHolder(paths, authorization) {
   const file = assignmentFile(paths);
   if (!fs.existsSync(file)) throw new Error("canonical assignment holder is required before Flow cancellation");
   const current = protectedJson(file, "canonical assignment", 256 * 1024);
-  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || canonicalJson(current.actor) !== canonicalJson(authorization.assignment_actor)) {
+  if (current.status !== "claimed" || current.actor_key !== authorization.assignment_actor_key || !assignmentActorsMatch(current.actor, authorization.assignment_actor)) {
     throw new Error("authorization does not bind the live canonical assignment holder");
   }
 }
@@ -265,7 +272,7 @@ async function reconcileCanceledFlow(paths, authorization) {
   const { flow } = await loadPinnedFlowReducer(); const run = await flow.loadRun(paths.runId, paths.projectRoot);
   assertAuthorizationBinding(paths, authorization, run);
   const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
-  if (run.state.status !== "canceled" || assignment.status !== "released" || assignment.actor_key !== authorization.assignment_actor_key || canonicalJson(assignment.actor) !== canonicalJson(authorization.assignment_actor)) return null;
+  if (run.state.status !== "canceled" || assignment.status !== "released" || assignment.actor_key !== authorization.assignment_actor_key || !assignmentActorsMatch(assignment.actor, authorization.assignment_actor)) return null;
   return { result_core_sha256: sha256({ state: run.state, assignment_released: true }), run_id: paths.runId };
 }
 async function archiveCanonicalSession(paths, authorization) {

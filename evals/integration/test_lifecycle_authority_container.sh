@@ -87,7 +87,13 @@ fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(pro
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
 fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
-for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e']) await makeSession(slug);
+for (const slug of ['resolve-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e']) await makeSession(slug);
+for (const slug of ['legacy-e2e', 'legacy-mismatch-e2e']) {
+  const assignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`);
+  const record = JSON.parse(fs.readFileSync(assignment, 'utf8'));
+  delete record.actor.human;
+  write(assignment, record);
+}
 write(path.join(project, 'fixture.json'), { project, subject, actor, actorKey });
 NODE
 node /work/setup-fixture.mjs
@@ -168,6 +174,16 @@ node /work/make-lifecycle-authorization.mjs cancel stale-e2e /root/lifecycle-aut
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-a.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel concurrent-e2e /root/lifecycle-authorizations/concurrent-b.json "$FUTURE"
 node /work/make-lifecycle-authorization.mjs cancel symlink-e2e /root/lifecycle-authorizations/symlink.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-e2e /root/lifecycle-authorizations/legacy.json "$FUTURE"
+node /work/make-lifecycle-authorization.mjs cancel legacy-mismatch-e2e /root/lifecycle-authorizations/legacy-mismatch.json "$FUTURE"
+node - /root/lifecycle-authorizations/legacy-mismatch.json <<'NODE'
+const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...base } = value;
+const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
+for (const [name, field, replacement] of [['runtime', 'runtime', 'different-runtime'], ['session', 'session_id', 'different-session'], ['host', 'host', 'different-host'], ['human', 'human', 'fixture-human']]) {
+  const unsigned = structuredClone(base); unsigned.assignment_actor[field] = replacement; unsigned.nonce = `${unsigned.nonce}-${name}`;
+  fs.writeFileSync(`/root/lifecycle-authorizations/legacy-mismatch-${name}.json`, JSON.stringify({ ...unsigned, signature: { ...signature, value: crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), key).toString('base64') } }));
+}
+NODE
 node - /root/lifecycle-authorizations/unauthorized.json <<'NODE'
 const fs = require('node:fs'), crypto = require('node:crypto'); const file = process.argv[2], value = JSON.parse(fs.readFileSync(file, 'utf8')); const { signature, ...unsigned } = value;
 value.signature.value = crypto.sign(null, Buffer.from(JSON.stringify(unsigned)), crypto.generateKeyPairSync('ed25519').privateKey).toString('base64'); fs.writeFileSync(file, JSON.stringify(value));
@@ -204,6 +220,9 @@ fs.writeFileSync(path.join(session('resolve-e2e'), 'post-resolution-non-root.txt
 const run = path.join(project, '.kontourai', 'flow', 'runs', 'resolve-e2e'); for (const file of ['evidence/manifest.json', 'state.json', 'report.json', 'report.md']) if (!fs.existsSync(path.join(run, file))) throw new Error(`missing canonical Flow write ${file}`); if (!JSON.parse(fs.readFileSync(path.join(run, 'evidence/manifest.json'), 'utf8')).evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest missing authority attachment');
 const canceled = invoke('cancel', 'archive-e2e', '/root/lifecycle-authorizations/cancel.json'); if (canceled.operation_status !== 'applied') throw new Error('cancel was not applied'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'archive-e2e.json'), 'utf8')).status !== 'released') throw new Error('cancel did not release assignment'); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'archive-e2e', 'state.json'), 'utf8')).status !== 'canceled') throw new Error('cancel did not update canonical Flow state');
 const archived = invoke('archive', 'archive-e2e', '/root/lifecycle-authorizations/archive.json'); if (archived.operation_status !== 'applied' || fs.existsSync(session('archive-e2e')) || !fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'archive', 'archive-e2e', 'state.json'))) throw new Error('archive behavior is invalid');
+const legacyAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'legacy-e2e.json'); if (Object.hasOwn(JSON.parse(fs.readFileSync(legacyAssignment, 'utf8')).actor, 'human')) throw new Error('legacy fixture was rewritten before redemption');
+const legacyCanceled = invoke('cancel', 'legacy-e2e', '/root/lifecycle-authorizations/legacy.json'); if (legacyCanceled.operation_status !== 'applied') throw new Error('legacy assignment was not redeemed'); const releasedLegacy = JSON.parse(fs.readFileSync(legacyAssignment, 'utf8')); if (releasedLegacy.status !== 'released' || Object.hasOwn(releasedLegacy.actor, 'human')) throw new Error('legacy assignment compatibility rewrote the persisted actor');
+const legacyMismatchAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'legacy-mismatch-e2e.json'), legacyMismatchRun = path.join(project, '.kontourai', 'flow', 'runs', 'legacy-mismatch-e2e', 'state.json'); const beforeLegacyMismatchAssignment = fs.readFileSync(legacyMismatchAssignment, 'utf8'), beforeLegacyMismatchRun = fs.readFileSync(legacyMismatchRun, 'utf8'); for (const field of ['runtime', 'session', 'host', 'human']) { expectReject(() => invoke('cancel', 'legacy-mismatch-e2e', `/root/lifecycle-authorizations/legacy-mismatch-${field}.json`), /live canonical assignment holder/); if (fs.readFileSync(legacyMismatchAssignment, 'utf8') !== beforeLegacyMismatchAssignment || fs.readFileSync(legacyMismatchRun, 'utf8') !== beforeLegacyMismatchRun) throw new Error(`mismatched legacy ${field} actor mutated canonical state`); }
 expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale.json'), /authorization is expired/);
 const staleAssignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'stale-e2e.json'); const staleRecord = JSON.parse(fs.readFileSync(staleAssignment, 'utf8')); staleRecord.actor_key = 'stale-holder'; fs.writeFileSync(staleAssignment, JSON.stringify(staleRecord)); expectReject(() => invoke('cancel', 'stale-e2e', '/root/lifecycle-authorizations/stale-holder.json'), /live canonical assignment holder/); if (JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'stale-e2e', 'state.json'), 'utf8')).status !== 'active') throw new Error('stale assignment canceled Flow');
 const concurrentCode = `import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js'; import path from 'node:path'; const project = process.argv[1], auth = process.argv[2]; invokeExternalLifecycleAuthority({ action: 'cancel', project_root: project, session_dir: path.join(project, '.kontourai', 'flow-agents', 'concurrent-e2e'), authorization_file: auth });`;
@@ -212,7 +231,7 @@ const concurrentResults = await Promise.all([concurrent('/root/lifecycle-authori
 const swapped = session('symlink-e2e'), rootSentinel = '/tmp/lifecycle-root-target/sentinel'; fs.rmSync(swapped, { recursive: true, force: true }); fs.symlinkSync('/tmp/lifecycle-root-target', swapped); expectReject(() => invoke('cancel', 'symlink-e2e', '/root/lifecycle-authorizations/symlink.json'), /session_dir must identify/); if (fs.readFileSync(rootSentinel, 'utf8') !== 'root-owned sentinel\n') throw new Error('symlink swap escaped into a root-owned path');
 expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authorizations/unauthorized.json'), /authorization signature is invalid/);
 expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
-console.log('PASS: signed resolve/cancel/archive E2E, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
+console.log('PASS: signed resolve/cancel/archive E2E, legacy actor compatibility, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
 NODE
 su -s /bin/bash node -c 'node /work/operator-e2e.mjs'
 CONTAINER

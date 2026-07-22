@@ -3,13 +3,26 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { assignmentActorsMatch, canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const request = { action: "cancel", project_root: "/srv/project", session_dir: "/srv/project/.kontourai/flow-agents/run-1", authorization_file: "/etc/kontourai/request.json" };
 const envelope = { schema_version: "1.0", action: "cancel", request_sha256: sha256(request), request };
 test("reference coordinator canonicalization is order-independent", () => {
   assert.equal(canonicalJson({ b: 1, a: 2 }), canonicalJson({ a: 2, b: 1 }));
   assert.deepEqual(validateEnvelope(envelope), envelope);
+});
+test("reference coordinator treats only a missing legacy human field as canonical null", () => {
+  const canonical = { runtime: "codex", session_id: "session", host: "host", human: null };
+  const legacy = { runtime: "codex", session_id: "session", host: "host" };
+  assert.equal(assignmentActorsMatch(legacy, canonical), true);
+  assert.equal(assignmentActorsMatch(canonical, legacy), true);
+  for (const changed of [
+    { ...canonical, runtime: "other-runtime" },
+    { ...canonical, session_id: "other-session" },
+    { ...canonical, host: "other-host" },
+    { ...canonical, human: "operator" },
+    { ...legacy, extra: "unsupported" },
+  ]) assert.equal(assignmentActorsMatch(legacy, changed), false);
 });
 test("reference coordinator rejects unknown fields actions and digest drift", () => {
   assert.throws(() => validateEnvelope({ ...envelope, extra: true }), /unexpected or missing/);
