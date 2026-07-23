@@ -30,9 +30,9 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -351,8 +351,8 @@ test("completed replay preserves a newer exact-current receipt and restores only
     const bundle = { schema_version: "1.0", claims: [] };
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), `${JSON.stringify(bundle)}\n`, { mode: 0o600 });
     const exactCore = loaded.lifecycleAuthorityResultDigest(bundle, []);
-    const signedCompletion = (requestSha256, resultCoreSha256) => {
-      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "repair-critique-resolution-history", request_sha256: requestSha256, run_id: "run-replay", operation_status: "applied", result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
+    const signedCompletion = (requestSha256, resultCoreSha256, action = "repair-critique-resolution-history") => {
+      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: "applied", result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
       return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), privateKey).toString("base64") } };
     };
     const newer = signedCompletion("b".repeat(64), exactCore);
@@ -368,6 +368,18 @@ test("completed replay preserves a newer exact-current receipt and restores only
     const exactReplay = signedCompletion("e".repeat(64), exactCore);
     assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactReplay), { run_id: "run-replay", receipt: "written" });
     assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactReplay);
+    for (const action of ["cancel", "archive"]) {
+      const requestSha256 = action === "cancel" ? "6".repeat(64) : "7".repeat(64);
+      const completion = signedCompletion(requestSha256, exactCore, action);
+      assert.deepEqual(
+        loaded.durableCompletionRecord(
+          { authorization_sha256: "8".repeat(64), request_sha256: requestSha256, result_core_sha256: exactCore, completion },
+          { action, request_sha256: requestSha256 }, { runId: "run-replay" }, "8".repeat(64),
+        ),
+        completion,
+        `${action} replay reuses its exact signed durable completion`,
+      );
+    }
   } finally {
     if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
     fs.rmSync(directory, { recursive: true, force: true });
@@ -434,7 +446,53 @@ test("historical repair bridge is request-keyed, append-only, and rejects an alt
     fs.writeFileSync(completionFile, `${JSON.stringify(durableCompletion)}\n`, { mode: 0o600 });
     const durableNonce = { schema_version: "1.0", operation_id: operationId, authorization_sha256: historicalAuthorizationSha256, key_id: "historical-key", nonce: "historical-nonce", request_sha256: completion.request_sha256, status: "applied", result_core_sha256: completion.result_core_sha256 };
     fs.writeFileSync(nonceFile, `${JSON.stringify(durableNonce)}\n`, { mode: 0o600 });
+    const replayEnvelope = { action: "resolve-critique", request_sha256: completion.request_sha256 };
+    assert.deepEqual(
+      loaded.durableCompletionRecord(durableCompletion, replayEnvelope, { runId }, historicalAuthorizationSha256),
+      completion,
+      "completed replay authenticates and reuses the exact signed durable completion",
+    );
+    assert.throws(
+      () => loaded.durableCompletionRecord({ ...durableCompletion, request_sha256: "f".repeat(64) }, replayEnvelope, { runId }, historicalAuthorizationSha256),
+      /does not match the exact request/i,
+      "a mismatched durable completion cannot be replayed",
+    );
     assert.doesNotThrow(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }));
+    const preparedNonce = { ...durableNonce, status: "prepared" };
+    fs.writeFileSync(nonceFile, `${JSON.stringify(preparedNonce)}\n`, { mode: 0o600 });
+    assert.deepEqual(
+      loaded.reconcileCompletedNonce(nonceFile, preparedNonce, completion.result_core_sha256),
+      durableNonce,
+      "a replay after the durable completion write promotes only its exact prepared nonce",
+    );
+    assert.deepEqual(JSON.parse(fs.readFileSync(nonceFile, "utf8")), durableNonce);
+    assert.doesNotThrow(
+      () => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }),
+      "the completion-write crash window restores the exact durable three-anchor state for a later repair",
+    );
+    const appliedNonceBytes = fs.readFileSync(nonceFile);
+    assert.deepEqual(loaded.reconcileCompletedNonce(nonceFile, preparedNonce, completion.result_core_sha256), durableNonce);
+    assert.deepEqual(fs.readFileSync(nonceFile), appliedNonceBytes, "an exact applied nonce is not rewritten during replay");
+    fs.unlinkSync(path.join(sessionDir, "lifecycle-authority.completion.json"));
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), `${JSON.stringify(currentBundle)}\n`, { mode: 0o600 });
+    writeLedger(sessionDir, { schema_version: "1.0", events: [event] });
+    assert.deepEqual(
+      loaded.installCompletionReceipt({ sessionDir, runId }, durableCompletion.completion),
+      { run_id: runId, receipt: "written" },
+      "a replay after the nonce write restores the exact authenticated durable completion rather than minting a replay receipt",
+    );
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), "utf8")), durableCompletion.completion);
+    assert.doesNotThrow(
+      () => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }),
+      "the nonce-write crash window remains usable by the later three-anchor repair",
+    );
+    fs.unlinkSync(nonceFile);
+    assert.throws(
+      () => loaded.reconcileCompletedNonce(nonceFile, preparedNonce, completion.result_core_sha256),
+      /nonce record is missing/i,
+      "replay never fabricates a missing durable nonce anchor",
+    );
+    fs.writeFileSync(nonceFile, `${JSON.stringify(durableNonce)}\n`, { mode: 0o600 });
     fs.unlinkSync(completionFile);
     assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /ENOENT|historical durable completion/i, "a missing historical completion record rejects before publication");
     fs.writeFileSync(completionFile, `${JSON.stringify({ ...durableCompletion, request_sha256: "f".repeat(64) })}\n`, { mode: 0o600 });

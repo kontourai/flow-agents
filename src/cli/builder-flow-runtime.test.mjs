@@ -2917,6 +2917,81 @@ test("history-repair authorization parser rejects every missing bridge field and
   );
 });
 
+test("package graph rejects every coherently rehashed repair authorization missing a mandatory bridge field", () => {
+  const makeClaim = (sequence, predecessor, reviewer, verdict) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: `2030-01-01T00:0${sequence}:00.000Z`,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status: verdict === "pass" ? "verified" : "superseded", fieldOrBehavior: base.summary,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash },
+    };
+  };
+  const prior = makeClaim(1, CRITIQUE_CHAIN_GENESIS, "reviewer-a", "fail");
+  const resolving = makeClaim(2, prior.metadata.critique_record_hash, "reviewer-b", "pass");
+  const missingAuthorizationSha256 = "a".repeat(64);
+  const missingEventId = `critique-resolution:${missingAuthorizationSha256}`;
+  const edge = {
+    schema_version: "1.0", kind: "cross-reviewer", prior_record_id: prior.metadata.critique_record_id,
+    resolving_record_id: resolving.metadata.critique_record_id, resolver: resolving.metadata.reviewer,
+    resolved_lane_ids: [], resolved_finding_ids: [], resolved_at: "2030-01-01T00:02:00.000Z",
+    authorization_sha256: missingAuthorizationSha256, resolution_event_id: missingEventId,
+  };
+  prior.metadata = { ...prior.metadata, superseded_by: resolving.metadata.critique_record_id, critique_resolution: edge };
+  const bridgeFields = [
+    "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+    "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+    "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+    "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+    "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+    "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+    "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+    "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+    "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  ];
+  const bridgeValue = (field) => field.endsWith("_length") || field.endsWith("_count") ? 0
+    : field.endsWith("_version") ? "1.0"
+      : field.endsWith("_action") ? "resolve-critique"
+        : field.endsWith("_id") || field.endsWith("_path") ? `fixture:${field}`
+          : "b".repeat(64);
+  const signedAuthorization = {
+    schema_version: "1.0", operation: "repair-critique-resolution-history", project_root: "/project", run_id: "run-graph", subject: SUBJECT,
+    prior_record_id: prior.metadata.critique_record_id, prior_record_hash: prior.metadata.critique_record_hash,
+    resolving_record_id: resolving.metadata.critique_record_id, resolving_record_hash: resolving.metadata.critique_record_hash,
+    expected_resolver: resolving.metadata.reviewer, missing_resolution_event_id: missingEventId, missing_authorization_sha256: missingAuthorizationSha256,
+    preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
+    reason_code: "coordinator-external-ledger-overwrite-v1", nonce: "repair-nonce", signature: { algorithm: "ed25519", key_id: "fixture", value: "signed" },
+    ...Object.fromEntries(bridgeFields.map((field) => [field, bridgeValue(field)])),
+  };
+  signedAuthorization.historical_bridge_sha256 = critiqueResolutionRuntime.critiqueResolutionHistoryBridgeDigest(signedAuthorization);
+  const repairEvent = (authorization) => {
+    const authorizationSha256 = createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
+    const unsigned = {
+      schema_version: "1.0", event_id: `critique-resolution-history-repair:${authorizationSha256}`, sequence: 1, predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+      operation: "repair-critique-resolution-history", run_id: "run-graph", subject: SUBJECT, preimage_bundle_sha256: "c".repeat(64),
+      prior_record_id: prior.metadata.critique_record_id, prior_record_hash: prior.metadata.critique_record_hash,
+      resolving_record_id: resolving.metadata.critique_record_id, resolving_record_hash: resolving.metadata.critique_record_hash, resolver: resolving.metadata.reviewer,
+      authorization_sha256: authorizationSha256, authorization_key_id: "fixture", authorization_nonce: "repair-nonce", edge,
+      missing_resolution_event_id: missingEventId, missing_authorization_sha256: missingAuthorizationSha256,
+      reason_code: authorization.reason_code, current_completion_sha256: "d".repeat(64), verified_bridge_sha256: authorization.historical_bridge_sha256,
+      resulting_core_sha256: critiqueResolutionRuntime.critiqueResolutionResultCoreDigest(prior.metadata, resolving.metadata, edge), signed_authorization: authorization,
+    };
+    return { ...unsigned, event_hash: createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") };
+  };
+  const completeGraph = validateCritiqueResolutionGraph([prior, resolving], SUBJECT, [repairEvent(signedAuthorization)]);
+  assert.equal(completeGraph.valid, true, `the complete repair bridge is accepted by package graph validation: ${completeGraph.errors.join("; ")}`);
+  for (const field of bridgeFields) {
+    const missing = { ...signedAuthorization };
+    delete missing[field];
+    missing.historical_bridge_sha256 = critiqueResolutionRuntime.critiqueResolutionHistoryBridgeDigest(missing);
+    const graph = validateCritiqueResolutionGraph([prior, resolving], SUBJECT, [repairEvent(missing)]);
+    assert.equal(graph.valid, false, `missing ${field} must fail even when authorization, event, and bridge digests are coherently rehashed`);
+    assert.match(graph.errors.join("\n"), /verified historical bridge/i, field);
+  }
+});
+
 test("public history-repair request preimage reads protected exact bytes and treats only an absent ledger as empty", () => {
   const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
   assert.equal(typeof readPreimage, "function");

@@ -599,6 +599,31 @@ function operationIdentity(envelope, authorization) {
   return { project, runId, keyId, nonce: authorization.nonce, id: sha256({ project, run_id: runId, action: envelope.action, key_id: keyId, nonce: authorization.nonce }) };
 }
 function durableJson(file, label) { return JSON.parse(protectedRegularFile(file, label, 256 * 1024).toString("utf8")); }
+function durableCompletionRecord(prior, envelope, identity, authorizationSha256) {
+  exact(prior, ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
+  if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
+  const completionRecord = prior.completion;
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  exact(completionRecord, fields, "durable lifecycle completion");
+  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
+  const { signature, ...unsigned } = completionRecord;
+  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
+  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("durable lifecycle completion signature is invalid");
+  return completionRecord;
+}
+function appliedNonceRecord(prepared, resultCoreSha256) {
+  return { ...prepared, status: "applied", result_core_sha256: resultCoreSha256 };
+}
+function reconcileCompletedNonce(nonceFile, prepared, resultCoreSha256) {
+  const applied = appliedNonceRecord(prepared, resultCoreSha256);
+  if (!fs.existsSync(nonceFile)) throw new Error("durable lifecycle authorization nonce record is missing");
+  const prior = durableJson(nonceFile, "nonce record");
+  if (prior.status === "prepared") {
+    assertPreparedNonceRecord(prior, prepared);
+    atomicWrite(nonceFile, `${JSON.stringify(applied)}\n`);
+  } else if (canonicalJson(prior) !== canonicalJson(applied)) throw new Error("consumed lifecycle authorization nonce record does not match the exact completion");
+  return applied;
+}
 function childInvocation(payload, identity) {
   const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { input: `${JSON.stringify(payload)}\n`, encoding: "utf8", env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C", FLOW_AGENTS_LIFECYCLE_MUTATION_WORKER: "1" }, uid: identity.uid, gid: identity.gid, timeout: 30_000, maxBuffer: 512 * 1024 });
   if (result.error) throw result.error;
@@ -615,18 +640,18 @@ async function processRootOperation(envelope) {
   if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
   const authorizationSha256 = sha256(canonicalJson(authorization));
   const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);
+  const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
+  const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
   const runLockId = sha256({ project: identity.project, run_id: identity.runId });
   return withDurableLock(runLockId, async () => {
     const caller = callerIdentity();
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "completion record");
-      if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256) throw new Error("consumed lifecycle authorization record does not match the exact request");
-      const completionRecord = completion(envelope, { runId: identity.runId }, "replayed", prior.result_core_sha256);
+      const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
+      reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
-    const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
-    const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
     const transactionBinding = { request_sha256: envelope.request_sha256, authorization_sha256: authorizationSha256 };
     let resumePrepared = false;
     let verifiedBridge = null;
@@ -664,7 +689,7 @@ async function processRootOperation(envelope) {
     if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
     const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
-    atomicWrite(nonceFile, `${JSON.stringify({ ...prepared, status: "applied", result_core_sha256: mutation.result_core_sha256 })}\n`);
+    atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, mutation.result_core_sha256))}\n`);
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.

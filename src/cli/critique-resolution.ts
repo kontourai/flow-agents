@@ -311,7 +311,8 @@ function validateEvents(state: GraphState): void {
     else if (state.projectRoot && !state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
     if (event.operation === "repair-critique-resolution-history") {
       if (event.signed_authorization.operation !== "repair-critique-resolution-history" || event.signed_authorization.missing_resolution_event_id !== event.missing_resolution_event_id || event.signed_authorization.missing_authorization_sha256 !== event.missing_authorization_sha256 || event.signed_authorization.reason_code !== "coordinator-external-ledger-overwrite-v1" || state.resolutionEvents.some((other) => other !== event && other.operation === "resolve-critique" && (other.event_id === event.missing_resolution_event_id || other.authorization_sha256 === event.missing_authorization_sha256))) state.errors.push("critique resolution repair event is incomplete or reconstructs an original authority event");
-      if (event.verified_bridge_sha256 !== event.signed_authorization.historical_bridge_sha256
+      if (!HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(event.signed_authorization, field))
+        || event.verified_bridge_sha256 !== event.signed_authorization.historical_bridge_sha256
         || event.verified_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(event.signed_authorization)) {
         state.errors.push("critique resolution repair event does not bind the verified historical bridge");
       }
