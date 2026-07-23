@@ -33,6 +33,22 @@ const ACTION_FIELDS = {
   "resolve-critique": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
 };
+const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash",
+  "expected_resolver", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha",
+  "preimage_bundle_sha256", "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash", "current_completion_sha256",
+  "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+  "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+  "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+  "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+  "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+  "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+  "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+  "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  "historical_bridge_sha256", "preserved_resolution_sha256", "missing_resolution_event_id", "missing_authorization_sha256", "reason_code",
+  "nonce", "expires_at", "requested_at", "signature",
+];
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 export function canonicalJson(value) {
@@ -101,8 +117,14 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
   return authorization;
 }
+function assertPrivilegedAuthorizationShape(authorization) {
+  if (authorization.operation !== "repair-critique-resolution-history") return authorization;
+  exact(authorization, HISTORY_REPAIR_AUTHORIZATION_FIELDS, "privileged history repair authorization");
+  exact(authorization.signature, ["algorithm", "key_id", "value"], "privileged history repair authorization signature");
+  return authorization;
+}
 function verifyAuthorization(file, options = {}) {
-  return verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")), options);
+  return assertPrivilegedAuthorizationShape(verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")), options));
 }
 function atomicWrite(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -128,13 +150,15 @@ export function restoreTree(root, snapshot) {
   for (const entry of current.filter((entry) => !original.has(entry.path))) fs.unlinkSync(path.join(root, entry.path));
   for (const entry of snapshot) atomicWrite(path.join(root, entry.path), Buffer.from(entry.bytes, "base64"), entry.mode);
 }
-export function recoverTransaction(paths) {
-  const file = transactionJournal(paths); if (!fs.existsSync(file)) return;
+export function recoverTransaction(paths, expectedBinding = null) {
+  const file = transactionJournal(paths); if (!fs.existsSync(file)) return false;
   const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
-  if (journal.status !== "prepared") return;
+  if (journal.status !== "prepared") return false;
+  if (expectedBinding !== null && canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) return false;
   if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
   restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
+  return true;
 }
 export function rollbackCommittedTransaction(paths, expectedBinding) {
   const file = transactionJournal(paths); if (!fs.existsSync(file)) return false;
@@ -146,8 +170,36 @@ export function rollbackCommittedTransaction(paths, expectedBinding) {
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
   return true;
 }
-async function inProjectTransaction(paths, binding, action) {
-  recoverTransaction(paths);
+export function assertPreparedNonceRecord(prior, prepared) {
+  if (canonicalJson(prior) !== canonicalJson(prepared)) throw new Error("lifecycle authorization nonce has already been consumed");
+  return prepared;
+}
+export function recoverMatchingTransaction(paths, expectedBinding) {
+  const file = transactionJournal(paths);
+  if (!fs.existsSync(file)) return false;
+  const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
+  if (!["prepared", "committed"].includes(journal.status)) return false;
+  if (canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) throw new Error("prepared lifecycle recovery found a transaction for another operation");
+  const recovered = journal.status === "committed"
+    ? rollbackCommittedTransaction(paths, expectedBinding)
+    : recoverTransaction(paths, expectedBinding);
+  if (!recovered) throw new Error("prepared lifecycle transaction changed during recovery");
+  return true;
+}
+function recoverPreparedTransactionForEntry(paths, expectedBinding) {
+  const file = transactionJournal(paths);
+  if (!fs.existsSync(file)) return false;
+  const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
+  // A committed or rolled-back journal is inert history at ordinary transaction
+  // entry and will be replaced by the next prepared transaction. Only an
+  // interrupted prepared generation requires entry-time recovery.
+  if (journal.status !== "prepared") return false;
+  if (canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) throw new Error("prepared lifecycle recovery found a transaction for another operation");
+  if (!recoverTransaction(paths, expectedBinding)) throw new Error("prepared lifecycle transaction changed during recovery");
+  return true;
+}
+export async function inProjectTransaction(paths, binding, action) {
+  recoverPreparedTransactionForEntry(paths, binding);
   const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", binding, created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
   atomicWrite(transactionJournal(paths), `${JSON.stringify(journal)}\n`);
   try {
@@ -266,7 +318,7 @@ function canonicalFlowPaths(paths) {
     reportMarkdown: path.join(root, "report.md")
   };
 }
-function historicalAttachment(paths, authorization, completion) {
+function historicalAttachment(paths, authorization, completion, { expectedSupersededBy = null } = {}) {
   const files = canonicalFlowPaths(paths);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
@@ -276,8 +328,10 @@ function historicalAttachment(paths, authorization, completion) {
   const entries = manifest.evidence.filter((entry) => record(entry) && entry.id === attachmentId);
   if (entries.length !== 1) throw new Error("historical Flow attachment must occur exactly once");
   const entry = entries[0];
+  const { superseded_by: supersededBy, ...signedEntry } = entry;
+  if (expectedSupersededBy === null ? supersededBy !== undefined : supersededBy !== expectedSupersededBy) throw new Error("historical Flow attachment supersession does not match the expected transition");
   const expectedPath = `evidence/${attachmentId}.json`;
-  if (entry.kind !== "trust.bundle" || entry.stored_path !== expectedPath || authorization.historical_stored_path !== expectedPath || entry.sha256 !== authorization.historical_stored_raw_sha256 || sha256(canonicalJson(entry)) !== authorization.historical_manifest_entry_sha256) throw new Error("historical Flow attachment does not match the signed bridge");
+  if (entry.kind !== "trust.bundle" || entry.stored_path !== expectedPath || authorization.historical_stored_path !== expectedPath || entry.sha256 !== authorization.historical_stored_raw_sha256 || sha256(canonicalJson(signedEntry)) !== authorization.historical_manifest_entry_sha256) throw new Error("historical Flow attachment does not match the signed bridge");
   const evidenceRoot = path.join(files.root, "evidence");
   const storedFile = path.resolve(files.root, entry.stored_path);
   if (!within(storedFile, evidenceRoot) || storedFile !== path.join(evidenceRoot, `${attachmentId}.json`)) throw new Error("historical Flow stored path escapes the canonical evidence directory");
@@ -300,10 +354,10 @@ function exactBridgeSummary(summary, currentClaims, authorization, prefix) {
   if (authorization.current_resolution_edge_projection_sha256 !== currentEdges.digest || authorization.current_resolution_edge_projection_count !== currentEdges.count) throw new Error("history repair authorization current resolution-edge projection changed");
   if (authorization.historical_ledger_prefix_length !== prefix.length || authorization.historical_ledger_prefix_raw_sha256 !== prefix.raw_sha256 || authorization.historical_ledger_prefix_canonical_sha256 !== prefix.canonical_sha256 || authorization.historical_ledger_prefix_tail_hash !== prefix.tail_hash) throw new Error("history repair authorization historical ledger prefix changed");
 }
-function deriveHistoricalRepairBridge(paths, authorization, bundleBytes, bundle, ledger) {
+function deriveHistoricalRepairBridge(paths, authorization, bundleBytes, bundle, ledger, options = {}) {
   if (authorization.operation !== "repair-critique-resolution-history" || authorization.current_bundle_sha256 !== sha256(bundleBytes) || authorization.current_ledger_sha256 !== sha256(ledger.bytes) || authorization.current_ledger_length !== ledger.events.length || authorization.current_ledger_tail_hash !== (ledger.events.at(-1)?.event_hash ?? "0".repeat(64))) throw new Error("history repair authorization does not bind the exact current preimages");
   const historical = historicalCompletionForBridge(paths, authorization);
-  const attachment = historicalAttachment(paths, authorization, historical.completion);
+  const attachment = historicalAttachment(paths, authorization, historical.completion, options);
   const prefix = selectUniqueHistoricalLedgerPrefix(attachment.bundle, ledger.events, historical.completion.result_core_sha256);
   // A durable operation identity comes only from the signed authority event in
   // the unique reproducing prefix. A zero-length prefix has no such anchor.
@@ -370,11 +424,22 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   fs.mkdirSync(path.dirname(evidenceFile), { recursive: true, mode: 0o700 });
   if (!fs.readFileSync(files.definition).equals(definitionBytes) || !fs.readFileSync(files.state).equals(stateBytes) || !fs.readFileSync(files.manifest).equals(manifestBytes)) throw new Error("canonical Flow preimage changed during lifecycle trust synchronization");
   atomicWrite(evidenceFile, bundleBytes, 0o644);
+  const postimages = [{ file: evidenceFile, bytes: bundleBytes, label: "canonical Flow stored trust bundle", max_bytes: 4 * 1024 * 1024 }];
   for (const artifact of reduced.write.artifacts) {
     const destination = path.join(files.root, artifact.path);
-    atomicWrite(destination, typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`, 0o644);
+    const bytes = Buffer.from(typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`);
+    atomicWrite(destination, bytes, 0o644);
+    postimages.push({ file: destination, bytes, label: artifact.path === "evidence/manifest.json" ? "canonical Flow evidence manifest" : "canonical Flow reducer artifact", max_bytes: artifact.path === "evidence/manifest.json" ? MAX_CANONICAL_FLOW_MANIFEST_BYTES : 16 * 1024 * 1024 });
   }
-  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId };
+  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, postimages };
+}
+function assertCanonicalFlowPostimages(synchronized) {
+  if (!record(synchronized) || !Array.isArray(synchronized.postimages) || synchronized.postimages.length === 0) throw new Error("canonical Flow synchronization postimages are missing");
+  for (const postimage of synchronized.postimages) {
+    if (!record(postimage) || !Buffer.isBuffer(postimage.bytes) || typeof postimage.file !== "string") throw new Error("canonical Flow synchronization postimage is invalid");
+    const current = protectedRegularFile(postimage.file, postimage.label, postimage.max_bytes);
+    if (!current.equals(postimage.bytes)) throw new Error("canonical Flow postimage changed after lifecycle trust synchronization");
+  }
 }
 function sessionSubject(paths) {
   const state = protectedJson(path.join(paths.sessionDir, "state.json"), "workflow session state", 4 * 1024 * 1024);
@@ -501,13 +566,14 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
         assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
         if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
         assertResolutionEventLedgerPreimage(paths, ledger);
-        await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
+        const synchronized = await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
         // Recheck the exact preimage immediately before the session mutation.
         const finalBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(finalBytes, envelope.action, authorization);
         if (!finalBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
         assertResolutionEventLedgerPreimage(paths, ledger);
-        if (bridge && canonicalJson(publicBridge(deriveHistoricalRepairBridge(paths, authorization, finalBytes, JSON.parse(finalBytes.toString("utf8")), loadResolutionEventLedger(paths, JSON.parse(finalBytes.toString("utf8")), authorization, envelope.action)))) !== canonicalJson(verifiedBridge)) throw new Error("history repair bridge changed during mutation preparation");
+        assertCanonicalFlowPostimages(synchronized);
+        if (bridge && canonicalJson(publicBridge(deriveHistoricalRepairBridge(paths, authorization, finalBytes, JSON.parse(finalBytes.toString("utf8")), loadResolutionEventLedger(paths, JSON.parse(finalBytes.toString("utf8")), authorization, envelope.action), { expectedSupersededBy: synchronized.attachment_id }))) !== canonicalJson(verifiedBridge)) throw new Error("history repair bridge changed during mutation preparation");
         if (envelope.action === "resolve-critique") atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
         writeResolutionEventLedger(paths, nextResolutionEvents, ledger);
         if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
@@ -559,18 +625,19 @@ async function processRootOperation(envelope) {
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
-    let verifiedBridge = null;
-    if (envelope.action === "repair-critique-resolution-history") {
-      const paths = canonicalMutationPaths(envelope.request);
-      verifiedBridge = verifyRootHistoricalBridge(paths, authorization);
-    }
     const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
     const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+    const transactionBinding = { request_sha256: envelope.request_sha256, authorization_sha256: authorizationSha256 };
     let resumePrepared = false;
+    let verifiedBridge = null;
     if (fs.existsSync(nonceFile)) {
       const prior = durableJson(nonceFile, "nonce record");
-      if (canonicalJson(prior) !== canonicalJson(prepared)) throw new Error("lifecycle authorization nonce has already been consumed");
+      assertPreparedNonceRecord(prior, prepared);
       resumePrepared = true;
+      if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
+        const recovery = childInvocation({ kind: "rollback", capability: signedCapability("rollback-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
+        if (!record(recovery) || recovery.run_id !== identity.runId || typeof recovery.rolled_back !== "boolean") throw new Error("unprivileged lifecycle transaction recovery returned an invalid response");
+      }
     } else {
       verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
       // Reject a stale or mismatched live holder before creating any durable
@@ -580,8 +647,10 @@ async function processRootOperation(envelope) {
       if (envelope.action === "cancel") {
         assertLiveAssignmentHolder(canonicalMutationPaths(envelope.request), authorization);
       }
+      if (envelope.action === "repair-critique-resolution-history") verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
+    if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
     // The child rechecks all worktree inputs immediately before publication. Do
     // the matching root-only completion/nonce read immediately before handing
     // it the mutation capability, so a changed durable anchor cannot be used
@@ -606,26 +675,42 @@ async function processRootOperation(envelope) {
 function response(envelope, outcome) {
   return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord } };
 }
+function installCompletionReceipt(paths, candidate) {
+  const bundle = protectedJson(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
+  const ledgerFile = resolutionEventLedgerFile(paths);
+  const events = fs.existsSync(ledgerFile) ? protectedJson(ledgerFile, "lifecycle authority resolution event ledger", 4 * 1024 * 1024).events : [];
+  if (!Array.isArray(events)) throw new Error("lifecycle completion receipt resolution event ledger is invalid");
+  const receiptFile = path.join(paths.sessionDir, "lifecycle-authority.completion.json");
+  if (fs.existsSync(receiptFile)) {
+    // Authenticate the receipt against exact current state before considering
+    // the replay candidate. A valid newer receipt is authoritative even when
+    // the replay's older result core no longer matches current state.
+    const existing = verifyCurrentLifecycleCompletion(paths, bundle, events);
+    if (canonicalJson(existing) !== canonicalJson(candidate)) return { run_id: paths.runId, receipt: "preserved" };
+    return { run_id: paths.runId, receipt: "present" };
+  }
+  if (candidate.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, events)) throw new Error("lifecycle completion receipt does not bind the current bundle and ledger");
+  atomicWrite(receiptFile, `${JSON.stringify(candidate, null, 2)}\n`, 0o644);
+  return { run_id: paths.runId, receipt: "written" };
+}
 export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {
     const payload = JSON.parse(input);
     if (!record(payload) || typeof payload.kind !== "string") throw new Error("mutation worker request is invalid");
+    if (payload.kind === "rollback") {
+      const value = verifiedCapability(payload.capability, "rollback-capability");
+      if (!record(value.request) || !record(value.binding)) throw new Error("mutation worker rollback request is invalid");
+      exact(value.binding, ["request_sha256", "authorization_sha256"], "mutation worker rollback binding");
+      const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
+      if (value.binding.request_sha256 !== sha256(envelope.request) || !/^[a-f0-9]{64}$/.test(String(value.binding.authorization_sha256))) throw new Error("mutation worker rollback binding is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      return { run_id: paths.runId, rolled_back: recoverMatchingTransaction(paths, value.binding) };
+    }
     if (payload.kind === "receipt") {
       const value = verifiedCapability(payload.capability, "receipt-capability");
       if (!record(value.request) || !record(value.completion)) throw new Error("mutation worker receipt is invalid");
       const paths = canonicalMutationPaths(value.request);
-      const bundle = protectedJson(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
-      const ledgerFile = resolutionEventLedgerFile(paths);
-      const events = fs.existsSync(ledgerFile) ? protectedJson(ledgerFile, "lifecycle authority resolution event ledger", 4 * 1024 * 1024).events : [];
-      if (!Array.isArray(events) || value.completion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, events)) throw new Error("lifecycle completion receipt does not bind the current bundle and ledger");
-      const receiptFile = path.join(paths.sessionDir, "lifecycle-authority.completion.json");
-      if (fs.existsSync(receiptFile)) {
-        const existing = verifyCurrentLifecycleCompletion(paths, bundle, events);
-        if (canonicalJson(existing) !== canonicalJson(value.completion)) return { run_id: paths.runId, receipt: "preserved" };
-        return { run_id: paths.runId, receipt: "present" };
-      }
-      atomicWrite(receiptFile, `${JSON.stringify(value.completion, null, 2)}\n`, 0o644);
-      return { run_id: paths.runId, receipt: "written" };
+      return installCompletionReceipt(paths, value.completion);
     }
     if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");
     const value = verifiedCapability(payload.capability, "mutation-capability");
@@ -640,7 +725,6 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(projectRoot, archived) }), run_id: runId };
     }
     const paths = canonicalMutationPaths(envelope.request);
-    if (value.resume_prepared && ["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) rollbackCommittedTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(value.authorization)) });
     if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
     return executeMutation(envelope, paths, value.authorization, null, value.verified_bridge ?? null);
   }

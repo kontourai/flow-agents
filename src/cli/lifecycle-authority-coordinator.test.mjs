@@ -30,9 +30,9 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -149,6 +149,35 @@ test("canonical Flow manifest declares and uses the isolated 16 MiB capacity", (
     /protectedRegularFile\(\s*files\.manifest,\s*"canonical Flow evidence manifest",\s*MAX_CANONICAL_FLOW_MANIFEST_BYTES\s*\)/s.test(source),
     "coordinator must apply the named cap only to the canonical evidence manifest",
   );
+});
+
+test("privileged history-repair authorization rejects signed shape drift and legacy payloads", async () => {
+  const fixtureDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-privileged-authorization-"));
+  let loaded = null;
+  try {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const registryFile = path.join(fixtureDirectory, "keys.json");
+    fs.writeFileSync(registryFile, JSON.stringify({ schema_version: "1.0", keys: [{ id: "test-key", algorithm: "ed25519", public_key_pem: publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+    loaded = await loadProtectedReadFromCoordinator({ registryFile });
+    const unsigned = Object.fromEntries(loaded.historyRepairAuthorizationFields.filter((field) => field !== "signature").map((field) => [field, `fixture-${field}`]));
+    unsigned.operation = "repair-critique-resolution-history";
+    unsigned.expires_at = "2030-01-01T00:00:00.000Z";
+    const verifySigned = (candidate) => {
+      const authorizationFile = path.join(fixtureDirectory, `authorization-${Math.random()}.json`);
+      fs.writeFileSync(authorizationFile, JSON.stringify(signHistoricalAuthorization(candidate, privateKey)), { mode: 0o600 });
+      return loaded.verifyAuthorization(authorizationFile);
+    };
+    assert.doesNotThrow(() => verifySigned(unsigned));
+    assert.throws(() => verifySigned({ ...unsigned, unexpected: "signed-too" }), /unexpected or missing fields/i);
+    const missing = { ...unsigned };
+    delete missing.historical_bridge_sha256;
+    assert.throws(() => verifySigned(missing), /unexpected or missing fields/i);
+    const legacy = Object.fromEntries(Object.entries(unsigned).filter(([field]) => !field.startsWith("historical_") && !field.startsWith("current_")));
+    assert.throws(() => verifySigned(legacy), /unexpected or missing fields/i);
+  } finally {
+    if (loaded) fs.rmSync(loaded.directory, { recursive: true, force: true });
+    fs.rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("current four MiB coordinator guard rejects the protected 4,288,259-byte canonical manifest", async () => {
@@ -308,6 +337,43 @@ test("coordinator rejects forged or stale current completions before history rep
   }
 });
 
+test("completed replay preserves a newer exact-current receipt and restores only an exact missing receipt", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-replay-receipt-"));
+  let moduleDirectory = null;
+  try {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const completionKeyFile = path.join(directory, "completion-verification-key.pem");
+    fs.writeFileSync(completionKeyFile, publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+    const loaded = await loadProtectedReadFromCoordinator({ completionKeyFile });
+    moduleDirectory = loaded.directory;
+    const sessionDir = path.join(directory, "project", ".kontourai", "flow-agents", "run-replay");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const bundle = { schema_version: "1.0", claims: [] };
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), `${JSON.stringify(bundle)}\n`, { mode: 0o600 });
+    const exactCore = loaded.lifecycleAuthorityResultDigest(bundle, []);
+    const signedCompletion = (requestSha256, resultCoreSha256) => {
+      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "repair-critique-resolution-history", request_sha256: requestSha256, run_id: "run-replay", operation_status: "applied", result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
+      return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), privateKey).toString("base64") } };
+    };
+    const newer = signedCompletion("b".repeat(64), exactCore);
+    const olderReplay = signedCompletion("c".repeat(64), "d".repeat(64));
+    const receiptFile = path.join(sessionDir, "lifecycle-authority.completion.json");
+    fs.writeFileSync(receiptFile, `${JSON.stringify(newer)}\n`, { mode: 0o600 });
+    const newerBytes = fs.readFileSync(receiptFile);
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, olderReplay), { run_id: "run-replay", receipt: "preserved" });
+    assert.deepEqual(fs.readFileSync(receiptFile), newerBytes, "an exact-current newer receipt is protected before the older replay core is considered");
+    fs.unlinkSync(receiptFile);
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, olderReplay), /does not bind the current bundle and ledger/i);
+    assert.equal(fs.existsSync(receiptFile), false, "a missing receipt is not restored from an old replay core");
+    const exactReplay = signedCompletion("e".repeat(64), exactCore);
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactReplay), { run_id: "run-replay", receipt: "written" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactReplay);
+  } finally {
+    if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("historical repair bridge is request-keyed, append-only, and rejects an altered canonical snapshot", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-historical-bridge-"));
   let moduleDirectory = null;
@@ -380,8 +446,28 @@ test("historical repair bridge is request-keyed, append-only, and rejects an alt
     assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /nonce record does not match/i, "a mismatched historical nonce record rejects before publication");
     fs.writeFileSync(nonceFile, `${JSON.stringify(durableNonce)}\n`, { mode: 0o600 });
     assert.doesNotThrow(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }));
+    const supersedingAttachmentId = `lifecycle-authority:${"f".repeat(64)}`;
+    const supersededEntry = { ...entry, superseded_by: supersedingAttachmentId };
+    const manifestFile = path.join(flowRoot, "evidence", "manifest.json");
+    fs.writeFileSync(manifestFile, `${JSON.stringify({ evidence: [supersededEntry] })}\n`, { mode: 0o600 });
+    assert.doesNotThrow(
+      () => loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger, { expectedSupersededBy: supersedingAttachmentId }),
+      "the final CAS authenticates the signed entry after the one expected supersession",
+    );
+    fs.writeFileSync(manifestFile, `${JSON.stringify({ evidence: [{ ...supersededEntry, unrelated: "drift" }] })}\n`, { mode: 0o600 });
+    assert.throws(
+      () => loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger, { expectedSupersededBy: supersedingAttachmentId }),
+      /does not match the signed bridge/i,
+      "unrelated manifest-entry drift is not hidden by the expected supersession",
+    );
+    const expectedManifestBytes = Buffer.from(`${JSON.stringify({ evidence: [supersededEntry] })}\n`);
+    fs.writeFileSync(manifestFile, expectedManifestBytes, { mode: 0o600 });
+    assert.doesNotThrow(() => loaded.assertCanonicalFlowPostimages({ postimages: [{ file: manifestFile, bytes: expectedManifestBytes, label: "canonical Flow evidence manifest", max_bytes: EXPECTED_MANIFEST_BYTES }] }));
+    fs.appendFileSync(manifestFile, " ");
+    assert.throws(() => loaded.assertCanonicalFlowPostimages({ postimages: [{ file: manifestFile, bytes: expectedManifestBytes, label: "canonical Flow evidence manifest", max_bytes: EXPECTED_MANIFEST_BYTES }] }), /postimage changed/i, "post-synchronize manifest drift aborts before session publication");
+    fs.writeFileSync(manifestFile, expectedManifestBytes, { mode: 0o600 });
     fs.writeFileSync(path.join(flowRoot, storedPath), `${JSON.stringify({ schema_version: "1.0", claims: ["tampered"] })}\n`, { mode: 0o600 });
-    assert.throws(() => loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger), /stored trust bundle digest/i);
+    assert.throws(() => loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger, { expectedSupersededBy: supersedingAttachmentId }), /stored trust bundle digest/i);
   } finally {
     if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
     fs.rmSync(directory, { recursive: true, force: true });

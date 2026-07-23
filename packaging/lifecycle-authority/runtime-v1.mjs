@@ -228,6 +228,14 @@ function assertStoredAuthorizationBinding(event, expected) {
     if (event.event_id !== `critique-resolution:${event.authorization_sha256}` || event.edge.resolution_event_id !== event.event_id || event.edge.authorization_sha256 !== event.authorization_sha256) throw new Error("resolution event ledger ordinary event binding is invalid");
   } else if (authorization.missing_resolution_event_id !== event.missing_resolution_event_id || authorization.missing_authorization_sha256 !== event.missing_authorization_sha256 || event.edge.resolution_event_id !== event.missing_resolution_event_id || event.edge.authorization_sha256 !== event.missing_authorization_sha256) {
     throw new Error("resolution event ledger repair event binding is invalid");
+  } else if (
+    !HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(authorization, field))
+    || !Object.hasOwn(authorization, "historical_bridge_sha256")
+    || !Object.hasOwn(event, "verified_bridge_sha256")
+    || authorization.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(authorization)
+    || event.verified_bridge_sha256 !== authorization.historical_bridge_sha256
+  ) {
+    throw new Error("resolution event ledger repair event verified historical bridge binding is invalid");
   }
 }
 
@@ -340,15 +348,16 @@ export function repairCritiqueResolutionHistoryTransition(input) {
   const authorization = input.authorization;
   if (!record(authorization) || authorization.schema_version !== "1.0" || authorization.operation !== "repair-critique-resolution-history") throw new Error("history repair authorization identity is invalid");
   const ledger = assertExternalLedgerInput(input, authorization, false);
-  if (authorization.historical_bridge_sha256 !== undefined) {
-    requireDigest(authorization.historical_bridge_sha256, "history repair bridge");
-    if (authorization.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(authorization)) throw new Error("history repair authorization bridge digest is invalid");
-    if (authorization.current_bundle_sha256 !== authorization.preimage_bundle_sha256
-      || authorization.current_ledger_sha256 !== input.ledger_bytes_sha256
-      || authorization.current_ledger_length !== ledger.length
-      || authorization.current_ledger_tail_hash !== ledger.tail_hash) {
-      throw new Error("history repair authorization does not bind the exact current preimages");
-    }
+  if (!HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(authorization, field)) || !Object.hasOwn(authorization, "historical_bridge_sha256")) {
+    throw new Error("history repair authorization requires every historical bridge field");
+  }
+  requireDigest(authorization.historical_bridge_sha256, "history repair bridge");
+  if (authorization.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(authorization)) throw new Error("history repair authorization bridge digest is invalid");
+  if (authorization.current_bundle_sha256 !== authorization.preimage_bundle_sha256
+    || authorization.current_ledger_sha256 !== input.ledger_bytes_sha256
+    || authorization.current_ledger_length !== ledger.length
+    || authorization.current_ledger_tail_hash !== ledger.tail_hash) {
+    throw new Error("history repair authorization does not bind the exact current preimages");
   }
   requireDigest(input.current_completion_sha256, "current completion");
   if (authorization.current_completion_sha256 !== input.current_completion_sha256) throw new Error("history repair authorization does not bind the current completion digest");
@@ -382,7 +391,7 @@ export function repairCritiqueResolutionHistoryTransition(input) {
     authorization_key_id: authorization.signature?.key_id, authorization_nonce: authorization.nonce,
     edge, missing_resolution_event_id: edge.resolution_event_id, missing_authorization_sha256: edge.authorization_sha256,
     reason_code: authorization.reason_code, current_completion_sha256: input.current_completion_sha256,
-    ...(authorization.historical_bridge_sha256 ? { verified_bridge_sha256: authorization.historical_bridge_sha256 } : {}),
+    verified_bridge_sha256: authorization.historical_bridge_sha256,
     resulting_core_sha256: critiqueResolutionResultCoreDigest(priorMetadata, resolvingMetadata, edge), signed_authorization: authorization,
   };
   return { bundle: input.bundle, resolution_events: appendEvent(input.resolution_events, unsignedEvent) };

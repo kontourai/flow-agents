@@ -124,19 +124,6 @@ export function critiqueResolutionHistoryRepairAuthorizationPayload(value: Omit<
   return JSON.stringify(value);
 }
 
-type LegacyCritiqueResolutionHistoryRepairFields = Omit<CritiqueResolutionHistoryRepairAuthorization,
-  "schema_version" | "operation" | "signature"
-  | "historical_completion_sha256" | "historical_completion_request_sha256" | "historical_completion_action" | "historical_completion_result_core_sha256"
-  | "historical_attachment_id" | "historical_manifest_entry_sha256" | "historical_stored_path" | "historical_stored_raw_sha256" | "historical_stored_bundle_sha256"
-  | "historical_durable_operation_id" | "historical_durable_completion_record_sha256"
-  | "historical_ledger_prefix_length" | "historical_ledger_prefix_raw_sha256" | "historical_ledger_prefix_canonical_sha256" | "historical_ledger_prefix_tail_hash"
-  | "historical_critique_projection_version" | "historical_critique_projection_sha256" | "historical_critique_projection_length" | "historical_critique_projection_tail_hash"
-  | "current_critique_projection_version" | "current_critique_projection_sha256" | "current_critique_projection_length" | "current_critique_projection_tail_hash"
-  | "historical_resolution_edge_projection_sha256" | "historical_resolution_edge_projection_count"
-  | "current_resolution_edge_projection_sha256" | "current_resolution_edge_projection_count"
-  | "current_bundle_sha256" | "current_ledger_sha256" | "current_ledger_length" | "current_ledger_tail_hash" | "historical_bridge_sha256"
->;
-
 const HISTORY_REPAIR_BRIDGE_FIELDS = [
   "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
   "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
@@ -149,25 +136,26 @@ const HISTORY_REPAIR_BRIDGE_FIELDS = [
   "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
 ] as const;
 
+export type CritiqueResolutionHistoryRepairBridgeBindings = Pick<
+  CritiqueResolutionHistoryRepairAuthorization,
+  typeof HISTORY_REPAIR_BRIDGE_FIELDS[number] | "historical_bridge_sha256"
+>;
+
 export function critiqueResolutionHistoryBridgeDigest(value: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(Object.fromEntries(HISTORY_REPAIR_BRIDGE_FIELDS.map((field) => [field, value[field]])))).digest("hex");
 }
 
 export function buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields: Omit<CritiqueResolutionHistoryRepairAuthorization, "schema_version" | "operation" | "signature">): {
   unsigned: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">; signingPayload: string;
-};
-/** Transitional overload retained only until the later public-request integration wave supplies bridge fields. */
-export function buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields: LegacyCritiqueResolutionHistoryRepairFields): {
-  unsigned: Readonly<Record<string, unknown>>; signingPayload: string;
-};
-export function buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields: Record<string, unknown>): {
-  unsigned: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">; signingPayload: string;
 } {
-  if (Object.hasOwn(fields, "historical_bridge_sha256") && fields.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(fields)) {
+  if (!HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(fields, field)) || !Object.hasOwn(fields, "historical_bridge_sha256")) {
+    throw new Error("history repair authorization requires every historical bridge field");
+  }
+  if (fields.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(fields)) {
     throw new Error("history repair authorization historical_bridge_sha256 does not bind the exact bridge fields");
   }
   const unsigned = { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields } as const;
-  return { unsigned: unsigned as Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">, signingPayload: JSON.stringify(unsigned) };
+  return { unsigned, signingPayload: JSON.stringify(unsigned) };
 }
 
 const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [

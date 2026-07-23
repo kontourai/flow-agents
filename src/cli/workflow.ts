@@ -10,7 +10,7 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, critiqueResolutionHistoryBridgeDigest } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
@@ -1489,7 +1489,7 @@ function canonicalSha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
-export function discoverCritiqueResolutionHistoryRepairBridge(input: {
+type HistoricalRepairBridgeInput = {
   sessionDir: string;
   slug: string;
   projectRoot: string;
@@ -1498,21 +1498,36 @@ export function discoverCritiqueResolutionHistoryRepairBridge(input: {
   ledgerBytes: Buffer;
   events: JsonRecord[];
   completion: JsonRecord;
-}): Record<string, string | number> {
-  const { sessionDir, slug, projectRoot, bundleBytes, bundle, ledgerBytes, events, completion } = input;
+};
+
+type HistoricalCompletionIdentity = {
+  requestSha256: string;
+  resultCoreSha256: string;
+  action: "resolve-critique" | "repair-critique-resolution-history";
+};
+
+function historicalCompletionIdentity(completion: JsonRecord, slug: string): HistoricalCompletionIdentity {
   if (completion.run_id !== slug || !(["resolve-critique", "repair-critique-resolution-history"] as unknown[]).includes(completion.action)) {
     throw new Error("historical lifecycle completion does not bind the canonical repair run");
   }
   const requestSha256 = String(completion.request_sha256);
-  if (!/^[a-f0-9]{64}$/.test(requestSha256) || !/^[a-f0-9]{64}$/.test(String(completion.result_core_sha256))) {
+  const resultCoreSha256 = String(completion.result_core_sha256);
+  if (!/^[a-f0-9]{64}$/.test(requestSha256) || !/^[a-f0-9]{64}$/.test(resultCoreSha256)) {
     throw new Error("historical lifecycle completion identity is invalid");
   }
+  return { requestSha256, resultCoreSha256, action: completion.action as HistoricalCompletionIdentity["action"] };
+}
+
+function readHistoricalRepairAttachment(input: HistoricalRepairBridgeInput, identity: HistoricalCompletionIdentity): {
+  attachmentId: string; entry: JsonRecord; storedPath: string; storedBytes: Buffer; historicalBundle: JsonRecord;
+} {
+  const { sessionDir, projectRoot, slug } = input;
   const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
   const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "canonical Flow evidence manifest", 16 * 1024 * 1024);
   if (!manifestBytes) throw new Error("canonical Flow evidence manifest is missing");
   const manifest = JSON.parse(manifestBytes.toString("utf8")) as JsonRecord;
   if (!Array.isArray(manifest.evidence)) throw new Error("canonical Flow evidence manifest is invalid");
-  const attachmentId = `lifecycle-authority:${requestSha256}`;
+  const attachmentId = `lifecycle-authority:${identity.requestSha256}`;
   const entries = (manifest.evidence as unknown[]).filter((entry): entry is JsonRecord =>
     Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) && (entry as JsonRecord).id === attachmentId,
   );
@@ -1542,20 +1557,40 @@ export function discoverCritiqueResolutionHistoryRepairBridge(input: {
   if (!historicalBundle || typeof historicalBundle !== "object" || Array.isArray(historicalBundle) || !Array.isArray(historicalBundle.claims)) {
     throw new Error("historical Flow stored trust bundle is invalid");
   }
-  const prefix = selectUniqueHistoricalLedgerPrefix(historicalBundle, events, String(completion.result_core_sha256));
+  return { attachmentId, entry, storedPath, storedBytes, historicalBundle };
+}
+
+function historicalRepairAuthorizationIdentity(input: HistoricalRepairBridgeInput, identity: HistoricalCompletionIdentity, historicalBundle: JsonRecord): {
+  prefix: ReturnType<typeof selectUniqueHistoricalLedgerPrefix>;
+  historicalAuthorization: JsonRecord;
+  signature: JsonRecord;
+} {
+  const prefix = selectUniqueHistoricalLedgerPrefix(historicalBundle, input.events, identity.resultCoreSha256);
   const historicalEvent = prefix.events.at(-1) as JsonRecord | undefined;
   const historicalAuthorization = historicalEvent?.signed_authorization as JsonRecord | undefined;
   const signature = historicalAuthorization?.signature as JsonRecord | undefined;
   if (
     !historicalEvent || !historicalAuthorization || !signature
-    || historicalEvent.operation !== completion.action
-    || historicalEvent.run_id !== slug
-    || historicalAuthorization.project_root !== projectRoot
+    || historicalEvent.operation !== identity.action
+    || historicalEvent.run_id !== input.slug
+    || historicalAuthorization.project_root !== input.projectRoot
     || typeof signature.key_id !== "string"
     || typeof historicalAuthorization.nonce !== "string"
   ) {
     throw new Error("historical completion has no matching signed ledger authorization");
   }
+  return { prefix, historicalAuthorization, signature };
+}
+
+function buildHistoricalRepairBridgeBindings(
+  input: HistoricalRepairBridgeInput,
+  identity: HistoricalCompletionIdentity,
+  attachment: ReturnType<typeof readHistoricalRepairAttachment>,
+  authority: ReturnType<typeof historicalRepairAuthorizationIdentity>,
+): CritiqueResolutionHistoryRepairBridgeBindings {
+  const { projectRoot, slug, bundleBytes, bundle, ledgerBytes, events, completion } = input;
+  const { attachmentId, entry, storedPath, storedBytes, historicalBundle } = attachment;
+  const { prefix, historicalAuthorization, signature } = authority;
   const continuity = assertAppendOnlyCritiqueHistory(historicalBundle.claims as JsonRecord[], bundle.claims as JsonRecord[]);
   const currentEdges = critiqueResolutionEdgeProjectionSummary(bundle.claims as JsonRecord[]);
   const historicalAuthorizationSha256 = canonicalSha256(historicalAuthorization);
@@ -1563,21 +1598,21 @@ export function discoverCritiqueResolutionHistoryRepairBridge(input: {
   const operationId = canonicalSha256({
     project: path.resolve(projectRoot),
     run_id: slug,
-    action: completion.action,
+    action: identity.action,
     key_id: signature.key_id,
     nonce: historicalAuthorization.nonce,
   });
   const durableRecord = {
     authorization_sha256: historicalAuthorizationSha256,
-    request_sha256: requestSha256,
-    result_core_sha256: completion.result_core_sha256,
+    request_sha256: identity.requestSha256,
+    result_core_sha256: identity.resultCoreSha256,
     completion,
   };
-  const bridge: JsonRecord = {
+  const bridge = {
     historical_completion_sha256: historicalCompletionSha256,
-    historical_completion_request_sha256: requestSha256,
-    historical_completion_action: completion.action,
-    historical_completion_result_core_sha256: completion.result_core_sha256,
+    historical_completion_request_sha256: identity.requestSha256,
+    historical_completion_action: identity.action,
+    historical_completion_result_core_sha256: identity.resultCoreSha256,
     historical_attachment_id: attachmentId,
     historical_manifest_entry_sha256: canonicalSha256(entry),
     historical_stored_path: storedPath,
@@ -1606,8 +1641,14 @@ export function discoverCritiqueResolutionHistoryRepairBridge(input: {
     current_ledger_length: events.length,
     current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
   };
-  bridge.historical_bridge_sha256 = critiqueResolutionHistoryBridgeDigest(bridge);
-  return bridge as Record<string, string | number>;
+  return { ...bridge, historical_bridge_sha256: critiqueResolutionHistoryBridgeDigest(bridge) };
+}
+
+export function discoverCritiqueResolutionHistoryRepairBridge(input: HistoricalRepairBridgeInput): CritiqueResolutionHistoryRepairBridgeBindings {
+  const identity = historicalCompletionIdentity(input.completion, input.slug);
+  const attachment = readHistoricalRepairAttachment(input, identity);
+  const authority = historicalRepairAuthorizationIdentity(input, identity, attachment.historicalBundle);
+  return buildHistoricalRepairBridgeBindings(input, identity, attachment, authority);
 }
 
 function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {

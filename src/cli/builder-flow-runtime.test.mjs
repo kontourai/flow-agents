@@ -2695,6 +2695,13 @@ test("history-repair authorization is a distinct signed request bound to the exa
   assert.equal(unsigned.operation, "repair-critique-resolution-history");
   assert.deepEqual(unsigned, { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields });
   assert.equal(signingPayload, critiqueResolutionHistoryRepairAuthorizationPayload(unsigned));
+  const missingBridgeField = structuredClone(fields);
+  delete missingBridgeField.historical_stored_raw_sha256;
+  assert.throws(
+    () => buildUnsignedCritiqueResolutionHistoryRepairAuthorization(missingBridgeField),
+    /requires every historical bridge field/i,
+    "the public builder rejects a legacy repair request before signing",
+  );
   assert.notEqual(
     buildUnsignedCritiqueResolutionAuthorization({
       project_root: fields.project_root, run_id: fields.run_id, subject: fields.subject,
