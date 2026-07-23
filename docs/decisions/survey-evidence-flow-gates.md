@@ -8,6 +8,8 @@ evidence:
   - kind: issue
     ref: https://github.com/kontourai/flow-agents/issues/821
   - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/858
+  - kind: issue
     ref: https://github.com/kontourai/flow/issues/169
 ---
 
@@ -20,9 +22,11 @@ review session and needs to continue an already-paused Flow gate. The host
 configures a review-session resolver capability separately from continuation
 requests. A request carries only an opaque review-session reference; the
 resolver returns the persisted record, append-only events, current server state,
-and canonical Survey projection. The adapter derives the review result,
-validates the projection's Flow subject and current-gate bindings, and builds
-Survey's ordinary trust bundle.
+producer identity, and its host-owned Flow subject binding. The adapter derives
+the review result and delegates the complete `ReviewItem` plus result projection
+to Survey's public `buildCanonicalReviewedTrustInput` API. It verifies that the
+Survey-owned projection matches the current gate, then builds Survey's ordinary
+trust bundle.
 
 The adapter does not accept caller-authored review state, events, projection, or
 decision as authority. It
@@ -49,6 +53,9 @@ proposed value from a gate description or `explore_hint`.
 
 - A rejected, incomplete, stale, foreign, or mismatched review cannot change
   the Flow run or its evidence manifest.
+- Survey is the single implementation source for review status precedence,
+  effective edited values, claim identity, and candidate/source/extraction
+  provenance. Flow Agents does not retain a parallel field comparator.
 - A non-passing canonical review remains inspectable through the returned
   Survey decisions and Flow outcome, while Flow keeps the paused run unchanged.
 - Native or in-process hosts call the same provider-neutral library API. This

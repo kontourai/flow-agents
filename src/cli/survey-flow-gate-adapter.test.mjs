@@ -13,7 +13,6 @@ import {
 } from "@kontourai/flow";
 import {
   createServerReviewSessionRecord,
-  deriveServerReviewSessionApplyResult,
 } from "@kontourai/survey/review-workbench/server-review-session";
 import { buildReviewSessionEvents } from "@kontourai/survey/review-workbench";
 import {
@@ -147,90 +146,13 @@ function session({ decision = "accept-proposed", name = "survey-gate-session" } 
   };
 }
 
-function surveyInput({ status = "verified", subject = SUBJECT, workflowSubject = SUBJECT } = {}) {
-  return {
-    source: "survey-gate-adapter-test",
-    generatedAt: TIME,
-    rawSources: [{
-      id: "source.review",
-      kind: "manual-entry",
-      sourceRef: "review://server/gate-review-item",
-      observedAt: TIME,
-      locatorScheme: "structured-field",
-    }],
-    extractions: [{
-      id: "extraction.review",
-      sourceId: "source.review",
-      target: "quality.review",
-      value: "accepted",
-      extractor: "survey-gate-test",
-      extractedAt: TIME,
-    }],
-    candidateSets: [{
-      id: "candidate-set.review",
-      target: "quality.review",
-      candidates: [{ id: "candidate.accepted", extractionId: "extraction.review", value: "accepted" }],
-      selectedCandidateId: "candidate.accepted",
-      status: "conflict",
-    }],
-    reviewOutcomes: [{
-      id: "review.accepted",
-      candidateSetId: "candidate-set.review",
-      candidateId: "candidate.accepted",
-      status,
-      actor: "reviewer:server",
-      reviewedAt: TIME,
-    }],
-    claims: [{
-      id: "claim.review",
-      candidateSetId: "candidate-set.review",
-      candidateId: "candidate.accepted",
-      subjectType: "work-item",
-      subjectId: subject,
-      facet: "quality",
-      claimType: "quality.review",
-      fieldOrBehavior: "review acceptance",
-      impactLevel: "high",
-      collectedBy: "survey-gate-test",
-      metadata: { workflow_subject_ref: workflowSubject },
-    }],
-  };
-}
-
-function resolvedReview(review, projection = surveyInput()) {
-  let derived;
-  try {
-    derived = deriveServerReviewSessionApplyResult({
-      record: review.record,
-      events: review.events,
-      currentSnapshot: review.currentSnapshot ?? review.snapshot,
-      currentEventCount: review.currentEventCount ?? review.events.length,
-      requiredResolvedItems: "all",
-    });
-  } catch {
-    derived = undefined;
-  }
-  if (derived?.ok) {
-    for (const outcome of projection.reviewOutcomes) {
-      const decision = derived.decisions.find((entry) => entry.spec.projection?.reviewOutcomeId === outcome.id);
-      if (!decision) continue;
-      for (const field of [
-        "attemptEvidenceIds",
-        "rationale",
-        "evidenceIds",
-        "withinComfortZone",
-        "comfortZoneNote",
-        "authorizing",
-      ]) {
-        if (decision.spec[field] !== undefined) outcome[field] = structuredClone(decision.spec[field]);
-      }
-    }
-  }
+function resolvedReview(review, { workflowSubjectRef = SUBJECT, projectionSource = "survey-gate-adapter-test" } = {}) {
   return {
     ...review,
     currentSnapshot: review.currentSnapshot ?? review.snapshot,
     currentEventCount: review.currentEventCount ?? review.events.length,
-    surveyInput: projection,
+    projectionSource,
+    workflowSubjectRef,
   };
 }
 
@@ -333,8 +255,8 @@ test("stale, foreign, mismatched, and fabricated resolver results fail before Fl
       delete resolved.currentSnapshot;
       return resolved;
     }],
-    ["foreign", (review) => resolvedReview(review, surveyInput({ subject: "work-item:foreign", workflowSubject: SUBJECT }))],
-    ["mismatch", (review) => resolvedReview(review, surveyInput({ workflowSubject: "work-item:wrong" }))],
+    ["foreign", (review) => resolvedReview(review, { workflowSubjectRef: "work-item:foreign" })],
+    ["mismatch", (review) => resolvedReview(review, { workflowSubjectRef: "work-item:wrong" })],
     ["fabricated", () => resolvedReview(session({ decision: null, name: "fabricated" }))],
   ];
 
@@ -358,7 +280,7 @@ test("a server-derived rejected review is inspectable but leaves Flow state muta
   const run = await pausedRun(cwd, "nonpass");
   const before = flowSnapshot(cwd, run.state.run_id);
   const dependencies = resolver({
-    rejected: resolvedReview(session({ decision: "reject-proposed", name: "rejected-review" }), surveyInput({ status: "rejected" })),
+    rejected: resolvedReview(session({ decision: "reject-proposed", name: "rejected-review" })),
   });
   const result = await continuePausedFlowGateFromSurvey(request(run, "rejected"), dependencies);
 
@@ -367,19 +289,19 @@ test("a server-derived rejected review is inspectable but leaves Flow state muta
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
 
-test("a verified claim override cannot turn a canonical rejection into passing evidence", async () => {
+test("a resolver cannot inject a SurveyInput status override", async () => {
   const cwd = workspace();
   const run = await pausedRun(cwd, "status-override");
   const before = flowSnapshot(cwd, run.state.run_id);
-  const projection = surveyInput({ status: "rejected" });
-  projection.claims[0].status = "verified";
+  const resolved = resolvedReview(session({ decision: "reject-proposed", name: "status-override-review" }));
+  resolved.surveyInput = { claims: [{ status: "verified" }] };
   const dependencies = resolver({
-    rejected: resolvedReview(session({ decision: "reject-proposed", name: "status-override-review" }), projection),
+    rejected: resolved,
   });
 
   await assert.rejects(
     () => continuePausedFlowGateFromSurvey(request(run, "rejected"), dependencies),
-    /overrides the canonical review status/,
+    /canonical review state and workflow binding/,
   );
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
@@ -406,7 +328,7 @@ test("continuation requests cannot inject authority records, events, or Survey p
   for (const injected of [
     { reviewSession: session({ name: "forged-session" }) },
     { record: session({ name: "forged-record" }).record },
-    { surveyInput: surveyInput({ workflowSubject: "work-item:forged" }) },
+    { surveyInput: { claims: [{ status: "verified" }] } },
     { events: [] },
   ]) {
     await assert.rejects(
@@ -419,7 +341,8 @@ test("continuation requests cannot inject authority records, events, or Survey p
   const result = await createSurveyFlowGateAdapter(dependencies).continuePausedGate(request(run, "canonical"));
   assert.equal(result.flow.committed, true);
   assert.equal(result.review.ref, "canonical");
-  assert.equal(result.trustBundle.claims[0].metadata.workflow_subject_ref, SUBJECT);
+  assert.equal(result.trustBundle.claims[0].subjectId, SUBJECT);
+  assert.equal(result.trustBundle.claims[0].status, "verified");
 });
 
 test("a valid unrelated review cannot be repurposed into the gated Survey projection", async () => {
@@ -427,46 +350,79 @@ test("a valid unrelated review cannot be repurposed into the gated Survey projec
   const run = await pausedRun(cwd, "unrelated-projection");
   const before = flowSnapshot(cwd, run.state.run_id);
   const dependencies = resolver({
-    unrelated: resolvedReview(unrelatedSession(), surveyInput()),
+    unrelated: resolvedReview(unrelatedSession()),
   });
 
   await assert.rejects(
     () => continuePausedFlowGateFromSurvey(request(run, "unrelated"), dependencies),
-    /canonical replayed ReviewItem/,
+    /canonicalSurveyInput\.claims/,
   );
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
 
-test("a resolver projection cannot change evidence-affecting candidate or claim fields", async () => {
+test("Survey rejects canonical review items with conflicting candidate claim targets", async () => {
   const cwd = workspace();
   const run = await pausedRun(cwd, "projection-field-mismatch");
   const before = flowSnapshot(cwd, run.state.run_id);
-  const projection = surveyInput();
-  projection.candidateSets[0].candidates[0].confidence = 0.99;
+  const review = session({ name: "projection-field-mismatch-review" });
+  const snapshot = structuredClone(review.snapshot);
+  const second = structuredClone(snapshot.items[0].spec.candidates[0]);
+  second.id = "candidate.other";
+  second.role = "current";
+  second.claimTarget.subjectId = "work-item:other";
+  second.projection.candidateId = "candidate.other";
+  second.projection.extractionId = "extraction.other";
+  second.projection.rawSourceId = "source.other";
+  second.source.sourceId = "source.other";
+  second.extraction.extractionId = "extraction.other";
+  snapshot.items[0].spec.candidates.push(second);
+  const events = buildReviewSessionEvents(snapshot, "projection-field-mismatch-review");
+  const canonicalReview = {
+    snapshot,
+    events,
+    record: createServerReviewSessionRecord({
+      sessionName: "projection-field-mismatch-review",
+      snapshot,
+      eventCount: events.length,
+      updatedAt: TIME,
+    }),
+  };
   const dependencies = resolver({
-    mismatch: resolvedReview(session({ name: "projection-field-mismatch-review" }), projection),
+    mismatch: resolvedReview(canonicalReview),
   });
 
   await assert.rejects(
     () => continuePausedFlowGateFromSurvey(request(run, "mismatch"), dependencies),
-    /surveyInput\.candidates\.confidence/,
+    /conflicting claim targets/,
   );
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });
 
-test("a resolver projection cannot change the canonical candidate-set rationale", async () => {
+test("Survey rejects canonical review items missing trust projection provenance", async () => {
   const cwd = workspace();
   const run = await pausedRun(cwd, "projection-rationale-mismatch");
   const before = flowSnapshot(cwd, run.state.run_id);
-  const projection = surveyInput();
-  projection.candidateSets[0].rationale = "caller-selected rationale";
+  const review = session({ name: "missing-provenance-review" });
+  const snapshot = structuredClone(review.snapshot);
+  delete snapshot.items[0].spec.candidates[0].source.observedAt;
+  const events = buildReviewSessionEvents(snapshot, "missing-provenance-review");
+  const canonicalReview = {
+    snapshot,
+    events,
+    record: createServerReviewSessionRecord({
+      sessionName: "missing-provenance-review",
+      snapshot,
+      eventCount: events.length,
+      updatedAt: TIME,
+    }),
+  };
   const dependencies = resolver({
-    mismatch: resolvedReview(session({ name: "projection-rationale-mismatch-review" }), projection),
+    mismatch: resolvedReview(canonicalReview),
   });
 
   await assert.rejects(
     () => continuePausedFlowGateFromSurvey(request(run, "mismatch"), dependencies),
-    /surveyInput\.candidateSets\.rationale/,
+    /lacks source or extraction provenance/,
   );
   assert.deepEqual(flowSnapshot(cwd, run.state.run_id), before);
 });

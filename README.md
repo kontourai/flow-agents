@@ -241,7 +241,8 @@ its claim targets and adds immutable workflow correlation, while
 
 After the server-owned review session is complete,
 `continuePausedFlowGateFromSurvey` resolves the opaque session reference,
-derives the canonical outcome, projects Survey evidence, and delegates the
+derives the canonical outcome, asks Survey to project the complete reviewed
+trust input from its authoritative `ReviewItem`s and results, and delegates the
 atomic attach/evaluate/resume transaction to Flow. Candidate construction,
 queue persistence, review authority, and lifecycle authority remain separate
 capabilities.
