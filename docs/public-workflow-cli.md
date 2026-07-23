@@ -267,7 +267,15 @@ before any adapter starts, retains the key only in driver memory, and adds an
 payload containing the canonical outcome and ordered adapter requests/results, and an Ed25519
 signature over the exact payload bytes. Consumers must compare the public key with the key they
 pinned before launch, verify the signature, and then validate any evidence-specific schema. Without
-this optional flag, the released outcome shape and behavior are unchanged.
+this optional flag, the outcome is not externally authenticated.
+
+Every JSON outcome also carries `canonical_gate_projection`, a compact observation copied from the
+final synchronized Flow state while the continuation lock is still held. It identifies the run and
+definition, current status and step, evaluated gate statuses, matched evidence ids, trust diagnostic
+codes, and accepted exceptions. This projection is final-output telemetry only: it is not included in
+continuation snapshots, adapter requests, or model context. When `--evidence-signing-key-file` is
+used, the projection is inside the signed outcome bytes; otherwise consumers may display it but must
+not treat it as authenticated proof.
 
 An adapter may instead park on a process or deadline. A pending barrier is persisted and does not
 consume another turn when `workflow drive` is invoked again:
