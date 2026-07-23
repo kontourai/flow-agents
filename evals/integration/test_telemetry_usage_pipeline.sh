@@ -118,12 +118,14 @@ if [[ -n "$out1" ]]; then
   ot=$(echo "$out1" | jq -r '.usage.output_tokens')
   cost=$(echo "$out1" | jq -r '.usage.estimated_cost_usd')
   by_model_len=$(echo "$out1" | jq -r '.usage.by_model | length')
+  semantics=$(echo "$out1" | jq -r '.usage.semantics // empty')
 
   [[ "$model" != "unknown" && "$model" != "null" && -n "$model" ]] && _pass "model is concrete (got: $model)" || _fail "model should not be unknown (got: $model)"
   [[ "$model" == "claude-opus-4-8" ]] && _pass "model is the dominant-by-tokens model (claude-opus-4-8)" || _fail "expected dominant model claude-opus-4-8, got $model"
   [[ "$it" != "null" && "$it" -gt 0 ]] && _pass "input_tokens is real and non-null (got: $it)" || _fail "input_tokens should be non-null/positive (got: $it)"
   [[ "$ot" != "null" && "$ot" -gt 0 ]] && _pass "output_tokens is real and non-null (got: $ot)" || _fail "output_tokens should be non-null/positive (got: $ot)"
   cost_positive=$(echo "$out1" | jq -r '(.usage.estimated_cost_usd // 0) > 0')
+  [[ "$semantics" == "snapshot" ]] && _pass "session usage declares cumulative snapshot semantics" || _fail "expected usage.semantics=snapshot, got $semantics"
   [[ "$cost" != "null" && "$cost_positive" == "true" ]] && _pass "estimated_cost_usd is real and non-null (got: $cost)" || _fail "estimated_cost_usd should be non-null/positive (got: $cost)"
   [[ "$by_model_len" == "2" ]] && _pass "by_model has 2 entries" || _fail "expected 2 by_model entries, got $by_model_len"
 else

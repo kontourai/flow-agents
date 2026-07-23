@@ -616,7 +616,8 @@ write_tool_start_record() {
 # add_tool_result_meta — enriches a tool.result event with the three #580
 # fields on its existing .tool object: duration_ms (wall-clock ms since the
 # matching invoke, or null when the start record is absent), outcome
-# (deterministic pass|fail|ambiguous), and status (host exit code int or null).
+# (deterministic pass|fail|ambiguous), exit_code (host exit code int or null),
+# and typed status (completed|failed|canceled|blocked|unknown).
 # Never fails the hook.
 add_tool_result_meta() {
   local event="$1" event_type="$2" stdin_json="$3"
@@ -643,13 +644,13 @@ add_tool_result_meta() {
   fi
 
   # --- outcome/status: hermetic jq tri-state (canonical observeResult port) ---
-  local verdict outcome status
+  local verdict outcome exit_code status
   verdict=$(printf '%s' "$stdin_json" | jq -c --arg et "$event_type" \
     "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_MAIN}" 2>/dev/null)
   [[ -z "$verdict" ]] && verdict='{"exitCode":null,"observedResult":"ambiguous"}'
-  status=$(printf '%s' "$verdict" | jq -c '.exitCode' 2>/dev/null)
+  exit_code=$(printf '%s' "$verdict" | jq -c '.exitCode' 2>/dev/null)
   outcome=$(printf '%s' "$verdict" | jq -r '.observedResult' 2>/dev/null)
-  [[ -z "$status" ]] && status="null"
+  [[ -z "$exit_code" ]] && exit_code="null"
   [[ -z "$outcome" ]] && outcome="ambiguous"
 
   # --- Codex-only exit-code resolution when the payload carried no clean code.
@@ -657,7 +658,7 @@ add_tool_result_meta() {
   # the jq scan alone yields ambiguous/null. Gated strictly to the codex runtime
   # so the Claude path stays 100% hermetic (jq only, no node). An unreadable
   # rollout leaves the honest ambiguous/null verdict untouched.
-  if [[ "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" == "codex" && "$status" == "null" ]]; then
+  if [[ "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" == "codex" && "$exit_code" == "null" ]]; then
     local codex_lib
     codex_lib="${TELEMETRY_DIR}/../hooks/lib/codex-exit-code.js"
     if [[ -f "$codex_lib" ]]; then
@@ -677,7 +678,7 @@ add_tool_result_meta() {
           } catch (e) {}
         ' 2>/dev/null)
         if [[ "$code" =~ ^-?[0-9]+$ ]]; then
-          status="$code"
+          exit_code="$code"
           outcome=$(jq -nr --argjson code "$code" --arg cmd "$cmd" \
             "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_CODEX}" 2>/dev/null)
           [[ -z "$outcome" ]] && outcome="fail"
@@ -686,11 +687,27 @@ add_tool_result_meta() {
     fi
   fi
 
+  status=$(printf '%s' "$stdin_json" | jq -r --arg outcome "$outcome" '
+    if (.canceled == true or .cancelled == true
+        or .tool_response.canceled == true or .tool_response.cancelled == true
+        or .tool_response.status == "canceled" or .tool_response.status == "cancelled")
+    then "canceled"
+    elif (.blocked == true or .denied == true
+          or .tool_response.blocked == true or .tool_response.denied == true
+          or .tool_response.status == "blocked" or .tool_response.status == "denied")
+    then "blocked"
+    elif $outcome == "pass" then "completed"
+    elif $outcome == "fail" then "failed"
+    else "unknown"
+    end' 2>/dev/null)
+  [[ -z "$status" ]] && status="unknown"
+
   echo "$event" | jq -c \
     --argjson dm "$duration_ms" \
-    --argjson st "$status" \
+    --argjson ec "$exit_code" \
+    --arg st "$status" \
     --arg oc "$outcome" \
-    '.tool = ((.tool // {}) + {duration_ms: $dm, outcome: $oc, status: $st})'
+    '.tool = ((.tool // {}) + {duration_ms: $dm, outcome: $oc, exit_code: $ec, status: $st})'
 }
 
 # add_tool_usage_data — populates .usage on tool.invoke/tool.result events
@@ -729,6 +746,7 @@ add_tool_usage_data() {
     # feature's "never invent, always degrade gracefully, never block" contract.
     joined=$(echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
       usage: {
+        semantics: "delta",
         model: $tu.model,
         input_tokens: $tu.input_tokens,
         output_tokens: $tu.output_tokens,
@@ -747,6 +765,7 @@ add_tool_usage_data() {
   if [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
     echo "$event" | jq -c --arg m "$hook_model" '. + {
       usage: {
+        semantics: "delta",
         model: $m,
         input_tokens: null,
         output_tokens: null,
@@ -759,6 +778,7 @@ add_tool_usage_data() {
   else
     echo "$event" | jq -c '. + {
       usage: {
+        semantics: "delta",
         model: null,
         input_tokens: null,
         output_tokens: null,
@@ -815,6 +835,7 @@ add_stop_data_and_emit_usage() {
       --argjson tu "$transcript_usage" \
       '.event_type = "session.usage" | .event_id = (.event_id + "-usage") | . + {
         usage: ({
+          semantics: "snapshot",
           model: $m,
           duration_s: .session.duration_s,
           tool_invocations: $tc,
