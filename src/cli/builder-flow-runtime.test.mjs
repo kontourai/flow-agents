@@ -2675,6 +2675,106 @@ test("history-repair authorization is a distinct signed request bound to the exa
   );
 });
 
+test("public history-repair request preimage reads protected exact bytes and treats only an absent ledger as empty", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  assert.equal(typeof readPreimage, "function");
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-preimage-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    const bundleBytes = Buffer.from('{\n  "schema_version": "1.0",\n  "claims": []\n}\n');
+    fs.writeFileSync(bundleFile, bundleBytes, { mode: 0o644 });
+
+    const absent = readPreimage(sessionDir);
+    assert.deepEqual(absent.bundleBytes, bundleBytes);
+    assert.equal(
+      createHash("sha256").update(absent.bundleBytes).digest("hex"),
+      createHash("sha256").update(bundleBytes).digest("hex"),
+      "the request signature preimage digest must bind the exact raw trust.bundle bytes",
+    );
+    assert.equal(absent.ledgerBytes.length, 0);
+    assert.equal(createHash("sha256").update(absent.ledgerBytes).digest("hex"), createHash("sha256").update(Buffer.alloc(0)).digest("hex"));
+    assert.deepEqual(absent.events, []);
+
+    const ledgerBytes = Buffer.from('{\n "events": [],\n "schema_version": "1.0"\n}\n');
+    fs.writeFileSync(ledgerFile, ledgerBytes, { mode: 0o644 });
+    const present = readPreimage(sessionDir);
+    assert.deepEqual(present.ledgerBytes, ledgerBytes);
+    assert.equal(
+      createHash("sha256").update(present.ledgerBytes).digest("hex"),
+      createHash("sha256").update(ledgerBytes).digest("hex"),
+      "the request signature preimage digest must bind the exact raw ledger bytes, not reserialized JSON",
+    );
+
+    fs.rmSync(ledgerFile);
+    fs.mkdirSync(ledgerFile);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file|EISDIR/i, "a non-ENOENT read failure is not treated as an absent ledger");
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed trust bundles", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-bundle-adversarial-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const target = path.join(sessionDir, "bundle-target.json");
+    fs.writeFileSync(target, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o644 });
+    fs.symlinkSync(target, bundleFile);
+    assert.throws(() => readPreimage(sessionDir), /ELOOP|symbolic link/i);
+    fs.unlinkSync(bundleFile);
+
+    fs.writeFileSync(bundleFile, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o666 });
+    fs.chmodSync(bundleFile, 0o666);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file/i);
+
+    fs.writeFileSync(bundleFile, Buffer.alloc(4 * 1024 * 1024 + 1), { mode: 0o644 });
+    fs.chmodSync(bundleFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file.*4194304 bytes/i);
+
+    fs.writeFileSync(bundleFile, "{malformed\n", { mode: 0o644 });
+    fs.chmodSync(bundleFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), SyntaxError);
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed ledgers", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-adversarial-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    fs.writeFileSync(bundleFile, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o644 });
+
+    const target = path.join(sessionDir, "ledger-target.json");
+    fs.writeFileSync(target, `${JSON.stringify({ schema_version: "1.0", events: [] })}\n`, { mode: 0o644 });
+    fs.symlinkSync(target, ledgerFile);
+    assert.throws(() => readPreimage(sessionDir), /ELOOP|symbolic link/i);
+    fs.unlinkSync(ledgerFile);
+
+    fs.writeFileSync(ledgerFile, `${JSON.stringify({ schema_version: "1.0", events: [] })}\n`, { mode: 0o666 });
+    fs.chmodSync(ledgerFile, 0o666);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file/i);
+
+    fs.writeFileSync(ledgerFile, Buffer.alloc(4 * 1024 * 1024 + 1), { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file.*4194304 bytes/i);
+
+    fs.writeFileSync(ledgerFile, "{malformed\n", { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), SyntaxError);
+
+    fs.writeFileSync(ledgerFile, `${JSON.stringify({ schema_version: "1.0", events: [], extra: true })}\n`, { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /exact external resolution event ledger shape/i);
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
 test("ordinary resolution and history repair completion cores preserve the synthetic-ledger compatibility shape", () => {
   const bundle = { schema_version: "1.0", claims: [{ id: "claim-1", value: "pass" }] };
   for (const operation of ["resolve-critique", "repair-critique-resolution-history"]) {

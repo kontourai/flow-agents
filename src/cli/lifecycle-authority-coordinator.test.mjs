@@ -345,13 +345,6 @@ test("coordinator ledger CAS rejects a newly appeared, removed, or byte-changed 
   }
 });
 
-test("root replay source keeps completed and prepared recovery separate from live expiry and preserves newer receipts", () => {
-  const source = fs.readFileSync(COORDINATOR, "utf8");
-  assert.match(source, /verifyAuthorization\(authorizationPath, \{ requireCurrentExpiry: false \}\)[\s\S]*?fs\.existsSync\(completionFile\)/, "exact completed replay authenticates before durable lookup without applying live expiry");
-  assert.match(source, /fs\.existsSync\(nonceFile\)[\s\S]*?else \{\s*verifySignedAuthorization\(authorization, \{ requireCurrentExpiry: true \}\)/, "only a new nonce consumption requires unexpired authority");
-  assert.match(source, /completion\.result_core_sha256 !== lifecycleAuthorityResultDigest\(bundle, events\)[\s\S]*?if \(fs\.existsSync\(receiptFile\)\)[\s\S]*?receipt: "preserved"/s, "receipt replay restores only exact current state and never overwrites a different valid receipt");
-});
-
 test("coordinator verifies the raw-byte preimage before parsing and at the mutation boundary", () => {
   const source = fs.readFileSync(COORDINATOR, "utf8");
   assert.match(

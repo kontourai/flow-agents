@@ -1434,9 +1434,7 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
   const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
   if (!priorRecordId || !resolvingRecordId) throw new Error("workflow repair-critique-resolution-history-request requires both critique record ids");
   const { slug, projectRoot } = readBoundSession(sessionDir);
-  const bundleFile = path.join(sessionDir, "trust.bundle");
-  const bundleBytes = fs.readFileSync(bundleFile);
-  const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+  const { bundleBytes, bundle, ledgerBytes, events } = readCritiqueResolutionHistoryRepairPreimage(sessionDir);
   if (Object.hasOwn(bundle, "critique_resolution_events")) throw new Error("workflow history repair refuses a Trust Bundle containing external authority events");
   const claims = normalizedCritiqueClaims(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []);
   const claimFor = (id: string): JsonRecord => {
@@ -1449,10 +1447,6 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
   const edge = prior.critique_resolution as JsonRecord | undefined;
   if (priorClaim.status !== "superseded" || prior.superseded_by !== resolvingRecordId || !edge || edge.kind !== "cross-reviewer") throw new Error("workflow history repair requires an already-superseded cross-reviewer edge");
   if (String(edge.prior_record_id) !== priorRecordId || String(edge.resolving_record_id) !== resolvingRecordId || String(edge.resolver) !== String(resolving.reviewer)) throw new Error("workflow history repair edge does not bind the selected critiques");
-  const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
-  const ledgerBytes = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile) : Buffer.alloc(0);
-  const ledger = ledgerBytes.length ? JSON.parse(ledgerBytes.toString("utf8")) as JsonRecord : { schema_version: "1.0", events: [] };
-  const events = Array.isArray(ledger.events) ? ledger.events as JsonRecord[] : (() => { throw new Error("workflow history repair requires a valid external resolution event ledger"); })();
   const originalEventId = String(edge.resolution_event_id); const originalAuthorization = String(edge.authorization_sha256);
   if (events.some((event) => event.event_id === originalEventId || event.authorization_sha256 === originalAuthorization)) throw new Error("workflow history repair refuses an edge whose original signed event is already present");
   if (events.some((event) => event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id === originalEventId || event.missing_authorization_sha256 === originalAuthorization))) throw new Error("workflow history repair already exists for the selected edge");
@@ -1680,6 +1674,64 @@ function readJsonFile(file: string, label: string): JsonRecord {
   } finally {
     fs.closeSync(descriptor);
   }
+}
+
+function readProtectedRegularFileBytes(file: string, label: string, maxBytes: number, optional = false): Buffer | null {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (error) {
+    if (optional && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maxBytes || (stat.mode & 0o022) !== 0) {
+      throw new Error(`${label} must be a protected regular file no larger than ${maxBytes} bytes`);
+    }
+    return fs.readFileSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+export function readCritiqueResolutionHistoryRepairPreimage(sessionDir: string): {
+  bundleBytes: Buffer;
+  bundle: JsonRecord;
+  ledgerBytes: Buffer;
+  events: JsonRecord[];
+} {
+  const bundleBytes = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "workflow history repair trust bundle", 4 * 1024 * 1024);
+  if (!bundleBytes) throw new Error("workflow history repair trust bundle is missing");
+  const bundle = JSON.parse(bundleBytes.toString("utf8")) as unknown;
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) throw new Error("workflow history repair trust bundle must be a JSON object");
+
+  const storedLedgerBytes = readProtectedRegularFileBytes(
+    path.join(sessionDir, "lifecycle-authority.resolution-events.json"),
+    "workflow history repair resolution event ledger",
+    4 * 1024 * 1024,
+    true,
+  );
+  const ledgerBytes = storedLedgerBytes ?? Buffer.alloc(0);
+  const ledger = storedLedgerBytes === null
+    ? { schema_version: "1.0", events: [] }
+    : JSON.parse(storedLedgerBytes.toString("utf8")) as unknown;
+  if (
+    !ledger
+    || typeof ledger !== "object"
+    || Array.isArray(ledger)
+    || JSON.stringify(Object.keys(ledger).sort()) !== JSON.stringify(["events", "schema_version"])
+    || (ledger as JsonRecord).schema_version !== "1.0"
+    || !Array.isArray((ledger as JsonRecord).events)
+  ) {
+    throw new Error("workflow history repair requires an exact external resolution event ledger shape");
+  }
+  return {
+    bundleBytes,
+    bundle: bundle as JsonRecord,
+    ledgerBytes,
+    events: (ledger as JsonRecord).events as JsonRecord[],
+  };
 }
 
 function readOptionalJson(file: string): JsonRecord | null {
