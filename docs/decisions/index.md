@@ -31,6 +31,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [model-routing](./model-routing.md) | current | Model routing |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
+| [survey-evidence-flow-gates](./survey-evidence-flow-gates.md) | current | Survey evidence for paused Flow gates |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |
 | [trust-ledger-retention](./trust-ledger-retention.md) | needs-decision | Trust-ledger retention and console-as-projection |
 | [trust-reconcile](./trust-reconcile.md) | current | Trust-reconcile and delivery reconciliation |

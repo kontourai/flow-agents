@@ -157,7 +157,6 @@
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",
     "@kontourai/surface": "2.13.0",
-    "@kontourai/survey": "1.19.0",
     "@kontourai/traverse": "0.19.1",
     "@types/node": "^26.1.1",
     "gcp-metadata": "7.0.1",
@@ -166,8 +165,9 @@
   },
   "dependencies": {
     "@kontourai/dispatch": "0.3.0",
-    "@kontourai/flow": "3.6.2",
+    "@kontourai/flow": "3.7.0",
     "@kontourai/relay": "0.4.0",
+    "@kontourai/survey": "1.19.0",
     "esbuild": "0.28.1"
   },
   "optionalDependencies": {
