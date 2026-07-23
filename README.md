@@ -229,6 +229,23 @@ bash evals/ci/run-baseline.sh --lane runtime-and-kit
 
 `setup:repo-hooks` is a repo Git hook for local developer checks, not a Flow Agents runtime hook — runtime hooks live under `scripts/hooks/`; see [docs/developer-hook-setup.md](docs/developer-hook-setup.md) for the boundary.
 
+## Human-review gate integration
+
+Library hosts can compose Flow gates with Survey review sessions without adding
+a new gate kind or trusting browser-authored decisions. Use
+`discoverSurveyGateReviewWork` to read explicitly classified missing review
+expectations from an exact, persisted Flow Run head. A producer then creates the
+canonical candidate-bearing `ReviewItem`; `bindSurveyGateReviewItem` validates
+its claim targets and adds immutable workflow correlation, while
+`publishSurveyGateReviewWork` publishes it through a host-owned queue.
+
+After the server-owned review session is complete,
+`continuePausedFlowGateFromSurvey` resolves the opaque session reference,
+derives the canonical outcome, projects Survey evidence, and delegates the
+atomic attach/evaluate/resume transaction to Flow. Candidate construction,
+queue persistence, review authority, and lifecycle authority remain separate
+capabilities.
+
 ## Repository layout
 
 See [Repository Structure](docs/repository-structure.md) for the canonical map. In short:
