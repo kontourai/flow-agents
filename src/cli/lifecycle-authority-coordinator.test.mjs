@@ -345,7 +345,7 @@ test("coordinator rejects forged or stale current completions before history rep
   }
 });
 
-test("completed replay preserves a newer exact-current receipt and restores only an exact missing receipt", async () => {
+test("committed recovery replaces only an authenticated stale receipt with an exact-current root candidate", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-replay-receipt-"));
   let moduleDirectory = null;
   try {
@@ -359,23 +359,75 @@ test("completed replay preserves a newer exact-current receipt and restores only
     const bundle = { schema_version: "1.0", claims: [] };
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), `${JSON.stringify(bundle)}\n`, { mode: 0o600 });
     const exactCore = loaded.lifecycleAuthorityResultDigest(bundle, []);
-    const signedCompletion = (requestSha256, resultCoreSha256, action = "repair-critique-resolution-history") => {
-      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: "applied", result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
+    const signedCompletion = (requestSha256, resultCoreSha256, action = "repair-critique-resolution-history", operationStatus = "applied", overrides = {}) => {
+      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z", ...overrides };
       return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), privateKey).toString("base64") } };
     };
-    const newer = signedCompletion("b".repeat(64), exactCore);
-    const olderReplay = signedCompletion("c".repeat(64), "d".repeat(64));
+    const exactCandidate = signedCompletion("b".repeat(64), exactCore);
+    const staleHistorical = signedCompletion("c".repeat(64), "d".repeat(64));
     const receiptFile = path.join(sessionDir, "lifecycle-authority.completion.json");
+    fs.writeFileSync(receiptFile, `${JSON.stringify(staleHistorical)}\n`, { mode: 0o600 });
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "replaced" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactCandidate, "a signed stale receipt is replaced after committed recovery");
+
+    const newer = signedCompletion("e".repeat(64), exactCore);
     fs.writeFileSync(receiptFile, `${JSON.stringify(newer)}\n`, { mode: 0o600 });
     const newerBytes = fs.readFileSync(receiptFile);
-    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, olderReplay), { run_id: "run-replay", receipt: "preserved" });
-    assert.deepEqual(fs.readFileSync(receiptFile), newerBytes, "an exact-current newer receipt is protected before the older replay core is considered");
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "preserved" });
+    assert.deepEqual(fs.readFileSync(receiptFile), newerBytes, "a valid different exact-current newer receipt is preserved");
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, staleHistorical), { run_id: "run-replay", receipt: "preserved" });
+    assert.deepEqual(fs.readFileSync(receiptFile), newerBytes, "a stale completed replay cannot displace a newer exact-current receipt");
+
+    const forgedExisting = { ...staleHistorical, result_core_sha256: exactCore };
+    fs.writeFileSync(receiptFile, `${JSON.stringify(forgedExisting)}\n`, { mode: 0o600 });
+    const forgedBytes = fs.readFileSync(receiptFile);
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), /signature is invalid/i);
+    assert.deepEqual(fs.readFileSync(receiptFile), forgedBytes, "a forged existing receipt is never replaced");
+
+    const malformedExisting = { ...staleHistorical, unexpected: true };
+    fs.writeFileSync(receiptFile, `${JSON.stringify(malformedExisting)}\n`, { mode: 0o600 });
+    const malformedBytes = fs.readFileSync(receiptFile);
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), /historical lifecycle completion contains unexpected or missing fields/i);
+    assert.deepEqual(fs.readFileSync(receiptFile), malformedBytes, "a malformed existing receipt is never replaced");
+
+    const forgedCandidate = { ...exactCandidate, result_core_sha256: "f".repeat(64) };
+    fs.writeFileSync(receiptFile, `${JSON.stringify(staleHistorical)}\n`, { mode: 0o600 });
+    const staleBytes = fs.readFileSync(receiptFile);
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, forgedCandidate), /signature is invalid/i);
+    assert.deepEqual(fs.readFileSync(receiptFile), staleBytes, "a forged candidate cannot replace a stale receipt");
+
+    const replayedCandidate = signedCompletion("f".repeat(64), exactCore, "repair-critique-resolution-history", "replayed");
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, replayedCandidate), /current lifecycle completion identity is invalid/i);
+    assert.deepEqual(fs.readFileSync(receiptFile), staleBytes, "a correctly signed replayed candidate cannot replace a stale receipt");
+
+    const invalidProtocolCandidates = [
+      ["runtime digest", signedCompletion("1".repeat(64), exactCore, undefined, undefined, { coordinator_runtime_sha256: "A".repeat(64) }), /coordinator_runtime_sha256 is invalid/i],
+      ["timestamp", signedCompletion("2".repeat(64), exactCore, undefined, undefined, { completed_at: "not-a-timestamp" }), /timestamp is invalid/i],
+      ["Base64 signature", { ...exactCandidate, signature: { ...exactCandidate.signature, value: "!" } }, /signature is invalid/i],
+    ];
+    for (const [label, invalidCandidate, error] of invalidProtocolCandidates) {
+      assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, invalidCandidate), error, `invalid candidate ${label} fails closed`);
+      assert.deepEqual(fs.readFileSync(receiptFile), staleBytes, `invalid candidate ${label} leaves the existing receipt untouched`);
+    }
+
+    const invalidProtocolExisting = [
+      ["runtime digest", signedCompletion("3".repeat(64), "d".repeat(64), undefined, undefined, { coordinator_runtime_sha256: "A".repeat(64) }), /coordinator_runtime_sha256 is invalid/i],
+      ["timestamp", signedCompletion("4".repeat(64), "d".repeat(64), undefined, undefined, { completed_at: "not-a-timestamp" }), /timestamp is invalid/i],
+      ["Base64 signature", { ...staleHistorical, signature: { ...staleHistorical.signature, value: "!" } }, /signature is invalid/i],
+    ];
+    for (const [label, invalidExisting, error] of invalidProtocolExisting) {
+      fs.writeFileSync(receiptFile, `${JSON.stringify(invalidExisting)}\n`, { mode: 0o600 });
+      const invalidExistingBytes = fs.readFileSync(receiptFile);
+      assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), error, `invalid existing ${label} fails closed`);
+      assert.deepEqual(fs.readFileSync(receiptFile), invalidExistingBytes, `invalid existing ${label} is never replaced`);
+    }
+
     fs.unlinkSync(receiptFile);
-    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, olderReplay), /does not bind the current bundle and ledger/i);
-    assert.equal(fs.existsSync(receiptFile), false, "a missing receipt is not restored from an old replay core");
-    const exactReplay = signedCompletion("e".repeat(64), exactCore);
-    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactReplay), { run_id: "run-replay", receipt: "written" });
-    assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactReplay);
+    assert.throws(() => loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, staleHistorical), /does not bind the exact bundle and resolution ledger/i);
+    assert.equal(fs.existsSync(receiptFile), false, "a missing receipt is not restored from a stale candidate");
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "written" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactCandidate);
+    assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "present" }, "ordinary exact replay remains present");
     for (const action of ["cancel", "archive"]) {
       const requestSha256 = action === "cancel" ? "6".repeat(64) : "7".repeat(64);
       const completion = signedCompletion(requestSha256, exactCore, action);

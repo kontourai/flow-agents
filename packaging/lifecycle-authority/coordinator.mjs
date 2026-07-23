@@ -265,25 +265,36 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
   // established synthetic-bundle shape for compatibility with prior receipts.
   return sha256({ ...bundle, critique_resolution_events: resolutionEvents });
 }
-function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
-  const completion = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024);
+function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
-  exact(completion, fields, "current lifecycle completion");
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || completion.operation_status !== "applied" || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256) || typeof completion.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.result_core_sha256) || !record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string") throw new Error("current lifecycle completion identity is invalid");
+  exact(completion, fields, label);
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
+  if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
+  if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
   const { signature, ...unsigned } = completion;
   const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
-  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("current lifecycle completion signature is invalid");
-  if (completion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, resolutionEvents)) throw new Error("current lifecycle completion does not bind the exact bundle and resolution ledger");
+  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error(`${label} signature is invalid`);
   return completion;
 }
+function assertCurrentLifecycleCompletionIdentity(paths, completion) {
+  return assertLifecycleCompletionIdentity(paths, completion, ["applied"], "current lifecycle completion");
+}
+function assertCurrentLifecycleCompletion(paths, completion, bundle, resolutionEvents) {
+  const verifiedCompletion = assertCurrentLifecycleCompletionIdentity(paths, completion);
+  if (verifiedCompletion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, resolutionEvents)) throw new Error("current lifecycle completion does not bind the exact bundle and resolution ledger");
+  return verifiedCompletion;
+}
+function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
+  return assertCurrentLifecycleCompletion(
+    paths,
+    protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024),
+    bundle,
+    resolutionEvents,
+  );
+}
 function verifyHistoricalLifecycleCompletion(paths, completion) {
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
-  exact(completion, fields, "historical lifecycle completion");
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || !["applied", "replayed"].includes(completion.operation_status) || !/^[a-f0-9]{64}$/.test(completion.request_sha256) || !/^[a-f0-9]{64}$/.test(completion.result_core_sha256) || !record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string") throw new Error("historical lifecycle completion identity is invalid");
-  const { signature, ...unsigned } = completion;
-  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
-  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("historical lifecycle completion signature is invalid");
-  return completion;
+  return assertLifecycleCompletionIdentity(paths, completion, ["applied", "replayed"], "historical lifecycle completion");
 }
 function sha256File(file, label) { return sha256(protectedRegularFile(file, label, 16 * 1024 * 1024)); }
 function exactObject(value, expected, label) {
@@ -705,17 +716,30 @@ function installCompletionReceipt(paths, candidate) {
   const ledgerFile = resolutionEventLedgerFile(paths);
   const events = fs.existsSync(ledgerFile) ? protectedJson(ledgerFile, "lifecycle authority resolution event ledger", 4 * 1024 * 1024).events : [];
   if (!Array.isArray(events)) throw new Error("lifecycle completion receipt resolution event ledger is invalid");
+  const verifiedCandidate = assertCurrentLifecycleCompletionIdentity(paths, candidate);
+  const currentResultCore = lifecycleAuthorityResultDigest(bundle, events);
   const receiptFile = path.join(paths.sessionDir, "lifecycle-authority.completion.json");
   if (fs.existsSync(receiptFile)) {
-    // Authenticate the receipt against exact current state before considering
-    // the replay candidate. A valid newer receipt is authoritative even when
-    // the replay's older result core no longer matches current state.
-    const existing = verifyCurrentLifecycleCompletion(paths, bundle, events);
-    if (canonicalJson(existing) !== canonicalJson(candidate)) return { run_id: paths.runId, receipt: "preserved" };
-    return { run_id: paths.runId, receipt: "present" };
+    const existing = protectedJson(receiptFile, "current lifecycle completion", 256 * 1024);
+    try {
+      // A valid different exact-current receipt is newer state and remains
+      // authoritative even when the replay candidate is stale.
+      const verifiedExisting = assertCurrentLifecycleCompletion(paths, existing, bundle, events);
+      if (canonicalJson(verifiedExisting) !== canonicalJson(verifiedCandidate)) return { run_id: paths.runId, receipt: "preserved" };
+      return { run_id: paths.runId, receipt: "present" };
+    } catch (error) {
+      // Committed recovery can leave an authenticated pre-operation receipt
+      // beside the new bundle and ledger. It is replaceable only after the
+      // root-issued candidate binds this exact current state.
+      const historicalExisting = verifyHistoricalLifecycleCompletion(paths, existing);
+      if (historicalExisting.result_core_sha256 === currentResultCore) throw error;
+      const exactCurrentCandidate = assertCurrentLifecycleCompletion(paths, verifiedCandidate, bundle, events);
+      atomicWrite(receiptFile, `${JSON.stringify(exactCurrentCandidate, null, 2)}\n`, 0o644);
+      return { run_id: paths.runId, receipt: "replaced" };
+    }
   }
-  if (candidate.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, events)) throw new Error("lifecycle completion receipt does not bind the current bundle and ledger");
-  atomicWrite(receiptFile, `${JSON.stringify(candidate, null, 2)}\n`, 0o644);
+  const exactCurrentCandidate = assertCurrentLifecycleCompletion(paths, verifiedCandidate, bundle, events);
+  atomicWrite(receiptFile, `${JSON.stringify(exactCurrentCandidate, null, 2)}\n`, 0o644);
   return { run_id: paths.runId, receipt: "written" };
 }
 export async function main(input = fs.readFileSync(0, "utf8")) {
