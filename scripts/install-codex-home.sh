@@ -74,8 +74,11 @@ const packageJson = JSON.parse(readRegular(path.join(root, "package.json")).toSt
 const requiredFiles = [
   ".codex/hooks.json",
   ".agents/skills/deliver/SKILL.md",
+  "package.json",
   "build/package.json",
   "build/src/cli.js",
+  "build/runtime-dependencies.json",
+  "build/runtime-node-modules/@kontourai/flow/package.json",
   "scripts/install-owned-files.js",
   "scripts/install-merge.js",
   "scripts/classify-codex-legacy-agents.js",
@@ -88,13 +91,110 @@ for (const relative of requiredFiles) {
     throw new Error(`missing or empty ${relative}`);
   }
 }
-const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[0]), "utf8"));
+const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, ".codex/hooks.json"), "utf8"));
 if (!hooks || typeof hooks !== "object" || !hooks.hooks || typeof hooks.hooks !== "object") {
   throw new Error(".codex/hooks.json has no hooks object");
 }
-const bundlePackage = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[2]), "utf8"));
+const bundlePackage = JSON.parse(fs.readFileSync(path.join(snapshot, "build/package.json"), "utf8"));
 if (bundlePackage.name !== packageJson.name || bundlePackage.version !== packageJson.version) {
   throw new Error("dist/codex/build/package.json does not match the package name and version");
+}
+const closure = JSON.parse(readRegular(path.join(snapshot, "build/runtime-dependencies.json")).toString("utf8"));
+if (closure.schema_version !== "2.0" || closure.source !== "package-lock.json#packages"
+    || closure.materialization !== "npm-ci-omit-dev-optional-ignore-scripts"
+    || !Array.isArray(closure.root_dependencies) || !Array.isArray(closure.packages)) {
+  throw new Error("runtime dependency closure manifest is missing its lockfile-bound schema");
+}
+if (closure.policy?.roots !== "package.dependencies" || closure.policy?.transitive !== "dependencies"
+    || closure.policy?.optional_dependencies !== "excluded" || closure.policy?.peer_dependencies !== "excluded") {
+  throw new Error("runtime dependency closure policy is missing or unsupported");
+}
+const stagingRoot = path.join(snapshot, "build/runtime-node-modules");
+const packageByPath = new Map();
+const expectedFiles = new Set();
+for (const item of closure.packages) {
+  if (!item || typeof item !== "object" || typeof item.path !== "string"
+      || !/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+(?:\/node_modules\/(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)*$/i.test(item.path)
+      || item.storage_path !== item.path.split("/node_modules/").join("/__flow_agents_node_modules__/")
+      || item.lock_path !== `node_modules/${item.path}` || typeof item.name !== "string"
+      || typeof item.version !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)
+      || !Array.isArray(item.dependencies) || !Array.isArray(item.files) || packageByPath.has(item.path)) {
+    throw new Error("runtime dependency closure contains an invalid or duplicate package record");
+  }
+  const packageRoot = path.join(stagingRoot, item.storage_path);
+  const packageManifest = JSON.parse(readRegular(path.join(packageRoot, "package.json")).toString("utf8"));
+  if (packageManifest.name !== item.name || packageManifest.version !== item.version) {
+    throw new Error(`runtime dependency identity mismatch for ${item.path}`);
+  }
+  const observedFiles = [];
+  function visitPackage(absolute, relative) {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${item.path}/${relative}`);
+    if (stat.isDirectory()) {
+      if (relative && (path.basename(relative) === "node_modules" || path.basename(relative).toLowerCase() === "__flow_agents_node_modules__")) return;
+      for (const entry of fs.readdirSync(absolute).sort()) visitPackage(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${item.path}/${relative}`);
+    observedFiles.push({
+      path: relative.split(path.sep).join("/"),
+      sha256: crypto.createHash("sha256").update(readRegular(absolute)).digest("hex"),
+    });
+  }
+  visitPackage(packageRoot, "");
+  if (JSON.stringify(observedFiles) !== JSON.stringify(item.files)) {
+    throw new Error(`runtime dependency file coverage or digest mismatch for ${item.path}`);
+  }
+  for (const file of observedFiles) expectedFiles.add(`${item.storage_path}/${file.path}`);
+  packageByPath.set(item.path, { manifest: packageManifest, record: item });
+}
+const expectedRootNames = Object.keys(packageJson.dependencies ?? {}).sort();
+if (closure.root_dependencies.length !== expectedRootNames.length) {
+  throw new Error("runtime dependency closure root set does not match package dependencies");
+}
+const rootPaths = [];
+for (let index = 0; index < closure.root_dependencies.length; index += 1) {
+  const edge = closure.root_dependencies[index];
+  if (!edge || edge.name !== expectedRootNames[index] || typeof edge.path !== "string" || !packageByPath.has(edge.path)) {
+    throw new Error("runtime dependency closure contains an invalid root edge");
+  }
+  rootPaths.push(edge.path);
+}
+for (const [packagePath, value] of packageByPath) {
+  const manifestDependencyNames = Object.keys(value.manifest.dependencies ?? {}).sort();
+  const edgeNames = value.record.dependencies.map((edge) => edge?.name);
+  if (JSON.stringify(edgeNames) !== JSON.stringify(manifestDependencyNames)) {
+    throw new Error(`runtime dependency lock edges do not match the materialized manifest for ${packagePath}`);
+  }
+  for (const edge of value.record.dependencies) {
+    if (!edge || typeof edge.name !== "string" || typeof edge.path !== "string" || !packageByPath.has(edge.path)) {
+      throw new Error(`runtime dependency closure contains an invalid edge from ${packagePath}`);
+    }
+  }
+}
+const reachable = new Set();
+const pendingPaths = [...rootPaths];
+while (pendingPaths.length) {
+  const packagePath = pendingPaths.shift();
+  if (reachable.has(packagePath)) continue;
+  reachable.add(packagePath);
+  for (const edge of packageByPath.get(packagePath).record.dependencies) pendingPaths.push(edge.path);
+}
+if (reachable.size !== packageByPath.size) throw new Error("runtime dependency closure contains unreachable package records");
+const observedStagedFiles = new Set();
+function visitStaging(absolute, relative) {
+  const stat = fs.lstatSync(absolute);
+  if (stat.isSymbolicLink()) throw new Error(`runtime dependency staging contains symlink: ${relative}`);
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(absolute).sort()) visitStaging(path.join(absolute, entry), path.join(relative, entry));
+    return;
+  }
+  if (!stat.isFile()) throw new Error(`runtime dependency staging contains non-regular entry: ${relative}`);
+  observedStagedFiles.add(relative.split(path.sep).join("/"));
+}
+visitStaging(stagingRoot, "");
+if (observedStagedFiles.size !== expectedFiles.size || [...observedStagedFiles].some((file) => !expectedFiles.has(file))) {
+  throw new Error("runtime dependency closure has missing or unowned staged files");
 }
 } catch (error) {
   console.error(`install-codex-home.sh: shipped bundle validation failed: ${error.message}`);
@@ -301,9 +401,37 @@ for managed_dir in \
 do
   if [[ -d "$BUNDLE_SOURCE/$managed_dir" ]]; then
     mkdir -p "$FA_OWNED_OVERLAY/$managed_dir"
-    rsync -a "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    if [[ "$managed_dir" == "build" ]]; then
+      rsync -a --exclude 'runtime-node-modules/' "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    else
+      rsync -a "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    fi
   fi
 done
+
+# npm pack excludes directories literally named node_modules. Bundle the
+# required production closure under a packable staging name, then project it
+# into build/node_modules so Node's normal resolution works after installation.
+if [[ -d "$BUNDLE_SOURCE/build/runtime-node-modules" ]]; then
+  mkdir -p "$FA_OWNED_OVERLAY/build/node_modules"
+  node - "$BUNDLE_SOURCE/build/runtime-node-modules" "$BUNDLE_SOURCE/build/runtime-dependencies.json" "$FA_OWNED_OVERLAY/build/node_modules" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [stagingRoot, manifestFile, destinationRoot] = process.argv.slice(2);
+const closure = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+for (const item of closure.packages) {
+  for (const file of item.files) {
+    const source = path.join(stagingRoot, item.storage_path, file.path);
+    const destination = path.join(destinationRoot, item.path, file.path);
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`unsafe runtime closure source: ${item.storage_path}/${file.path}`);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+    fs.chmodSync(destination, stat.mode & 0o777);
+  }
+}
+NODE
+fi
 
 # Portable skills use Codex's universal catalog, independently of CODEX_HOME.
 if [[ -d "$BUNDLE_SOURCE/.agents/skills" ]]; then
@@ -322,7 +450,7 @@ if [[ -d "$BUNDLE_SOURCE/.codex/agents" ]]; then
   rsync -a "$BUNDLE_SOURCE/.codex/agents/" "$FA_OWNED_OVERLAY/agents/"
 fi
 
-for bundle_file in README.md console.telemetry.json install.sh; do
+for bundle_file in README.md console.telemetry.json install.sh package.json; do
   if [[ -f "$BUNDLE_SOURCE/$bundle_file" ]]; then
     cp "$BUNDLE_SOURCE/$bundle_file" "$FA_OWNED_OVERLAY/$bundle_file"
   fi

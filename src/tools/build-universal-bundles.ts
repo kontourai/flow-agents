@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import crypto from "node:crypto";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { buildSync } from "esbuild";
@@ -10,7 +13,8 @@ import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-a
 type Agent = Record<string, unknown> & { name: string; prompt: string };
 const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
-const pkgVersion: string = (loadJson<Record<string, unknown>>(path.join(root, "package.json")) as Record<string, string>)["version"] ?? "0.0.0";
+const rootPackageManifest = loadJson<Record<string, unknown>>(path.join(root, "package.json"));
+const pkgVersion: string = (rootPackageManifest as Record<string, string>)["version"] ?? "0.0.0";
 const runtimeTaskDir = FLOW_AGENTS_RUNTIME_DIR;
 const durableInstallRecordRel = `${DURABLE_FLOW_AGENTS_DIR}/install.json`;
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
@@ -21,6 +25,203 @@ const dropDiagnostics: string[] = [];
 // (see main()) instead of an uncaught thrown Error / stack trace.
 let skillCollisionDiagnostic: string | null = null;
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
+const PACKED_NODE_MODULES_MARKER = "__flow_agents_node_modules__";
+
+function isPackedNodeModulesMarker(value: string): boolean {
+  return value.toLowerCase() === PACKED_NODE_MODULES_MARKER;
+}
+
+type RuntimeDependency = {
+  name: string;
+  version: string;
+  lockPath: string;
+  integrity: string;
+  packageRoot: string;
+  packageJson: string;
+};
+
+type PackageLock = {
+  lockfileVersion?: number;
+  packages?: Record<string, Record<string, unknown>>;
+};
+
+function portablePath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function packSafeRuntimePath(logicalPath: string): string {
+  return logicalPath.replaceAll("/node_modules/", `/${PACKED_NODE_MODULES_MARKER}/`);
+}
+
+function resolveLockedDependencyPath(
+  packageName: string,
+  declaringLockPath: string,
+  lockPackages: Record<string, Record<string, unknown>>,
+): string {
+  if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(packageName)) {
+    throw new Error(`unsafe runtime dependency package name: ${packageName}`);
+  }
+  let current = declaringLockPath;
+  for (;;) {
+    const candidate = current ? `${current}/node_modules/${packageName}` : `node_modules/${packageName}`;
+    if (lockPackages[candidate]) return candidate;
+    const marker = current.lastIndexOf("/node_modules/");
+    if (marker < 0) break;
+    current = current.slice(0, marker);
+  }
+  const rootCandidate = `node_modules/${packageName}`;
+  if (lockPackages[rootCandidate]) return rootCandidate;
+  throw new Error(`package-lock.json cannot resolve runtime dependency ${packageName} from ${declaringLockPath || "root"}`);
+}
+
+function materializeRuntimeDependencyRoot(): { root: string; cleanup: () => void; method: string } {
+  const fixture = process.env["FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT"];
+  if (fixture) {
+    if (process.env["FLOW_AGENTS_TEST_MODE"] !== "1") {
+      throw new Error("FLOW_AGENTS_RUNTIME_DEPENDENCY_FIXTURE_ROOT requires FLOW_AGENTS_TEST_MODE=1");
+    }
+    return { root: path.resolve(fixture), cleanup: () => undefined, method: "test-fixture" };
+  }
+  const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-runtime-closure."));
+  fs.copyFileSync(path.join(root, "package.json"), path.join(isolatedRoot, "package.json"));
+  fs.copyFileSync(path.join(root, "package-lock.json"), path.join(isolatedRoot, "package-lock.json"));
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const result = spawnSync(npm, [
+    "ci", "--omit=dev", "--omit=optional", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline",
+  ], { cwd: isolatedRoot, encoding: "utf8", stdio: "pipe" });
+  if (result.status !== 0) {
+    fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    throw new Error(`isolated runtime dependency npm ci failed: ${(result.stderr || result.stdout || "unknown error").trim()}`);
+  }
+  return {
+    root: isolatedRoot,
+    cleanup: () => fs.rmSync(isolatedRoot, { recursive: true, force: true }),
+    method: "npm-ci-omit-dev-optional-ignore-scripts",
+  };
+}
+
+function copyRuntimePackageTree(source: string, destination: string): void {
+  function visit(absolute: string, relative: string): void {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
+    if (stat.isDirectory()) {
+      if (relative && isPackedNodeModulesMarker(path.basename(relative))) {
+        throw new Error(`runtime dependency contains reserved packed-storage directory '${PACKED_NODE_MODULES_MARKER}': ${absolute}`);
+      }
+      if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
+      fs.mkdirSync(path.join(destination, relative), { recursive: true, mode: stat.mode & 0o777 });
+      for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${absolute}`);
+    const output = path.join(destination, relative);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.copyFileSync(absolute, output);
+    fs.chmodSync(output, stat.mode & 0o777);
+  }
+  visit(source, "");
+}
+
+function runtimePackageFiles(packageRoot: string): Array<{ path: string; sha256: string }> {
+  const files: Array<{ path: string; sha256: string }> = [];
+  function visit(absolute: string, relative: string): void {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
+    if (stat.isDirectory()) {
+      if (relative && (["node_modules", ".git"].includes(path.basename(relative)) || isPackedNodeModulesMarker(path.basename(relative)))) return;
+      for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${absolute}`);
+    files.push({
+      path: portablePath(relative),
+      sha256: crypto.createHash("sha256").update(fs.readFileSync(absolute)).digest("hex"),
+    });
+  }
+  visit(packageRoot, "");
+  return files;
+}
+
+function exportRequiredRuntimeDependencies(bundleRoot: string): void {
+  const materialized = materializeRuntimeDependencyRoot();
+  try {
+    const rootPackage = loadJson<Record<string, unknown>>(path.join(materialized.root, "package.json"));
+    const packageLock = loadJson<PackageLock>(path.join(materialized.root, "package-lock.json"));
+    if (packageLock.lockfileVersion !== 3 || !packageLock.packages || typeof packageLock.packages !== "object") {
+      throw new Error("required runtime closure requires package-lock.json lockfileVersion 3 with a packages map");
+    }
+    const lockRoot = packageLock.packages[""] ?? {};
+    const rootDependencies = (rootPackage["dependencies"] as Record<string, unknown> | undefined) ?? {};
+    if (JSON.stringify(rootDependencies) !== JSON.stringify((lockRoot["dependencies"] as Record<string, unknown> | undefined) ?? {})) {
+      throw new Error("package.json dependencies do not exactly match package-lock.json root dependencies");
+    }
+    const pending = Object.keys(rootDependencies).sort().map((name) => ({ name, declaringLockPath: "" }));
+    const resolved = new Map<string, RuntimeDependency>();
+
+    while (pending.length > 0) {
+      const next = pending.shift()!;
+      const lockPath = resolveLockedDependencyPath(next.name, next.declaringLockPath, packageLock.packages);
+      if (resolved.has(lockPath)) continue;
+      const lockEntry = packageLock.packages[lockPath]!;
+      const packageRoot = path.join(materialized.root, ...lockPath.split("/"));
+      const packageJson = path.join(packageRoot, "package.json");
+      const installedManifest = loadJson<Record<string, unknown>>(packageJson);
+      const version = installedManifest["version"];
+      if (installedManifest["name"] !== next.name || typeof version !== "string" || lockEntry["version"] !== version) {
+        throw new Error(`isolated runtime dependency identity does not match package-lock.json at ${lockPath}`);
+      }
+      const integrity = lockEntry["integrity"];
+      if (typeof integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) {
+        throw new Error(`runtime dependency ${next.name}@${version} has no sha512 integrity in package-lock.json at ${lockPath}`);
+      }
+      resolved.set(lockPath, { name: next.name, version, lockPath, integrity, packageRoot, packageJson });
+      const lockedDependencies = (lockEntry["dependencies"] as Record<string, unknown> | undefined) ?? {};
+      for (const name of Object.keys(lockedDependencies).sort()) pending.push({ name, declaringLockPath: lockPath });
+    }
+
+    const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
+    for (const dependency of [...resolved.values()].sort((a, b) => a.lockPath.localeCompare(b.lockPath))) {
+      const stagedRelative = dependency.lockPath.replace(/^node_modules\//, "");
+      copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, packSafeRuntimePath(stagedRelative)));
+    }
+    const resolveRecordedEdges = (lockPath: string): Array<{ name: string; path: string }> => {
+      const lockedDependencies = (packageLock.packages![lockPath]!["dependencies"] as Record<string, unknown> | undefined) ?? {};
+      return Object.keys(lockedDependencies).sort().map((name) => ({
+        name,
+        path: resolveLockedDependencyPath(name, lockPath, packageLock.packages!).replace(/^node_modules\//, ""),
+      }));
+    };
+    writeText(path.join(bundleRoot, "build", "runtime-dependencies.json"), `${JSON.stringify({
+      schema_version: "2.0",
+      source: "package-lock.json#packages",
+      materialization: materialized.method,
+      policy: {
+        roots: "package.dependencies",
+        transitive: "dependencies",
+        optional_dependencies: "excluded",
+        peer_dependencies: "excluded",
+      },
+      root_dependencies: Object.keys(rootDependencies).sort().map((name) => ({
+        name,
+        path: resolveLockedDependencyPath(name, "", packageLock.packages!).replace(/^node_modules\//, ""),
+      })),
+      packages: [...resolved.values()]
+        .sort((a, b) => a.lockPath.localeCompare(b.lockPath))
+        .map(({ name, version, lockPath, integrity }) => ({
+          path: lockPath.replace(/^node_modules\//, ""),
+          storage_path: packSafeRuntimePath(lockPath.replace(/^node_modules\//, "")),
+          lock_path: lockPath,
+          name,
+          version,
+          integrity,
+          dependencies: resolveRecordedEdges(lockPath),
+          files: runtimePackageFiles(path.join(stagingRoot, packSafeRuntimePath(lockPath.replace(/^node_modules\//, "")))),
+        })),
+    }, null, 2)}\n`);
+  } finally {
+    materialized.cleanup();
+  }
+}
 
 /**
  * Collect all skill source paths across skills/ and kit-owned skills.
@@ -447,11 +648,14 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
     }
   }
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
-  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({
+  const runtimePackage = {
     name: "@kontourai/flow-agents",
     version: pkgVersion,
     type: "module",
-  }, null, 2)}\n`);
+    private: true,
+    dependencies: rootPackageManifest["dependencies"] ?? {},
+  };
+  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify(runtimePackage, null, 2)}\n`);
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
@@ -632,6 +836,14 @@ function buildCodex(agents: Agent[]): void {
   const targetAgents = agents.filter((spec) => !excluded.has(spec.name));
   resetDir(bundle);
   copySharedContent(bundle, "codex", "<bundle-root>");
+  writeText(path.join(bundle, "package.json"), `${JSON.stringify({
+    name: "@kontourai/flow-agents",
+    version: pkgVersion,
+    type: "module",
+    private: true,
+    dependencies: rootPackageManifest["dependencies"] ?? {},
+  }, null, 2)}\n`);
+  exportRequiredRuntimeDependencies(bundle);
   writeText(path.join(bundle, manifest.codex.task_dir, ".gitkeep"), "");
   writeText(path.join(bundle, ".codex/config.toml"), exportCodexConfig());
   const settings = manifest.codex.settings ?? {};
