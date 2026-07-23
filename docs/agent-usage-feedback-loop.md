@@ -14,6 +14,21 @@ The loop has three parts:
 
 Quality outcomes are not inferred from raw telemetry alone. The CLI can automatically derive coarse outcomes from task artifacts such as `.kontourai/flow-agents/<slug>/*.md`: `delivered` and `complete` become `success`, `failed` becomes `failure`, and optionally open artifacts can be recorded as `not_verified`. It does not invent `quality_score` or `human_minutes_saved`; those remain human/eval/release-gate facts.
 
+### Malformed input and partial reports
+
+Read-only reports and telemetry-source imports quarantine malformed JSONL records
+and continue over valid records. JSON reports expose a `measurement` object with
+total, valid, and malformed counts plus content-free diagnostics; Markdown
+reports show the same counts under **Measurement State**. The CLI also emits one
+stderr warning per affected logical source. Diagnostics include only a logical
+source name, line number, SHA-256 content hash, and parse error class. They never
+include the malformed record or an absolute path.
+
+This tolerance applies only to source analysis. A destination that an import,
+sync, or upsert operation would rewrite remains strict: one malformed existing
+record aborts before any write. The command does not silently discard corrupt
+state.
+
 ## Storage Defaults
 
 Repo-local telemetry defaults to `.telemetry/`:
