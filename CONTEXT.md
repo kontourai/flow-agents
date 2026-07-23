@@ -171,6 +171,17 @@ A stable explanation for why a Gate passed, failed, could not be verified, or ro
 One execution of a Workflow from selected scope through its gates, evidence, route-backs, and terminal outcome. A Workflow Run references its canonical Selected Scope and snapshots the selected subject identifiers for audit history. Builder Kit Delivery Runs are a build-specific kind of Workflow Run.
 _Avoid_: Delivery Run as the generic term
 
+### Run Correlation Envelope
+
+A versioned, provider-neutral identity carrier that lets runtime telemetry,
+Flow state, trust references, economics, delegation lineage, and terminal
+outcomes identify the same Workflow Run without heuristic joins. The envelope
+uses one opaque correlation id and records every supported identity slot as
+present, unavailable, unsupported, or not applicable. It references
+authority-owned identifiers without replacing them. See
+[`context/contracts/run-correlation-contract.md`](context/contracts/run-correlation-contract.md).
+_Avoid_: Inferring identity from paths, timestamps, working directories, or process ancestry; experiment labels in Builder records
+
 ### Workflow Entry Authority
 
 The authority to create a new Workflow Run or resume an existing one. A new run always starts at the Workflow's first step; a later current step is valid only when recovered from persisted run state whose transitions, gate outcomes, evidence, and accepted exceptions validate against the canonical Workflow definition. Gate exceptions may authorize a gate outcome inside an existing run, but never authorize selecting a later starting step.

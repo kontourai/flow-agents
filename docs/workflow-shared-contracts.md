@@ -17,8 +17,9 @@ Shared contracts live in `context/contracts/`:
 - `review-contract.md`
 - `verification-contract.md`
 - `delivery-contract.md`
+- `run-correlation-contract.md`
 
-These files define the stable rules for artifacts, planning, execution, review, verification, delivery loops, Goal Fit, and final acceptance. `standing-directives.md` is cross-cutting: it holds ratified owner directives that override default engineering conservatism, pointed to from the header of every other contract file so delegated agents receive it regardless of which phase contract they load.
+These files define the stable rules for artifacts, planning, execution, review, verification, delivery loops, run correlation, Goal Fit, and final acceptance. `standing-directives.md` is cross-cutting: it holds ratified owner directives that override default engineering conservatism, pointed to from the header of every other contract file so delegated agents receive it regardless of which phase contract they load.
 
 The durable resource shape for selected scope, workflow runs, run plans, status conditions, provider-backed Work Items, and sidecar compatibility direction is documented in the Kontour Resource Contract:
 https://github.com/kontourai/flow-agents/blob/main/docs/kontour-resource-contract.md

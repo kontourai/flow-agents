@@ -26,6 +26,24 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  RUN_CORRELATION_IDENTITY_KEYS,
+  RUN_CORRELATION_IDENTITY_STATUSES,
+  RUN_CORRELATION_SCHEMA_VERSION,
+  RunCorrelationValidationError,
+  createRunCorrelationEnvelope,
+  validateRunCorrelationEnvelope,
+} from "./run-correlation.js";
+export type {
+  AbsentRunCorrelationIdentity,
+  PresentRunCorrelationIdentity,
+  RunCorrelationEnvelope,
+  RunCorrelationIdentity,
+  RunCorrelationIdentityKey,
+  RunCorrelationIdentityStatus,
+  RunCorrelationInput,
+} from "./run-correlation.js";
+
+export {
   NARRATIVE_SOURCE_ID_VERSION,
   SourceIdParseError,
   compareSourceIds,

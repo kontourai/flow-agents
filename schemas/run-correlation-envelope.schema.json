@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json",
+  "title": "Run correlation envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "correlation_id", "identities"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "correlation_id": { "$ref": "#/$defs/opaqueIdentifier" },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_session",
+        "runtime_turn",
+        "flow_run",
+        "flow_step",
+        "work_item",
+        "agent",
+        "delegation_trace",
+        "delegation_span",
+        "terminal_record"
+      ],
+      "properties": {
+        "runtime_session": { "$ref": "#/$defs/identity" },
+        "runtime_turn": { "$ref": "#/$defs/identity" },
+        "flow_run": { "$ref": "#/$defs/identity" },
+        "flow_step": { "$ref": "#/$defs/identity" },
+        "work_item": { "$ref": "#/$defs/identity" },
+        "agent": { "$ref": "#/$defs/identity" },
+        "delegation_trace": { "$ref": "#/$defs/identity" },
+        "delegation_span": { "$ref": "#/$defs/identity" },
+        "terminal_record": { "$ref": "#/$defs/identity" }
+      }
+    }
+  },
+  "$defs": {
+    "opaqueIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "value"],
+          "properties": {
+            "status": { "const": "present" },
+            "value": { "$ref": "#/$defs/opaqueIdentifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": {
+              "enum": ["unavailable", "unsupported", "not_applicable"]
+            },
+            "reason": { "$ref": "#/$defs/reason" }
+          }
+        }
+      ]
+    }
+  }
+}
