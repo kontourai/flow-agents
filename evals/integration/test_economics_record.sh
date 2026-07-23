@@ -244,7 +244,10 @@ stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID
 wait_for_post() { for _ in $(seq 1 25); do [[ -s "$RECV" ]] && return 0; sleep 0.2; done; return 1; }
 wait_for_mailbox() {
   local mailbox="$1"
-  for _ in $(seq 1 25); do
+  # Detached transport can be heavily de-scheduled when the hosted lane runs
+  # several integration jobs. Poll the isolated mailbox rather than assuming
+  # the configured 0.5s stub delay is the entire scheduling latency.
+  for _ in $(seq 1 150); do
     [[ -s "$mailbox" ]] && return 0
     sleep 0.2
   done

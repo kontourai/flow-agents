@@ -31,7 +31,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -49,6 +49,7 @@ Public workflow verbs:
   release             Release the current assignment without canceling the run.
   cancel              Cancel through a signed user/operator authorization record.
   archive             Archive a terminal session through a signed authorization record.
+  reclaim             Remove a clean linked worktree after learning and confirmed merge.
   doctor              Report CLI, install, Kit, Flow, and artifact compatibility.
 
 Use the isolated exact-package command emitted by workflow status and doctor in automation.`);

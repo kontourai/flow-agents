@@ -138,6 +138,9 @@ The `deliver` skill orchestrates the full `builder.build` flow:
 6. **verify-work** — tests and checks with evidence tied to the change; if evidence is missing the verify-gate triggers a route-back (`verify-gate`)
 7. **release-readiness** — scope, evidence, and risk assessment (`merge-ready-gate`)
 8. **pull-request** — PR with linked work item and verification evidence (`pr-open-gate`)
+9. **learning and workspace closeout** — route durable follow-up, retain open
+   changes for review, and reclaim only clean linked worktrees whose exact head
+   is freshly confirmed merged
 
 You can also invoke each skill individually if you want explicit control:
 

@@ -59,7 +59,9 @@ produces its local record only.
    deployment, release, provider, or user outcomes from local completion alone.
 7. Give `decision-evidence` and `learning-evidence` independent verdicts. A
    complete decision record can pass while learning follow-up remains failed or
-   `NOT_VERIFIED`.
+   `NOT_VERIFIED`. The learning-review stage is required, but discovering a new
+   lesson is not: when the evidence supports no correction or follow-up, record
+   that explicit no-op outcome and its basis instead of inventing backlog work.
 8. On a matching active run, publish both expectations through the public CLI:
 
 ```bash
@@ -76,6 +78,22 @@ flow-agents workflow evidence --session-dir <session-dir> \
   --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/learning.json","summary":"Observed outcomes, follow-up routing, and unresolved gaps."}'
 ```
 
+9. After both learning expectations are accepted and the public workflow reports
+   completion, close the Repository-adapter workspace deliberately:
+   - An open, draft, closed-without-merge, dirty, primary-checkout, or
+     provider-unverifiable change is **retained** with the reason recorded in
+     `learning.json`.
+   - A merged change in a clean linked worktree is reclaimed with
+     `flow-agents workflow reclaim --session-dir <session-dir>`. The command
+     obtains a fresh authenticated provider observation for the exact head SHA,
+     removes the worktree without force, retains the branch, prunes Git metadata,
+     and writes a content-free receipt under the primary checkout.
+   - Never reclaim merely because a pull request exists, and never chain branch
+     deletion or forced worktree removal after push/merge commands.
+   - Reclaim is a terminal dependent effect, not work that may race the learning
+     review. Read-only merge and worktree preflight may happen concurrently, but
+     removal waits until the learning artifacts it depends on are durable.
+
 ## Output
 
 Record scope, intended and observed outcomes, decisions, facts, interpretation,
@@ -86,4 +104,6 @@ and durable link when one was created.
 
 For a matching active run, publish both `decision-evidence` and
 `learning-evidence` from those slices. These claims record closeout evidence;
-they do not erase open follow-up work or authorize an external operation.
+they do not erase open follow-up work or authorize an external operation. The
+post-completion reclaim action is separate provider-aware cleanup and runs only
+when the user or delivery context authorizes worktree removal.
