@@ -22,6 +22,7 @@ import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
 import { assertCurrentVerifiedWorkspaceEvidence, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustCheckpointSealResult, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
+import { canonicalGateProjection } from "../canonical-gate-projection.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -273,7 +274,7 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
   let evidenceSigner: EvidenceSigner | null = null;
   let observedAdapterTurns: Array<Record<string, unknown>> = [];
-  const result = await withContinuationDriverLock(sessionDir, async (lock) => {
+  const driven = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
     const continuationStore = createFileContinuationStore(sessionDir);
@@ -316,8 +317,10 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
     if (evidenceSigningKeyFile) observedAdapterTurns = attestationTurns(continuationStore.acceptedTurns());
-    return outcome;
+    const finalSession = await inspectBuilderFlowSession({ sessionDir });
+    return { outcome, canonicalGateProjection: canonicalGateProjection(finalSession.run) };
   });
+  const result = { ...driven.outcome, canonical_gate_projection: driven.canonicalGateProjection };
   const output = evidenceSigner
     ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
     : result;

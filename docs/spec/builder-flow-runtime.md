@@ -363,7 +363,10 @@ fresh context changes only transcript routing, never the Flow contract, gate
 requirements, or evidence authority. When `workflow drive` produces its optional
 signed request/result attestation, the exact request object (including the
 envelope and context strategy) is included in the signed payload without
-transformation.
+transformation. The final drive result also projects the synchronized Flow gate
+outcomes and accepted exceptions as `canonical_gate_projection`. The projection
+is captured under the continuation lock, stays out of adapter requests, and is
+authenticated only when the signed attestation covers the final outcome.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may

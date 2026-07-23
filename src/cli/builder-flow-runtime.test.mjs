@@ -1089,6 +1089,9 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   const payload = JSON.parse(payloadBytes);
   assert.equal(payload.schema, "kontour.flow-agents.continuation_evidence");
   assert.equal(payload.outcome.outcome, "budget_exhausted");
+  assert.equal(payload.outcome.canonical_gate_projection.schema, "kontour.flow-agents.canonical_gate_projection");
+  assert.equal(payload.outcome.canonical_gate_projection.run_id, session.slug);
+  assert.deepEqual(payload.outcome.canonical_gate_projection, result.canonical_gate_projection);
   assert.equal(payload.adapter_turns.length, 10);
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request.iteration), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   const observedRequests = fs.readFileSync(observedRequestsFile, "utf8").trim().split("\n").map(JSON.parse);
@@ -1096,6 +1099,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
   assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
   assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "3.0");
+  assert.equal(Object.hasOwn(payload.adapter_turns[0].request, "canonical_gate_projection"), false);
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
   assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
   const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
