@@ -282,6 +282,20 @@ export {
   continuePausedFlowGateFromSurvey,
   SurveyFlowGateInputError,
 } from "./survey-flow-gate-adapter.js";
+
+export {
+  bindSurveyGateReviewItem,
+  discoverSurveyGateReviewWork,
+  publishSurveyGateReviewWork,
+} from "./survey-flow-gate-review-work.js";
+export type {
+  DiscoverSurveyGateReviewWorkInput,
+  PublishedSurveyGateReviewWork,
+  PublishSurveyGateReviewWorkDependencies,
+  SurveyGateReviewWorkProducer,
+  SurveyGateReviewWorkQueue,
+  SurveyGateReviewWorkRequest,
+} from "./survey-flow-gate-review-work.js";
 export type {
   ContinuePausedFlowGateFromSurveyInput,
   ContinuePausedFlowGateFromSurveyResult,
