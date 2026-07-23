@@ -65,6 +65,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | narrative-eval-result.schema.json | Flow Agents Narrative Eval Result | https://flow-agents.dev/schemas/narrative-eval-result.schema.json |
 | narrative-runtime-projection.schema.json | Flow Agents Grounded Runtime Projection | https://flow-agents.dev/schemas/narrative-runtime-projection.schema.json |
 | narrative-source-manifest.schema.json | Flow Agents Narrative Source Manifest | https://flow-agents.dev/schemas/narrative-source-manifest.schema.json |
+| run-correlation-envelope.schema.json | Run correlation envelope | https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json |
 | workflow-acceptance.schema.json | Flow Agents Workflow Acceptance | https://flow-agents.dev/schemas/workflow-acceptance.schema.json |
 | workflow-critique.schema.json | Flow Agents Workflow Critique | https://flow-agents.dev/schemas/workflow-critique.schema.json |
 | workflow-evidence.schema.json | Flow Agents Workflow Evidence | https://flow-agents.dev/schemas/workflow-evidence.schema.json |
