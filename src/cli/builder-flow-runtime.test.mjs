@@ -87,6 +87,57 @@ test("critique chain diagnostics identify the first sequence and predecessor mis
   const graph = validateCritiqueResolutionGraph([claim], SUBJECT);
   assert.match(graph.errors.join("\n"), new RegExp(`critique chain mismatch at sequence 1:.*declares sequence 2.*expected predecessor ${CRITIQUE_CHAIN_GENESIS}`));
 });
+
+test("critique resolution accepts a verified PASS recheck chain and rejects invalid terminal, cycle, and mismatched edges", () => {
+  const makeClaim = (sequence, predecessor, status = "verified") => {
+    const record = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer: "reviewer-a", reviewed_at: `2030-01-01T00:0${sequence}:00.000Z`,
+      verdict: sequence === 1 ? "fail" : "pass", summary: `review ${sequence}`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(record);
+    return { id: `claim-${sequence}`, value: record.verdict, fieldOrBehavior: record.summary, status, metadata: { ...record, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash } };
+  };
+  const first = makeClaim(1, CRITIQUE_CHAIN_GENESIS, "superseded");
+  const second = makeClaim(2, first.metadata.critique_record_hash, "superseded");
+  const third = makeClaim(3, second.metadata.critique_record_hash);
+  const edge = (prior, resolving, suffix) => ({
+    schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: prior.metadata.critique_record_id,
+    resolving_record_id: resolving.metadata.critique_record_id, resolver: "reviewer-a", resolved_lane_ids: [], resolved_finding_ids: [],
+    resolved_at: `2030-01-01T00:0${suffix}:30.000Z`, authorization_sha256: String(suffix).repeat(64), resolution_event_id: `critique-resolution:${String(suffix).repeat(64)}`,
+  });
+  first.metadata.superseded_by = second.metadata.critique_record_id;
+  first.metadata.critique_resolution = edge(first, second, 1);
+  second.metadata.superseded_by = third.metadata.critique_record_id;
+  second.metadata.critique_resolution = edge(second, third, 2);
+  const chain = [first, second, third];
+  assert.equal(validateCritiqueResolutionGraph(chain, SUBJECT).valid, true, "a historical PASS resolver may lead through a valid forward chain to the current verified PASS");
+
+  const invalidTerminal = structuredClone(chain);
+  invalidTerminal[2].status = "superseded";
+  assert.equal(validateCritiqueResolutionGraph(invalidTerminal, SUBJECT).valid, false, "a transitive chain without a current verified PASS terminal fails");
+
+  const nonVerifiedResolver = structuredClone(chain);
+  nonVerifiedResolver[1].status = "pending";
+  assert.match(validateCritiqueResolutionGraph(nonVerifiedResolver, SUBJECT).errors.join("\n"), /critique resolver must be a verified PASS/, "a non-verified historical resolver remains rejected");
+
+  const incorrectlyCurrentIntermediate = structuredClone(chain);
+  incorrectlyCurrentIntermediate[1].status = "verified";
+  assert.match(validateCritiqueResolutionGraph(incorrectlyCurrentIntermediate, SUBJECT).errors.join("\n"), /critique resolver chain history must be superseded/, "an intermediate PASS with a valid successor edge cannot retain verified status");
+
+  const failingResolver = structuredClone(chain);
+  failingResolver[1].value = "fail";
+  assert.match(validateCritiqueResolutionGraph(failingResolver, SUBJECT).errors.join("\n"), /critique resolver must be a verified PASS/, "a FAIL historical resolver remains rejected");
+
+  const cycle = structuredClone(chain);
+  cycle[2].status = "superseded";
+  cycle[2].metadata.superseded_by = cycle[1].metadata.critique_record_id;
+  cycle[2].metadata.critique_resolution = edge(cycle[2], cycle[1], 3);
+  assert.equal(validateCritiqueResolutionGraph(cycle, SUBJECT).valid, false, "a backward or cyclic resolver chain fails");
+
+  const mismatch = structuredClone(chain);
+  mismatch[1].metadata.superseded_by = "critique:missing";
+  assert.equal(validateCritiqueResolutionGraph(mismatch, SUBJECT).valid, false, "a resolver chain with a mismatched edge fails");
+});
 childProcess.execFileSync = ((file, args, options) => {
   if (Array.isArray(args) && String(args[0]).endsWith("lifecycle-authority-verifier.js")) {
     if (process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY !== TEST_AUTHORITY_FILE) return realExecFileSync(file, args, options);

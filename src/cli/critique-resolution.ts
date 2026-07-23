@@ -254,14 +254,47 @@ function validateCoverage(prior: AnyRecord, resolving: AnyRecord, resolution: An
   if (canonical(findings) !== canonical(coveredFindings) || findings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
 }
 
+function validateResolverChain(resolving: AnyRecord, state: GraphState): void {
+  let cursor = resolving;
+  const visited = new Set<string>();
+  while (true) {
+    const id = String(cursor.critique_record_id);
+    if (visited.has(id)) { state.errors.push("critique resolution graph is circular or not forward ordered"); return; }
+    visited.add(id);
+    if (cursor.verdict !== "pass" || !["verified", "superseded"].includes(cursor.claim_status)) {
+      state.errors.push("critique resolver must be a verified PASS");
+      return;
+    }
+    const hasSuccessorEdge = Boolean(cursor.superseded_by || cursor.critique_resolution);
+    if (!hasSuccessorEdge) {
+      if (cursor.claim_status !== "verified") state.errors.push("critique resolver chain must terminate at a current verified PASS");
+      return;
+    }
+    if (cursor.claim_status !== "superseded") {
+      state.errors.push("critique resolver chain history must be superseded");
+      return;
+    }
+    const edge = cursor.critique_resolution;
+    const next = state.byId.get(cursor.superseded_by);
+    if (!edge || typeof edge !== "object" || !next || edge.prior_record_id !== cursor.critique_record_id || edge.resolving_record_id !== cursor.superseded_by) {
+      state.errors.push("critique resolver chain has a missing or mismatched resolution edge");
+      return;
+    }
+    if (next.critique_sequence <= cursor.critique_sequence) { state.errors.push("critique resolution graph is circular or not forward ordered"); return; }
+    cursor = next;
+  }
+}
+
 function validateResolution(prior: AnyRecord, state: GraphState): void {
   if (!prior.superseded_by && !prior.critique_resolution) return;
+  if (prior.claim_status !== "superseded") state.errors.push("critique resolver chain history must be superseded");
   const resolution = prior.critique_resolution;
   if (!prior.superseded_by || !resolution || typeof resolution !== "object") { state.errors.push(`critique record ${String(prior.critique_record_id)} has an incomplete resolution edge`); return; }
   const resolving = state.byId.get(resolution.resolving_record_id);
   if (!resolving || prior.superseded_by !== resolution.resolving_record_id || resolution.prior_record_id !== prior.critique_record_id) { state.errors.push(`critique record ${String(prior.critique_record_id)} has a missing or mismatched resolver`); return; }
   if (resolving === prior || resolving.critique_sequence <= prior.critique_sequence) state.errors.push("critique resolution graph is circular or not forward ordered");
-  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) state.errors.push("critique resolver must be a current verified PASS");
+  if (resolving.verdict !== "pass") state.errors.push("critique resolver must be a verified PASS");
+  else validateResolverChain(resolving, state);
   if (resolution.resolver !== resolving.reviewer || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer) || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer) || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) state.errors.push("critique resolution actor binding is invalid");
   if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) state.errors.push("critique resolution crosses workflow subjects");
   validateResolutionSnapshots(prior, resolving, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
