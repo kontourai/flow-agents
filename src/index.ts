@@ -58,6 +58,18 @@ export {
   reduceUsageObservations,
   validateTelemetryRecord,
 } from "./telemetry-semantics.js";
+export {
+  RUN_FACT_KINDS,
+  joinIndependentEvaluation,
+  reconstructRun,
+} from "./run-reconstruction.js";
+export type {
+  EvaluatedRun,
+  IndependentEvaluation,
+  ReconstructedRun,
+  RunFact,
+  RunFactKind,
+} from "./run-reconstruction.js";
 export type {
   TelemetryDiagnostic,
   ToolResultStatus,
