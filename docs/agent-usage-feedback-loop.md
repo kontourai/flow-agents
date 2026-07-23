@@ -191,18 +191,25 @@ Do not store sensitive prompt text, tool payloads, secrets, or customer data in 
 
 Recommended reports should include:
 
-- Success rate.
-- Partial, failure, and not-verified rates.
+- Joined-outcome success rate, with the joined outcome count named as its denominator.
+- Joined partial, failure, and not-verified outcome counts.
 - Session duration, including total and average duration.
 - Tool invocations per session.
 - Delegations per session.
 - Permission requests per session.
-- Rework rate.
+- Joined-outcome rework rate.
 - Average quality score from recorded outcomes.
 - Human minutes saved from recorded outcomes.
-- Sessions with outcomes versus sessions without outcomes.
+- Sessions with joined outcomes versus sessions without joined outcomes.
+- Total, joined, and unjoined outcome records, including content-free unjoined reason counts.
 
 Usage-only metrics can be computed from telemetry. Quality and value metrics require outcome records.
+An outcome contributes to quality metrics only when it resolves to exactly one session through a
+valid run-correlation ID, an explicit runtime-session ID, or the documented legacy
+`{runtime, session_id}` pair, in that precedence order. Missing, invalid, unmatched, and ambiguous
+identities remain visible as unjoined records and never contribute to a success or rework claim.
+Reports are partial when source records are malformed, outcomes are unjoined, or recorded sessions
+lack joined outcome coverage.
 
 ## Core Commands
 

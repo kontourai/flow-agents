@@ -34,9 +34,12 @@ tmp_b="$TMPDIR_EVAL/repo-b"
 mkdir -p "$tmp_a" "$tmp_b"
 cp "$FIXTURE_DIR/sample-full.jsonl" "$tmp_a/full.jsonl"
 cp "$FIXTURE_DIR/sample-outcomes.jsonl" "$tmp_a/outcomes.jsonl"
-cp "$FIXTURE_DIR/sample-full.jsonl" "$tmp_b/full.jsonl"
+cat > "$tmp_b/normalized-sessions.jsonl" <<'JSONL'
+{"schema_version":"1","session_id":"codex-session-3","runtime_session_id":"codex-session-3","source_id":"repo-b","runtime":"codex","repo":"repo-b","agent":"dev","profile_id":"codex-experimental","prompt_id":"deliver-v2","prompt_variant":"concise","skill_ids":["deliver","verify-work"],"turns":1,"tool_invocations":1,"delegations":0,"permission_requests":0}
+JSONL
 cat > "$tmp_b/outcomes.jsonl" <<'JSONL'
-{"schema_version":"1","outcome_id":"outcome-2","recorded_at":"2026-05-04T11:30:00Z","session_id":"codex-session-2","runtime":"codex","repo":"repo-b","agent":"dev","profile_id":"codex-experimental","prompt_id":"deliver-v2","prompt_variant":"concise","skill_ids":["deliver","verify-work"],"task_type":"verify","task_slug":"usage-feedback-report","result":"failure","quality_score":2,"human_minutes_saved":0,"rework_required":true,"notes":"Fixture failure outcome","evidence":["evals/integration/test_usage_feedback_report.sh"]}
+{"schema_version":"1","outcome_id":"outcome-2","recorded_at":"2026-05-04T11:30:00Z","session_id":"codex-session-3","runtime":"codex","repo":"repo-b","agent":"dev","profile_id":"codex-experimental","prompt_id":"deliver-v2","prompt_variant":"concise","skill_ids":["deliver","verify-work"],"task_type":"verify","task_slug":"usage-feedback-report","result":"failure","quality_score":2,"human_minutes_saved":0,"rework_required":true,"notes":"Fixture failure outcome","evidence":["evals/integration/test_usage_feedback_report.sh"]}
+{"schema_version":"1","outcome_id":"artifact:legacy-success","recorded_at":"2026-05-04T11:31:00Z","session_id":"legacy-success-slug","runtime":"codex","repo":"repo-b","task_type":"deliver","task_slug":"legacy-success-slug","result":"success","quality_score":null,"human_minutes_saved":null,"rework_required":false,"evidence":["legacy-artifact.md"]}
 JSONL
 
 echo "--- JSON Report ---"
@@ -51,10 +54,21 @@ else
   _fail "JSON report failed: $(cat "$TMPDIR_EVAL/report-json.err" 2>/dev/null)"
 fi
 
-if jq -e '.summary.sessions >= 4 and .summary.sessions_with_outcomes >= 2 and (.summary.success_rate != null) and (.sources | length >= 2)' "$json_report" >/dev/null 2>&1; then
-  _pass "JSON report includes summary sessions, outcomes, success rate, and sources"
+if jq -e '.summary.sessions == 3 and
+  .summary.sessions_with_joined_outcomes == 2 and
+  .summary.joined_outcome_records == 2 and
+  .summary.joined_outcome_result_counts == {"success":1,"partial":0,"failure":1,"not_verified":0,"unknown":0} and
+  .summary.joined_outcome_success_rate == 0.5 and
+  .measurement.outcome_identity.total_records == 3 and
+  .measurement.outcome_identity.joined_records == 2 and
+  .measurement.outcome_identity.unjoined_records == 1 and
+  .measurement.outcome_identity.unjoined_by_reason.no_match == 1 and
+  .measurement.partial == true and
+  (.measurement.partial_reasons | index("unjoined_outcomes")) != null and
+  (.sources | length) == 3' "$json_report" >/dev/null 2>&1; then
+  _pass "JSON report separates joined quality evidence from unjoined outcomes"
 else
-  _fail "JSON report missing expected summary/source fields"
+  _fail "JSON report did not preserve explicit joined and unjoined denominators"
 fi
 
 if jq -e '.groups[]? | select((.key == "flow-agents") or (.group == "flow-agents") or (.name == "flow-agents"))' "$json_report" >/dev/null 2>&1; then
@@ -63,10 +77,11 @@ else
   _fail "JSON report did not include repo group"
 fi
 
-if jq -e '.summary.sessions > .summary.sessions_with_outcomes' "$json_report" >/dev/null 2>&1; then
-  _pass "report includes sessions without outcomes in usage totals"
+if jq -e '([.groups[].joined_outcome_records] | add) == .summary.joined_outcome_records and
+  .summary.sessions > .summary.sessions_with_joined_outcomes' "$json_report" >/dev/null 2>&1; then
+  _pass "group and summary joined denominators reconcile while usage retains sessions without outcomes"
 else
-  _fail "report did not distinguish sessions without outcomes"
+  _fail "group and summary joined denominators did not reconcile"
 fi
 
 echo ""
@@ -88,13 +103,49 @@ else
 fi
 
 if grep -q "# Agent Usage Feedback Report" "$markdown_report" && \
-   grep -q "Success rate" "$markdown_report" && \
+   grep -q "Joined-outcome success rate" "$markdown_report" && \
+   grep -q "Unjoined outcome records: 0" "$markdown_report" && \
    grep -q "Avg tool invocations" "$markdown_report" && \
-   grep -q "Rework rate" "$markdown_report" && \
+   grep -q "Joined-outcome rework rate" "$markdown_report" && \
    grep -q "codex-default" "$markdown_report"; then
-  _pass "Markdown report includes required headings, metrics, and profile group"
+  _pass "Markdown report names joined denominators and profile group"
 else
   _fail "Markdown report missing required content"
+fi
+
+echo ""
+echo "--- Ambiguous Identity Quarantine ---"
+tmp_ambiguous_a="$TMPDIR_EVAL/ambiguous-a"
+tmp_ambiguous_b="$TMPDIR_EVAL/ambiguous-b"
+mkdir -p "$tmp_ambiguous_a" "$tmp_ambiguous_b"
+cat > "$tmp_ambiguous_a/normalized-sessions.jsonl" <<'JSONL'
+{"schema_version":"1","session_id":"duplicate-session","runtime":"codex","source_id":"a","tool_invocations":0}
+JSONL
+cat > "$tmp_ambiguous_b/normalized-sessions.jsonl" <<'JSONL'
+{"schema_version":"1","session_id":"duplicate-session","runtime":"codex","source_id":"b","tool_invocations":0}
+JSONL
+cat > "$tmp_ambiguous_a/outcomes.jsonl" <<'JSONL'
+{"schema_version":"1","outcome_id":"ambiguous-success","session_id":"duplicate-session","runtime":"codex","result":"success","rework_required":false}
+{"schema_version":"1","outcome_id":"missing-identity-success","result":"success","rework_required":false}
+{"schema_version":"1","outcome_id":"invalid-correlation-success","session_id":"duplicate-session","runtime":"codex","run_correlation":{"schema_version":"broken"},"result":"success","rework_required":false}
+JSONL
+ambiguous_report="$TMPDIR_EVAL/ambiguous-report.json"
+if flow_agents_node "$USAGE_FEEDBACK" report \
+  --telemetry-dir "$tmp_ambiguous_a" \
+  --telemetry-dir "$tmp_ambiguous_b" \
+  --format json >"$ambiguous_report" 2>"$TMPDIR_EVAL/ambiguous-report.err" && \
+  jq -e '.measurement.outcome_identity.total_records == 3 and
+    .measurement.outcome_identity.joined_records == 0 and
+    .measurement.outcome_identity.unjoined_records == 3 and
+    .measurement.outcome_identity.unjoined_by_reason.ambiguous_match == 1 and
+    .measurement.outcome_identity.unjoined_by_reason.missing_identity == 1 and
+    .measurement.outcome_identity.unjoined_by_reason.invalid_correlation == 1 and
+    .summary.sessions_with_joined_outcomes == 0 and
+    .summary.joined_outcome_records == 0 and
+    .summary.joined_outcome_success_rate == null' "$ambiguous_report" >/dev/null 2>&1; then
+  _pass "ambiguous exact identities remain unjoined and produce no success claim"
+else
+  _fail "ambiguous identity handling produced a quality claim"
 fi
 
 relative_report="$tmp_a/reports/relative.md"
