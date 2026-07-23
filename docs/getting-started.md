@@ -32,6 +32,14 @@ npx @kontourai/flow-agents init --runtime codex --global --activate-kits --yes
 
 That splits installation by ownership: Codex-only runtime assets go into `CODEX_HOME` when set (otherwise `~/.codex`), while portable skills go into Codex's documented user catalog at `$HOME/.agents/skills`. A repository bundle install similarly exposes skills at `<repo>/.agents/skills`.
 
+For OpenCode, a global install targets `${XDG_CONFIG_HOME:-$HOME/.config}/opencode` and keeps the candidate workspace clean:
+
+```bash
+npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+```
+
+The installer additively merges `opencode.json`, syncs the Flow Agents plugin and agents, and exposes core skills plus the selected kits and their transitive dependencies. Runtime support and a SHA-256 managed-file manifest live under `.flow-agents/`; unrelated user plugins, agents, skills, and config entries remain user-owned. To migrate from an older incomplete global OpenCode install, upgrade Flow Agents and re-run this command. There is no compatibility path for stamp-only experimental installs.
+
 Pass a positional runtime destination and `--skills-dir PATH` when both roots must be isolated, or set `FLOW_AGENTS_SKILLS_DIR` for headless environments:
 
 ```bash

@@ -12,8 +12,19 @@ function fail(message) {
 const args = process.argv.slice(2);
 const checkOnly = args[0] === "--check";
 if (checkOnly) args.shift();
-const [sourceArg, destArg, manifestArg] = args;
+const metadataIndex = args.indexOf("--metadata-json");
+let manifestMetadata = {};
+if (metadataIndex !== -1) {
+  const metadataJson = args[metadataIndex + 1];
+  if (!metadataJson) fail("--metadata-json requires a JSON object");
+  try { manifestMetadata = JSON.parse(metadataJson); } catch (error) { fail(`invalid manifest metadata: ${error.message}`); }
+  if (!manifestMetadata || typeof manifestMetadata !== "object" || Array.isArray(manifestMetadata)) fail("manifest metadata must be a JSON object");
+  if (Object.hasOwn(manifestMetadata, "schema_version") || Object.hasOwn(manifestMetadata, "files")) fail("manifest metadata cannot replace schema_version or files");
+  args.splice(metadataIndex, 2);
+}
+const [sourceArg, destArg, manifestArg, ...extraArgs] = args;
 if (!sourceArg || !destArg || !manifestArg) fail("usage: install-owned-files.js <overlay> <destination> <manifest-relative-path>");
+if (extraArgs.length) fail(`unexpected arguments: ${extraArgs.join(" ")}`);
 const source = fs.realpathSync(sourceArg);
 function canonicalizeMissing(value) {
   let current = path.resolve(value);
@@ -187,7 +198,7 @@ ensureSafeParent(manifestPath, true);
 if (fs.existsSync(manifestPath) && fs.lstatSync(manifestPath).isSymbolicLink()) fail(`refusing to replace symlink: ${manifestPath}`);
 const manifestTemp = `${manifestPath}.tmp.${process.pid}.${crypto.randomBytes(6).toString("hex")}`;
 try {
-  fs.writeFileSync(manifestTemp, `${JSON.stringify({ schema_version: "1.0", files: incoming.map((entry) => ({ path: entry.rel, sha256: entry.hash })) }, null, 2)}\n`, { flag: "wx" });
+  fs.writeFileSync(manifestTemp, `${JSON.stringify({ schema_version: "1.0", ...manifestMetadata, files: incoming.map((entry) => ({ path: entry.rel, sha256: entry.hash })) }, null, 2)}\n`, { flag: "wx" });
   fs.renameSync(manifestTemp, manifestPath);
 } finally {
   fs.rmSync(manifestTemp, { force: true });

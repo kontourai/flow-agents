@@ -95,6 +95,14 @@ npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
 
+OpenCode also supports a global install. Flow Agents merges `opencode.json`, installs its plugin and agents, and exposes core skills plus only the selected kits (including their transitive kit dependencies) under OpenCode's global config root:
+
+```bash
+npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+```
+
+The default root is `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`. Managed support files and their content manifest live under `.flow-agents/`; unrelated user config, plugins, agents, and skills are preserved. Versions that produced only an install stamp did not complete a usable global OpenCode installation. Re-run the command above after upgrading; no legacy compatibility layer is required.
+
 Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, Codex's preferred `CODEX_THREAD_ID`, the backward-compatible `CODEX_SESSION_ID`, or `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time. Codex thread identifiers are never written into actor keys verbatim; Flow Agents derives a stable, domain-separated opaque token instead.
 
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
