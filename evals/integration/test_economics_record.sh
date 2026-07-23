@@ -31,7 +31,8 @@ FIX="$ROOT/evals/fixtures/economics"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"; [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null' EXIT
 PORT=38812
-RECV="$TMP/recv.jsonl"
+STUB_GENERATION=0
+RECV="$TMP/recv-0.jsonl"
 
 # Hermetic isolation: this suite must be deterministic regardless of what the machine running it has
 # configured for real (e.g. an operator's trusted .kontourai/telemetry-console.conf / ~/.flow-agents
@@ -184,6 +185,7 @@ printf '%s' "$(cat "$LOG3")" | jq -e . >/dev/null 2>&1 && pass "record with host
 # ── Stub Console endpoint (200 / 500) for the relay + fail-open cases ──────────────────────────────
 start_stub() {
   local mode="$1"
+  local delay="${2:-0}"
   local fake_bin="$TMP/fake-curl-bin"
   mkdir -p "$fake_bin"
   cat > "$fake_bin/curl" <<'SH'
@@ -196,6 +198,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$config" && -f "$config" ]] || exit 2
+sleep "${ECON_STUB_DELAY_SECONDS:-0}"
 node - "$config" "$ECON_STUB_RECV" <<'NODE'
 const fs = require("fs");
 const config = fs.readFileSync(process.argv[2], "utf8").split(/\n/);
@@ -226,7 +229,10 @@ NODE
 exit 0
 SH
   chmod +x "$fake_bin/curl"
-  export ECON_STUB_RECV="$RECV" ECON_STUB_MODE="$mode"
+  STUB_GENERATION=$((STUB_GENERATION + 1))
+  RECV="$TMP/recv-$STUB_GENERATION.jsonl"
+  : > "$RECV"
+  export ECON_STUB_RECV="$RECV" ECON_STUB_MODE="$mode" ECON_STUB_DELAY_SECONDS="$delay"
   case ":$PATH:" in
     *":$fake_bin:"*) ;;
     *) export PATH="$fake_bin:$PATH" ;;
@@ -237,6 +243,22 @@ SH
 stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID=""; }
 wait_for_post() { for _ in $(seq 1 25); do [[ -s "$RECV" ]] && return 0; sleep 0.2; done; return 1; }
 ENDPOINT="http://127.0.0.1:${PORT}/records"
+
+# ── detached POST isolation: a late prior case cannot contaminate the next mailbox ───────────────
+echo "--- detached relay fixture isolates every case mailbox ---"
+start_stub ok 0.5
+PRIOR_RECV="$RECV"
+MAILBOX_LOG="$TMP/econ-mailbox-delay.jsonl"; : > "$MAILBOX_LOG"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  run_emitter "$MAILBOX_LOG" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+start_stub ok
+NEXT_RECV="$RECV"
+sleep 0.8
+[[ -s "$PRIOR_RECV" ]] && pass "delayed prior POST lands in its original mailbox" || fail "delayed prior POST did not land"
+[[ ! -s "$NEXT_RECV" ]] && pass "delayed prior POST cannot contaminate the next case mailbox" || fail "delayed prior POST contaminated the next case mailbox"
 
 # ── local-first: NO console configured → local write happens, nothing POSTed ──────────────────────
 echo "--- local-first: no console configured → local record written, nothing POSTed ---"
