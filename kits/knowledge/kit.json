@@ -134,7 +134,7 @@
     {
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
-      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against schemas/decision-record.schema.json before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir."
+      "description": "Executable logic for the knowledge.promote sub-flow (issues #313 and #669): runPromote({sessionDir, repoRoot, provenance}) preserves the workflow-sidecar ingest -> distill -> link -> health path and writes DRAFT proposals ONLY under <session>/proposals/. The ingest layer also exposes provider-neutral workflow-sidecar and runtime-session sources; runtime-session projects canonical telemetry-referenced Claude Code/Codex transcripts into bounded, deterministically redacted residue under schemas/knowledge/residue.schema.json with a fail-closed dream-owned cursor. Proposals-only by construction; never mutates docs/, CONTEXT.md, a Knowledge store, or any path outside the explicit proposal/cursor targets."
     }
   ],
   "evals": [
@@ -211,7 +211,12 @@
     {
       "id": "knowledge.promote-suite",
       "path": "promote/promote.test.js",
-      "description": "Eval cases for the knowledge.promote sub-flow (issue #313): AC1 (a real-modeled completed session dir yields >=1 schema-valid draft decision delta with PR/merge-SHA/session-archive provenance, validated against the real #310 registry validator); AC2 (a seeded-contradiction registry fixture yields a duplicate-detection report naming BOTH topics + a schema-valid merge-repair proposal naming a merge target; a resolved supersede/merge pair is not re-flagged); AC3 (filesystem diff proves zero writes outside the session/proposal dir); R1 (the FlowDefinition exports every gate claim so a parent uses_flow step resolves it)."
+      "description": "Eval cases for the knowledge.promote sub-flow (issue #313): the established proposal/provenance/health/write-boundary suite."
+    },
+    {
+      "id": "knowledge.runtime-session-residue-suite",
+      "path": "promote/runtime-session.test.js",
+      "description": "Eval cases for unified agentic memory WI-1 (#669): pins the workflow-sidecar residue hash, rejects partial source variants, exercises Claude Code and Codex fixtures, proves prefix-bound continuity by blocking copy-truncate gaps and draining the native .1 rotation predecessor, verifies cross-invocation deduplication, rejects mixed-format, out-of-root, over-limit, unsafe-cursor, and uncommitted-cursor input, and seeds credential/path/email/identifier canaries for deterministic scrub evidence."
     }
   ],
   "skills": [
