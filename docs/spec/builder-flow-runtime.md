@@ -405,6 +405,29 @@ administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
+### Canonical manifest and completion-key boundaries
+
+The coordinator permits at most 16 MiB only when it reads the canonical Flow evidence
+manifest (`.kontourai/flow/runs/<run-id>/evidence/manifest.json`) for a signed critique
+resolution. This is an isolated `MAX_CANONICAL_FLOW_MANIFEST_BYTES` boundary: canonical
+definition and state reads, trust bundles, authorizations, journals, keys, responses, and all
+other bounded inputs retain their smaller existing limits. The manifest is still opened with
+`O_NOFOLLOW`, must be a regular file with no group/world write bit, is read through the protected
+descriptor, and must parse as JSON. Raising this one size limit does not permit streaming,
+lossy parsing, writable files, or a broader input-size relaxation.
+
+Package-side completion verification always uses the fixed administrator-owned public-key path
+`/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem`; callers and
+environment variables cannot substitute a key path. On Darwin alone, the fixed root `/etc`
+component may be the standard protected alias that resolves exactly to `/private/etc`. Every
+resolved component, including `/`, `/private`, `/private/etc`, and the fixed descendants to the
+key, must be root-owned and group/world non-writable; after that one alias, every component must
+be non-symlinked. The final key is opened with `O_NOFOLLOW` and validated from its descriptor as
+a protected regular Ed25519 public key. Arbitrary alias targets, deeper symlinks, writable or
+non-root-owned components, and every symlink on non-Darwin hosts fail closed. This exception does
+not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
+every component.
+
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
 a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
@@ -428,6 +451,14 @@ Flow's canonical cancellation transition, then releases the exact bound local as
 requires a canceled or completed canonical Flow run and atomically relocates only the session to
 `.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains
 `NOT_VERIFIED` pending the root/container conformance lane.
+
+An administrator upgrade copies the direct coordinator source
+`packaging/lifecycle-authority/coordinator.mjs`; it is not generated package output. The signed
+`coordinator_runtime_sha256` field deliberately continues to identify the separately installed
+`runtime-v1.mjs`, so an upgrade proves coordinator source-to-installed byte equality and SHA-256
+separately. The installer keeps its prior coordinator, runtime, pin, and reducer closure for
+rollback. Neither the package caller nor an authorization record can override the helper, key, or
+installed source selected by this boundary.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

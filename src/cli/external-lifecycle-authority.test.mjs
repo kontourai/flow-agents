@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
+import * as fs from "node:fs";
+import { generateKeyPairSync } from "node:crypto";
+import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
+
+const {
+  LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH,
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
   invokeExternalLifecycleAuthority,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
-} from "../../build/src/external-lifecycle-authority.js";
+} = lifecycleAuthority;
 
 const action = "cancel";
 const digest = "a".repeat(64);
@@ -20,6 +25,77 @@ function protectedDirectory() {
 
 function protectedExecutable() {
   return { isSymbolicLink: () => false, isFile: () => true, uid: 0, mode: 0o755 };
+}
+
+const completionVerificationKey = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "pem" });
+const nonEd25519CompletionVerificationKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ type: "spki", format: "pem" });
+const resolvedCompletionVerificationKeyPath = "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
+
+function protectedCompletionDirectory(overrides = {}) {
+  return { isSymbolicLink: () => false, isFile: () => false, uid: 0, mode: 0o755, ...overrides };
+}
+
+function protectedCompletionKey(overrides = {}) {
+  return { isSymbolicLink: () => false, isFile: () => true, uid: 0, mode: 0o644, size: completionVerificationKey.length, ...overrides };
+}
+
+/**
+ * The planned boundary is intentionally narrower than the helper host: package
+ * verification may inspect only the immutable completion-key installation.
+ */
+function completionVerificationKeyHost({
+  platform = "darwin",
+  etcTarget = "/private/etc",
+  entries = {},
+  key = completionVerificationKey,
+} = {}) {
+  const defaultEntries = new Map([
+    ["/", protectedCompletionDirectory()],
+    ["/etc", { ...protectedCompletionDirectory(), isSymbolicLink: () => true }],
+    ["/private", protectedCompletionDirectory()],
+    ["/private/etc", protectedCompletionDirectory()],
+    ["/private/etc/kontourai", protectedCompletionDirectory()],
+    ["/private/etc/kontourai/flow-agents-lifecycle-authority-v1", protectedCompletionDirectory()],
+    [resolvedCompletionVerificationKeyPath, protectedCompletionKey({ size: key.length })],
+  ]);
+  for (const [file, stat] of Object.entries(entries)) defaultEntries.set(file, stat);
+  let closed = false;
+  return {
+    platform,
+    lstatSync(file) {
+      const stat = defaultEntries.get(file);
+      if (!stat) { const error = new Error(`ENOENT: ${file}`); error.code = "ENOENT"; throw error; }
+      return stat;
+    },
+    readlinkSync(file) {
+      assert.equal(file, "/etc", "only the fixed lexical /etc component may be resolved as the platform alias");
+      return etcTarget;
+    },
+    accessSync(file) {
+      assert.ok(defaultEntries.has(file), `runtime-user write probe must cover ${file}`);
+      const error = new Error("EACCES");
+      error.code = "EACCES";
+      throw error;
+    },
+    openSync(file, flags) {
+      assert.equal(file, resolvedCompletionVerificationKeyPath, "the final descriptor must open the fixed resolved key path");
+      assert.equal(flags, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW, "the final key descriptor must retain O_NOFOLLOW");
+      return 43;
+    },
+    fstatSync(descriptor) {
+      assert.equal(descriptor, 43);
+      return defaultEntries.get(resolvedCompletionVerificationKeyPath);
+    },
+    readFileSync(descriptor) {
+      assert.equal(descriptor, 43);
+      return key;
+    },
+    closeSync(descriptor) {
+      assert.equal(descriptor, 43);
+      closed = true;
+    },
+    get closed() { return closed; },
+  };
 }
 
 test("lifecycle authority helper identity is immutable and ignores caller executable selection", () => {
@@ -57,6 +133,87 @@ test("lifecycle authority helper installation is hermetic when a protected helpe
   };
   assert.equal(validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH, installedHost), LIFECYCLE_AUTHORITY_HELPER_PATH);
   assert.equal(closed, true, "the helper descriptor is closed after validation");
+});
+
+test("completion-key verification admits only the protected Darwin /etc platform alias and retains every resolved-path and final-key boundary", () => {
+  const validateCompletionVerificationKeyInstallation = lifecycleAuthority.validateLifecycleAuthorityCompletionVerificationKeyInstallation;
+  assert.equal(
+    typeof validateCompletionVerificationKeyInstallation,
+    "function",
+    "RED: completion-key verification needs an injectable fixed-key host boundary before the standard Darwin /etc -> /private/etc alias can be accepted hermetically",
+  );
+
+  const standardAliasHost = completionVerificationKeyHost();
+  const key = validateCompletionVerificationKeyInstallation(standardAliasHost);
+  assert.equal(key.type, "public");
+  assert.equal(key.asymmetricKeyType, "ed25519");
+  assert.equal(standardAliasHost.closed, true, "the final protected key descriptor is closed");
+
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ etcTarget: "/var/etc" })),
+    /symlink|alias|private\/etc/i,
+    "Darwin must not accept an arbitrary root-owned /etc symlink target",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
+      entries: {
+        "/private/etc/kontourai": { ...protectedCompletionDirectory(), isSymbolicLink: () => true },
+      },
+    })),
+    /symlink/i,
+    "only the first lexical /etc component may be the platform alias; descendants remain symlink-free",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
+      entries: { "/private": protectedCompletionDirectory({ mode: 0o775 }) },
+    })),
+    /OS-owned|non-writable|root-owned/i,
+    "every resolved parent remains group/world non-writable",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
+      entries: { "/private/etc": protectedCompletionDirectory({ uid: 501 }) },
+    })),
+    /OS-owned|root-owned/i,
+    "every resolved parent remains root-owned",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
+      entries: { [resolvedCompletionVerificationKeyPath]: protectedCompletionKey({ mode: 0o664 }) },
+    })),
+    /protected regular file|non-writable/i,
+    "final fstat validation retains group/world mode protection",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
+      entries: { [resolvedCompletionVerificationKeyPath]: protectedCompletionKey({ isFile: () => false }) },
+    })),
+    /protected regular file/i,
+    "final fstat validation retains the regular-file requirement",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ key: nonEd25519CompletionVerificationKey })),
+    /Ed25519/i,
+    "the fixed protected file must still contain an Ed25519 public key",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ platform: "linux" })),
+    /symlink/i,
+    "non-Darwin platforms retain the no-symlink component policy",
+  );
+  assert.throws(
+    () => validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH, {
+      platform: "darwin",
+      getuid: () => 501,
+      lstatSync: (file) => file === "/usr" ? { ...protectedDirectory(), isSymbolicLink: () => true } : protectedDirectory(),
+      accessSync: () => { const error = new Error("EACCES"); error.code = "EACCES"; throw error; },
+      openSync: () => 42,
+      fstatSync: () => protectedExecutable(),
+      closeSync: () => {},
+    }),
+    /symlink/i,
+    "the completion-key alias exception must not relax helper installation validation",
+  );
 });
 
 test("lifecycle authority response requires one non-empty response", () => {

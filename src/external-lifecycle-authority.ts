@@ -36,6 +36,22 @@ export interface LifecycleAuthorityHelperHost {
   closeSync(descriptor: number): void;
 }
 
+/**
+ * The read-only filesystem boundary used while validating the immutable
+ * completion-verification key. It is deliberately separate from the helper
+ * boundary: only this fixed key path may use the narrow Darwin platform alias.
+ */
+export interface LifecycleAuthorityCompletionVerificationKeyHost {
+  platform: string;
+  lstatSync(file: string): { isSymbolicLink(): boolean; isFile(): boolean; uid: number; mode: number };
+  readlinkSync(file: string): string;
+  accessSync(file: string, mode: number): void;
+  openSync(file: string, flags: number): number;
+  fstatSync(descriptor: number): { isFile(): boolean; uid: number; mode: number; size: number };
+  readFileSync(descriptor: number): Buffer;
+  closeSync(descriptor: number): void;
+}
+
 const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
   platform: process.platform,
   getuid: typeof process.getuid === "function" ? () => process.getuid!() : undefined,
@@ -43,6 +59,17 @@ const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
   accessSync: (file, mode) => fs.accessSync(file, mode),
   openSync: (file, flags) => fs.openSync(file, flags),
   fstatSync: (descriptor) => fs.fstatSync(descriptor),
+  closeSync: (descriptor) => fs.closeSync(descriptor),
+};
+
+const lifecycleAuthorityCompletionVerificationKeyHost: LifecycleAuthorityCompletionVerificationKeyHost = {
+  platform: process.platform,
+  lstatSync: (file) => fs.lstatSync(file),
+  readlinkSync: (file) => fs.readlinkSync(file),
+  accessSync: (file, mode) => fs.accessSync(file, mode),
+  openSync: (file, flags) => fs.openSync(file, flags),
+  fstatSync: (descriptor) => fs.fstatSync(descriptor),
+  readFileSync: (descriptor) => fs.readFileSync(descriptor),
   closeSync: (descriptor) => fs.closeSync(descriptor),
 };
 
@@ -95,27 +122,57 @@ export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
   return value;
 }
 
-function trustedCompletionVerificationKey() {
-  if (process.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
-  const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
-  let cursor = path.parse(keyFile).root;
-  for (const component of keyFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, component);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
-    if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
-    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
-    try { fs.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
-    catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
+function validateProtectedCompletionVerificationKeyPathComponent(file: string, host: LifecycleAuthorityCompletionVerificationKeyHost) {
+  let stat: ReturnType<LifecycleAuthorityCompletionVerificationKeyHost["lstatSync"]>;
+  try { stat = host.lstatSync(file); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH}`); }
+  if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
+  try { host.accessSync(file, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
+  catch (error) {
+    if (error instanceof Error && error.message.includes("must not be writable")) throw error;
+    const code = (error as { code?: unknown })?.code;
+    if (code !== "EACCES" && code !== "EPERM") throw new Error("pinned lifecycle authority completion verification key path runtime-user write protection could not be verified");
   }
-  const descriptor = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  return stat;
+}
+
+/**
+ * Validate and load the immutable completion-verification key without treating
+ * it as authority to mutate. The injectable host exists solely for hermetic
+ * fixed-installation checks; production always supplies the real host below.
+ */
+export function validateLifecycleAuthorityCompletionVerificationKeyInstallation(host: LifecycleAuthorityCompletionVerificationKeyHost = lifecycleAuthorityCompletionVerificationKeyHost) {
+  if (host.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
+  const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
+  const root = path.posix.parse(keyFile).root;
+  let resolvedKeyFile = keyFile;
+  const rootStat = validateProtectedCompletionVerificationKeyPathComponent(root, host);
+  if (rootStat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
+  if (host.platform === "darwin") {
+    const etcStat = validateProtectedCompletionVerificationKeyPathComponent("/etc", host);
+    if (!etcStat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key must use the protected Darwin /etc platform alias");
+    let target: string;
+    try { target = host.readlinkSync("/etc"); } catch { throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias is unreadable"); }
+    if (path.posix.resolve(root, target) !== "/private/etc") throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias must resolve exactly to /private/etc");
+    resolvedKeyFile = path.posix.join("/private/etc", keyFile.slice("/etc".length));
+  }
+  let cursor = root;
+  for (const component of resolvedKeyFile.slice(root.length).split(path.posix.sep).filter(Boolean)) {
+    cursor = path.posix.join(cursor, component);
+    const stat = validateProtectedCompletionVerificationKeyPathComponent(cursor, host);
+    if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
+  }
+  const descriptor = host.openSync(resolvedKeyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const stat = fs.fstatSync(descriptor);
+    const stat = host.fstatSync(descriptor);
     if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");
-    const key = createPublicKey(fs.readFileSync(descriptor));
+    const key = createPublicKey(host.readFileSync(descriptor));
     if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") throw new Error("pinned lifecycle authority completion verification key must be an Ed25519 public key");
     return key;
-  } finally { fs.closeSync(descriptor); }
+  } finally { host.closeSync(descriptor); }
+}
+
+function trustedCompletionVerificationKey() {
+  return validateLifecycleAuthorityCompletionVerificationKeyInstallation();
 }
 
 /**

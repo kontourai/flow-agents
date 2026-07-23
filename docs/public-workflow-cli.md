@@ -182,6 +182,27 @@ Package-side graph validation never invokes a live verification subprocess or tr
 response as authorization. It verifies the coordinator's pinned Ed25519 completion receipt and
 requires its result digest to bind the exact resolved graph before Builder consumes the transition.
 
+For a signed critique resolution, the coordinator accepts up to 16 MiB only for the canonical
+Flow evidence manifest. The protected descriptor, `O_NOFOLLOW`, regular-file, group/world-mode,
+and mandatory JSON checks remain in force. Definitions, state, trust bundles, authorizations,
+journals, keys, and responses retain their smaller existing limits; this is not a general
+input-size increase.
+
+Completion verification always reads the fixed public key at
+`/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem`; no command,
+authorization, or environment setting can choose another key. On Darwin only, the standard
+protected `/etc` alias resolving exactly to `/private/etc` is accepted. Every resolved component
+and the final `O_NOFOLLOW` Ed25519 key descriptor are validated as protected. Different alias
+targets, deeper or writable symlinks, non-root-owned components, all non-Darwin symlinks, and all
+helper-path symlinks are rejected. The helper itself remains pinned and symlink-free.
+
+Administrators upgrade the direct source
+`packaging/lifecycle-authority/coordinator.mjs` through the privileged installer. They verify the
+installed coordinator's bytes and SHA-256 separately from the signed runtime digest, which
+continues to identify `runtime-v1.mjs`; the installer preserves its prior coordinator/runtime/pin/
+reducer set for rollback. This operational path is administrator-owned and cannot be selected or
+overridden by package callers.
+
 The helper and its provider-neutral key registry are deployed and configured by runtime
 administrators outside source control. Flow Agents ships neither helper configuration nor keys.
 Missing, untrusted, repository-local, or writable helpers fail closed. The privileged

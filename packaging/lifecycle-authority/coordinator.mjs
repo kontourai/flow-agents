@@ -13,6 +13,7 @@ export const STATE_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-authority-v1
 export const REGISTRY_FILE = `${CONFIG_ROOT}/keys.json`;
 export const COMPLETION_PRIVATE_KEY_FILE = `${CONFIG_ROOT}/completion-signing-key.pem`;
 export const COMPLETION_PUBLIC_KEY_FILE = `${CONFIG_ROOT}/completion-verification-key.pem`;
+const MAX_CANONICAL_FLOW_MANIFEST_BYTES = 16 * 1024 * 1024;
 const INSTALL_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const FLOW_REDUCER_PIN_FILE = path.join(INSTALL_ROOT, "flow-reducer-v1.json");
 const FLOW_REDUCER_PACKAGE_ROOT = path.join(INSTALL_ROOT, "flow-reducer", "node_modules", "@kontourai", "flow");
@@ -192,7 +193,7 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const stateBytes = protectedRegularFile(files.state, "canonical Flow state", 4 * 1024 * 1024);
-  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", 4 * 1024 * 1024);
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const definition = JSON.parse(definitionBytes.toString("utf8"));
   const state = JSON.parse(stateBytes.toString("utf8"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));

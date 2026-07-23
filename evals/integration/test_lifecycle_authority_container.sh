@@ -10,6 +10,20 @@ apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
 npm ci --ignore-scripts --silent
 npm run build --silent
+# AC-5 capacity boundary: the direct privileged installer source must name and
+# use the isolated canonical-manifest cap.  The focused Node test exercises the
+# generated protected JSON fixtures; this container assertion proves the source
+# handed to the root installer retains that exact boundary.
+node - /work/packaging/lifecycle-authority/coordinator.mjs <<'NODE'
+const fs = require('node:fs');
+const source = fs.readFileSync(process.argv[2], 'utf8');
+if (!/(?:export\s+)?const\s+MAX_CANONICAL_FLOW_MANIFEST_BYTES\s*=\s*16\s*\*\s*1024\s*\*\s*1024\s*;/.test(source)) {
+  throw new Error('coordinator must declare the named 16 MiB canonical-manifest cap');
+}
+if (!/protectedRegularFile\(\s*files\.manifest,\s*"canonical Flow evidence manifest",\s*MAX_CANONICAL_FLOW_MANIFEST_BYTES\s*\)/s.test(source)) {
+  throw new Error('coordinator must apply the named cap only to the canonical evidence manifest');
+}
+NODE
 # The privileged coordinator intentionally remains pinned to the audited Flow 3.5.0
 # reducer closure even when the application runtime consumes a newer Flow release.
 pinned_reducer_root="$(mktemp -d)"
