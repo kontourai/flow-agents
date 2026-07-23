@@ -22,7 +22,17 @@ sudoers_backup="$sudoers_file.previous"
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
 ensure_operator_group() {
   case "$(uname -s)" in
-    Darwin) dseditgroup -o create "$operator_group" 2>/dev/null || true ;;
+    Darwin)
+      if ! darwin_groups="$(dscl . -list /Groups)"; then
+        echo "could not list Darwin groups before ensuring lifecycle operator group" >&2
+        exit 70
+      fi
+      if printf '%s\n' "$darwin_groups" | grep -F -x -- "$operator_group" >/dev/null; then
+        :
+      else
+        dseditgroup -o create "$operator_group"
+      fi
+      ;;
     Linux) getent group "$operator_group" >/dev/null 2>&1 || groupadd --system "$operator_group" ;;
     *) echo "unsupported platform for lifecycle operator group: $(uname -s)" >&2; exit 69 ;;
   esac

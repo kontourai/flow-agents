@@ -98,6 +98,7 @@ BUILDER_KIT_BASELINE_FRESHNESS_HINT_FIXTURE="$ROOT/evals/fixtures/builder-kit-wo
 PULL_WORK_PERSONAL_WIP_FIXTURE="$ROOT/evals/fixtures/pull-work-wip-shepherding/personal-wip-blocks.json"
 PULL_WORK_GLOBAL_WIP_FIXTURE="$ROOT/evals/fixtures/pull-work-wip-shepherding/global-wip-informs.json"
 BACKLOG_PROVIDER_SETTINGS="$ROOT/context/settings/backlog-provider-settings.json"
+LIFECYCLE_AUTHORITY_ADMIN="$ROOT/scripts/lifecycle-authority-admin.sh"
 BACKLOG_PROVIDER_SETTINGS_SCHEMA="$ROOT/schemas/backlog-provider-settings.schema.json"
 VERIFICATION_CONTRACT="$ROOT/context/contracts/verification-contract.md"
 REVIEW_CONTRACT="$ROOT/context/contracts/review-contract.md"
@@ -156,6 +157,73 @@ done < <(
     find "$ROOT/docs" -maxdepth 1 -type f \( -name 'workflow-*.md' -o -name 'skills-map.md' \)
   } | sort -u
 )
+
+if node - "$LIFECYCLE_AUTHORITY_ADMIN" <<'NODE'; then
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+const match = source.match(/^ensure_operator_group\(\) \{[\s\S]*?^\}$/m);
+if (!match) throw new Error("could not extract ensure_operator_group");
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-darwin-group-"));
+const bin = path.join(temporary, "bin");
+const harness = path.join(temporary, "ensure-operator-group.sh");
+const log = path.join(temporary, "dseditgroup.log");
+fs.mkdirSync(bin);
+fs.writeFileSync(path.join(bin, "uname"), "#!/bin/sh\nprintf '%s\\n' Darwin\n", { mode: 0o755 });
+fs.writeFileSync(path.join(bin, "dscl"), `#!/bin/sh
+case "\${DARWIN_GROUP_STATE:?}" in
+  existing) printf '%s\\n' kontourai-lifecycle-operator ;;
+  absent|create-fails) : ;;
+  lookup-fails) exit 70 ;;
+  *) exit 71 ;;
+esac
+`, { mode: 0o755 });
+fs.writeFileSync(path.join(bin, "dseditgroup"), `#!/bin/sh
+printf '%s\\n' "$*" >> "\${DARWIN_GROUP_LOG:?}"
+[ "\${DARWIN_GROUP_STATE:?}" = absent ]
+`, { mode: 0o755 });
+fs.writeFileSync(harness, `#!/bin/sh
+set -eu
+operator_group="$1"
+${match[0]}
+ensure_operator_group
+`, { mode: 0o755 });
+
+const run = (state) => spawnSync("/bin/sh", [harness, "kontourai-lifecycle-operator"], {
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    DARWIN_GROUP_STATE: state,
+    DARWIN_GROUP_LOG: log,
+  },
+});
+const logLines = () => fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+
+let result = run("existing");
+if (result.status !== 0) throw new Error(`existing Darwin group lookup failed: ${result.stderr}`);
+if (logLines().length !== 0) throw new Error("existing Darwin group was recreated");
+
+result = run("absent");
+if (result.status !== 0) throw new Error(`absent Darwin group was not created: ${result.stderr}`);
+if (logLines().join("\n") !== "-o create kontourai-lifecycle-operator") throw new Error("absent Darwin group was not created exactly once");
+
+result = run("lookup-fails");
+if (result.status === 0) throw new Error("failed Darwin group lookup was accepted");
+if (logLines().length !== 1) throw new Error("failed Darwin group lookup attempted creation");
+
+result = run("create-fails");
+if (result.status === 0) throw new Error("failed Darwin group creation was accepted");
+if (logLines().length !== 2) throw new Error("failed Darwin group creation did not attempt exactly one additional create");
+fs.rmSync(temporary, { recursive: true, force: true });
+NODE
+  pass "Darwin lifecycle operator group preservation and fail-closed creation are deterministic"
+else
+  fail "Darwin lifecycle operator group preservation and fail-closed creation are deterministic"
+fi
 
 require_file "$IDEA" "idea-to-backlog skill"
 require_file "$BUILDER_SHAPE" "builder-shape skill"
