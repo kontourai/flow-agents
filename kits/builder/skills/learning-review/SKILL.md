@@ -59,7 +59,9 @@ produces its local record only.
    deployment, release, provider, or user outcomes from local completion alone.
 7. Give `decision-evidence` and `learning-evidence` independent verdicts. A
    complete decision record can pass while learning follow-up remains failed or
-   `NOT_VERIFIED`.
+   `NOT_VERIFIED`. The learning-review stage is required, but discovering a new
+   lesson is not: when the evidence supports no correction or follow-up, record
+   that explicit no-op outcome and its basis instead of inventing backlog work.
 8. On a matching active run, publish both expectations through the public CLI:
 
 ```bash
@@ -88,6 +90,9 @@ flow-agents workflow evidence --session-dir <session-dir> \
      and writes a content-free receipt under the primary checkout.
    - Never reclaim merely because a pull request exists, and never chain branch
      deletion or forced worktree removal after push/merge commands.
+   - Reclaim is a terminal dependent effect, not work that may race the learning
+     review. Read-only merge and worktree preflight may happen concurrently, but
+     removal waits until the learning artifacts it depends on are durable.
 
 ## Output
 

@@ -463,7 +463,11 @@ Builder learning evidence and a fresh authenticated merged observation for the
 exact worktree head. It refuses primary checkouts, dirty or unregistered
 worktrees, stale/mismatched provider identity, and unmerged changes; it uses
 non-forced `git worktree remove`, retains the branch, prunes worktree metadata,
-and writes a content-free receipt outside the removed worktree.
+and writes a content-free receipt outside the removed worktree. Learning review
+is a required closeout stage even when its evidence-backed result is that no new
+lesson or follow-up exists. Reclaim is downstream of that durable result because
+it removes the workspace containing the learning inputs; read-only closeout
+preflight may overlap, but destructive removal cannot.
 
 `cancel-request` is a **read-only convenience** that removes the friction of hand-assembling a
 cancellation record: it mints the *unsigned* authorization for the run (correct `run_id`,
