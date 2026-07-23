@@ -247,6 +247,21 @@ atomic attach/evaluate/resume transaction to Flow. Candidate construction,
 queue persistence, review authority, and lifecycle authority remain separate
 capabilities.
 
+## Portable host integration
+
+Flow Agents consumes `@kontourai/conduit` for the host-facing lifecycle and
+portable-asset boundary. Application policy still runs in Flow Agents; its
+model-visible context and deny outcomes are projected unchanged through a
+configured host adapter. Skills, agents, hooks, prompts, commands, and context
+assets use Conduit installation receipts, while Flow definitions, kits, gates,
+sidecars, and evidence remain Flow Agents contracts.
+
+`npm run host-conformance` executes Conduit's external probe against one local
+harness binding and one in-process framework binding, then generates the
+[host integration matrix](docs/specs/host-integration-conformance.md) and its
+machine-readable report. These are adapter-contract results; an actual
+deployment records separate host-bound evidence before runtime selection.
+
 ## Repository layout
 
 See [Repository Structure](docs/repository-structure.md) for the canonical map. In short:
