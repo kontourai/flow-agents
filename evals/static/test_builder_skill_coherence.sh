@@ -53,7 +53,7 @@ const expectedArtifacts = {
   'pull-work': ['<slug>--pull-work.md', 'trust.bundle#selected-work'],
   'pickup-probe': ['<slug>--pull-work.md', 'trust.bundle#pickup-probe'],
   'plan-work': ['<slug>--plan-work.md', 'acceptance.json', 'handoff.json', 'trust.bundle#implementation-plan'],
-  'execute-plan': ['<slug>--deliver.md', 'state.json', 'trust.bundle#implementation-scope'],
+  'execute-plan': ['<slug>--deliver.md', 'trust.bundle#implementation-scope'],
   'review-work': ['trust.bundle#critique'],
   'verify-work': ['trust.bundle#acceptance-criteria', 'trust.bundle#tests-evidence', 'trust.bundle#policy-compliance'],
   'evidence-gate': ['<slug>--evidence-gate.md', 'trust.bundle#merge-readiness'],
@@ -79,6 +79,8 @@ const expectedActions = {
 };
 
 const failures = [];
+const executeSkillText = fs.readFileSync(path.join(root, 'kits/builder/skills/execute-plan/SKILL.md'), 'utf8');
+if (/\bstate\.json\b/.test(executeSkillText)) failures.push('execute-plan must not claim or reference workflow-owned state.json');
 const rows = Array.isArray(kit.skill_roles) ? kit.skill_roles : [];
 const declared = (kit.skills || []).map((entry) => entry.id.replace(/^builder\./, '')).sort();
 const classified = rows.map((entry) => entry.skill_id.replace(/^builder\./, '')).sort();
