@@ -13,6 +13,7 @@ const bundle = { schema_version: "1.0", claims: [
 ] };
 const authorization = { schema_version: "1.0", operation: "resolve-critique", project_root: "/project", run_id: "run-1", subject: "work-item:1", prior_record_id: "prior", prior_record_hash: priorHash, resolving_record_id: "resolving", resolving_record_hash: resolvingHash, expected_resolver: "reviewer-b", resolved_lane_ids: ["security"], resolved_finding_ids: ["F-1"], prior_snapshot_sha256: "c".repeat(64), resolving_snapshot_sha256: "d".repeat(64), prior_head_sha: "none", resolving_head_sha: "none", requested_at: "2030-01-01T00:00:00Z", signature: { algorithm: "ed25519", key_id: "operator", value: "signed-elsewhere" } };
 const sha256 = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const rawSha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 function missingOriginalResolutionFixture() {
   const original = resolveCritiqueTransition({ bundle, resolution_events: [], authorization, prior_record_id: "prior", resolving_record_id: "resolving" });
@@ -35,7 +36,7 @@ function missingOriginalResolutionFixture() {
     prior_head_sha: authorization.prior_head_sha,
     resolving_head_sha: authorization.resolving_head_sha,
     preimage_bundle_sha256: sha256(preservedBundle),
-    preimage_ledger_sha256: sha256(emptyLedger),
+    preimage_ledger_sha256: rawSha256(Buffer.alloc(0)),
     preimage_ledger_length: 0,
     preimage_ledger_tail_hash: "0".repeat(64),
     current_completion_sha256: "e".repeat(64),
@@ -81,6 +82,7 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
     prior_record_id: "prior",
     resolving_record_id: "resolving",
     current_completion_sha256: repairAuthorization.current_completion_sha256,
+    ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
   });
   assert.deepEqual(repaired.bundle, preservedBundle, "history repair must leave the already-superseded Trust Bundle byte-semantically unchanged");
   assert.equal(repaired.resolution_events.length, 1, "repair appends exactly one external authority event");
@@ -92,12 +94,20 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
   assert.equal(repairEvent.predecessor_hash, "0".repeat(64));
   assert.equal(repaired.bundle.claims[0].metadata.critique_resolution.resolution_event_id, edge.resolution_event_id, "repair does not rewrite the preserved resolution edge");
 
+  const sameReviewerBundle = structuredClone(preservedBundle);
+  sameReviewerBundle.claims.find((claim) => claim.metadata.critique_record_id === "resolving").metadata.reviewer = "reviewer-a";
+  assert.throws(
+    () => repairCritiqueResolutionHistoryTransition({ bundle: sameReviewerBundle, resolution_events: emptyLedger.events, authorization: repairAuthorization, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256 }),
+    /distinct cross-reviewer|distinct/i,
+    "repair cannot turn a same-reviewer edge into authority",
+  );
+
   assert.doesNotThrow(
     () => repairCritiqueResolutionHistoryTransition({
       bundle: preservedBundle,
       resolution_events: emptyLedger.events,
       authorization: { ...repairAuthorization, preimage_bundle_sha256: "f".repeat(64) },
-      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256,
+      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
     }),
     "the pure transition must leave exact raw-byte preimage verification to the coordinator",
   );
@@ -112,9 +122,9 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
         preimage_ledger_length: 1,
         preimage_ledger_tail_hash: originalEvent.event_hash,
       },
-      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256,
+      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
     }),
-    /original event|already present/i,
+    /original event|already present|exact resolution event ledger preimage/i,
     "an original event cannot be reconstructed or repaired when it is already present",
   );
   assert.throws(
@@ -127,15 +137,15 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
         preimage_ledger_length: repaired.resolution_events.length,
         preimage_ledger_tail_hash: repaired.resolution_events.at(-1).event_hash,
       },
-      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256,
+      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
     }),
-    /repair.*already exists|duplicate/i,
+    /repair.*already exists|duplicate|exact resolution event ledger preimage/i,
     "exactly one repair event may cover a missing original edge",
   );
   const altered = structuredClone(preservedBundle);
   altered.claims[0].metadata.critique_resolution.resolved_at = "2031-01-01T00:00:00Z";
   assert.throws(
-    () => repairCritiqueResolutionHistoryTransition({ bundle: altered, resolution_events: emptyLedger.events, authorization: { ...repairAuthorization, preimage_bundle_sha256: sha256(altered) }, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256 }),
+    () => repairCritiqueResolutionHistoryTransition({ bundle: altered, resolution_events: emptyLedger.events, authorization: { ...repairAuthorization, preimage_bundle_sha256: sha256(altered) }, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256 }),
     /preserved.*edge|resolution.*digest/i,
     "a repair cannot mutate the original edge, timestamp, or edge digest",
   );
@@ -143,13 +153,13 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
     current_completion_sha256: "f".repeat(64), prior_snapshot_sha256: "f".repeat(64), subject: "work-item:other", expected_resolver: "reviewer-c", missing_resolution_event_id: "critique-resolution:missing",
   })) {
     assert.throws(
-      () => repairCritiqueResolutionHistoryTransition({ bundle: preservedBundle, resolution_events: emptyLedger.events, authorization: { ...repairAuthorization, [field]: value }, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256 }),
+      () => repairCritiqueResolutionHistoryTransition({ bundle: preservedBundle, resolution_events: emptyLedger.events, authorization: { ...repairAuthorization, [field]: value }, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256 }),
       /bind|digest|subject|resolver|event/i,
       `repair authorization rejects a wrong ${field}`,
     );
   }
   assert.throws(
-    () => repairCritiqueResolutionHistoryTransition({ bundle: preservedBundle, resolution_events: [{ event_id: "bad", sequence: 2, predecessor_hash: "wrong", event_hash: "invalid" }], authorization: repairAuthorization, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256 }),
+    () => repairCritiqueResolutionHistoryTransition({ bundle: preservedBundle, resolution_events: [{ event_id: "bad", sequence: 2, predecessor_hash: "wrong", event_hash: "invalid" }], authorization: repairAuthorization, prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256 }),
     /chain|ledger|event/i,
     "a repair refuses an invalid external event chain before append",
   );
@@ -165,7 +175,7 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
     () => repairCritiqueResolutionHistoryTransition({
       bundle: preservedBundle, resolution_events: [forgedAuthorizationEvent],
       authorization: { ...repairAuthorization, preimage_ledger_sha256: sha256({ schema_version: "1.0", events: [forgedAuthorizationEvent] }), preimage_ledger_length: 1, preimage_ledger_tail_hash: forgedAuthorizationEvent.event_hash },
-      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256,
+      prior_record_id: "prior", resolving_record_id: "resolving", current_completion_sha256: repairAuthorization.current_completion_sha256, ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
     }),
     /project binding/i,
     "a coherently rehashed event still cannot replace its signed project-bound authority",

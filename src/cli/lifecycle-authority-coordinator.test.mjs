@@ -29,9 +29,9 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   let source = fs.readFileSync(COORDINATOR, "utf8");
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, canonicalJson: module.canonicalJson };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, canonicalJson: module.canonicalJson };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -260,7 +260,7 @@ test("coordinator cryptographically verifies stored historical authorizations wi
     const sessionDir = path.join(directory, "session");
     fs.mkdirSync(sessionDir);
     writeLedger(sessionDir, { schema_version: "1.0", events: [historical] });
-    assert.deepEqual(loadResolutionEventLedger({ sessionDir, projectRoot: "/project" }, bundle, fixture.authorization), [historical], "a valid historical signature remains valid after expiry");
+    assert.deepEqual(loadResolutionEventLedger({ sessionDir, projectRoot: "/project" }, bundle, fixture.authorization).events, [historical], "a valid historical signature remains valid after expiry");
 
     const forged = resignHistoricalEvent(structuredClone(historical), bundle, privateKey, (authorization) => ({ ...authorization, requested_at: "2031-01-01T00:00:00.000Z" }));
     forged.signed_authorization.requested_at = "2032-01-01T00:00:00.000Z";
@@ -324,6 +324,32 @@ test("coordinator accepts only the signed exact raw trust.bundle bytes before mu
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("coordinator ledger CAS rejects a newly appeared, removed, or byte-changed external ledger", async () => {
+  const { directory, assertResolutionEventLedgerPreimage } = await loadProtectedReadFromCoordinator();
+  try {
+    const sessionDir = path.join(directory, "session"); fs.mkdirSync(sessionDir);
+    const paths = { sessionDir };
+    assert.doesNotThrow(() => assertResolutionEventLedgerPreimage(paths, { absent: true, bytes: Buffer.alloc(0) }));
+    const ledgerFile = writeLedger(sessionDir, { schema_version: "1.0", events: [] });
+    assert.throws(() => assertResolutionEventLedgerPreimage(paths, { absent: true, bytes: Buffer.alloc(0) }), /appeared/i);
+    const initial = fs.readFileSync(ledgerFile);
+    assert.doesNotThrow(() => assertResolutionEventLedgerPreimage(paths, { absent: false, bytes: initial }));
+    fs.writeFileSync(ledgerFile, `${JSON.stringify({ schema_version: "1.0", events: [], padding: "changed" })}\n`, { mode: 0o600 });
+    assert.throws(() => assertResolutionEventLedgerPreimage(paths, { absent: false, bytes: initial }), /bytes changed/i);
+    fs.unlinkSync(ledgerFile);
+    assert.throws(() => assertResolutionEventLedgerPreimage(paths, { absent: false, bytes: initial }), /disappeared/i);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("root replay source keeps completed and prepared recovery separate from live expiry and preserves newer receipts", () => {
+  const source = fs.readFileSync(COORDINATOR, "utf8");
+  assert.match(source, /verifyAuthorization\(authorizationPath, \{ requireCurrentExpiry: false \}\)[\s\S]*?fs\.existsSync\(completionFile\)/, "exact completed replay authenticates before durable lookup without applying live expiry");
+  assert.match(source, /fs\.existsSync\(nonceFile\)[\s\S]*?else \{\s*verifySignedAuthorization\(authorization, \{ requireCurrentExpiry: true \}\)/, "only a new nonce consumption requires unexpired authority");
+  assert.match(source, /completion\.result_core_sha256 !== lifecycleAuthorityResultDigest\(bundle, events\)[\s\S]*?if \(fs\.existsSync\(receiptFile\)\)[\s\S]*?receipt: "preserved"/s, "receipt replay restores only exact current state and never overwrites a different valid receipt");
 });
 
 test("coordinator verifies the raw-byte preimage before parsing and at the mutation boundary", () => {

@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-import { composeGateVerdict, inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 
 const commandLogChain = createRequire(import.meta.url)("../../scripts/lib/command-log-chain.js");
@@ -227,6 +227,30 @@ test("explicit gate verdicts remain authoritative over successful and failing co
     assert.equal(composeGateVerdict(requested, observed), expected, `${requested} with ${observed}`);
   }
   assert.equal(composeGateVerdict("pass", "ambiguous"), "not_verified");
+});
+
+test("critique authority gates ignore embedded ledger events and require a protected external ledger", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-critique-authority-"));
+  const bundle = {
+    claims: [{ metadata: { origin: "critique", critique_resolution: { kind: "cross-reviewer" } } }],
+    critique_resolution_events: [{ event_id: "embedded-forgery" }],
+  };
+  assert.deepEqual(externalCritiqueAuthorityForGate(dir, bundle), { events: [], completionVerified: false }, "bundle-embedded authority events are never consumed");
+  const ledger = path.join(dir, "lifecycle-authority.resolution-events.json");
+  fs.writeFileSync(ledger, `${JSON.stringify({ schema_version: "1.0", events: [{ event_id: "external-event" }] })}\n`, { mode: 0o644 });
+  assert.deepEqual(externalCritiqueAuthorityForGate(dir, bundle), { events: [{ event_id: "external-event" }], completionVerified: false }, "an external ledger still needs a verified completion");
+  fs.chmodSync(ledger, 0o666);
+  assert.deepEqual(externalCritiqueAuthorityForGate(dir, bundle), { events: [], completionVerified: false }, "group/world-writable external ledgers fail closed");
+});
+
+test("critique gate freshness permits stale passing anchors but requires one current substantive PASS", () => {
+  const substantive = (id) => ({ critique_record_id: id, verdict: "pass", claim_status: "verified", lanes: [{ id: "code", status: "pass" }], findings: [], review_target: { artifacts: [{ file: "reviewed.md", sha256: "a".repeat(64) }] } });
+  const stale = substantive("stale"), current = substantive("current");
+  const byId = new Map([[stale.critique_record_id, stale], [current.critique_record_id, current]]);
+  assert.equal(liveCritiqueFreshnessSatisfied([{ critique_record_id: "stale" }, { critique_record_id: "current" }], byId, (critique) => critique.critique_record_id === "current"), true);
+  assert.equal(liveCritiqueFreshnessSatisfied([{ critique_record_id: "stale" }, { critique_record_id: "current" }], byId, () => false), false, "all-stale live PASS anchors do not satisfy freshness");
+  byId.set("current", { ...current, verdict: "not_verified" });
+  assert.equal(liveCritiqueFreshnessSatisfied([{ critique_record_id: "stale" }, { critique_record_id: "current" }], byId, (critique) => critique.critique_record_id === "stale"), false, "a live non-PASS blocks even when another review is current");
 });
 
 test("fake Vitest-looking stdout is not test execution proof", () => {

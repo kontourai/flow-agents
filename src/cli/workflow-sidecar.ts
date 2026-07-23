@@ -19,6 +19,7 @@ import { runObservedCommand } from "../lib/observed-command.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import {
   EVIDENCE_REF_FIELD_SCHEMAS,
@@ -3519,6 +3520,61 @@ function critiqueWorkspaceSnapshotIsCurrent(dir: string, critique: AnyObj): bool
   } catch { return false; }
 }
 
+/** A current review is required, but older live PASS anchors need not be recaptured. */
+export function liveCritiqueFreshnessSatisfied(live: AnyObj[], byRecordId: Map<string, AnyObj>, isCurrent: (critique: AnyObj) => boolean): boolean {
+  return live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique));
+  }) && live.some((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique) && isCurrent(critique));
+  });
+}
+
+/**
+ * Critique resolution authority is intentionally outside the Hachure bundle.
+ * Read it through a no-follow descriptor and accept it only alongside the
+ * root-signed completion that binds the exact external-ledger snapshot.
+ */
+export function externalCritiqueAuthorityForGate(dir: string, bundle: AnyObj): { events: AnyObj[]; completionVerified: boolean } {
+  const ledgerFile = path.join(dir, "lifecycle-authority.resolution-events.json");
+  const completionFile = path.join(dir, "lifecycle-authority.completion.json");
+  const crossReviewerEdge = Array.isArray(bundle.claims) && bundle.claims.some((claim: AnyObj) =>
+    claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer",
+  );
+  if (!fs.existsSync(ledgerFile)) return { events: [], completionVerified: !crossReviewerEdge };
+  let events: AnyObj[];
+  try {
+    const descriptor = fs.openSync(ledgerFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > 4 * 1024 * 1024 || (stat.mode & 0o022) !== 0) return { events: [], completionVerified: false };
+      bytes = fs.readFileSync(descriptor);
+    } finally { fs.closeSync(descriptor); }
+    const ledger = JSON.parse(bytes.toString("utf8"));
+    if (!ledger || typeof ledger !== "object" || Array.isArray(ledger) || ledger.schema_version !== "1.0" || !Array.isArray(ledger.events)) return { events: [], completionVerified: false };
+    events = ledger.events;
+  } catch { return { events: [], completionVerified: false }; }
+  if (events.length === 0 && !crossReviewerEdge) return { events, completionVerified: true };
+  try {
+    const completionDescriptor = fs.openSync(completionFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(completionDescriptor);
+      if (!stat.isFile() || stat.size > 256 * 1024 || (stat.mode & 0o022) !== 0) return { events, completionVerified: false };
+      bytes = fs.readFileSync(completionDescriptor);
+    } finally { fs.closeSync(completionDescriptor); }
+    const completion = verifyLifecycleAuthorityCompletion(JSON.parse(bytes.toString("utf8")));
+    return {
+      events,
+      completionVerified: ["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action))
+        && completion.run_id === path.basename(dir)
+        && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events }),
+    };
+  } catch { return { events, completionVerified: false }; }
+}
+
 function critiqueSnapshotDigest(critique: AnyObj): string | null {
   const target = critique.review_target;
   const snapshot = target && typeof target === "object" && !Array.isArray(target)
@@ -6619,13 +6675,11 @@ function critiqueClean(dir: string): boolean {
     const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
       ? state.work_item_refs[0]
       : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
-    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+    const authority = externalCritiqueAuthorityForGate(dir, bundle);
+    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
     if (!graph.valid) return false;
     const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
-    return graph.live.every((record) => {
-      const critique = byRecordId.get(record.critique_record_id);
-      return critique && critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique);
-    });
+    return liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) => critiqueWorkspaceSnapshotIsCurrent(dir, critique));
   }
   return false;
 }
@@ -6653,14 +6707,12 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
   const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
     ? state.work_item_refs[0]
     : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
-  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+  const authority = externalCritiqueAuthorityForGate(dir, bundle);
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
   if (!graph.valid) fail();
   const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
-  if (!graph.live.every((record) => {
-    const critique = byRecordId.get(record.critique_record_id);
-    return critique && critiqueIsSubstantivePass(critique)
-      && isDeepStrictEqual(critique.review_target?.workspace_snapshot, current);
-  })) fail();
+  if (!liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) =>
+    isDeepStrictEqual(critique.review_target?.workspace_snapshot, current))) fail();
   const testsClaims = Array.isArray(bundle.claims)
     ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
       && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"

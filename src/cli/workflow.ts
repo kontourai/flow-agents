@@ -1450,7 +1450,8 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
   if (priorClaim.status !== "superseded" || prior.superseded_by !== resolvingRecordId || !edge || edge.kind !== "cross-reviewer") throw new Error("workflow history repair requires an already-superseded cross-reviewer edge");
   if (String(edge.prior_record_id) !== priorRecordId || String(edge.resolving_record_id) !== resolvingRecordId || String(edge.resolver) !== String(resolving.reviewer)) throw new Error("workflow history repair edge does not bind the selected critiques");
   const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
-  const ledger = readJsonFile(eventsFile, "lifecycle authority resolution event ledger") as JsonRecord;
+  const ledgerBytes = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile) : Buffer.alloc(0);
+  const ledger = ledgerBytes.length ? JSON.parse(ledgerBytes.toString("utf8")) as JsonRecord : { schema_version: "1.0", events: [] };
   const events = Array.isArray(ledger.events) ? ledger.events as JsonRecord[] : (() => { throw new Error("workflow history repair requires a valid external resolution event ledger"); })();
   const originalEventId = String(edge.resolution_event_id); const originalAuthorization = String(edge.authorization_sha256);
   if (events.some((event) => event.event_id === originalEventId || event.authorization_sha256 === originalAuthorization)) throw new Error("workflow history repair refuses an edge whose original signed event is already present");
@@ -1472,7 +1473,7 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
     project_root: projectRoot, run_id: slug, subject,
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash), resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash), expected_resolver: String(resolving.reviewer),
     prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
-    preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), preimage_ledger_sha256: createHash("sha256").update(JSON.stringify(ledger)).digest("hex"), preimage_ledger_length: events.length, preimage_ledger_tail_hash: String(tail?.event_hash ?? "0".repeat(64)),
+    preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), preimage_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), preimage_ledger_length: events.length, preimage_ledger_tail_hash: String(tail?.event_hash ?? "0".repeat(64)),
     current_completion_sha256: createHash("sha256").update(JSON.stringify(completion)).digest("hex"), preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
     missing_resolution_event_id: originalEventId, missing_authorization_sha256: originalAuthorization, reason_code: "coordinator-external-ledger-overwrite-v1",
     nonce: `critique-history-repair-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),

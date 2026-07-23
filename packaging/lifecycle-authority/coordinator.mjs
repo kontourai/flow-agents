@@ -92,8 +92,8 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
   return authorization;
 }
-function verifyAuthorization(file) {
-  return verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")));
+function verifyAuthorization(file, options = {}) {
+  return verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")), options);
 }
 function atomicWrite(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -161,17 +161,29 @@ function hasCrossReviewerEdge(bundle) {
 function loadResolutionEventLedger(paths, bundle, authorization, action = authorization.operation) {
   const file = resolutionEventLedgerFile(paths);
   if (!fs.existsSync(file)) {
-    if (hasCrossReviewerEdge(bundle)) throw new Error("resolution event ledger is required after a cross-reviewer edge; repair is required");
-    return [];
+    if (hasCrossReviewerEdge(bundle) && action !== "repair-critique-resolution-history") throw new Error("resolution event ledger is required after a cross-reviewer edge; repair is required");
+    return { events: [], bytes: Buffer.alloc(0), absent: true };
   }
-  const ledger = protectedJson(file, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+  const bytes = protectedRegularFile(file, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+  const ledger = JSON.parse(bytes.toString("utf8"));
   exact(ledger, ["schema_version", "events"], "lifecycle authority resolution event ledger");
   if (ledger.schema_version !== PROTOCOL_VERSION || !Array.isArray(ledger.events)) throw new Error("lifecycle authority resolution event ledger is invalid");
   validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" });
   for (const event of ledger.events) verifySignedAuthorization(event.signed_authorization, { projectRoot: paths.projectRoot, requireCurrentExpiry: false });
-  return ledger.events;
+  return { events: ledger.events, bytes, absent: false };
 }
-function writeResolutionEventLedger(paths, events) {
+function assertResolutionEventLedgerPreimage(paths, initial) {
+  const file = resolutionEventLedgerFile(paths);
+  if (initial.absent) {
+    if (fs.existsSync(file)) throw new Error("resolution event ledger appeared during mutation preparation");
+    return;
+  }
+  if (!fs.existsSync(file)) throw new Error("resolution event ledger disappeared during mutation preparation");
+  const current = protectedRegularFile(file, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+  if (!current.equals(initial.bytes)) throw new Error("resolution event ledger bytes changed during mutation preparation");
+}
+function writeResolutionEventLedger(paths, events, initial) {
+  assertResolutionEventLedgerPreimage(paths, initial);
   validateResolutionEventLedger(events);
   atomicWrite(resolutionEventLedgerFile(paths), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events }, null, 2)}\n`, 0o644);
 }
@@ -376,7 +388,8 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
       assertAuthorizedBundlePreimage(beforeBytes, envelope.action, authorization);
       const before = JSON.parse(beforeBytes.toString("utf8"));
-      const resolutionEvents = loadResolutionEventLedger(paths, before, authorization, envelope.action);
+      const ledger = loadResolutionEventLedger(paths, before, authorization, envelope.action);
+      const resolutionEvents = ledger.events;
       const currentCompletion = envelope.action === "repair-critique-resolution-history"
         ? verifyCurrentLifecycleCompletion(paths, before, resolutionEvents)
         : null;
@@ -385,7 +398,7 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
         : repairCritiqueResolutionHistoryTransition({
           bundle: before, resolution_events: resolutionEvents, authorization,
           prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id,
-          current_completion_sha256: jsonSha256(currentCompletion),
+          current_completion_sha256: jsonSha256(currentCompletion), ledger_bytes_sha256: sha256(ledger.bytes),
         });
       const sessionBundle = reduced.bundle;
       const nextResolutionEvents = reduced.resolution_events;
@@ -396,13 +409,15 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
         const currentBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
         if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
+        assertResolutionEventLedgerPreimage(paths, ledger);
         await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
         // Recheck the exact preimage immediately before the session mutation.
         const finalBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(finalBytes, envelope.action, authorization);
         if (!finalBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
+        assertResolutionEventLedgerPreimage(paths, ledger);
         if (envelope.action === "resolve-critique") atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
-        writeResolutionEventLedger(paths, nextResolutionEvents);
+        writeResolutionEventLedger(paths, nextResolutionEvents, ledger);
         if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
       });
       return { result_core_sha256: resultCoreSha256, run_id: paths.runId };
@@ -435,7 +450,9 @@ function childInvocation(payload, identity) {
 }
 async function processRootOperation(envelope) {
   const authorizationPath = path.resolve(envelope.request.authorization_file);
-  const authorization = verifyAuthorization(authorizationPath);
+  // Authenticate and bind before consulting durable state. Expiry is a live
+  // permission check, not a reason to lose an exact completed/prepared recovery.
+  const authorization = verifyAuthorization(authorizationPath, { requireCurrentExpiry: false });
   const identity = operationIdentity(envelope, authorization);
   if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
   const authorizationSha256 = sha256(canonicalJson(authorization));
@@ -458,6 +475,7 @@ async function processRootOperation(envelope) {
       if (canonicalJson(prior) !== canonicalJson(prepared)) throw new Error("lifecycle authorization nonce has already been consumed");
       resumePrepared = true;
     } else {
+      verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
       // Reject a stale or mismatched live holder before creating any durable
       // nonce state. A prepared nonce is intentionally exempt: it may be
       // recovering a cancel whose child mutation already completed, and the
@@ -490,7 +508,17 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       const value = verifiedCapability(payload.capability, "receipt-capability");
       if (!record(value.request) || !record(value.completion)) throw new Error("mutation worker receipt is invalid");
       const paths = canonicalMutationPaths(value.request);
-      atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(value.completion, null, 2)}\n`, 0o644);
+      const bundle = protectedJson(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
+      const ledgerFile = resolutionEventLedgerFile(paths);
+      const events = fs.existsSync(ledgerFile) ? protectedJson(ledgerFile, "lifecycle authority resolution event ledger", 4 * 1024 * 1024).events : [];
+      if (!Array.isArray(events) || value.completion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, events)) throw new Error("lifecycle completion receipt does not bind the current bundle and ledger");
+      const receiptFile = path.join(paths.sessionDir, "lifecycle-authority.completion.json");
+      if (fs.existsSync(receiptFile)) {
+        const existing = verifyCurrentLifecycleCompletion(paths, bundle, events);
+        if (canonicalJson(existing) !== canonicalJson(value.completion)) return { run_id: paths.runId, receipt: "preserved" };
+        return { run_id: paths.runId, receipt: "present" };
+      }
+      atomicWrite(receiptFile, `${JSON.stringify(value.completion, null, 2)}\n`, 0o644);
       return { run_id: paths.runId, receipt: "written" };
     }
     if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");

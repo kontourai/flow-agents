@@ -223,6 +223,24 @@ function readJson(file: string): { value: any | undefined; issues: Issue[] } {
   catch (error) { return { value: undefined, issues: [{ path: file, message: `invalid JSON: ${(error as Error).message}` }] }; }
 }
 
+/** External lifecycle evidence must never be accepted from Trust Bundle fields. */
+function readProtectedLifecycleAuthorityJson(file: string, label: string, maxBytes: number): any {
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maxBytes || (stat.mode & 0o022) !== 0) throw new Error(`${label} must be a protected regular file`);
+    return JSON.parse(fs.readFileSync(descriptor).toString("utf8"));
+  } finally { fs.closeSync(descriptor); }
+}
+
+function critiqueIsSubstantivePass(critique: any): boolean {
+  return critique?.verdict === "pass" && critique?.claim_status === "verified"
+    && Array.isArray(critique.lanes) && critique.lanes.length > 0 && critique.lanes.every((lane: any) => lane?.status === "pass")
+    && (!Array.isArray(critique.findings) || critique.findings.every((finding: any) => finding?.status !== "open"))
+    && Array.isArray(critique.review_target?.artifacts) && critique.review_target.artifacts.length > 0
+    && critique.review_target.artifacts.every((artifact: any) => typeof artifact?.file === "string" && /^[a-f0-9]{64}$/i.test(String(artifact?.sha256)));
+}
+
 function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
   const { value, issues } = readJson(file);
   const warnings: Issue[] = [];
@@ -408,19 +426,32 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1
             ? state.work_item_refs[0]
             : typeof state?.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
-          const authorityEvents = readJson(path.join(dir, "lifecycle-authority.resolution-events.json")).value;
-          const resolutionEvents = Array.isArray(authorityEvents?.events)
-            ? authorityEvents.events
-            : Array.isArray(bundleValue.critique_resolution_events) ? bundleValue.critique_resolution_events : [];
-          let externalCompletionVerified = false;
-          const completion = readJson(path.join(dir, "lifecycle-authority.completion.json")).value;
+          const ledgerPath = path.join(dir, "lifecycle-authority.resolution-events.json");
+          const completionPath = path.join(dir, "lifecycle-authority.completion.json");
+          const crossReviewerEdge = claims.some((claim: any) => claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer");
+          let resolutionEvents: any[] = [];
+          let ledgerAvailable = false;
           try {
-            const verified = verifyLifecycleAuthorityCompletion(completion);
-            externalCompletionVerified = ["resolve-critique", "repair-critique-resolution-history"].includes(String(verified.action))
-              && verified.run_id === path.basename(dir)
-              && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
-          } catch {
-            // A cross-reviewer edge remains NOT_VERIFIED without a root-signed completion.
+            const authorityEvents = readProtectedLifecycleAuthorityJson(ledgerPath, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+            if (!authorityEvents || authorityEvents.schema_version !== "1.0" || !Array.isArray(authorityEvents.events)) throw new Error("lifecycle authority resolution event ledger shape is invalid");
+            resolutionEvents = authorityEvents.events;
+            ledgerAvailable = true;
+          } catch (error) {
+            if (crossReviewerEdge) issues.push({ path: ledgerPath, message: `required external lifecycle authority ledger is unavailable: ${(error as Error).message}` });
+          }
+          let externalCompletionVerified = false;
+          if (crossReviewerEdge || resolutionEvents.length > 0) {
+            try {
+              const completion = readProtectedLifecycleAuthorityJson(completionPath, "lifecycle authority completion", 256 * 1024);
+              const verified = verifyLifecycleAuthorityCompletion(completion);
+              externalCompletionVerified = ledgerAvailable
+                && ["resolve-critique", "repair-critique-resolution-history"].includes(String(verified.action))
+                && verified.run_id === path.basename(dir)
+                && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
+            } catch {
+              // The explicit issue below keeps missing/invalid authority evidence distinct from a graph failure.
+            }
+            if (!externalCompletionVerified) issues.push({ path: completionPath, message: "required external lifecycle authority completion is missing, invalid, or does not bind the exact protected ledger" });
           }
           const graph = validateCritiqueResolutionGraph(claims, subject, resolutionEvents, projectRootForSession(dir), externalCompletionVerified);
           if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
@@ -429,7 +460,12 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
             issues.push({ path: trustBundlePath, message: "required critique project root could not be resolved" });
             continue;
           }
+          let currentSubstantivePass = false;
           for (const critique of graph.live) {
+            if (!critiqueIsSubstantivePass(critique)) {
+              issues.push({ path: trustBundlePath, message: "required critique has a live record that is not a substantive verified PASS" });
+              continue;
+            }
             const artifacts = Array.isArray(critique.review_target?.artifacts) ? critique.review_target.artifacts : [];
             try {
               const currentArtifacts = artifacts.map((artifact: any) => {
@@ -441,8 +477,12 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
                 return { file: String(artifact.file), sha256 };
               });
               if (currentArtifacts.length === 0 || !isDeepStrictEqual(critique.review_target?.workspace_snapshot, captureReviewWorkspaceSnapshot(projectRoot, currentArtifacts))) throw new Error("workspace snapshot changed");
-            } catch { issues.push({ path: trustBundlePath, message: "required critique resolver artifacts or workspace are no longer current" }); }
+              currentSubstantivePass = true;
+            } catch {
+              // Historical passing anchors may be stale as long as another live substantive PASS is current.
+            }
           }
+          if (!currentSubstantivePass) issues.push({ path: trustBundlePath, message: "required critique has no current live substantive PASS" });
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

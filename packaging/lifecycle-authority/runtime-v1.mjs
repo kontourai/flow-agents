@@ -200,7 +200,7 @@ export function resolveCritiqueTransition(input) {
 
 /** Pure, append-only attestation for an unrecoverable historical authority event. */
 export function repairCritiqueResolutionHistoryTransition(input) {
-  exact(input, ["bundle", "resolution_events", "authorization", "prior_record_id", "resolving_record_id", "current_completion_sha256"], "history repair transition input");
+  exact(input, ["bundle", "resolution_events", "authorization", "prior_record_id", "resolving_record_id", "current_completion_sha256", "ledger_bytes_sha256"], "history repair transition input");
   if (!record(input.bundle) || !Array.isArray(input.bundle.claims) || Object.hasOwn(input.bundle, "critique_resolution_events")) throw new Error("history repair requires a stripped trust bundle");
   const authorization = input.authorization;
   if (!record(authorization) || authorization.schema_version !== "1.0" || authorization.operation !== "repair-critique-resolution-history") throw new Error("history repair authorization identity is invalid");
@@ -211,13 +211,14 @@ export function repairCritiqueResolutionHistoryTransition(input) {
   // protected trust.bundle *bytes*, which a parsed-object transition cannot
   // reproduce without silently changing the signed preimage contract.
   requireDigest(authorization.preimage_bundle_sha256, "history repair authorization bundle preimage");
-  if (authorization.preimage_ledger_sha256 !== ledger.digest || authorization.preimage_ledger_length !== ledger.length || authorization.preimage_ledger_tail_hash !== ledger.tail_hash) throw new Error("history repair authorization does not bind the resolution event ledger preimage");
+  requireDigest(input.ledger_bytes_sha256, "history repair ledger bytes");
+  if (authorization.preimage_ledger_sha256 !== input.ledger_bytes_sha256 || authorization.preimage_ledger_length !== ledger.length || authorization.preimage_ledger_tail_hash !== ledger.tail_hash) throw new Error("history repair authorization does not bind the exact resolution event ledger preimage");
   if (authorization.reason_code !== "coordinator-external-ledger-overwrite-v1") throw new Error("history repair authorization reason is invalid");
   if (authorization.prior_record_id !== input.prior_record_id || authorization.resolving_record_id !== input.resolving_record_id) throw new Error("history repair authorization does not bind the selected critique edge");
   const prior = oneClaim(input.bundle.claims, input.prior_record_id, "prior");
   const resolving = oneClaim(input.bundle.claims, input.resolving_record_id, "resolving");
   const priorMetadata = prior.metadata; const resolvingMetadata = resolving.metadata;
-  if (prior.status !== "superseded" || priorMetadata.superseded_by !== input.resolving_record_id || !record(priorMetadata.critique_resolution)) throw new Error("history repair requires an already-superseded cross-reviewer edge");
+  if (prior.status !== "superseded" || priorMetadata.superseded_by !== input.resolving_record_id || !record(priorMetadata.critique_resolution) || priorMetadata.critique_resolution.kind !== "cross-reviewer" || priorMetadata.reviewer === resolvingMetadata.reviewer) throw new Error("history repair requires an already-superseded distinct cross-reviewer edge");
   assertAuthorizationPreimage(authorization, priorMetadata, resolvingMetadata, input.bundle.claims);
   const edge = priorMetadata.critique_resolution;
   if (jsonDigest(edge) !== authorization.preserved_resolution_sha256) throw new Error("history repair authorization does not bind the preserved resolution edge");
