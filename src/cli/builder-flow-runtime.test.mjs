@@ -589,6 +589,45 @@ for (const faultAt of cleanupResources) {
   });
 }
 
+test("typed staged setup recovery remains recovery-required when outer cleanup is uncertain", async () => {
+  const session = makeSession("staged-setup-recovery-cleanup-type");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterCandidateResourceAcquired: (resource) => {
+      if (resource === "session-directory" && !fs.existsSync(canonical)) fs.mkdirSync(canonical);
+    },
+    candidateResourceClose: (resource) => {
+      if (resource === "session-directory") throw new Error("setup cleanup fault");
+    },
+  });
+  try {
+    let setupError;
+    try {
+      await stageWorkflowEvidenceCandidate(session.sessionDir, []);
+    } catch (error) {
+      setupError = error;
+    }
+    assert.ok(setupError);
+    assert.equal(setupError.constructor.name, "StagedEvidenceSetupRecoveryRequiredError", "cleanup composition preserves the typed setup-recovery classification");
+    assert.equal(setupError.cause?.constructor?.name, "StagedEvidenceSetupRecoveryRequiredError", "the original typed setup error remains the cause");
+    assert.match(String(setupError), /canonical trust entry is present or uncertain/i);
+    assert.match(String(setupError), /cleanup uncertainty.*session-directory/i);
+    fs.rmdirSync(canonical);
+
+    const publicResult = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "typed setup recovery with cleanup uncertainty",
+    ]);
+    assert.ok(publicResult.error);
+    assert.match(String(publicResult.error), /workflow evidence recovery required; inspect canonical workflow state/i, "typed setup recovery must never be downgraded to safely rolled back");
+    assert.match(String(publicResult.error), /cleanup uncertainty.*session-directory/i);
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
 test("a returned evidence transaction failure retains its primary cause when outer cleanup is uncertain", async () => {
   const session = makeSession("staged-returned-failure-cleanup-primary");
   claimAmbientSessionAssignment(session);
@@ -678,6 +717,9 @@ for (const [phase, installDrift] of [
   })],
   ["after exclusive creation", (session) => ({
     afterCanonicalCreate: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+  ["after parent fsync", (session) => ({
+    afterCandidateCommitDirectoryFsync: () => replacePinnedSessionDirectoryForTest(session),
   })],
 ]) {
   test(`persistent cooperative session-parent drift ${phase} is recovery-required without writing the replacement namespace`, async () => {

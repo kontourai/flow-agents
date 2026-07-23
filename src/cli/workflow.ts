@@ -604,6 +604,7 @@ export let workflowEvidenceTransactionTestHooks: {
   beforeCanonicalCommitReread?: (descriptor: number) => void;
   afterCanonicalCreate?: (canonicalFile: string) => void;
   beforeCandidateCommitDirectoryFsync?: () => void;
+  afterCandidateCommitDirectoryFsync?: () => void;
   candidateResourceClose?: (resource: "canonical-trust" | "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
   candidateResourceClosed?: (resource: "canonical-trust" | "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
 } | undefined;
@@ -769,10 +770,10 @@ function isEvidenceTransactionFailure(value: unknown): value is EvidenceTransact
 }
 
 function cleanupUncertaintyError(primary: unknown, cleanupFailures: readonly CandidateResourceName[]): Error {
-  return new Error(
-    `${errorMessage(primary)}; workflow evidence cleanup uncertainty requires recovery; no retry is required (${cleanupFailures.join(", ")})`,
-    { cause: primary },
-  );
+  const message = `${errorMessage(primary)}; workflow evidence cleanup uncertainty requires recovery; no retry is required (${cleanupFailures.join(", ")})`;
+  return primary instanceof StagedEvidenceSetupRecoveryRequiredError
+    ? new StagedEvidenceSetupRecoveryRequiredError(message, { cause: primary })
+    : new Error(message, { cause: primary });
 }
 
 /** Close every acquired descriptor even when a prior close is uncertain. */
@@ -846,6 +847,7 @@ function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, 
       assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
       workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
       fs.fsyncSync(candidate.sessionDescriptor);
+      workflowEvidenceTransactionTestHooks?.afterCandidateCommitDirectoryFsync?.();
       assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
       assertCanonicalDescriptorBytes(canonicalDescriptor, canonicalIdentity, candidateBytes, candidate.digest, canonicalFile);
       assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
@@ -864,6 +866,7 @@ function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, 
   }
   workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
   fs.fsyncSync(candidate.sessionDescriptor);
+  workflowEvidenceTransactionTestHooks?.afterCandidateCommitDirectoryFsync?.();
   assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
 }
 
