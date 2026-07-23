@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.0.0](https://github.com/kontourai/flow-agents/compare/v4.8.0...v5.0.0) (2026-07-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* delegate canonical review projection to Survey ([#859](https://github.com/kontourai/flow-agents/issues/859))
+* Survey review-session resolvers now provide projectionSource and workflowSubjectRef instead of a caller-built surveyInput.
+
+### Features
+
+* delegate canonical review projection to Survey ([d707b9e](https://github.com/kontourai/flow-agents/commit/d707b9e7fd6ef2c5b6d242f636e33aec6ffef3c1))
+* delegate canonical review projection to Survey ([#859](https://github.com/kontourai/flow-agents/issues/859)) ([28ddc75](https://github.com/kontourai/flow-agents/commit/28ddc75c08e3eefbe928c8a0f08d27b06049d819))
+
 ## [4.8.0](https://github.com/kontourai/flow-agents/compare/v4.7.0...v4.8.0) (2026-07-23)
 
 
