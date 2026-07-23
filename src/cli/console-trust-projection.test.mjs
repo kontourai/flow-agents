@@ -204,3 +204,73 @@ test("fixed generatedAt produces deterministic reports, entry IDs, and stable or
   assert.deepEqual(first.trusts.map((entry) => entry.subjectRef.id), ["a-session", "z-session"]);
   assert.equal(first.trusts[0].payload.generatedAt, "2026-07-20T12:00:00.000Z");
 });
+
+test("review finding 1: a duplicated claim id is excluded from every gate association and reported, never double-attached", () => {
+  const bundle = validBundle("keep-claim");
+  const stamped = (gateId) => ({
+    ...bundle.claims[0],
+    id: "same-claim",
+    subjectId: `demo/gate/same-claim-${gateId}`,
+    metadata: { gate_claim: { ...bundle.claims[0].metadata.gate_claim, expectation_id: gateId } },
+  });
+  bundle.claims.push(stamped("tests-evidence"), stamped("clean-critique"));
+  bundle.evidence.push({ ...bundle.evidence[0], id: "ev:same-claim", claimId: "same-claim" });
+  bundle.events.push({ ...bundle.events[0], id: "evt:same-claim", claimId: "same-claim", evidenceIds: ["ev:same-claim"] });
+
+  const warnings = [];
+  const associations = deriveGateAssociations(bundle, { warnings, label: "session-a" });
+
+  // The ambiguous id is attached to NO gate; the unambiguous claim is untouched.
+  assert.deepEqual(associations, [{
+    gateId: "tests-evidence",
+    claimIds: ["keep-claim"],
+    evidenceIds: ["ev:keep-claim"],
+    eventIds: ["evt:keep-claim"],
+  }]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^session-a: claim id 'same-claim' appears on multiple claim records \(gates: clean-critique, tests-evidence\)/);
+});
+
+test("review finding 2: one workflow's malformed sidecar is warned and skipped; valid siblings still project", async (t) => {
+  const root = fixtureRoot(t);
+  writeWorkflow(root, "healthy", { bundle: validBundle() });
+  const brokenDir = writeWorkflow(root, "broken", { bundle: validBundle() });
+  fs.writeFileSync(path.join(brokenDir, "handoff.json"), "{ truncated");
+
+  const read = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
+  assert.deepEqual(read.sources.map((source) => source.slug), ["healthy"]);
+  assert.ok(read.warnings.some((warning) => /^broken: workflow sidecar sources are invalid/.test(warning)));
+});
+
+test("review finding 3: an assignment record without a positive binding is never attributed; malformed records are warned", async (t) => {
+  const root = fixtureRoot(t);
+  writeWorkflow(root, "session-a", { bundle: validBundle() });
+  fs.mkdirSync(path.join(root, "assignment"), { recursive: true });
+  // The review's probe: wrong subject, wrong actor/branch, and NO work_item_ref/artifact_dir.
+  fs.writeFileSync(path.join(root, "assignment", "session-a.json"), `${JSON.stringify({
+    subject_id: "another-workflow",
+    actor_key: "wrong-actor",
+    branch: "wrong-branch",
+    status: "claimed",
+  }, null, 2)}\n`);
+
+  const read = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
+  const refs = read.sources[0].sourceOfTruthRefs;
+  assert.ok(!refs.some((ref) => ref.id === "wrong-actor" || ref.id === "wrong-branch"), "unbound assignment fields must not become provenance");
+  assert.ok(read.warnings.some((warning) => /session-a: local assignment record does not positively bind/.test(warning)));
+
+  // Absence of contradiction is still not a match: no binding fields at all.
+  fs.writeFileSync(path.join(root, "assignment", "session-a.json"), `${JSON.stringify({
+    actor_key: "floating-actor",
+    branch: "floating-branch",
+    status: "claimed",
+  }, null, 2)}\n`);
+  const readAbsent = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
+  const refsAbsent = readAbsent.sources[0].sourceOfTruthRefs;
+  assert.ok(!refsAbsent.some((ref) => ref.id === "floating-actor" || ref.id === "floating-branch"));
+
+  // A present-but-shapeless assignment file is reported, not silently ignored.
+  fs.writeFileSync(path.join(root, "assignment", "session-a.json"), '"not-an-object"\n');
+  const readMalformed = await readWorkflowTrustSources(root, { generatedAt: GENERATED_AT });
+  assert.ok(readMalformed.warnings.some((warning) => /session-a: local assignment record is not a well-formed assignment record/.test(warning)));
+});

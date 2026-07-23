@@ -106,6 +106,7 @@ type AssignmentRecord = {
   work_item_ref?: unknown;
   branch?: unknown;
   artifact_dir?: unknown;
+  subject_id?: unknown;
   status?: unknown;
 };
 
@@ -142,7 +143,10 @@ export async function readWorkflowTrustSources(
 ): Promise<ReadWorkflowTrustSourcesResult> {
   const root = path.resolve(artifactRoot);
   const surface = options.surface ?? await loadSurfaceTrustRuntime();
-  const processRead = readWorkflowProcessSources(root);
+  // #891 review finding 2 (HIGH): one workflow's malformed state.json or
+  // handoff.json must not abort the sibling workflows' trust projection --
+  // scan in warn mode so a broken sidecar is recorded and skipped per-slug.
+  const processRead = readWorkflowProcessSources(root, { onWorkflowError: "warn" });
   const sources: WorkflowTrustSource[] = [];
   const warnings = [...processRead.warnings];
   const now = new Date(options.generatedAt);
@@ -176,7 +180,7 @@ export async function readWorkflowTrustSources(
       slug: processSource.slug,
       processSource,
       report,
-      gateAssociations: deriveGateAssociations(bundle),
+      gateAssociations: deriveGateAssociations(bundle, { warnings, label: processSource.slug }),
       sourceOfTruthRefs: deriveSourceOfTruthRefs(processSource, assignment),
     });
   }
@@ -225,21 +229,54 @@ export function buildWorkflowTrustProjection(
   };
 }
 
-export function deriveGateAssociations(bundle: Record<string, unknown>): ConsoleTrustGateAssociation[] {
+export function deriveGateAssociations(
+  bundle: Record<string, unknown>,
+  diagnostics?: { warnings: string[]; label: string },
+): ConsoleTrustGateAssociation[] {
   const claims = arrayOfRecords(bundle.claims);
   const evidence = arrayOfRecords(bundle.evidence);
   const events = arrayOfRecords(bundle.events);
-  const claimsByGate = new Map<string, Set<string>>();
 
+  // #891 review finding 1 (HIGH): Surface 2.13 accepts duplicate claim ids, and
+  // the claim-id string is this projector's ONLY join key from evidence/events
+  // to gates. Two claim records sharing an id but stamped for different gates
+  // would attach the SAME evidence/events to BOTH gates — fabricated
+  // provenance. This projector must not reinterpret trust semantics to pick a
+  // winner, so a duplicated claim id is excluded from every gate association
+  // and reported through `diagnostics` instead.
+  const claimIdCounts = new Map<string, number>();
+  for (const claim of claims) {
+    const claimId = nonEmptyString(claim.id);
+    if (claimId) claimIdCounts.set(claimId, (claimIdCounts.get(claimId) ?? 0) + 1);
+  }
+  const ambiguousClaimIds = new Set(
+    [...claimIdCounts.entries()].filter(([, count]) => count > 1).map(([id]) => id),
+  );
+
+  const claimsByGate = new Map<string, Set<string>>();
+  const ambiguousGatesByClaim = new Map<string, Set<string>>();
   for (const claim of claims) {
     const claimId = nonEmptyString(claim.id);
     const metadata = recordOrUndefined(claim.metadata);
     const gateClaim = recordOrUndefined(metadata?.gate_claim);
     const gateId = nonEmptyString(gateClaim?.expectation_id);
     if (!claimId || !gateId) continue;
+    if (ambiguousClaimIds.has(claimId)) {
+      const gates = ambiguousGatesByClaim.get(claimId) ?? new Set<string>();
+      gates.add(gateId);
+      ambiguousGatesByClaim.set(claimId, gates);
+      continue;
+    }
     const ids = claimsByGate.get(gateId) ?? new Set<string>();
     ids.add(claimId);
     claimsByGate.set(gateId, ids);
+  }
+  if (diagnostics) {
+    for (const [claimId, gates] of [...ambiguousGatesByClaim.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
+      diagnostics.warnings.push(
+        `${diagnostics.label}: claim id '${claimId}' appears on multiple claim records (gates: ${[...gates].sort().join(", ")}) -- ambiguous claim-to-gate association; its claims/evidence/events are not attached to any gate`,
+      );
+    }
   }
 
   return [...claimsByGate.entries()]
@@ -362,7 +399,9 @@ function readAssignmentRecords(
       const providerState = readJsonNoFollow(providerFile, `${source.slug}/assignment-provider-state.json`, MAX_ASSIGNMENT_BYTES);
       const providerRecord = extractProviderAssignmentRecord(providerState);
       if (providerRecord && assignmentMatchesSource(providerRecord, root, source)) records.push(providerRecord);
-      else if (providerRecord) warnings.push(`${source.slug}: assignment-provider-state.json record does not match this workflow binding -- skipping assignment refs`);
+      else if (providerRecord) warnings.push(`${source.slug}: assignment-provider-state.json record does not positively bind to this workflow -- skipping assignment refs`);
+      // #891 review finding 3: a present-but-shapeless file must be reported, not silently ignored.
+      else warnings.push(`${source.slug}: assignment-provider-state.json does not contain a well-formed assignment record -- skipping assignment refs`);
     } catch (error) {
       warnings.push(`${source.slug}: assignment-provider-state.json could not be read (${errorMessage(error)}) -- skipping assignment refs`);
     }
@@ -373,7 +412,9 @@ function readAssignmentRecords(
     try {
       const localRecord = recordOrUndefined(readJsonNoFollow(localFile, `assignment/${source.slug}.json`, MAX_ASSIGNMENT_BYTES));
       if (localRecord && assignmentMatchesSource(localRecord, root, source)) records.push(localRecord);
-      else if (localRecord) warnings.push(`${source.slug}: local assignment record does not match this workflow binding -- skipping assignment refs`);
+      else if (localRecord) warnings.push(`${source.slug}: local assignment record does not positively bind to this workflow -- skipping assignment refs`);
+      // #891 review finding 3: a present-but-shapeless file must be reported, not silently ignored.
+      else warnings.push(`${source.slug}: local assignment record is not a well-formed assignment record -- skipping assignment refs`);
     } catch (error) {
       warnings.push(`${source.slug}: local assignment record could not be read (${errorMessage(error)}) -- skipping assignment refs`);
     }
@@ -400,7 +441,15 @@ function assignmentMatchesSource(
     const resolved = path.isAbsolute(artifactDir) ? path.resolve(artifactDir) : path.resolve(root, artifactDir);
     if (resolved !== path.resolve(root, source.slug)) return false;
   }
-  return true;
+  const subjectId = nonEmptyString(record.subject_id);
+  if (subjectId && subjectId !== source.state.task_slug && subjectId !== source.slug) return false;
+  // #891 review finding 3 (MEDIUM): absence of contradiction is NOT a match.
+  // A record whose binding fields are all absent could belong to any workflow;
+  // attributing its actor/branch as this workflow's source-of-truth provenance
+  // would be false attribution. Require at least one POSITIVE binding — a
+  // binding field that is present here has already been verified to match
+  // above (a mismatch returned false).
+  return Boolean(workItemRef || artifactDir || subjectId);
 }
 
 function assignmentActor(record: AssignmentRecord): string | undefined {

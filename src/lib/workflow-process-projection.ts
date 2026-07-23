@@ -444,37 +444,50 @@ export function deriveConsoleProcessBlockedReason(
  * next_action.summary or undefined) and a warning is returned so the caller
  * can surface it, rather than failing the whole batch for one bad sidecar.
  */
-export function readWorkflowProcessSources(artifactRoot: string): ReadWorkflowProcessSourcesResult {
+export function readWorkflowProcessSources(
+  artifactRoot: string,
+  // #891 review finding 2 (HIGH): the default ("throw") preserves this
+  // function's long-standing contract for existing callers; "warn" records a
+  // workflow whose sidecars fail to parse/validate as a warning and skips it,
+  // so one broken workflow cannot abort its siblings' projection.
+  options?: { onWorkflowError?: "throw" | "warn" },
+): ReadWorkflowProcessSourcesResult {
   const root = path.resolve(artifactRoot);
   const stat = fs.statSync(root);
   if (!stat.isDirectory()) throw new Error(`artifact root is not a directory: ${root}`);
+  const onWorkflowError = options?.onWorkflowError ?? "throw";
 
   const sources: WorkflowProcessSource[] = [];
   const warnings: string[] = [];
   for (const slug of childWorkflowDirs(root)) {
     const stateFile = path.join(root, slug, "state.json");
     if (!fs.existsSync(stateFile)) continue;
-    const stateValue = readSourceJson(stateFile, `${slug}/state.json`);
-    const state = validateWorkflowStateProjectionSourceShape(stateValue, `${slug}/state.json`);
+    try {
+      const stateValue = readSourceJson(stateFile, `${slug}/state.json`);
+      const state = validateWorkflowStateProjectionSourceShape(stateValue, `${slug}/state.json`);
 
-    const handoffFile = path.join(root, slug, "handoff.json");
-    let handoff: WorkflowHandoffSidecar | undefined;
-    if (fs.existsSync(handoffFile)) {
-      const candidate = validateWorkflowHandoffProjectionSourceShape(readSourceJson(handoffFile, `${slug}/handoff.json`), `${slug}/handoff.json`);
-      if (candidate.task_slug !== state.task_slug) {
-        warnings.push(`${slug}: handoff.json task_slug '${candidate.task_slug}' does not match state.json task_slug '${state.task_slug}' -- skipping handoff.json join (blockers ignored)`);
-      } else {
-        handoff = candidate;
+      const handoffFile = path.join(root, slug, "handoff.json");
+      let handoff: WorkflowHandoffSidecar | undefined;
+      if (fs.existsSync(handoffFile)) {
+        const candidate = validateWorkflowHandoffProjectionSourceShape(readSourceJson(handoffFile, `${slug}/handoff.json`), `${slug}/handoff.json`);
+        if (candidate.task_slug !== state.task_slug) {
+          warnings.push(`${slug}: handoff.json task_slug '${candidate.task_slug}' does not match state.json task_slug '${state.task_slug}' -- skipping handoff.json join (blockers ignored)`);
+        } else {
+          handoff = candidate;
+        }
       }
-    }
 
-    sources.push({
-      path: stateFile,
-      relativePath: toPosix(path.relative(root, stateFile)),
-      slug,
-      state,
-      ...(handoff ? { handoff } : {}),
-    });
+      sources.push({
+        path: stateFile,
+        relativePath: toPosix(path.relative(root, stateFile)),
+        slug,
+        state,
+        ...(handoff ? { handoff } : {}),
+      });
+    } catch (error) {
+      if (onWorkflowError !== "warn") throw error;
+      warnings.push(`${slug}: workflow sidecar sources are invalid (${error instanceof Error ? error.message : String(error)}) -- skipping this workflow`);
+    }
   }
   return { sources, warnings };
 }
