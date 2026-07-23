@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.2.0](https://github.com/kontourai/flow-agents/compare/v5.1.0...v5.2.0) (2026-07-23)
+
+
+### Features
+
+* expose host actor workflow binding ([#863](https://github.com/kontourai/flow-agents/issues/863)) ([cd7f357](https://github.com/kontourai/flow-agents/commit/cd7f35777944d8d8419a8e436e0a1b988ed09be9))
+
 ## [5.1.0](https://github.com/kontourai/flow-agents/compare/v5.0.0...v5.1.0) (2026-07-23)
 
 
