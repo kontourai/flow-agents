@@ -1,6 +1,6 @@
 # Reviewed grounding reference workflow
 
-This deterministic reference composes Traverse 0.19.1, Survey 1.19.0, Lookout
+This deterministic reference composes Traverse 0.19.1, Survey 2.0.0, Lookout
 0.3.2, and Surface 2.13.0 through their public contracts. Those packages are
 exact, dev-only dependencies; the Flow Agents runtime dependency boundary is
 unchanged.

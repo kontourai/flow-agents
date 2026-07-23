@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import {
   continuePausedGate,
   expectationsForGate,
@@ -13,6 +12,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import {
+  buildCanonicalReviewedTrustInput,
   buildSurveyTrustBundle,
   type ReviewDecision,
   type ReviewSessionEvent,
@@ -42,8 +42,10 @@ export interface ResolvedSurveyFlowGateReviewSession {
   readonly events: readonly ReviewSessionEvent[];
   readonly currentSnapshot: ReviewQueueSessionState;
   readonly currentEventCount: number;
-  /** Canonical projection stored with the server-owned review resolution. */
-  readonly surveyInput: SurveyInput;
+  /** Producer identity recorded on Survey's canonical trust input. */
+  readonly projectionSource: string;
+  /** Host-owned binding between this review session and its Flow Run subject. */
+  readonly workflowSubjectRef: string;
 }
 
 export interface SurveyFlowGateReviewSessionResolver {
@@ -113,11 +115,18 @@ export async function continuePausedFlowGateFromSurvey(
     throw new SurveyFlowGateInputError("reviewSession", derived.issues.map((issue) => issue.message).join(" ") || "does not contain a complete server-derived review result");
   }
 
-  assertSurveyProjectionBinding(resolved.surveyInput, derived.results, derived.replayedSession, run.state.subject, run.definition, run.config, input.gate);
-  const trustBundle = buildSurveyTrustBundle(resolved.surveyInput, {
+  assertWorkflowSubjectBinding(resolved.workflowSubjectRef, run.state.subject);
+  const canonical = buildCanonicalReviewedTrustInput({
+    source: resolved.projectionSource,
+    generatedAt: resolved.record.updatedAt,
     projectionContextId: surveyProjectionContext(resolved.record, input.gate),
+    items: resolved.record.snapshot.items,
+    results: derived.results,
+  });
+  assertCanonicalProjectionMatchesGate(canonical.surveyInput, run.definition, run.config, input.gate);
+  const trustBundle = buildSurveyTrustBundle(canonical.surveyInput, {
+    projectionContextId: canonical.projectionContextId,
   }) as unknown as JsonObject;
-  assertBundleBinding(trustBundle, derived.results, run.state.subject, run.definition, run.config, input.gate);
 
   const snapshot = await writeInvocationSnapshot(trustBundle);
   try {
@@ -183,8 +192,10 @@ function assertResolvedReviewSession(value: unknown): asserts value is ResolvedS
     || !isRecord(value.currentSnapshot)
     || !Number.isSafeInteger(value.currentEventCount)
     || value.currentEventCount < 0
-    || !isRecord(value.surveyInput)) {
-    throw new SurveyFlowGateInputError("reviewSessionRef", "did not resolve to canonical review state and projection");
+    || !isNonEmptyString(value.projectionSource)
+    || !isNonEmptyString(value.workflowSubjectRef)
+    || Object.prototype.hasOwnProperty.call(value, "surveyInput")) {
+    throw new SurveyFlowGateInputError("reviewSessionRef", "did not resolve to canonical review state and workflow binding");
   }
 }
 
@@ -201,148 +212,21 @@ function assertRunAndGateBinding(run: Awaited<ReturnType<typeof loadRun>>, input
   }
 }
 
-function assertSurveyProjectionBinding(
+function assertCanonicalProjectionMatchesGate(
   surveyInput: SurveyInput,
-  results: readonly any[],
-  replayedSession: ReviewQueueSessionState,
-  subject: string,
   definition: unknown,
   config: unknown,
   gateId: string,
 ): void {
   const relevant = relevantSurveyClaims(surveyInput, definition, config, gateId);
   if (relevant.length === 0) {
-    throw new SurveyFlowGateInputError("surveyInput.claims", "contains no claim matching the persisted current open Flow gate");
-  }
-  for (const claim of relevant) {
-    if (!isRecord(claim.metadata) || claim.metadata.workflow_subject_ref !== subject) {
-      throw new SurveyFlowGateInputError("surveyInput.claims.metadata.workflow_subject_ref", "must match the persisted Flow Run subject");
-    }
-    const candidateSet = surveyInput.candidateSets.find((entry) => entry.id === claim.candidateSetId);
-    const candidate = candidateSet?.candidates.find((entry) => entry.id === (claim.candidateId ?? candidateSet.selectedCandidateId ?? candidateSet.candidates[0]?.id));
-    const review = candidate ? surveyInput.reviewOutcomes.find((entry) => entry.candidateSetId === claim.candidateSetId && entry.candidateId === candidate.id) : undefined;
-    const result = results.find((entry) => (
-      entry?.reviewDecision?.spec?.projection?.reviewOutcomeId === review?.id
-      && entry?.reviewDecision?.spec?.candidateId === candidate?.id
-      && entry?.reviewDecision?.spec?.status === review?.status
-      && entry?.reviewDecision?.status?.appliedToClaimIds?.includes(claim.id)
-    ));
-    if (!candidateSet || !candidate || !review || !result) {
-      throw new SurveyFlowGateInputError("surveyInput.reviewOutcomes", `claim ${claim.id} is not bound to a canonical server-derived review decision`);
-    }
-    const reviewItem = replayedSession.items.find((item) => item.metadata.name === result.reviewItemName);
-    if (!reviewItem) {
-      throw new SurveyFlowGateInputError("surveyInput.reviewOutcomes", `claim ${claim.id} is not bound to a canonical replayed ReviewItem`);
-    }
-    if (claim.status !== undefined && claim.status !== result.status) {
-      throw new SurveyFlowGateInputError("surveyInput.claims.status", `claim ${claim.id} overrides the canonical review status`);
-    }
-    assertReviewedProjectionMatches({ surveyInput, claim, candidateSet, candidate, review, result, reviewItem });
+    throw new SurveyFlowGateInputError("canonicalSurveyInput.claims", "contains no claim matching the persisted current open Flow gate");
   }
 }
 
-function assertReviewedProjectionMatches(input: {
-  surveyInput: SurveyInput;
-  claim: SurveyInput["claims"][number];
-  candidateSet: SurveyInput["candidateSets"][number];
-  candidate: SurveyInput["candidateSets"][number]["candidates"][number];
-  review: SurveyInput["reviewOutcomes"][number];
-  result: any;
-  reviewItem: ReviewQueueSessionState["items"][number];
-}): void {
-  const reviewedCandidate = input.result.selectedCandidate;
-  const decision = input.result.reviewDecision?.spec;
-  const target = reviewedCandidate?.claimTarget;
-  const projection = reviewedCandidate?.projection;
-  const rawSource = input.surveyInput.rawSources.find((entry) => entry.id === projection?.rawSourceId);
-  const extraction = input.surveyInput.extractions.find((entry) => entry.id === input.candidate.extractionId);
-  const fail = (field: string): never => {
-    throw new SurveyFlowGateInputError(`surveyInput.${field}`, `does not match the canonical replayed ReviewItem for claim ${input.claim.id}`);
-  };
-  const same = (field: string, left: unknown, right: unknown) => {
-    if (!isDeepStrictEqual(left, right)) fail(field);
-  };
-
-  same("candidateSets.target", input.candidateSet.target, input.reviewItem.spec.target);
-  same("candidateSets.status", input.candidateSet.status, input.reviewItem.spec.candidateSetStatus);
-  same("candidateSets.rationale", input.candidateSet.rationale, input.reviewItem.spec.rationale);
-  same("claims.id", input.claim.id, target?.claimId);
-  same("claims.subjectType", input.claim.subjectType, target?.subjectType);
-  same("claims.subjectId", input.claim.subjectId, target?.subjectId);
-  same("claims.facet", input.claim.facet, target?.facet);
-  same("claims.claimType", input.claim.claimType, target?.claimType);
-  same("claims.fieldOrBehavior", input.claim.fieldOrBehavior, target?.fieldOrBehavior);
-  same("claims.impactLevel", input.claim.impactLevel, target?.impactLevel);
-  same("claims.collectedBy", input.claim.collectedBy, target?.collectedBy);
-  same("claims.evidenceType", input.claim.evidenceType, target?.evidenceType);
-  same("claims.evidenceMethod", input.claim.evidenceMethod, target?.evidenceMethod);
-  same("claims.derivedFrom", input.claim.derivedFrom, target?.derivedFrom);
-  same("claims.candidateSetId", input.claim.candidateSetId, projection?.candidateSetId);
-  same("claims.candidateId", input.candidate.id, projection?.candidateId);
-  same("reviewOutcomes.id", input.review.id, projection?.reviewOutcomeId);
-  same("candidates.id", input.candidate.id, input.result.selectedCandidateId);
-  same("candidates.extractionId", input.candidate.extractionId, projection?.extractionId);
-  same("candidates.value", input.candidate.value, input.result.effectiveValue);
-  same("candidates.confidence", input.candidate.confidence, reviewedCandidate?.confidence);
-  same("candidates.sourceRank", input.candidate.sourceRank, reviewedCandidate?.sourceRank);
-  same("candidates.rejectionReason", input.candidate.rejectionReason, reviewedCandidate?.rejectionReason);
-  same("candidateSets.selectedCandidateId", input.candidateSet.selectedCandidateId, input.candidate.id);
-  if (input.claim.value !== undefined) same("claims.value", input.claim.value, input.result.effectiveValue);
-
-  const boundRawSource = rawSource ?? fail("rawSources");
-  const boundExtraction = extraction ?? fail("extractions");
-  same("rawSources.id", boundRawSource.id, reviewedCandidate?.source?.sourceId);
-  same("rawSources.kind", boundRawSource.kind, reviewedCandidate?.source?.kind);
-  same("rawSources.sourceRef", boundRawSource.sourceRef, reviewedCandidate?.source?.sourceRef);
-  same("rawSources.observedAt", boundRawSource.observedAt, reviewedCandidate?.source?.observedAt);
-  same("rawSources.fetchedAt", boundRawSource.fetchedAt, reviewedCandidate?.source?.fetchedAt);
-  same("rawSources.checksum", boundRawSource.checksum, reviewedCandidate?.source?.checksum);
-  same("rawSources.locatorScheme", boundRawSource.locatorScheme, reviewedCandidate?.source?.locatorScheme);
-  same("rawSources.locatorScheme", boundRawSource.locatorScheme, reviewedCandidate?.locator?.scheme);
-  same("extractions.id", boundExtraction.id, reviewedCandidate?.extraction?.extractionId);
-  same("extractions.target", boundExtraction.target, reviewedCandidate?.extraction?.target);
-  same("extractions.confidence", boundExtraction.confidence, reviewedCandidate?.extraction?.confidence);
-  same("extractions.extractor", boundExtraction.extractor, reviewedCandidate?.extraction?.extractor);
-  same("extractions.extractedAt", boundExtraction.extractedAt, reviewedCandidate?.extraction?.extractedAt);
-  same("extractions.value", boundExtraction.value, input.result.effectiveValue);
-  same("extractions.locator", boundExtraction.locator, reviewedCandidate?.locator?.locator);
-  same("extractions.excerpt", boundExtraction.excerpt, reviewedCandidate?.locator?.excerpt);
-
-  same("reviewOutcomes.status", input.review.status, decision?.status);
-  same("reviewOutcomes.actor", input.review.actor, decision?.actor?.id);
-  same("reviewOutcomes.reviewedAt", input.review.reviewedAt, decision?.reviewedAt);
-  same("reviewOutcomes.resolution", input.review.resolution, decision?.resolution);
-  same("reviewOutcomes.resolutionReason", input.review.resolutionReason, decision?.resolutionReason);
-  same("reviewOutcomes.attemptEvidenceIds", input.review.attemptEvidenceIds, decision?.attemptEvidenceIds);
-  same("reviewOutcomes.rationale", input.review.rationale, decision?.rationale);
-  same("reviewOutcomes.evidenceIds", input.review.evidenceIds, decision?.evidenceIds);
-  same("reviewOutcomes.withinComfortZone", input.review.withinComfortZone, decision?.withinComfortZone);
-  same("reviewOutcomes.comfortZoneNote", input.review.comfortZoneNote, decision?.comfortZoneNote);
-  same("reviewOutcomes.authorizing", input.review.authorizing, decision?.authorizing);
-  same("reviewOutcomes.editedValue", decision?.editedValue, input.result.editedValue);
-}
-
-function assertBundleBinding(
-  bundle: JsonObject,
-  results: readonly any[],
-  subject: string,
-  definition: unknown,
-  config: unknown,
-  gateId: string,
-): void {
-  const claims = Array.isArray(bundle.claims) ? bundle.claims.filter(isRecord) : [];
-  const gate = findCurrentGate(definition, gateId);
-  const selectors = expectationsForGate(gate, config as any).map((expectation: any) => expectation.bundle_claim ?? expectation.claim).filter(Boolean);
-  const relevant = claims.filter((claim) => selectors.some((selector: any) => matchesSelector(claim, selector)));
-  if (relevant.length === 0) throw new SurveyFlowGateInputError("trustBundle.claims", "contains no claim matching the persisted current open Flow gate");
-  for (const claim of relevant) {
-    if (!isRecord(claim.metadata) || claim.metadata.workflow_subject_ref !== subject) {
-      throw new SurveyFlowGateInputError("trustBundle.claims.metadata.workflow_subject_ref", "must match the persisted Flow Run subject");
-    }
-    const result = results.find((entry) => entry?.reviewDecision?.status?.appliedToClaimIds?.includes(claim.id));
-    if (!result || claim.status !== result.status) {
-      throw new SurveyFlowGateInputError("trustBundle.claims.status", `claim ${String(claim.id)} must retain the canonical review status`);
-    }
+function assertWorkflowSubjectBinding(resolvedSubject: string, runSubject: string): void {
+  if (resolvedSubject !== runSubject) {
+    throw new SurveyFlowGateInputError("reviewSession.workflowSubjectRef", "must match the persisted Flow Run subject");
   }
 }
 
