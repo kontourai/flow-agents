@@ -502,6 +502,11 @@ export {
   LEGACY_TELEMETRY_DIR,
   telemetryDataDir,
 } from "./lib/local-artifact-root.js";
+export { bindHostWorkflowSession } from "./lib/host-workflow-binding.js";
+export type {
+  HostWorkflowBinding,
+  HostWorkflowBindingInput,
+} from "./lib/host-workflow-binding.js";
 
 export {
   // Trust-bundle (Hachure) validation — the same validator the writer uses.
