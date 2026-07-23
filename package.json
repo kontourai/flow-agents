@@ -175,7 +175,7 @@
     "esbuild": "0.28.1"
   },
   "optionalDependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
+    "@anthropic-ai/sdk": "^0.114.0",
     "@kontourai/surface": "^2.11.0",
     "neo4j-driver": "^5.28.0"
   }
