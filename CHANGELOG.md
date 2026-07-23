@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.8.0](https://github.com/kontourai/flow-agents/compare/v4.7.0...v4.8.0) (2026-07-23)
+
+
+### Features
+
+* add survey flow gate adapter ([04c4128](https://github.com/kontourai/flow-agents/commit/04c41287e744b4822d04d307a224b8765d3361de))
+* add survey flow gate adapter ([#856](https://github.com/kontourai/flow-agents/issues/856)) ([310b240](https://github.com/kontourai/flow-agents/commit/310b24032a8101b1501cb5bfa5f83c52d0a37664))
+* bridge blocked gates to survey review work ([c30073c](https://github.com/kontourai/flow-agents/commit/c30073c06980a7c2cf9a7da3adaa75f87544ae2d))
+* bridge blocked gates to survey review work ([#857](https://github.com/kontourai/flow-agents/issues/857)) ([7806259](https://github.com/kontourai/flow-agents/commit/7806259a6134f2b6545b882c0519981bd88a5b91))
+
+
+### Fixes
+
+* bind survey review projection authority ([cfc10eb](https://github.com/kontourai/flow-agents/commit/cfc10ebd69a2172a622c1ae45e0c9fd203427ef8))
+* **contracts:** disambiguate work-item drift vocabularies instead of retiring one ([#818](https://github.com/kontourai/flow-agents/issues/818)) ([#853](https://github.com/kontourai/flow-agents/issues/853)) ([5e0d48f](https://github.com/kontourai/flow-agents/commit/5e0d48fa5011d1c95f739e32d886e9e4c1d8e38e))
+* retain runtime dependency revision evidence ([ecd1d65](https://github.com/kontourai/flow-agents/commit/ecd1d65befb4b4f536b500bcd3d0e452302cda3f))
+
 ## [4.7.0](https://github.com/kontourai/flow-agents/compare/v4.6.2...v4.7.0) (2026-07-22)
 
 
