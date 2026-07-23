@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.1.0](https://github.com/kontourai/flow-agents/compare/v5.0.0...v5.1.0) (2026-07-23)
+
+
+### Features
+
+* dogfood portable host integration contracts ([a958b46](https://github.com/kontourai/flow-agents/commit/a958b46eaa63190fa59a2e1868f20afd41f1a791))
+* dogfood portable host integration contracts ([#861](https://github.com/kontourai/flow-agents/issues/861)) ([8b993a6](https://github.com/kontourai/flow-agents/commit/8b993a6e076f212dec2093b9ff3daed9dbcd4968))
+
+
+### Fixes
+
+* **ci:** execute host conformance drift check ([870d25c](https://github.com/kontourai/flow-agents/commit/870d25c21af1feea39e95d588af209f9ed31bf40))
+
 ## [5.0.0](https://github.com/kontourai/flow-agents/compare/v4.8.0...v5.0.0) (2026-07-23)
 
 
