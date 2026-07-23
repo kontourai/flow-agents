@@ -447,6 +447,8 @@ flow-agents builder-run cancel-request --session-dir <dir> [--out <file>] [--rea
 flow-agents builder-run cancel --session-dir <dir> --authorization-file <record.json>
 flow-agents builder-run release-assignment --session-dir <dir> --reason <text>
 flow-agents builder-run archive --session-dir <dir> --authorization-file <record.json>
+flow-agents builder-run reclaim --session-dir <dir>
+flow-agents workflow reclaim --session-dir <dir>
 ```
 
 Pause and resume verify the live assignment actor under the assignment lock, and preserve the
@@ -455,7 +457,13 @@ change the Flow run. Cancellation changes Flow first and then idempotently relea
 assignment while holding the same lock inside the external helper; a successfully consumed
 cancellation nonce cannot be replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
-operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
+operations deletes a branch or worktree; cleanup requires the separate
+provider-aware `builder-run reclaim` action. Reclaim is valid only after accepted
+Builder learning evidence and a fresh authenticated merged observation for the
+exact worktree head. It refuses primary checkouts, dirty or unregistered
+worktrees, stale/mismatched provider identity, and unmerged changes; it uses
+non-forced `git worktree remove`, retains the branch, prunes worktree metadata,
+and writes a content-free receipt outside the removed worktree.
 
 `cancel-request` is a **read-only convenience** that removes the friction of hand-assembling a
 cancellation record: it mints the *unsigned* authorization for the run (correct `run_id`,

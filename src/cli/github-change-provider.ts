@@ -33,6 +33,16 @@ export type GithubChangeProviderDependencies = Readonly<{
   now?: () => string;
 }>;
 
+export type GithubMergedChangeObservation = Readonly<{
+  state: "merged";
+  mergeSha: string;
+  headSha: string;
+  headRef: string;
+  baseRef: string;
+  providerActor: string;
+  observedAt: string;
+}>;
+
 type TrustedExecutable = Readonly<{ candidate: string; path: string; device: number; inode: number; size: number; mtimeMs: number; mode: number }>;
 type GithubExecutionDependencies = Required<Pick<GithubChangeProviderDependencies, "executor" | "executable" | "now">> & Readonly<{ trustedExecutable: TrustedExecutable | null; env?: NodeJS.ProcessEnv; authConfigDir?: string }>;
 type GithubListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; title: string; body: string; isDraft: boolean }>;
@@ -82,6 +92,81 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
       }
     },
   });
+}
+
+/**
+ * Re-observe an already-published change for destructive closeout. This is
+ * intentionally narrower than createOrRecover: it can only confirm a merged
+ * record already bound to the configured repository, refs, and immutable head
+ * SHA. It never creates, edits, closes, or merges a provider record.
+ */
+export async function observeGithubMergedChange(input: Readonly<{
+  settings: ChangeProviderSettings;
+  configurationId: string;
+  expected: Readonly<{
+    number: number;
+    repository: { owner: string; name: string };
+    baseRef: string;
+    headRef: string;
+    headSha: string;
+    providerActor: string;
+  }>;
+}>, dependencies: GithubChangeProviderDependencies = {}): Promise<GithubMergedChangeObservation> {
+  const { settings, expected } = input;
+  if (settings.kind !== "github" || settings.executor !== "gh-cli"
+    || settings.repository.owner !== expected.repository.owner
+    || settings.repository.name !== expected.repository.name) {
+    throw new ChangeProviderError("invalid_request", "merged-change observation does not match the configured GitHub provider");
+  }
+  validateConfigurationId(input.configurationId);
+  if (!Number.isSafeInteger(expected.number) || expected.number < 1) {
+    throw new ChangeProviderError("invalid_request", "merged-change provider record number is invalid");
+  }
+  const injectedExecutor = dependencies.executor !== undefined;
+  if (!injectedExecutor && dependencies.executable !== undefined) {
+    throw new ChangeProviderError("invalid_request", "ChangeProvider executable overrides require an injected executor");
+  }
+  const trustedExecutable = injectedExecutor ? null : resolveTrustedGithubExecutableIdentity();
+  const execution: GithubExecutionDependencies = {
+    executor: dependencies.executor ?? execFileArgv,
+    executable: injectedExecutor ? validateExecutable(dependencies.executable ?? "gh") : trustedExecutable!.path,
+    now: dependencies.now ?? (() => new Date().toISOString()),
+    trustedExecutable,
+  };
+  const authenticatedExecution = await bindGithubAuthentication(execution);
+  try {
+    const capability = await checkGithubCapability(settings, authenticatedExecution);
+    if (capability.provider_actor !== expected.providerActor) {
+      throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed before worktree closeout");
+    }
+    const raw = plainObject(parseProviderJson(
+      await invoke(authenticatedExecution, ["api", `repos/${expected.repository.owner}/${expected.repository.name}/pulls/${expected.number}`]),
+      "merged-change provider record output",
+    ), "merged-change provider record output");
+    const base = plainObject(raw.base, "merged-change provider base");
+    const head = plainObject(raw.head, "merged-change provider head");
+    const baseRepo = plainObject(base.repo, "merged-change provider base repository");
+    const headSha = providerSha(head.sha, "merged-change provider head SHA");
+    const mergeSha = providerSha(raw.merge_commit_sha, "merged-change provider merge SHA");
+    if (raw.merged !== true
+      || baseRepo.full_name !== `${expected.repository.owner}/${expected.repository.name}`
+      || base.ref !== expected.baseRef
+      || head.ref !== expected.headRef
+      || headSha !== expected.headSha.toLowerCase()) {
+      throw new ChangeProviderError("provider_observation_mismatch", "provider did not confirm the exact merged change bound to this worktree");
+    }
+    return Object.freeze({
+      state: "merged" as const,
+      mergeSha,
+      headSha,
+      headRef: expected.headRef,
+      baseRef: expected.baseRef,
+      providerActor: capability.provider_actor,
+      observedAt: execution.now(),
+    });
+  } finally {
+    releaseGithubAuthentication(authenticatedExecution);
+  }
 }
 
 async function bindGithubAuthentication(dependencies: GithubExecutionDependencies): Promise<GithubExecutionDependencies> {

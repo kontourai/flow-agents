@@ -109,6 +109,12 @@ Do not describe delivery as complete while required behavior, evidence, or
 follow-up remains unresolved. Route eligible outcomes into publish/readiness and
 learning through their owning Builder skills.
 
+After learning completes, follow `learning-review`'s Repository-adapter
+closeout. Keep the worktree while its change is open or needs review fixes.
+Reclaim a clean linked worktree only after a fresh authenticated provider
+observation confirms the exact head was merged; otherwise report the explicit
+retention reason. Opening a pull request is never cleanup authority.
+
 When an eligible code-host change needs its verified trust state committed for
 CI reconciliation, use the public `flow-agents workflow publish-delivery
 --session-dir <session>` command after release readiness while the assignment actor

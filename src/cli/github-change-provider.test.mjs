@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 import { ChangeProviderError } from "../../build/src/cli/change-provider.js";
-import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
+import { createGithubChangeProvider, observeGithubMergedChange } from "../../build/src/cli/github-change-provider.js";
 
 const SHA = "a".repeat(40);
 const STALE_SHA = "b".repeat(40);
@@ -213,4 +213,55 @@ test("GitHub adapter rejects auth failures and does not accept a different confi
   const wrongRepo = fakeExecutor(prefix());
   await assert.rejects(() => provider(wrongRepo).createOrRecover(request({ repository: { owner: "other", name: "repo" } })), (error) => assertCode(error, "provider_observation_mismatch"));
   assert.equal(wrongRepo.calls.length, 0);
+});
+
+test("merged-change closeout observation binds the authenticated actor, exact head, and merge commit", async () => {
+  const mergeSha = "c".repeat(40);
+  const fake = fakeExecutor([
+    ...prefix(),
+    providerRecord({ state: "CLOSED", merged: true, merge_commit_sha: mergeSha }),
+  ]);
+  const result = await observeGithubMergedChange({
+    settings,
+    configurationId: "settings-sha256",
+    expected: {
+      number: 610,
+      repository: { owner: "kontourai", name: "flow-agents" },
+      baseRef: "main",
+      headRef: "agent/change-provider-604-v2",
+      headSha: SHA,
+      providerActor: "briananderson1222",
+    },
+  }, { executor: fake.executor, executable: "gh", now: () => OBSERVED_AT });
+
+  assert.equal(result.state, "merged");
+  assert.equal(result.mergeSha, mergeSha);
+  assert.equal(result.headSha, SHA);
+  assert.deepEqual(fake.calls.at(-1).argv, ["api", "repos/kontourai/flow-agents/pulls/610"]);
+  assert.equal(JSON.stringify(result).includes(TOKEN), false);
+});
+
+test("merged-change closeout observation refuses an open or actor-mismatched provider record", async () => {
+  const expected = {
+    number: 610,
+    repository: { owner: "kontourai", name: "flow-agents" },
+    baseRef: "main",
+    headRef: "agent/change-provider-604-v2",
+    headSha: SHA,
+    providerActor: "briananderson1222",
+  };
+  await assert.rejects(
+    observeGithubMergedChange({ settings, configurationId: "settings-sha256", expected }, {
+      executor: fakeExecutor([...prefix(), providerRecord({ merge_commit_sha: "c".repeat(40) })]).executor,
+      executable: "gh",
+    }),
+    (error) => assertCode(error, "provider_observation_mismatch"),
+  );
+  await assert.rejects(
+    observeGithubMergedChange({ settings, configurationId: "settings-sha256", expected }, {
+      executor: fakeExecutor([TOKEN, "authenticated\n", { login: "different-user" }, { full_name: "kontourai/flow-agents" }]).executor,
+      executable: "gh",
+    }),
+    (error) => assertCode(error, "provider_observation_mismatch"),
+  );
 });
