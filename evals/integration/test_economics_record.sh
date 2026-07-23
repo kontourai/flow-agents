@@ -185,7 +185,7 @@ printf '%s' "$(cat "$LOG3")" | jq -e . >/dev/null 2>&1 && pass "record with host
 # ── Stub Console endpoint (200 / 500) for the relay + fail-open cases ──────────────────────────────
 start_stub() {
   local mode="$1"
-  local delay="${2:-0}"
+  local synchronization="${2:-}"
   local fake_bin="$TMP/fake-curl-bin"
   mkdir -p "$fake_bin"
   cat > "$fake_bin/curl" <<'SH'
@@ -198,7 +198,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$config" && -f "$config" ]] || exit 2
-sleep "${ECON_STUB_DELAY_SECONDS:-0}"
+if [[ -n "${ECON_STUB_STARTED_FILE:-}" ]]; then
+  : > "$ECON_STUB_STARTED_FILE"
+  for _ in $(seq 1 300); do
+    [[ -e "${ECON_STUB_RELEASE_FILE:-}" ]] && break
+    sleep 0.1
+  done
+  [[ -e "${ECON_STUB_RELEASE_FILE:-}" ]] || exit 124
+fi
 node - "$config" "$ECON_STUB_RECV" <<'NODE'
 const fs = require("fs");
 const config = fs.readFileSync(process.argv[2], "utf8").split(/\n/);
@@ -232,7 +239,14 @@ SH
   STUB_GENERATION=$((STUB_GENERATION + 1))
   RECV="$TMP/recv-$STUB_GENERATION.jsonl"
   : > "$RECV"
-  export ECON_STUB_RECV="$RECV" ECON_STUB_MODE="$mode" ECON_STUB_DELAY_SECONDS="$delay"
+  ECON_STUB_STARTED_FILE=""
+  ECON_STUB_RELEASE_FILE=""
+  if [[ "$synchronization" == "gated" ]]; then
+    ECON_STUB_STARTED_FILE="$TMP/stub-$STUB_GENERATION.started"
+    ECON_STUB_RELEASE_FILE="$TMP/stub-$STUB_GENERATION.release"
+  fi
+  export ECON_STUB_RECV="$RECV" ECON_STUB_MODE="$mode" \
+    ECON_STUB_STARTED_FILE ECON_STUB_RELEASE_FILE
   case ":$PATH:" in
     *":$fake_bin:"*) ;;
     *) export PATH="$fake_bin:$PATH" ;;
@@ -243,13 +257,17 @@ SH
 stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID=""; }
 wait_for_post() { for _ in $(seq 1 25); do [[ -s "$RECV" ]] && return 0; sleep 0.2; done; return 1; }
 wait_for_mailbox() {
-  local mailbox="$1"
-  # Detached transport can be heavily de-scheduled when the hosted lane runs
-  # several integration jobs. Poll the isolated mailbox rather than assuming
-  # the configured 0.5s stub delay is the entire scheduling latency.
-  for _ in $(seq 1 150); do
-    [[ -s "$mailbox" ]] && return 0
-    sleep 0.2
+  local mailbox="$1" require_content="${2:-true}"
+  # Detached transport can be heavily de-scheduled on hosted runners. Poll the
+  # explicit start/completion files with a bounded timeout instead of assuming
+  # the configured stub delay is the entire scheduling latency.
+  for _ in $(seq 1 300); do
+    if [[ "$require_content" == "true" ]]; then
+      [[ -s "$mailbox" ]] && return 0
+    else
+      [[ -e "$mailbox" ]] && return 0
+    fi
+    sleep 0.1
   done
   return 1
 }
@@ -257,16 +275,22 @@ ENDPOINT="http://127.0.0.1:${PORT}/records"
 
 # ── detached POST isolation: a late prior case cannot contaminate the next mailbox ───────────────
 echo "--- detached relay fixture isolates every case mailbox ---"
-start_stub ok 0.5
+start_stub ok gated
 PRIOR_RECV="$RECV"
+PRIOR_STARTED="$ECON_STUB_STARTED_FILE"
+PRIOR_RELEASE="$ECON_STUB_RELEASE_FILE"
 MAILBOX_LOG="$TMP/econ-mailbox-delay.jsonl"; : > "$MAILBOX_LOG"
 (
   export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
   export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
   run_emitter "$MAILBOX_LOG" --state "$FIX/state.json" --critique "$FIX/critique.json"
 )
+wait_for_mailbox "$PRIOR_STARTED" false \
+  && pass "detached prior POST started with its original fixture generation" \
+  || fail "detached prior POST did not start"
 start_stub ok
 NEXT_RECV="$RECV"
+touch "$PRIOR_RELEASE"
 wait_for_mailbox "$PRIOR_RECV" && pass "delayed prior POST lands in its original mailbox" || fail "delayed prior POST did not land"
 [[ ! -s "$NEXT_RECV" ]] && pass "delayed prior POST cannot contaminate the next case mailbox" || fail "delayed prior POST contaminated the next case mailbox"
 
