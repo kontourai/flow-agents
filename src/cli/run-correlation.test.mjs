@@ -4,7 +4,10 @@ import test from "node:test";
 import {
   RUN_CORRELATION_IDENTITY_KEYS,
   RunCorrelationValidationError,
+  attachRunCorrelation,
   createRunCorrelationEnvelope,
+  readRunCorrelation,
+  runtimeCorrelationIdentityDeclaration,
   validateRunCorrelationEnvelope,
 } from "../../build/src/index.js";
 import { validateSchemaValue } from "../../build/src/lib/mini-json-schema.js";
@@ -89,4 +92,59 @@ test("runtime and schema both reject a missing identity slot", () => {
   validateSchemaValue("run-correlation.json", envelope, schema, "$", issues, schema);
   assert(issues.some((issue) => issue.message.includes("delegation_span")));
   assert.throws(() => validateRunCorrelationEnvelope(envelope), RunCorrelationValidationError);
+});
+
+test("one immutable envelope stamps telemetry, trust, economics, delegation, and terminal records", () => {
+  const envelope = createRunCorrelationEnvelope({
+    correlation_id: "run-shared-123",
+    identities: explicitIdentities(),
+  });
+  const records = [
+    { kind: "runtime.telemetry", event_id: "event-1" },
+    { kind: "flow.step", step_id: "verify" },
+    { kind: "trust.reference", artifact_ref: "trust.bundle" },
+    { kind: "economics", input_tokens: 12 },
+    { kind: "delegation", worker: "worker-1" },
+    { kind: "terminal", outcome: "accepted" },
+  ].map((record) => attachRunCorrelation(record, envelope));
+
+  assert(records.every((record) => record.run_correlation.correlation_id === "run-shared-123"));
+  records[0].run_correlation.identities.flow_run.value = "mutated";
+  assert.equal(records[1].run_correlation.identities.flow_run.value, "flow-run-123");
+});
+
+test("legacy records remain explicitly incomplete instead of receiving a heuristic join", () => {
+  assert.deepEqual(readRunCorrelation({
+    session_id: "looks-related",
+    cwd: "/same/repository",
+    timestamp: "2026-07-23T12:00:00Z",
+  }), {
+    status: "incomplete",
+    reason: "record predates run correlation or its producer did not provide an envelope",
+  });
+});
+
+test("concurrent runs cannot cross-join even when all surrounding fields match", () => {
+  const first = attachRunCorrelation(
+    { cwd: "/same/repository", work_item: "same-item" },
+    createRunCorrelationEnvelope({ correlation_id: "run-a", identities: explicitIdentities() }),
+  );
+  const second = attachRunCorrelation(
+    { cwd: "/same/repository", work_item: "same-item" },
+    createRunCorrelationEnvelope({ correlation_id: "run-b", identities: explicitIdentities() }),
+  );
+  assert.notEqual(
+    readRunCorrelation(first).envelope.correlation_id,
+    readRunCorrelation(second).envelope.correlation_id,
+  );
+});
+
+test("runtime adapters declare support for every correlation identity field", () => {
+  for (const runtime of ["claude-code", "codex", "kiro", "opencode", "pi", "codex-local", "strands-local", "unknown"]) {
+    const declaration = runtimeCorrelationIdentityDeclaration(runtime);
+    assert.deepEqual(Object.keys(declaration).sort(), [...RUN_CORRELATION_IDENTITY_KEYS].sort());
+  }
+  assert.equal(runtimeCorrelationIdentityDeclaration("codex").runtime_turn.status, "supported");
+  assert.equal(runtimeCorrelationIdentityDeclaration("opencode").runtime_turn.status, "partial");
+  assert.equal(runtimeCorrelationIdentityDeclaration("strands-local").runtime_session.status, "not_applicable");
 });

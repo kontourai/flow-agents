@@ -26,6 +26,27 @@ fields are not permitted in version 1. New identity classes require a new
 contract version so older consumers fail visibly instead of silently dropping a
 join dimension.
 
+Runtime adapters declare support for every identity slot through
+`runtimeCorrelationIdentityDeclaration`. `supported` means the adapter can
+observe that identity when the host supplies it; `partial` names the host mode
+where it is absent; `unsupported` means the host cannot expose it; and
+`not_applicable` means another authority owns the slot. These declarations do
+not manufacture values.
+
+Use `attachRunCorrelation` for runtime events, Flow projections, trust
+references, economics records, delegation facts, and terminal outcomes. It
+validates and defensively copies the envelope, preventing later mutation from
+cross-joining otherwise independent records. `readRunCorrelation` returns an
+explicit `incomplete` result for older records that omit the field. Consumers
+must preserve that status and must not repair it from neighboring timestamps,
+paths, work items, or sessions.
+
+Builder Flow runs accept the envelope as `correlation` when started. The
+`flow_run` identity must be present and must equal the requested run id. Flow's
+string-only parameter contract stores the canonical JSON bytes; Builder load
+and evaluation validate those bytes before exposing them. Trust evidence
+analytics carry either the same envelope or the explicit incomplete result.
+
 This is intentionally an embedded value rather than a standalone Kontour
 Resource Contract. It has no independent lifecycle, desired state, authority,
 or status conditions; wrapping every occurrence in resource metadata would

@@ -30,7 +30,11 @@ export {
   RUN_CORRELATION_IDENTITY_STATUSES,
   RUN_CORRELATION_SCHEMA_VERSION,
   RunCorrelationValidationError,
+  RUNTIME_CORRELATION_IDENTITY_DECLARATIONS,
+  attachRunCorrelation,
   createRunCorrelationEnvelope,
+  readRunCorrelation,
+  runtimeCorrelationIdentityDeclaration,
   validateRunCorrelationEnvelope,
 } from "./run-correlation.js";
 export type {
@@ -41,6 +45,10 @@ export type {
   RunCorrelationIdentityKey,
   RunCorrelationIdentityStatus,
   RunCorrelationInput,
+  RunCorrelationCarrier,
+  RunCorrelationPresence,
+  RuntimeCorrelationIdentityDeclaration,
+  RuntimeCorrelationIdentitySupport,
 } from "./run-correlation.js";
 
 export {

@@ -25,6 +25,10 @@ import {
   loadBuilderBuildRun,
   startBuilderBuildRun,
 } from "../../build/src/builder-flow-run-adapter.js";
+import {
+  RUN_CORRELATION_IDENTITY_KEYS,
+  createRunCorrelationEnvelope,
+} from "../../build/src/run-correlation.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const BUILDER_BUILD_DEFINITION = path.join(REPO_ROOT, "kits/builder/flows/build.flow.json");
@@ -36,6 +40,73 @@ const FIXTURE_NOW = "2026-07-09T20:00:00.000Z";
 function makeWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-flow-"));
 }
+
+function runCorrelation(runId) {
+  return createRunCorrelationEnvelope({
+    correlation_id: `correlation-${runId}`,
+    identities: Object.fromEntries(RUN_CORRELATION_IDENTITY_KEYS.map((key) => [
+      key,
+      key === "flow_run"
+        ? { status: "present", value: runId }
+        : { status: "unavailable", reason: `${key} is unavailable in this fixture` },
+    ])),
+  });
+}
+
+test("Builder persists and reloads one validated run correlation envelope", async () => {
+  const cwd = makeWorkspace();
+  const runId = "builder-correlation-run";
+  const correlation = runCorrelation(runId);
+  const started = await startBuilderBuildRun({ cwd, runId, subject: SUBJECT, correlation });
+  const loaded = await loadBuilderBuildRun({ cwd, runId });
+
+  assert.deepEqual(started.correlation, { status: "present", envelope: correlation });
+  assert.deepEqual(loaded.correlation, started.correlation);
+});
+
+test("Builder rejects cross-run correlation and reports legacy runs as incomplete", async () => {
+  const cwd = makeWorkspace();
+  await assert.rejects(
+    startBuilderBuildRun({
+      cwd,
+      runId: "run-one",
+      subject: SUBJECT,
+      correlation: runCorrelation("run-two"),
+    }),
+    /must match runId/,
+  );
+
+  const legacy = await startBuilderBuildRun({ cwd, runId: "legacy-run", subject: SUBJECT });
+  assert.equal(legacy.correlation.status, "incomplete");
+
+  await assert.rejects(
+    startBuilderBuildRun({
+      cwd,
+      runId: "injected-correlation",
+      subject: SUBJECT,
+      params: { run_correlation: JSON.stringify(runCorrelation("injected-correlation")) },
+    }),
+    /is reserved/,
+  );
+});
+
+test("Builder carries correlation into attached trust evidence analytics", async () => {
+  const cwd = makeWorkspace();
+  const runId = "correlated-trust-evidence";
+  const correlation = runCorrelation(runId);
+  await startBuilderBuildRun({ cwd, runId, subject: SUBJECT, correlation });
+  const evaluated = await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "pull-work-gate",
+      claimType: "builder.pull-work.selected",
+      subjectType: "work-item",
+    }),
+  });
+
+  assert.deepEqual(evaluated.attachedEvidence[0].analytics.run_correlation, correlation);
+});
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
