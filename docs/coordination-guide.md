@@ -247,6 +247,15 @@ debt or steer onto its slug. Accepted gap: a resolved actor with no per-actor po
 establishes one — never gated on another actor's unrelated work. An unresolved actor keeps the pre-#440
 legacy-fallback behavior unchanged (compat + anti-gaming: identity cannot be unset to escape the gate).
 
+Embedding hosts that own their own session lifecycle use the public
+`bindHostWorkflowSession()` library contract to establish this pointer. The
+host supplies a stable, filesystem-safe actor key and the selected task
+directory each time it starts or resumes that task, then supplies the same key
+as `FLOW_AGENTS_ACTOR` while invoking canonical hooks. The contract writes only
+the actor-scoped pointer: it does not claim assignment, create workflow state,
+or overwrite the shared compatibility pointer. This keeps lifecycle authority
+with the host while preserving Flow Agents' cross-actor isolation.
+
 ## 8. Guard point 3 — the verify-hold publish gate (the one hard fence)
 
 This is the **only** place coordination *blocks*, and it earned three fix iterations, so its design is
