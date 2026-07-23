@@ -46,6 +46,8 @@ export type WorkflowStateSidecar = {
   task_slug: string;
   status: WorkflowTaskStatus;
   phase: string;
+  owner?: string;
+  branch?: string;
   updated_at?: string;
   next_action: {
     status: WorkflowNextActionStatus;
@@ -571,6 +573,8 @@ export function validateWorkflowStateProjectionSourceShape(value: unknown, label
   const taskSlug = requiredString(sidecar, "task_slug", label);
   const status = enumString(sidecar, "status", KNOWN_STATUSES, label);
   const phase = requiredString(sidecar, "phase", label);
+  const owner = optionalString(sidecar, "owner", label);
+  const branch = optionalString(sidecar, "branch", label);
   const updatedAt = optionalString(sidecar, "updated_at", label);
   const nextActionValue = objectValue(sidecar.next_action, `${label}.next_action must be an object`);
   const nextActionStatus = enumString(nextActionValue, "status", KNOWN_NEXT_ACTION_STATUSES, `${label}.next_action`);
@@ -582,6 +586,8 @@ export function validateWorkflowStateProjectionSourceShape(value: unknown, label
     task_slug: taskSlug,
     status,
     phase,
+    ...(owner ? { owner } : {}),
+    ...(branch ? { branch } : {}),
     ...(updatedAt ? { updated_at: updatedAt } : {}),
     next_action: { status: nextActionStatus, summary: nextActionSummary },
     ...(workItemRefs ? { work_item_refs: workItemRefs } : {}),

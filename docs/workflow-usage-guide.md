@@ -667,6 +667,14 @@ The command writes `.kontourai/console/projections/flow-agents-process/<scope-ki
 
 This projection is local-artifact generation, the same mechanism as the learning projection above, and it is **not** itself a live Console board feed: Console's Kanban board reads `OperatingState`/`ConsoleProcess` populated by discrete `process.*` events (a separate, event-sourced ingest path), not by scanning `.kontourai/console/projections/`. What this command's output DOES match, verified by executing Console's own `console-inspect local` (`console-server/bin/console-inspect.ts`) against a real generated envelope at the console#236 commit (`cffecca5`): Console's generic local-projection reader (`inspectLocalKontour`, recursively scanning `<kontourRoot>/projections/**/*.json`) and its `validateProjection`/`validateProcess` shape checks accept this envelope with zero validation errors -- `id`/`status` (required strings) and the console#236-added optional `blockedReason` string all match field-for-field. That reader backs the `console-inspect` CLI audit/migration tool, not the live SSE-driven board; wiring a projection like this into the live board is Console-side scope (a bridge analogous to Console's `kontour-flow-bridge`), tracked separately, not attempted in this repo.
 
+To publish each workflow's canonical Surface trust report alongside that process projection, run:
+
+```bash
+flow-agents console-trust-projection --artifact-root .kontourai/flow-agents --kontour-root .kontourai/console
+```
+
+The command reads workflow directories without mutating them, skips directories with no `trust.bundle`, validates every present bundle with Surface's `validateTrustBundle`, and carries `surface.buildTrustReport(bundle)` verbatim in an inert `kontour.console.projection` envelope under `trusts[]`. Invalid bundles are skipped with a warning so one bad workflow does not abort its valid siblings; an unavailable Surface runtime fails the command because unvalidated trust is never projected. Gate associations come only from each claim's stamped `metadata.gate_claim.expectation_id` and its evidence/event `claimId` links. Work Item refs include canonical GitHub issue URLs when derivable, plus assignment branch, actor, and artifact-directory refs when the workflow state or assignment claim records provide them. By default the file is written under `.kontourai/console/projections/flow-agents-trust/`; pass `--out <file>` to override it or `--out -` for stdout.
+
 For local-only users, `.kontourai/flow-agents/<slug>/` is the recent recovery cache and queue dashboard. Retain active blockers and unresolved learning. Prune or archive routine successful runtime artifacts after 14-30 days once provider records, durable docs, or knowledge notes contain the useful history. Keep security, migration, release, or provider-governance evidence longer when auditability matters, usually 30-90 days unless a project policy says otherwise.
 
 ## Quick Prompt Templates
