@@ -1333,6 +1333,56 @@ test("direct sidecar gate recording derives the exact projected Flow head", asyn
   assert.equal(claim.metadata.gate_claim.flow_run_head, flowRunHead(started.run.state));
 });
 
+test("post-plan acceptance shrinking is rejected before a later bundle write", async () => {
+  const session = makeSession("acceptance-contract-integrity");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+
+  const criteria = Array.from({ length: 5 }, (_, index) => ({
+    id: `criterion-${index + 1}`,
+    description: `Planned criterion ${index + 1}`,
+    status: "pending",
+    evidence_refs: [],
+  }));
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    criteria,
+  });
+  const planArtifact = path.join(session.sessionDir, `${session.slug}--plan-work.md`);
+  fs.writeFileSync(planArtifact, "# Plan\n\nImplement all five criteria.\n");
+  await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "implementation-plan", "--status", "pass", "--summary", "Five-criterion plan",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, planArtifact), summary: "Implementation plan" }),
+  ]);
+  const planned = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(planned.run.state.current_step, "execute");
+
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const plannedBundle = fs.readFileSync(bundleFile, "utf8");
+  const planClaim = JSON.parse(plannedBundle).claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === "implementation-plan");
+  assert.deepEqual(planClaim.metadata.acceptance_contract.criteria, criteria.map(({ id, description }) => ({ id, description })));
+
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    criteria: [criteria[0]],
+  });
+  await assert.rejects(
+    workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "implementation-scope", "--status", "not_verified", "--summary", "Mutation probe",
+    ]),
+    /acceptance\.json no longer matches the criterion contract anchored by the implementation-plan claim/,
+  );
+  assert.equal(fs.readFileSync(bundleFile, "utf8"), plannedBundle, "the rejected post-plan mutation must not rewrite canonical trust evidence");
+});
+
 test("direct sidecar gate recording cannot inject a head without an exact Flow projection", async () => {
   const session = makeSession("direct-sidecar-injected-head");
   const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
