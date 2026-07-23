@@ -99,7 +99,8 @@ export function lifecycleAuthorityCompletionBindsExactState(
   bundle: JsonRecord,
   resolutionEvents: JsonRecord[],
 ): boolean {
-  return ["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action))
+  return completion.operation_status === "applied"
+    && ["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action))
     && completion.run_id === runId
     && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents });
 }
@@ -116,26 +117,39 @@ function validateSignedCompletion(value: unknown, action: string, requestSha256:
   return completion;
 }
 
-/**
- * Verifies a coordinator completion without treating it as permission to mutate.
- * Consumers which already have an immutable completion (such as artifact
- * validation) use this to establish that the root-owned coordinator signed it.
- */
-export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
-  if (!record(value)) throw new Error("lifecycle authority completion is missing");
+function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operationStatuses: readonly string[], label: string): JsonRecord {
+  if (!record(value)) throw new Error(`${label} is missing`);
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   const observed = Object.keys(value).sort();
-  if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error("lifecycle authority completion contains unexpected or missing fields");
-  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !["applied", "replayed"].includes(String(value.operation_status))) throw new Error("lifecycle authority completion identity is invalid");
-  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`lifecycle authority completion ${key} is invalid`);
-  if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error("lifecycle authority completion timestamp is invalid");
-  if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error("lifecycle authority completion signature is invalid");
+  if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error(`${label} contains unexpected or missing fields`);
+  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
+  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`${label} ${key} is invalid`);
+  if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error(`${label} timestamp is invalid`);
+  if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error(`${label} signature is invalid`);
   const signatureValue = value.signature.value;
   const { signature, ...unsigned } = value;
   if (!verify(null, Buffer.from(canonical(unsigned)), trustedCompletionVerificationKey(), Buffer.from(signatureValue, "base64"))) {
-    throw new Error("lifecycle authority completion signature is invalid");
+    throw new Error(`${label} signature is invalid`);
   }
   return value;
+}
+
+/**
+ * Verifies an applied coordinator completion without treating it as permission
+ * to mutate. Builder, sidecar/final-gate, artifact-validation, and helper
+ * response consumers use this strict current-authority verifier.
+ */
+export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
+  return verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied"], "lifecycle authority completion");
+}
+
+/**
+ * Authenticates legacy completion history only. A replayed historical receipt
+ * never establishes present lifecycle authority; it is accepted exclusively
+ * while deriving a signed history-repair bridge.
+ */
+export function verifyHistoricalLifecycleAuthorityCompletion(value: unknown): JsonRecord {
+  return verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied", "replayed"], "historical lifecycle authority completion");
 }
 
 function validateProtectedCompletionVerificationKeyPathComponent(file: string, host: LifecycleAuthorityCompletionVerificationKeyHost) {

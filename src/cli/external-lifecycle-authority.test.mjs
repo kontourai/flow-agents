@@ -14,6 +14,8 @@ const {
   lifecycleAuthorityResultDigest,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
+  verifyHistoricalLifecycleAuthorityCompletion,
+  verifyLifecycleAuthorityCompletion,
 } = lifecycleAuthority;
 
 const action = "cancel";
@@ -32,7 +34,7 @@ test("strict lifecycle consumers reject a historical core and accept only the ne
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(historicalCompletion, "run-1", bundle, postRepairEvents), false);
   const postRepairCompletion = {
-    action: "repair-critique-resolution-history", run_id: "run-1",
+    action: "repair-critique-resolution-history", run_id: "run-1", operation_status: "applied",
     result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: postRepairEvents }),
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(postRepairCompletion, "run-1", bundle, postRepairEvents), true);
@@ -344,12 +346,52 @@ test("lifecycle authority response accepts completed replays only with an authen
     for (const responseStatus of ["applied", "replayed"]) {
       assert.throws(
         () => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, operation_status: responseStatus, completion: replayedCompletion } })}\n`, replayAction, digest),
-        /completion status does not match/,
+        /completion (?:identity is invalid|status does not match)/,
         `${replayAction} ${responseStatus} response rejects a replayed immutable completion`,
       );
     }
   }
 }));
+
+test("strict current consumers reject a correctly signed replayed completion while historical authentication retains it", () => withCompletionVerificationKey(() => {
+  const replayed = signedCompletion({ action: "resolve-critique", operation_status: "replayed" });
+  assert.throws(
+    () => verifyLifecycleAuthorityCompletion(replayed),
+    /completion identity is invalid/,
+    "Builder, sidecar/final-gate, artifact validation, and helper response consumers share the applied-only verifier",
+  );
+  assert.deepEqual(
+    verifyHistoricalLifecycleAuthorityCompletion(replayed),
+    replayed,
+    "only history-repair bridge discovery can authenticate a legacy replayed completion",
+  );
+  const bundle = { schema_version: "1.0", claims: [] };
+  const events = [{ event_id: "current" }];
+  assert.equal(
+    lifecycleAuthorityCompletionBindsExactState(
+      { ...replayed, result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events }) },
+      "run-1",
+      bundle,
+      events,
+    ),
+    false,
+    "a replayed completion cannot become exact-current authority even when its core digest matches",
+  );
+}));
+
+test("Builder, sidecar/final-gate, and artifact validation retain the strict verifier while only history repair uses the historical verifier", () => {
+  for (const consumer of [
+    "../../src/builder-flow-runtime.ts",
+    "../../src/cli/workflow-sidecar.ts",
+    "../../src/cli/validate-workflow-artifacts.ts",
+  ]) {
+    const source = fs.readFileSync(new URL(consumer, import.meta.url), "utf8");
+    assert.match(source, /verifyLifecycleAuthorityCompletion/, `${consumer} must consume applied-only current authority`);
+    assert.doesNotMatch(source, /verifyHistoricalLifecycleAuthorityCompletion/, `${consumer} must not consume historical-only authority`);
+  }
+  const workflowSource = fs.readFileSync(new URL("../../src/cli/workflow.ts", import.meta.url), "utf8");
+  assert.match(workflowSource, /verifyHistoricalLifecycleAuthorityCompletion/, "the public history-repair discovery path explicitly selects historical authentication");
+});
 
 test("lifecycle authority replay response keeps action request run core and signature bindings fail-closed", () => withCompletionVerificationKey(() => {
   const appliedCompletion = signedCompletion();

@@ -254,10 +254,15 @@ test("sidecar and gate authority remain exact-current across the historical repa
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(staleCompletion, "repair-run", bundle, currentEvents), false, "a valid bridge does not make a stale completion gate authority");
   const exactCompletion = {
-    action: "repair-critique-resolution-history", run_id: "repair-run",
+    action: "repair-critique-resolution-history", run_id: "repair-run", operation_status: "applied",
     result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: currentEvents }),
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(exactCompletion, "repair-run", bundle, currentEvents), true, "only the new post-repair completion satisfies the exact-current gate contract");
+  assert.equal(
+    lifecycleAuthorityCompletionBindsExactState({ ...exactCompletion, operation_status: "replayed" }, "repair-run", bundle, currentEvents),
+    false,
+    "a replayed receipt cannot satisfy sidecar or final-gate current authority even with the exact current digest",
+  );
 });
 
 test("critique gate freshness permits stale passing anchors but requires one current substantive PASS", () => {

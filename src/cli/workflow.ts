@@ -14,7 +14,7 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, verifyHistoricalLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
@@ -1452,7 +1452,7 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
   if (events.some((event) => event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id === originalEventId || event.missing_authorization_sha256 === originalAuthorization))) throw new Error("workflow history repair already exists for the selected edge");
   const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "workflow history repair lifecycle completion", 256 * 1024);
   if (!completionBytes) throw new Error("workflow history repair lifecycle completion is missing");
-  const completion = verifyLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+  const completion = verifyHistoricalLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
   if (!(["resolve-critique", "repair-critique-resolution-history"] as string[]).includes(String(completion.action)) || completion.run_id !== slug) throw new Error("workflow history repair requires an authenticated historical lifecycle completion for this run");
   const bridge = discoverCritiqueResolutionHistoryRepairBridge({ sessionDir, slug, projectRoot, bundleBytes, bundle, ledgerBytes, events, completion });
   const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
