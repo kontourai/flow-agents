@@ -2816,6 +2816,32 @@ test("stale passing critique remains audit history when a current exact-workspac
   assert.equal(result.run.state.current_step, "merge-ready");
 });
 
+test("stale passing critique with a changed reviewed workflow artifact does not block a current exact critique", async () => {
+  const session = makeSession("stale-passing-workflow-artifact");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
+  stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "finalized workflow record\n");
+  const [current, criterion] = verifiedTestsPrerequisites(session);
+  appendCritiqueAfter(stale, current);
+
+  const result = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    stale,
+    current,
+    criterion,
+  ]);
+
+  assert.equal(result.run.state.current_step, "merge-ready");
+});
+
 test("stale open critique remains blocking even when a different reviewer supplies a current clean critique", async () => {
   const session = makeSession("stale-open-current-clean");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });

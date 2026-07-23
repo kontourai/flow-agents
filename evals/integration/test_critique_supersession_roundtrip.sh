@@ -45,9 +45,9 @@ seed() {
     --source-request "R" --summary "S" --timestamp "2026-07-01T00:00:00Z" >/dev/null 2>&1
 }
 
-# ─── (a) same-reviewer supersession: fail → pass ──────────────────────────────
+# ─── (a) same-reviewer supersession: fail → pass → refreshed pass ─────────────
 echo ""
-echo "=== (a) record-critique fail→pass (same reviewer) supersedes, history intact, reconcile 0 ==="
+echo "=== (a) record-critique fail→pass→pass (same reviewer) keeps one current resolver ==="
 A_AROOT="$TMP/a/.kontourai/flow-agents"; A_SLUG="supersede-same"; A_DIR="$A_AROOT/$A_SLUG"
 seed "$A_AROOT" "$A_SLUG"
 flow_agents_node "$WRITER" record-evidence "$A_DIR" --verdict pass \
@@ -62,6 +62,11 @@ flow_agents_node "$WRITER" record-critique "$A_DIR" --id rv --reviewer alice --v
   --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"fix verified\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$A_DIR/$A_SLUG--deliver.md\",\"summary\":\"Reviewed the corrected delivery artifact.\"}]}" \
   --artifact-ref "$A_DIR/$A_SLUG--deliver.md" \
   --timestamp "2026-07-01T00:03:00Z" >/dev/null 2>&1
+flow_agents_node "$WRITER" record-critique "$A_DIR" --id rv --reviewer alice --verdict pass \
+  --summary "workflow records refreshed; fix remains verified" \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"refreshed review passed\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$A_DIR/$A_SLUG--deliver.md\",\"summary\":\"Re-reviewed the finalized delivery artifact.\"}]}" \
+  --artifact-ref "$A_DIR/$A_SLUG--deliver.md" \
+  --timestamp "2026-07-01T00:04:00Z" >/dev/null 2>&1
 
 node - "$A_DIR/trust.bundle" << 'NODE'
 const fs = require('fs');
@@ -69,15 +74,17 @@ const b = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const crit = (b.claims||[]).filter(c => c.metadata && c.metadata.origin === 'critique');
 const live = crit.filter(c => !c.metadata.superseded_by);
 const hist = crit.filter(c => c.metadata.superseded_by);
-if (crit.length !== 2) throw new Error('expected 2 critique claims (1 live + 1 history), got ' + crit.length);
+if (crit.length !== 3) throw new Error('expected 3 critique claims (1 live + 2 history), got ' + crit.length);
 if (live.length !== 1 || live[0].value !== 'pass') throw new Error('expected exactly 1 LIVE critique with value=pass, got ' + JSON.stringify(live.map(c=>c.value)));
-if (hist.length !== 1 || hist[0].value !== 'fail' || hist[0].status !== 'superseded') throw new Error('expected historical fail with status=superseded');
-if (!hist[0].metadata.superseded_by) throw new Error('history missing first-class metadata.superseded_by');
+if (hist.length !== 2 || !hist.some(c => c.value === 'fail') || hist.some(c => c.status !== 'superseded')) throw new Error('expected historical fail and pass with status=superseded');
+const liveRecordId = live[0].metadata.critique_record_id;
+if (hist.some(c => c.metadata.superseded_by !== liveRecordId)) throw new Error('every historical critique must resolve to the newest live pass');
+if (hist.some(c => c.metadata.critique_resolution?.resolving_record_id !== liveRecordId)) throw new Error('historical resolution edges must target the newest live pass');
 const ids = (b.claims||[]).map(c=>c.id); const dup = ids.filter((x,i)=>ids.indexOf(x)!==i);
 if (dup.length) throw new Error('duplicate claim ids in bundle: ' + dup.join(','));
-console.log('live=pass, history=fail(superseded), no duplicate ids');
+console.log('live=latest pass, history=fail+pass(superseded to latest), no duplicate ids');
 NODE
-if [[ $? -eq 0 ]]; then _pass "(a) effective state=pass, historical fail retained+superseded, no dup ids"; else _fail "(a) supersession/history assertion failed"; fi
+if [[ $? -eq 0 ]]; then _pass "(a) refreshed pass retargets all same-reviewer resolution edges"; else _fail "(a) repeated supersession/history assertion failed"; fi
 
 TRUST_RECONCILE_COMMANDS="true" node "$RECON" --bundle "$A_DIR/trust.bundle" --repo-root "$TMP/a" >"$TMP/a-recon.log" 2>&1
 if [[ $? -eq 0 ]]; then _pass "(a) trust-reconcile exits 0 (resolved session converges)"; else _fail "(a) trust-reconcile did NOT converge: $(cat "$TMP/a-recon.log")"; fi

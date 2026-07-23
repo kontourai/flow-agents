@@ -1172,29 +1172,32 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
   if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
   }
-  const currentCritiques = liveCritiques.flatMap((claim) => {
+  const critiqueCandidates = await Promise.all(liveCritiques.map(async (claim) => {
     const artifacts = reviewedArtifacts(claim);
     try {
       assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
-      return [{ claim, artifacts }];
+      await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
+      return { current: { claim, artifacts }, staleError: null };
     } catch (error) {
       if (error instanceof BuilderBuildRunInputError && [
         "evidence.critique.review_target.workspace_snapshot.digest",
         "evidence.critique.review_target.workspace_snapshot.head_sha",
-      ].includes(error.field)) return [];
+        "evidence.critique.review_target.artifacts.sha256",
+      ].includes(error.field)) return { current: null, staleError: error };
       throw error;
     }
-  });
+  }));
+  const currentCritiques = critiqueCandidates.flatMap((candidate) => candidate.current ? [candidate.current] : []);
   if (currentCritiques.length === 0) {
+    const artifactError = critiqueCandidates.find((candidate) =>
+      candidate.staleError?.field === "evidence.critique.review_target.artifacts.sha256")?.staleError;
+    if (artifactError) throw artifactError;
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a clean critique of the current implementation workspace");
   }
   const implementationActors = new Set(testClaims.map((claim) => claim.metadata.recorded_by).filter((actor): actor is string => typeof actor === "string" && actor.length > 0));
   if (implementationActors.size !== 1 || currentCritiques.some(({ claim }) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
     throw new BuilderBuildRunInputError("evidence.critique.reviewer", "must identify a reviewer distinct from the tests-evidence implementation actor");
   }
-  await Promise.all(currentCritiques.flatMap(async ({ artifacts }) => {
-    await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
-  }));
   const criteria = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
   if (criteria.length === 0 || criteria.some((claim) => {
     const criterion = isRecord(claim.metadata.criterion) ? claim.metadata.criterion : null;
