@@ -170,7 +170,7 @@
     "@kontourai/conduit": "0.2.1",
     "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "3.7.0",
-    "@kontourai/relay": "0.4.0",
+    "@kontourai/relay": "0.5.0",
     "@kontourai/survey": "2.0.0",
     "esbuild": "0.28.1"
   },
