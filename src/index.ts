@@ -50,6 +50,22 @@ export type {
   RuntimeCorrelationIdentityDeclaration,
   RuntimeCorrelationIdentitySupport,
 } from "./run-correlation.js";
+export {
+  TOOL_RESULT_STATUSES,
+  USAGE_METRICS,
+  USAGE_SEMANTICS,
+  partitionTelemetryRecords,
+  reduceUsageObservations,
+  validateTelemetryRecord,
+} from "./telemetry-semantics.js";
+export type {
+  TelemetryDiagnostic,
+  ToolResultStatus,
+  UsageMetric,
+  UsageObservation,
+  UsageSemantics,
+  ValidatedTelemetryRecord,
+} from "./telemetry-semantics.js";
 
 export {
   NARRATIVE_SOURCE_ID_VERSION,

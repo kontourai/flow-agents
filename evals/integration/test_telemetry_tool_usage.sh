@@ -141,6 +141,7 @@ if [[ -n "$out1" ]]; then
   ot1=$(echo "$out1" | jq -r '.usage.output_tokens // empty')
   cost1=$(echo "$out1" | jq -r '.usage.estimated_cost_usd // empty')
   pv1=$(echo "$out1" | jq -r '.usage.pricing_version // empty')
+  semantics1=$(echo "$out1" | jq -r '.usage.semantics // empty')
 
   [[ "$event_type1" == "tool.invoke" ]] && _pass "preToolUse maps to tool.invoke" || _fail "expected tool.invoke, got $event_type1"
   [[ "$model1" == "claude-fable-5" ]] && _pass "usage.model is the LAST turn's model (claude-fable-5), not the aggregate-dominant model" || _fail "expected usage.model=claude-fable-5 (last turn), got $model1"
@@ -148,6 +149,7 @@ if [[ -n "$out1" ]]; then
   [[ "$ot1" == "200" ]] && _pass "usage.output_tokens is the last turn's value (200)" || _fail "expected usage.output_tokens=200, got $ot1"
   [[ -n "$cost1" && "$cost1" != "null" ]] && _pass "usage.estimated_cost_usd is non-null (got: $cost1)" || _fail "expected non-null estimated_cost_usd, got $cost1"
   [[ "$pv1" != "null" && -n "$pv1" ]] && _pass "usage.pricing_version is populated" || _fail "expected non-null pricing_version, got $pv1"
+  [[ "$semantics1" == "delta" ]] && _pass "per-turn tool usage declares delta semantics" || _fail "expected usage.semantics=delta, got $semantics1"
 else
   _fail "no tool.invoke event emitted for fixture transcript"
 fi
