@@ -27,9 +27,13 @@ function protectedExecutable() {
   return { isSymbolicLink: () => false, isFile: () => true, uid: 0, mode: 0o755 };
 }
 
-const completionVerificationKey = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "pem" });
+const completionVerificationKeyPair = generateKeyPairSync("ed25519");
+const completionVerificationKey = completionVerificationKeyPair.publicKey.export({ type: "spki", format: "pem" });
+const completionVerificationPrivateKeyPem = completionVerificationKeyPair.privateKey.export({ type: "pkcs8", format: "pem" });
+const completionVerificationPrivateKeyDer = completionVerificationKeyPair.privateKey.export({ type: "pkcs8", format: "der" });
 const nonEd25519CompletionVerificationKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ type: "spki", format: "pem" });
 const resolvedCompletionVerificationKeyPath = "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
+const directCompletionVerificationKeyPath = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
 
 function protectedCompletionDirectory(overrides = {}) {
   return { isSymbolicLink: () => false, isFile: () => false, uid: 0, mode: 0o755, ...overrides };
@@ -46,17 +50,21 @@ function protectedCompletionKey(overrides = {}) {
 function completionVerificationKeyHost({
   platform = "darwin",
   etcTarget = "/private/etc",
+  etcIsAlias = true,
+  writeErrorCode = "EACCES",
   entries = {},
   key = completionVerificationKey,
 } = {}) {
+  const keyPath = etcIsAlias ? resolvedCompletionVerificationKeyPath : directCompletionVerificationKeyPath;
+  const etcRoot = etcIsAlias ? "/private/etc" : "/etc";
   const defaultEntries = new Map([
     ["/", protectedCompletionDirectory()],
-    ["/etc", { ...protectedCompletionDirectory(), isSymbolicLink: () => true }],
-    ["/private", protectedCompletionDirectory()],
-    ["/private/etc", protectedCompletionDirectory()],
-    ["/private/etc/kontourai", protectedCompletionDirectory()],
-    ["/private/etc/kontourai/flow-agents-lifecycle-authority-v1", protectedCompletionDirectory()],
-    [resolvedCompletionVerificationKeyPath, protectedCompletionKey({ size: key.length })],
+    ["/etc", { ...protectedCompletionDirectory(), isSymbolicLink: () => etcIsAlias }],
+    ...(etcIsAlias ? [["/private", protectedCompletionDirectory()]] : []),
+    [etcRoot, protectedCompletionDirectory()],
+    [`${etcRoot}/kontourai`, protectedCompletionDirectory()],
+    [`${etcRoot}/kontourai/flow-agents-lifecycle-authority-v1`, protectedCompletionDirectory()],
+    [keyPath, protectedCompletionKey({ size: key.length })],
   ]);
   for (const [file, stat] of Object.entries(entries)) defaultEntries.set(file, stat);
   let closed = false;
@@ -69,22 +77,23 @@ function completionVerificationKeyHost({
     },
     readlinkSync(file) {
       assert.equal(file, "/etc", "only the fixed lexical /etc component may be resolved as the platform alias");
+      assert.equal(etcIsAlias, true, "a protected direct /etc must not be read as a symlink");
       return etcTarget;
     },
     accessSync(file) {
       assert.ok(defaultEntries.has(file), `runtime-user write probe must cover ${file}`);
-      const error = new Error("EACCES");
-      error.code = "EACCES";
+      const error = new Error(writeErrorCode);
+      error.code = writeErrorCode;
       throw error;
     },
     openSync(file, flags) {
-      assert.equal(file, resolvedCompletionVerificationKeyPath, "the final descriptor must open the fixed resolved key path");
+      assert.equal(file, keyPath, "the final descriptor must open the fixed resolved key path");
       assert.equal(flags, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW, "the final key descriptor must retain O_NOFOLLOW");
       return 43;
     },
     fstatSync(descriptor) {
       assert.equal(descriptor, 43);
-      return defaultEntries.get(resolvedCompletionVerificationKeyPath);
+      return defaultEntries.get(keyPath);
     },
     readFileSync(descriptor) {
       assert.equal(descriptor, 43);
@@ -135,12 +144,12 @@ test("lifecycle authority helper installation is hermetic when a protected helpe
   assert.equal(closed, true, "the helper descriptor is closed after validation");
 });
 
-test("completion-key verification admits only the protected Darwin /etc platform alias and retains every resolved-path and final-key boundary", () => {
+test("completion-key verification admits protected direct /etc or the exact Darwin platform alias and retains every resolved-path and final-key boundary", () => {
   const validateCompletionVerificationKeyInstallation = lifecycleAuthority.validateLifecycleAuthorityCompletionVerificationKeyInstallation;
   assert.equal(
     typeof validateCompletionVerificationKeyInstallation,
     "function",
-    "RED: completion-key verification needs an injectable fixed-key host boundary before the standard Darwin /etc -> /private/etc alias can be accepted hermetically",
+    "completion-key verification retains an injectable fixed-key host boundary for protected direct /etc and the standard Darwin /etc -> /private/etc alias",
   );
 
   const standardAliasHost = completionVerificationKeyHost();
@@ -148,6 +157,10 @@ test("completion-key verification admits only the protected Darwin /etc platform
   assert.equal(key.type, "public");
   assert.equal(key.asymmetricKeyType, "ed25519");
   assert.equal(standardAliasHost.closed, true, "the final protected key descriptor is closed");
+  const directEtcHost = completionVerificationKeyHost({ etcIsAlias: false });
+  assert.equal(validateCompletionVerificationKeyInstallation(directEtcHost).asymmetricKeyType, "ed25519", "a protected direct Darwin /etc remains valid");
+  assert.equal(directEtcHost.closed, true, "the direct /etc key descriptor is closed");
+  assert.equal(validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ writeErrorCode: "EROFS" })).asymmetricKeyType, "ed25519", "read-only protected Darwin components report EROFS rather than writable access");
 
   assert.throws(
     () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ etcTarget: "/var/etc" })),
@@ -178,6 +191,11 @@ test("completion-key verification admits only the protected Darwin /etc platform
     "every resolved parent remains root-owned",
   );
   assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ writeErrorCode: "ENOENT" })),
+    /runtime-user write protection could not be verified/i,
+    "unexpected runtime-user write probe failures are not treated as protected read-only paths",
+  );
+  assert.throws(
     () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({
       entries: { [resolvedCompletionVerificationKeyPath]: protectedCompletionKey({ mode: 0o664 }) },
     })),
@@ -197,10 +215,21 @@ test("completion-key verification admits only the protected Darwin /etc platform
     "the fixed protected file must still contain an Ed25519 public key",
   );
   assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ key: completionVerificationPrivateKeyPem })),
+    /must not contain private key material/i,
+    "PKCS#8 PEM private material cannot be promoted to a public verification key",
+  );
+  assert.throws(
+    () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ key: completionVerificationPrivateKeyDer })),
+    /must not contain private key material/i,
+    "PKCS#8 DER private material cannot be promoted to a public verification key",
+  );
+  assert.throws(
     () => validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ platform: "linux" })),
     /symlink/i,
     "non-Darwin platforms retain the no-symlink component policy",
   );
+  assert.equal(validateCompletionVerificationKeyInstallation(completionVerificationKeyHost({ platform: "linux", etcIsAlias: false })).asymmetricKeyType, "ed25519", "non-Darwin protected direct paths retain the no-symlink policy");
   assert.throws(
     () => validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH, {
       platform: "darwin",

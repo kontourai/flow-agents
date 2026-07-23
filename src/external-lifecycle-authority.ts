@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, verify } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
@@ -130,7 +130,7 @@ function validateProtectedCompletionVerificationKeyPathComponent(file: string, h
   catch (error) {
     if (error instanceof Error && error.message.includes("must not be writable")) throw error;
     const code = (error as { code?: unknown })?.code;
-    if (code !== "EACCES" && code !== "EPERM") throw new Error("pinned lifecycle authority completion verification key path runtime-user write protection could not be verified");
+    if (code !== "EACCES" && code !== "EPERM" && code !== "EROFS") throw new Error("pinned lifecycle authority completion verification key path runtime-user write protection could not be verified");
   }
   return stat;
 }
@@ -149,11 +149,12 @@ export function validateLifecycleAuthorityCompletionVerificationKeyInstallation(
   if (rootStat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
   if (host.platform === "darwin") {
     const etcStat = validateProtectedCompletionVerificationKeyPathComponent("/etc", host);
-    if (!etcStat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key must use the protected Darwin /etc platform alias");
-    let target: string;
-    try { target = host.readlinkSync("/etc"); } catch { throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias is unreadable"); }
-    if (path.posix.resolve(root, target) !== "/private/etc") throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias must resolve exactly to /private/etc");
-    resolvedKeyFile = path.posix.join("/private/etc", keyFile.slice("/etc".length));
+    if (etcStat.isSymbolicLink()) {
+      let target: string;
+      try { target = host.readlinkSync("/etc"); } catch { throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias is unreadable"); }
+      if (path.posix.resolve(root, target) !== "/private/etc") throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias must resolve exactly to /private/etc");
+      resolvedKeyFile = path.posix.join("/private/etc", keyFile.slice("/etc".length));
+    }
   }
   let cursor = root;
   for (const component of resolvedKeyFile.slice(root.length).split(path.posix.sep).filter(Boolean)) {
@@ -165,7 +166,13 @@ export function validateLifecycleAuthorityCompletionVerificationKeyInstallation(
   try {
     const stat = host.fstatSync(descriptor);
     if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");
-    const key = createPublicKey(host.readFileSync(descriptor));
+    const keyMaterial = host.readFileSync(descriptor);
+    let privateKeyMaterial = false;
+    try { createPrivateKey(keyMaterial); privateKeyMaterial = true; } catch {
+      try { createPrivateKey({ key: keyMaterial, format: "der", type: "pkcs8" }); privateKeyMaterial = true; } catch { /* not private key material */ }
+    }
+    if (privateKeyMaterial) throw new Error("pinned lifecycle authority completion verification key must not contain private key material");
+    const key = createPublicKey(keyMaterial);
     if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") throw new Error("pinned lifecycle authority completion verification key must be an Ed25519 public key");
     return key;
   } finally { host.closeSync(descriptor); }
