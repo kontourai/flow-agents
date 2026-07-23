@@ -167,7 +167,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@kontourai/conduit": "0.2.1",
+    "@kontourai/conduit": "0.6.0",
     "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "3.7.0",
     "@kontourai/relay": "0.4.0",
