@@ -47,6 +47,21 @@ string-only parameter contract stores the canonical JSON bytes; Builder load
 and evaluation validate those bytes before exposing them. Trust evidence
 analytics carry either the same envelope or the explicit incomplete result.
 
+`reconstructRun` rebuilds a run account from identity-bearing facts only. A
+complete account contains runtime session and turn facts, tool results, Flow
+gates and route-backs, delegations, trust references, economics, and a terminal
+outcome. Delegation facts may point to a child correlation id, making a nested
+run discoverable without using prompt text, paths, timestamps, or process
+ancestry. Facts from concurrent runs remain separate even when every surrounding
+label is identical.
+
+Evaluation identity remains external. `joinIndependentEvaluation` joins an eval
+cell, attempt, and independent grade through the correlation id after
+reconstruction. Run facts reject experiment arms, grade status, scores, and eval
+identifiers. Process completion and task-quality acceptance are separate
+booleans: a run can finish successfully while an independent grader rejects its
+quality.
+
 This is intentionally an embedded value rather than a standalone Kontour
 Resource Contract. It has no independent lifecycle, desired state, authority,
 or status conditions; wrapping every occurrence in resource metadata would
