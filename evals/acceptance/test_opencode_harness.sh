@@ -79,7 +79,8 @@ done
 # and which opencode does not reliably surface to its log file — a stale-assertion
 # false failure (#75). The factory runs regardless of provider, so this load
 # signal is independent of whether a model turn completes.
-if [[ -f "$TMP_WORK/.telemetry/opencode-plugin.loaded" ]]; then
+if [[ -f "$TMP_WORK/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$TMP_WORK/.telemetry/opencode-plugin.loaded" ]]; then
   _pass "flow-agents plugin loaded (factory marker present)"
 else
   _fail "flow-agents plugin did not load (factory marker absent)"
