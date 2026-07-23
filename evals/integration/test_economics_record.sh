@@ -242,6 +242,14 @@ SH
 }
 stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID=""; }
 wait_for_post() { for _ in $(seq 1 25); do [[ -s "$RECV" ]] && return 0; sleep 0.2; done; return 1; }
+wait_for_mailbox() {
+  local mailbox="$1"
+  for _ in $(seq 1 25); do
+    [[ -s "$mailbox" ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
 ENDPOINT="http://127.0.0.1:${PORT}/records"
 
 # ── detached POST isolation: a late prior case cannot contaminate the next mailbox ───────────────
@@ -256,8 +264,7 @@ MAILBOX_LOG="$TMP/econ-mailbox-delay.jsonl"; : > "$MAILBOX_LOG"
 )
 start_stub ok
 NEXT_RECV="$RECV"
-sleep 0.8
-[[ -s "$PRIOR_RECV" ]] && pass "delayed prior POST lands in its original mailbox" || fail "delayed prior POST did not land"
+wait_for_mailbox "$PRIOR_RECV" && pass "delayed prior POST lands in its original mailbox" || fail "delayed prior POST did not land"
 [[ ! -s "$NEXT_RECV" ]] && pass "delayed prior POST cannot contaminate the next case mailbox" || fail "delayed prior POST contaminated the next case mailbox"
 
 # ── local-first: NO console configured → local write happens, nothing POSTed ──────────────────────
