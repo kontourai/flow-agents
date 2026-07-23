@@ -111,6 +111,8 @@
     "context-map:check": "npm run build --silent && node build/src/cli.js context-map --check",
     "capability-matrix": "npm run build --silent && node build/src/cli.js capability-matrix",
     "capability-matrix:check": "npm run build --silent && node build/src/cli.js capability-matrix --check",
+    "host-conformance": "npm run build --silent && node build/src/tools/generate-host-conformance.js",
+    "host-conformance:check": "npm run build --silent && node build/src/tools/generate-host-conformance.js --check",
     "build:bundles": "npm run build --silent && node build/src/cli.js build-bundles",
     "validate:package": "npm run build --silent && node build/src/cli.js validate-package",
     "workflow:sidecar": "npm run build --silent && node build/src/cli/workflow-sidecar.js",
@@ -164,6 +166,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@kontourai/conduit": "0.2.1",
     "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "3.7.0",
     "@kontourai/relay": "0.4.0",

@@ -99,6 +99,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check capability-matrix-drift
 
+      - name: Host conformance drift
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check host-conformance-drift
+
       - name: Static eval suite
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite

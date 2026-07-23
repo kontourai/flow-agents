@@ -1,0 +1,150 @@
+{
+  "schemaVersion": "1",
+  "adapters": [
+    {
+      "evidenceScope": "adapter-contract",
+      "adapterId": "claude-code",
+      "adapterVersion": "0.2.1",
+      "hostId": "flow-agents-local-harness-binding",
+      "hostVersion": "public-config-binding-v1",
+      "capabilities": {
+        "lifecycle": {
+          "session-start": "native",
+          "before-model": "approximated",
+          "before-tool": "native",
+          "after-tool": "native",
+          "stop": "native"
+        },
+        "contextInjection": "native",
+        "blocking": "native",
+        "install": {
+          "skill": "native",
+          "agent": "native",
+          "hook": "native",
+          "prompt": "native",
+          "command": "native",
+          "context": "static-only"
+        }
+      },
+      "limitations": [
+        "install.context=static-only",
+        "lifecycle.before-model=approximated"
+      ],
+      "results": [
+        {
+          "check": "capability-completeness",
+          "status": "pass"
+        },
+        {
+          "check": "context-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "deny-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "install-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-stop",
+          "status": "pass"
+        },
+        {
+          "check": "secret-free-install-receipt",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "evidenceScope": "adapter-contract",
+      "adapterId": "strands",
+      "adapterVersion": "0.2.1",
+      "hostId": "flow-agents-in-process-binding",
+      "hostVersion": "caller-bound-hooks-v1",
+      "capabilities": {
+        "lifecycle": {
+          "session-start": "native",
+          "before-model": "native",
+          "before-tool": "native",
+          "after-tool": "native",
+          "stop": "native"
+        },
+        "contextInjection": "native",
+        "blocking": "native",
+        "install": {
+          "skill": "approximated",
+          "agent": "approximated",
+          "hook": "native",
+          "prompt": "native",
+          "command": "approximated",
+          "context": "native"
+        }
+      },
+      "limitations": [
+        "install.agent=approximated",
+        "install.command=approximated",
+        "install.skill=approximated"
+      ],
+      "results": [
+        {
+          "check": "capability-completeness",
+          "status": "pass"
+        },
+        {
+          "check": "context-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "deny-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "install-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-stop",
+          "status": "pass"
+        },
+        {
+          "check": "secret-free-install-receipt",
+          "status": "pass"
+        }
+      ]
+    }
+  ]
+}

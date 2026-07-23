@@ -17,6 +17,7 @@ CHECKS=(
   "Source tree validation|npm run validate:source --"
   "Context map drift|npm run context-map -- --check"
   "Capability matrix drift|npm run capability-matrix -- --check"
+  "Host conformance drift|npm run host-conformance:check --"
   "Static eval suite|bash evals/run.sh static"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
@@ -130,6 +131,7 @@ LANE_SOURCE_AND_STATIC=(
   "Source tree validation"
   "Context map drift"
   "Capability matrix drift"
+  "Host conformance drift"
   "Static eval suite"
 )
 
