@@ -1067,6 +1067,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       && !Array.isArray(check._verification_workspace_snapshot)
       ? check._verification_workspace_snapshot as AnyObj
       : null;
+    const acceptanceContractMeta = check._acceptance_contract
+      && typeof check._acceptance_contract === "object"
+      && !Array.isArray(check._acceptance_contract)
+      ? check._acceptance_contract as AnyObj
+      : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -1108,6 +1113,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
       ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
+      ...(acceptanceContractMeta ? { acceptance_contract: acceptanceContractMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -3683,6 +3689,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
     if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
+    const md = claim.metadata as AnyObj;
+    if (md && typeof md.acceptance_contract === "object" && !Array.isArray(md.acceptance_contract)) {
+      check._acceptance_contract = md.acceptance_contract;
+    }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -3806,6 +3816,16 @@ function existingCheckStampMap(checks: AnyObj[]): Map<string, boolean> {
  * exactly what caused #270's 21-claims-to-1 wipe. Generalizes the pattern recordLearning already
  * used inline; behavior-neutral for recordLearning itself.
  */
+function acceptanceContract(criteria: AnyObj[]): AnyObj {
+  const snapshot = criteria.map((criterion) => ({ id: criterion.id, description: criterion.description }));
+  return {
+    version: 1,
+    algorithm: "sha256",
+    digest: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"),
+    criteria: snapshot,
+  };
+}
+
 function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
@@ -3816,6 +3836,17 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
   const acceptedIds = acceptedCriteria.map((criterion) => String(criterion.id));
   if (new Set(acceptedIds).size !== acceptedIds.length) {
     die("acceptance.json criterion ids must be unique — refusing to rebuild trust.bundle with ambiguous acceptance identity");
+  }
+  const checks = checksFromBundle(dir);
+  const plannedContract = checks.find((check) => check._gate_claim_expectation_id === "implementation-plan")?._acceptance_contract;
+  if (plannedContract) {
+    const currentContract = acceptanceContract(acceptedCriteria);
+    if (plannedContract.version !== currentContract.version
+      || plannedContract.algorithm !== currentContract.algorithm
+      || plannedContract.digest !== currentContract.digest
+      || !isDeepStrictEqual(plannedContract.criteria, currentContract.criteria)) {
+      die("acceptance.json no longer matches the criterion contract anchored by the implementation-plan claim — direct post-plan criterion mutation is not authorized; revise criteria through a provenance-bearing planning operation before recording later evidence");
+    }
   }
   const contractSignature = (criteria: AnyObj[]): string => JSON.stringify(criteria.map((criterion) => ({
     id: criterion.id ?? null,
@@ -3828,7 +3859,7 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
     ? acceptedCriteria
     : (bundledCriteria.length > 0 ? bundledCriteria : acceptedCriteria);
   return {
-    checks: checksFromBundle(dir),
+    checks,
     criteria,
     critiques: critiquesFromBundle(dir),
   };
@@ -4286,6 +4317,11 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
     ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
   };
+  if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
+    const acceptance = loadJson(path.join(dir, "acceptance.json"));
+    const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
+    check._acceptance_contract = acceptanceContract(criteria);
+  }
 
   // Include structured evidence refs if provided
   const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
