@@ -67,6 +67,7 @@ stat -c "%U %a" "$LIFECYCLE_HELPER_PATH" | grep -qx "root 755"
 CONFIG=/etc/kontourai/flow-agents-lifecycle-authority-v1
 STATE_SEGMENT=lib
 STATE="/var/$STATE_SEGMENT/kontourai/flow-agents-lifecycle-authority-v1"
+export LIFECYCLE_STATE_ROOT="$STATE"
 mkdir -p "$CONFIG" "$STATE" /root/lifecycle-authorizations
 node <<'NODE'
 const fs = require('node:fs');
@@ -121,7 +122,7 @@ fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(pro
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
 fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
-for (const slug of ['resolve-e2e', 'repair-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) await makeSession(slug);
+for (const slug of ['resolve-e2e', 'repair-e2e', 'bridge-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) await makeSession(slug);
 for (const slug of ['legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) {
   const assignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`);
   const record = JSON.parse(fs.readFileSync(assignment, 'utf8'));
@@ -180,6 +181,31 @@ const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON
 const acceptance = bundle.claims.find((claim) => claim.claimType === 'workflow.acceptance.criterion'); if (!acceptance) throw new Error('history-repair fixture acceptance claim is missing');
 acceptance.value = 'pass'; acceptance.status = 'verified'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
 NODE
+
+# This is the minimal durable bridge fixture: the first ordinary resolution
+# creates the only historical root state.  Its later critiques are intentionally
+# appended without issuing another completion, so a repair must use all three
+# request-keyed anchors rather than treating the old receipt as current.
+BRIDGE_SESSION="$PROJECT/.kontourai/flow-agents/bridge-e2e"
+node - "$PROJECT" "$BRIDGE_SESSION" <<'NODE'
+const fs = require('node:fs'), path = require('node:path'); const [project, session] = process.argv.slice(2);
+const flowFile = path.join(project, '.kontourai', 'flow', 'runs', 'bridge-e2e', 'state.json'); const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8')); flow.current_step = 'verify'; fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
+const sidecarFile = path.join(session, 'state.json'); const sidecar = JSON.parse(fs.readFileSync(sidecarFile, 'utf8')); if (sidecar.flow_run) sidecar.flow_run.current_step = 'verify'; fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
+NODE
+node build/src/cli/workflow-sidecar.js record-evidence "$BRIDGE_SESSION" --verdict pass --check-json '{"id":"bridge-fixture-check","kind":"test","status":"pass","summary":"Bridge fixture check passed."}' --command 'node --test review-target/fixture.test.mjs' --evidence-ref-json '{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"Runs the lifecycle bridge fixture test."}' --criterion-json '{"id":"AC-1","status":"pass","evidence_refs":[{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"Runs the lifecycle bridge fixture test."}]}' --timestamp "2026-07-20T01:00:00Z" >/dev/null
+node - "$BRIDGE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const acceptance = bundle.claims.find((claim) => claim.claimType === 'workflow.acceptance.criterion'); if (!acceptance) throw new Error('bridge fixture acceptance claim is missing');
+acceptance.value = 'pass'; acceptance.status = 'verified'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+printf 'bridge delivery A failed\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-a-failed --reviewer bridge-reviewer-a --verdict fail --summary "Bridge A failed." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-a","status":"fail","summary":"Bridge A remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-a-defect","severity":"high","status":"open","description":"Bridge A repair required."}' --timestamp "2026-07-20T01:01:00Z" >/dev/null
+printf 'bridge delivery A repaired\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-a-repaired --reviewer bridge-reviewer-b --verdict pass --summary "Bridge A repaired." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-a","status":"pass","summary":"Bridge A repaired.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-a-defect","severity":"high","status":"fixed","description":"Bridge A repair verified."}' --timestamp "2026-07-20T01:02:00Z" >/dev/null
+printf 'bridge delivery B failed\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-b-failed --reviewer bridge-reviewer-c --verdict fail --summary "Bridge B failed." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-b","status":"fail","summary":"Bridge B remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-b-defect","severity":"high","status":"open","description":"Bridge B repair required."}' --timestamp "2026-07-20T01:03:00Z" >/dev/null
+printf 'bridge delivery B repaired\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-b-repaired --reviewer bridge-reviewer-d --verdict pass --summary "Bridge B repaired." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-b","status":"pass","summary":"Bridge B repaired.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-b-defect","severity":"high","status":"fixed","description":"Bridge B repair verified."}' --timestamp "2026-07-20T01:04:00Z" >/dev/null
 mapfile -t CRITIQUE_IDS < <(node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
 const fs = require('node:fs'); for (const claim of JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique')) console.log(claim.metadata.critique_record_id);
 NODE
@@ -339,6 +365,109 @@ const manifest = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'fl
 console.log('PASS: legacy ledger overwrite, two signed history repairs, repair replay/rejections, two later ordinary resolutions, byte-identical repaired Trust Bundle, strict graph, completion, and Flow attachment');
 NODE
 node /work/history-repair-e2e.mjs
+
+cat > /work/history-repair-bridge-anchors-e2e.mjs <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawn, spawnSync } from 'node:child_process';
+import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
+import { verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
+const project = '/tmp/lifecycle-authority-e2e', slug = 'bridge-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug), flowRoot = path.join(project, '.kontourai', 'flow', 'runs', slug), ledgerFile = path.join(session, 'lifecycle-authority.resolution-events.json'), completionFile = path.join(session, 'lifecycle-authority.completion.json');
+const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
+const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
+const request = (verb, pair, name) => {
+  const result = spawnSync(process.execPath, ['./build/src/cli.js', 'workflow', verb, '--session-dir', session, '--prior-record-id', pair[0], '--resolving-record-id', pair[1]], { cwd: '/work', encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`${verb} request failed: ${result.stdout}${result.stderr}`);
+  const unsigned = JSON.parse(result.stdout), authorization = { ...unsigned.authorization, signature: { algorithm: 'ed25519', key_id: 'fixture-authority', value: crypto.sign(null, Buffer.from(unsigned.signing_payload), key).toString('base64') } };
+  const file = `/root/lifecycle-authorizations/${name}.json`; fs.writeFileSync(file, `${JSON.stringify(authorization)}\n`, { mode: 0o600 }); return { authorization, file };
+};
+const invoke = (action, pair, authorizationFile) => {
+  const command = ['node', '/work/history-repair-invoke.mjs', action, project, session, authorizationFile, pair[0], pair[1]].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', command], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`unprivileged ${action} invocation failed: ${result.stdout}${result.stderr}`);
+  return JSON.parse(result.stdout);
+};
+const reject = (label, fn, pattern = /./) => { try { fn(); } catch (error) { if (pattern.test(String(error))) return; throw new Error(`${label} rejected for the wrong reason: ${error}`); } throw new Error(`${label} unexpectedly succeeded`); };
+const critiques = () => JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.metadata).sort((a, b) => a.critique_sequence - b.critique_sequence);
+const initial = critiques(); if (initial.length !== 4) throw new Error('bridge fixture requires two initial critique pairs');
+const pairA = [initial[0].critique_record_id, initial[1].critique_record_id], pairB = [initial[2].critique_record_id, initial[3].critique_record_id];
+
+// Ordinary A is the sole historical authority root. Capture its request-keyed
+// Flow snapshot and the actual root durable completion/nonce before any later
+// critique exists.
+const ordinaryA = request('resolve-critique-request', pairA, 'bridge-ordinary-a');
+if (invoke('resolve-critique', pairA, ordinaryA.file).operation_status !== 'applied') throw new Error('ordinary bridge anchor was not applied');
+const historicalCompletionBytes = fs.readFileSync(completionFile), historicalCompletion = verifyLifecycleAuthorityCompletion(JSON.parse(historicalCompletionBytes));
+const historicalLedgerBytes = fs.readFileSync(ledgerFile), historicalLedger = JSON.parse(historicalLedgerBytes);
+if (historicalLedger.events.length !== 1 || historicalLedger.events[0].operation !== 'resolve-critique') throw new Error('ordinary bridge anchor did not append exactly one event');
+const historicalFlow = '/tmp/bridge-historical-flow'; fs.rmSync(historicalFlow, { recursive: true, force: true }); fs.cpSync(flowRoot, historicalFlow, { recursive: true });
+const historicalAttachmentId = `lifecycle-authority:${historicalCompletion.request_sha256}`;
+const historicalManifest = JSON.parse(fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), 'utf8'));
+const historicalEntry = historicalManifest.evidence.filter((entry) => entry.id === historicalAttachmentId);
+if (historicalEntry.length !== 1 || historicalEntry[0].stored_path !== `evidence/${historicalAttachmentId}.json`) throw new Error('ordinary bridge anchor did not create the request-keyed Flow attachment');
+const historicalSnapshot = fs.readFileSync(path.join(flowRoot, historicalEntry[0].stored_path));
+const operationId = sha256({ project, run_id: slug, action: 'resolve-critique', key_id: ordinaryA.authorization.signature.key_id, nonce: ordinaryA.authorization.nonce });
+const durableRoot = process.env.LIFECYCLE_STATE_ROOT; if (!durableRoot) throw new Error('container fixture requires the configured lifecycle durable state root');
+const durableCompletionFile = path.join(durableRoot, 'completions', `${operationId}.json`);
+const durableNonceFile = path.join(durableRoot, 'nonces', `${sha256(`${ordinaryA.authorization.signature.key_id}\u0000${ordinaryA.authorization.nonce}`)}.json`);
+const durableCompletionBytes = fs.readFileSync(durableCompletionFile), durableNonceBytes = fs.readFileSync(durableNonceFile);
+if (!durableCompletionBytes.includes(Buffer.from(historicalCompletion.request_sha256)) || !durableNonceBytes.includes(Buffer.from('"status":"applied"'))) throw new Error('ordinary bridge anchor lacks durable completion or applied nonce state');
+
+// B was ordinarily resolved, then its external event/receipt/Flow projection
+// was lost. The retained B edge is the only repair target. Restore A's
+// request-keyed snapshot and append C without minting a replacement receipt.
+const ordinaryB = request('resolve-critique-request', pairB, 'bridge-ordinary-b');
+if (invoke('resolve-critique', pairB, ordinaryB.file).operation_status !== 'applied') throw new Error('ordinary bridge gap fixture was not applied');
+fs.writeFileSync(ledgerFile, historicalLedgerBytes); fs.writeFileSync(completionFile, historicalCompletionBytes);
+fs.rmSync(flowRoot, { recursive: true, force: true }); fs.cpSync(historicalFlow, flowRoot, { recursive: true });
+const sidecar = (id, reviewer, verdict, lane, finding, timestamp) => {
+  const result = spawnSync(process.execPath, ['./build/src/cli/workflow-sidecar.js', 'record-critique', session, '--id', id, '--reviewer', reviewer, '--verdict', verdict, '--summary', `Bridge ${id}.`, '--artifact-ref', path.join(project, 'review-target', 'delivery.md'), '--lane-json', JSON.stringify({ id: lane, status: verdict, summary: `Bridge ${id}.`, evidence_refs: [{ kind: 'artifact', file: 'review-target/delivery.md', summary: 'Bridge delivery review.' }] }), '--finding-json', JSON.stringify({ id: finding, severity: 'high', status: verdict === 'pass' ? 'fixed' : 'open', description: `Bridge ${id}.` }), '--timestamp', timestamp], { cwd: '/work', encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`later critique ${id} failed: ${result.stdout}${result.stderr}`);
+};
+fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery C failed\n'); sidecar('bridge-c-failed', 'bridge-reviewer-e', 'fail', 'bridge-c', 'bridge-c-defect', '2026-07-20T01:05:00Z');
+fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery C repaired\n'); sidecar('bridge-c-repaired', 'bridge-reviewer-f', 'pass', 'bridge-c', 'bridge-c-defect', '2026-07-20T01:06:00Z');
+if (!fs.readFileSync(completionFile).equals(historicalCompletionBytes)) throw new Error('later critique minted or changed a stale completion');
+const afterLater = critiques(); const pairC = [afterLater[4].critique_record_id, afterLater[5].critique_record_id]; if (afterLater.length !== 6) throw new Error('later critique append did not preserve ordered history');
+
+const repair = request('repair-critique-resolution-history-request', pairB, 'bridge-repair');
+const bundleFile = path.join(session, 'trust.bundle'), bundleBeforeRepair = fs.readFileSync(bundleFile), ledgerBeforeRepair = fs.readFileSync(ledgerFile), flowBeforeRepair = '/tmp/bridge-before-repair-flow'; fs.rmSync(flowBeforeRepair, { recursive: true, force: true }); fs.cpSync(flowRoot, flowBeforeRepair, { recursive: true });
+const restore = (file, bytes) => fs.writeFileSync(file, bytes);
+const mutateAndReject = (label, file, mutate, pattern) => { const bytes = fs.readFileSync(file); try { mutate(); reject(label, () => invoke('repair-critique-resolution-history', pairB, repair.file), pattern); } finally { restore(file, bytes); } };
+mutateAndReject('missing durable completion', durableCompletionFile, () => fs.rmSync(durableCompletionFile), /durable completion/);
+mutateAndReject('tampered durable nonce', durableNonceFile, () => fs.writeFileSync(durableNonceFile, '{}\n'), /durable nonce/);
+mutateAndReject('historical attachment drift', path.join(flowRoot, 'evidence', 'manifest.json'), () => { const manifest = JSON.parse(fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), 'utf8')); manifest.evidence.find((entry) => entry.id === historicalAttachmentId).sha256 = '0'.repeat(64); fs.writeFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), JSON.stringify(manifest)); }, /historical Flow attachment/);
+mutateAndReject('historical stored snapshot drift', path.join(flowRoot, historicalEntry[0].stored_path), () => fs.writeFileSync(path.join(flowRoot, historicalEntry[0].stored_path), `${historicalSnapshot}\n`), /historical Flow stored trust bundle/);
+mutateAndReject('ambiguous ledger prefix', ledgerFile, () => { const ledger = JSON.parse(historicalLedgerBytes); ledger.events.push(structuredClone(ledger.events[0])); fs.writeFileSync(ledgerFile, JSON.stringify(ledger)); }, /ledger|event|prefix/);
+mutateAndReject('critique edge mutation', bundleFile, () => { const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8')); bundle.claims.find((claim) => claim.metadata?.critique_record_id === pairB[0]).metadata.critique_resolution.resolver = 'forged-reviewer'; fs.writeFileSync(bundleFile, JSON.stringify(bundle)); }, /exact current preimages|preimage/);
+mutateAndReject('current raw bundle CAS drift', bundleFile, () => fs.writeFileSync(bundleFile, Buffer.concat([bundleBeforeRepair, Buffer.from(' ')])), /exact current preimages|preimage/);
+mutateAndReject('current raw ledger CAS drift', ledgerFile, () => fs.writeFileSync(ledgerFile, Buffer.concat([ledgerBeforeRepair, Buffer.from(' ')])), /exact current preimages|preimage/);
+
+// Race the worker after its root check but before final publication. The
+// journal must restore both session and Flow snapshots, then the same prepared
+// authorization must recover only after the two root checks run again.
+const invokeAsync = () => new Promise((resolve) => { const command = ['node', '/work/history-repair-invoke.mjs', 'repair-critique-resolution-history', project, session, repair.file, pairB[0], pairB[1]].map(shellQuote).join(' '); const child = spawn('su', ['-s', '/bin/bash', 'node', '-c', command], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (value) => { stdout += value; }); child.stderr.on('data', (value) => { stderr += value; }); child.on('close', (status) => resolve({ status, stdout, stderr })); });
+const journalFile = path.join(session, '.lifecycle-authority.transaction.json'); const pending = invokeAsync();
+for (let attempt = 0; attempt < 500 && !fs.existsSync(journalFile); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+if (!fs.existsSync(journalFile)) throw new Error('transaction rollback fault did not reach the prepared journal');
+fs.writeFileSync(bundleFile, Buffer.concat([bundleBeforeRepair, Buffer.from(' ')]));
+const rollback = await pending; if (rollback.status === 0) throw new Error('transaction rollback fault unexpectedly committed');
+if (!fs.readFileSync(bundleFile).equals(bundleBeforeRepair) || !fs.readFileSync(ledgerFile).equals(ledgerBeforeRepair)) throw new Error('transaction rollback did not restore session artifacts');
+if (!fs.readFileSync(completionFile).equals(historicalCompletionBytes) || !fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json')).equals(fs.readFileSync(path.join(flowBeforeRepair, 'evidence', 'manifest.json')))) throw new Error('transaction rollback did not restore the stale receipt and canonical Flow snapshot');
+if (JSON.parse(fs.readFileSync(journalFile, 'utf8')).status !== 'rolled_back') throw new Error('transaction rollback did not record a rolled_back journal');
+
+if (invoke('repair-critique-resolution-history', pairB, repair.file).operation_status !== 'applied') throw new Error('prepared history repair did not recover');
+if (!fs.readFileSync(bundleFile).equals(bundleBeforeRepair)) throw new Error('history repair changed Trust Bundle bytes');
+const repairedCompletionBytes = fs.readFileSync(completionFile), repairedCompletion = verifyLifecycleAuthorityCompletion(JSON.parse(repairedCompletionBytes));
+if (repairedCompletion.action !== 'repair-critique-resolution-history' || repairedCompletion.request_sha256 === historicalCompletion.request_sha256) throw new Error('repair did not emit an exact new completion');
+const repairAttachment = `lifecycle-authority:${repairedCompletion.request_sha256}`, repairedManifest = JSON.parse(fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), 'utf8'));
+if (repairedManifest.evidence.filter((entry) => entry.id === repairAttachment).length !== 1 || !fs.readFileSync(path.join(flowRoot, 'evidence', `${repairAttachment}.json`)).equals(bundleBeforeRepair)) throw new Error('repair did not emit the exact request-keyed Flow attachment');
+const repairedLedger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); if (repairedLedger.events.length !== 2 || repairedLedger.events.map((event) => event.operation).join(',') !== 'resolve-critique,repair-critique-resolution-history') throw new Error('repair did not append exactly one authority event');
+
+const ordinaryC = request('resolve-critique-request', pairC, 'bridge-ordinary-c'); if (invoke('resolve-critique', pairC, ordinaryC.file).operation_status !== 'applied') throw new Error('post-repair ordinary resolution was not applied');
+const newerReceipt = fs.readFileSync(completionFile); if (invoke('repair-critique-resolution-history', pairB, repair.file).operation_status !== 'replayed') throw new Error('exact repair replay was not reported');
+if (!fs.readFileSync(completionFile).equals(newerReceipt)) throw new Error('repair replay overwrote a newer exact receipt');
+const finalLedger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); if (finalLedger.events.length !== 3 || finalLedger.events.map((event) => event.sequence).join(',') !== '1,2,3') throw new Error('post-repair ledger is not append-only');
+console.log('PASS: request-keyed durable bridge anchors, stale receipt rejection, root-only two-pass checks, rollback/recovery, replay preservation, and exact repaired Flow attachment');
+NODE
+node /work/history-repair-bridge-anchors-e2e.mjs
 
 cat > /work/check-lifecycle-invocation.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path';

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { resolveCritiqueTransition } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 
 const COORDINATOR = path.resolve("packaging/lifecycle-authority/coordinator.mjs");
 const RUNTIME = path.resolve("packaging/lifecycle-authority/runtime-v1.mjs");
@@ -23,15 +23,16 @@ function writeProtectedManifest(directory, bytes) {
   return file;
 }
 
-async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFile } = {}) {
+async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFile, stateRoot } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-test-"));
   fs.copyFileSync(RUNTIME, path.join(directory, "runtime-v1.mjs"));
   let source = fs.readFileSync(COORDINATOR, "utf8");
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest };\n`);
+  if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, canonicalJson: module.canonicalJson };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -301,6 +302,86 @@ test("coordinator rejects forged or stale current completions before history rep
     assert.throws(() => loaded.verifyCurrentLifecycleCompletion({ sessionDir, runId: fixture.authorization.run_id }, fixture.bundle, fixture.ledger.events), /completion signature is invalid/i, "a forged completion is rejected cryptographically");
     writeCompletion(complete({ ...unsigned, result_core_sha256: "f".repeat(64) }));
     assert.throws(() => loaded.verifyCurrentLifecycleCompletion({ sessionDir, runId: fixture.authorization.run_id }, fixture.bundle, fixture.ledger.events), /does not bind the exact bundle and resolution ledger/i, "a valid but stale completion cannot authorize repair");
+  } finally {
+    if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("historical repair bridge is request-keyed, append-only, and rejects an altered canonical snapshot", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-historical-bridge-"));
+  let moduleDirectory = null;
+  try {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const completionKeyFile = path.join(directory, "completion-verification-key.pem");
+    fs.writeFileSync(completionKeyFile, publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+    const stateRoot = path.join(directory, "root-state");
+    const loaded = await loadProtectedReadFromCoordinator({ completionKeyFile, stateRoot });
+    moduleDirectory = loaded.directory;
+    const projectRoot = path.join(directory, "project");
+    const runId = "run-bridge";
+    const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
+    fs.mkdirSync(path.join(flowRoot, "evidence"), { recursive: true });
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const historicalAuthorization = { operation: "resolve-critique", project_root: projectRoot, run_id: runId, nonce: "historical-nonce", signature: { key_id: "historical-key" } };
+    const event = { event_id: "historical-event", event_hash: "e".repeat(64), operation: "resolve-critique", run_id: runId, signed_authorization: historicalAuthorization };
+    const historicalBundle = { schema_version: "1.0", claims: [] };
+    const resultCore = loaded.lifecycleAuthorityResultDigest(historicalBundle, [event]);
+    const completionUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "a".repeat(64), run_id: runId, operation_status: "applied", result_core_sha256: resultCore, coordinator_runtime_sha256: "b".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
+    const completion = { ...completionUnsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(completionUnsigned)), privateKey).toString("base64") } };
+    fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completion)}\n`, { mode: 0o600 });
+    const attachmentId = `lifecycle-authority:${completion.request_sha256}`;
+    const storedPath = `evidence/${attachmentId}.json`;
+    const storedBytes = Buffer.from(`${JSON.stringify(historicalBundle)}\n`);
+    fs.writeFileSync(path.join(flowRoot, storedPath), storedBytes, { mode: 0o600 });
+    const entry = { id: attachmentId, kind: "trust.bundle", stored_path: storedPath, sha256: rawSha256(storedBytes) };
+    fs.writeFileSync(path.join(flowRoot, "evidence", "manifest.json"), `${JSON.stringify({ evidence: [entry] })}\n`, { mode: 0o600 });
+    const currentBundle = structuredClone(historicalBundle);
+    const ledgerBytes = Buffer.from(`${JSON.stringify({ schema_version: "1.0", events: [event] })}\n`);
+    const ledger = { events: [event], bytes: ledgerBytes };
+    const prefix = selectUniqueHistoricalLedgerPrefix(historicalBundle, ledger.events, resultCore);
+    const history = critiqueHistoryProjectionSummary(currentBundle.claims);
+    const edges = critiqueResolutionEdgeProjectionSummary(currentBundle.claims);
+    const operationId = loaded.sha256({ project: projectRoot, run_id: runId, action: "resolve-critique", key_id: "historical-key", nonce: "historical-nonce" });
+    const authorization = {
+      operation: "repair-critique-resolution-history", current_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(currentBundle))), current_ledger_sha256: rawSha256(ledgerBytes), current_ledger_length: 1, current_ledger_tail_hash: event.event_hash,
+      current_completion_sha256: rawSha256(Buffer.from(JSON.stringify(completion))), historical_completion_sha256: rawSha256(Buffer.from(JSON.stringify(completion))), historical_completion_request_sha256: completion.request_sha256, historical_completion_action: completion.action, historical_completion_result_core_sha256: completion.result_core_sha256,
+      historical_attachment_id: attachmentId, historical_manifest_entry_sha256: loaded.sha256(entry), historical_stored_path: storedPath, historical_stored_raw_sha256: rawSha256(storedBytes), historical_stored_bundle_sha256: loaded.sha256(historicalBundle), historical_durable_operation_id: operationId, historical_durable_completion_record_sha256: "c".repeat(64),
+      historical_ledger_prefix_length: prefix.length, historical_ledger_prefix_raw_sha256: prefix.raw_sha256, historical_ledger_prefix_canonical_sha256: prefix.canonical_sha256, historical_ledger_prefix_tail_hash: prefix.tail_hash,
+      historical_critique_projection_version: history.version, historical_critique_projection_sha256: history.digest, historical_critique_projection_length: history.length, historical_critique_projection_tail_hash: history.tail_hash,
+      current_critique_projection_version: history.version, current_critique_projection_sha256: history.digest, current_critique_projection_length: history.length, current_critique_projection_tail_hash: history.tail_hash,
+      historical_resolution_edge_projection_sha256: edges.digest, historical_resolution_edge_projection_count: edges.count, current_resolution_edge_projection_sha256: edges.digest, current_resolution_edge_projection_count: edges.count,
+    };
+    authorization.historical_bridge_sha256 = critiqueResolutionHistoryBridgeDigest(authorization);
+    const paths = { projectRoot, sessionDir, runId };
+    let bridge = loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger);
+    const historicalAuthorizationSha256 = loaded.sha256(historicalAuthorization);
+    const durableCompletion = { authorization_sha256: historicalAuthorizationSha256, request_sha256: completion.request_sha256, result_core_sha256: completion.result_core_sha256, completion };
+    authorization.historical_durable_completion_record_sha256 = loaded.sha256(durableCompletion);
+    authorization.historical_bridge_sha256 = critiqueResolutionHistoryBridgeDigest(authorization);
+    bridge = loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger);
+    fs.mkdirSync(path.join(stateRoot, "completions"), { recursive: true });
+    fs.mkdirSync(path.join(stateRoot, "nonces"), { recursive: true });
+    const completionFile = path.join(stateRoot, "completions", `${operationId}.json`);
+    const nonceFile = path.join(stateRoot, "nonces", `${loaded.sha256("historical-key\u0000historical-nonce")}.json`);
+    fs.writeFileSync(completionFile, `${JSON.stringify(durableCompletion)}\n`, { mode: 0o600 });
+    const durableNonce = { schema_version: "1.0", operation_id: operationId, authorization_sha256: historicalAuthorizationSha256, key_id: "historical-key", nonce: "historical-nonce", request_sha256: completion.request_sha256, status: "applied", result_core_sha256: completion.result_core_sha256 };
+    fs.writeFileSync(nonceFile, `${JSON.stringify(durableNonce)}\n`, { mode: 0o600 });
+    assert.doesNotThrow(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }));
+    fs.unlinkSync(completionFile);
+    assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /ENOENT|historical durable completion/i, "a missing historical completion record rejects before publication");
+    fs.writeFileSync(completionFile, `${JSON.stringify({ ...durableCompletion, request_sha256: "f".repeat(64) })}\n`, { mode: 0o600 });
+    assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /completion record does not match/i, "a mismatched historical completion record rejects before publication");
+    fs.writeFileSync(completionFile, `${JSON.stringify(durableCompletion)}\n`, { mode: 0o600 });
+    fs.unlinkSync(nonceFile);
+    assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /ENOENT|historical durable nonce/i, "a missing historical nonce record rejects before publication");
+    fs.writeFileSync(nonceFile, `${JSON.stringify({ ...durableNonce, nonce: "mismatched" })}\n`, { mode: 0o600 });
+    assert.throws(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }), /nonce record does not match/i, "a mismatched historical nonce record rejects before publication");
+    fs.writeFileSync(nonceFile, `${JSON.stringify(durableNonce)}\n`, { mode: 0o600 });
+    assert.doesNotThrow(() => loaded.verifyHistoricalDurableAnchor(bridge, authorization, { completion, event }));
+    fs.writeFileSync(path.join(flowRoot, storedPath), `${JSON.stringify({ schema_version: "1.0", claims: ["tampered"] })}\n`, { mode: 0o600 });
+    assert.throws(() => loaded.deriveHistoricalRepairBridge(paths, authorization, Buffer.from(JSON.stringify(currentBundle)), currentBundle, ledger), /stored trust bundle digest/i);
   } finally {
     if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
     fs.rmSync(directory, { recursive: true, force: true });

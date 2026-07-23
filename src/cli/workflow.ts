@@ -10,15 +10,15 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, critiqueResolutionHistoryBridgeDigest } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
+import { assertAppendOnlyCritiqueHistory, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
@@ -1450,11 +1450,11 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
   const originalEventId = String(edge.resolution_event_id); const originalAuthorization = String(edge.authorization_sha256);
   if (events.some((event) => event.event_id === originalEventId || event.authorization_sha256 === originalAuthorization)) throw new Error("workflow history repair refuses an edge whose original signed event is already present");
   if (events.some((event) => event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id === originalEventId || event.missing_authorization_sha256 === originalAuthorization))) throw new Error("workflow history repair already exists for the selected edge");
-  const completion = verifyLifecycleAuthorityCompletion(readJsonFile(path.join(sessionDir, "lifecycle-authority.completion.json"), "lifecycle authority completion"));
-  if (!(["resolve-critique", "repair-critique-resolution-history"] as string[]).includes(String(completion.action)) || completion.run_id !== slug) throw new Error("workflow history repair requires the current root-signed lifecycle completion");
-  if (completion.result_core_sha256 !== lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events })) {
-    throw new Error("workflow history repair requires a current completion bound to the exact trust bundle and resolution ledger");
-  }
+  const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "workflow history repair lifecycle completion", 256 * 1024);
+  if (!completionBytes) throw new Error("workflow history repair lifecycle completion is missing");
+  const completion = verifyLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+  if (!(["resolve-critique", "repair-critique-resolution-history"] as string[]).includes(String(completion.action)) || completion.run_id !== slug) throw new Error("workflow history repair requires an authenticated historical lifecycle completion for this run");
+  const bridge = discoverCritiqueResolutionHistoryRepairBridge({ sessionDir, slug, projectRoot, bundleBytes, bundle, ledgerBytes, events, completion });
   const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
   const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
   if (!subject || subject !== prior.workflow_subject_ref || subject !== resolving.workflow_subject_ref) throw new Error("workflow history repair requires one matching bound subject");
@@ -1468,12 +1468,146 @@ async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: 
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash), resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash), expected_resolver: String(resolving.reviewer),
     prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
     preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), preimage_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), preimage_ledger_length: events.length, preimage_ledger_tail_hash: String(tail?.event_hash ?? "0".repeat(64)),
-    current_completion_sha256: createHash("sha256").update(JSON.stringify(completion)).digest("hex"), preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
+    current_completion_sha256: String(bridge.historical_completion_sha256), ...bridge, preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
     missing_resolution_event_id: originalEventId, missing_authorization_sha256: originalAuthorization, reason_code: "coordinator-external-ledger-overwrite-v1",
     nonce: `critique-history-repair-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
   });
   console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
   return 0;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as JsonRecord;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalSha256(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+export function discoverCritiqueResolutionHistoryRepairBridge(input: {
+  sessionDir: string;
+  slug: string;
+  projectRoot: string;
+  bundleBytes: Buffer;
+  bundle: JsonRecord;
+  ledgerBytes: Buffer;
+  events: JsonRecord[];
+  completion: JsonRecord;
+}): Record<string, string | number> {
+  const { sessionDir, slug, projectRoot, bundleBytes, bundle, ledgerBytes, events, completion } = input;
+  if (completion.run_id !== slug || !(["resolve-critique", "repair-critique-resolution-history"] as unknown[]).includes(completion.action)) {
+    throw new Error("historical lifecycle completion does not bind the canonical repair run");
+  }
+  const requestSha256 = String(completion.request_sha256);
+  if (!/^[a-f0-9]{64}$/.test(requestSha256) || !/^[a-f0-9]{64}$/.test(String(completion.result_core_sha256))) {
+    throw new Error("historical lifecycle completion identity is invalid");
+  }
+  const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+  const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "canonical Flow evidence manifest", 16 * 1024 * 1024);
+  if (!manifestBytes) throw new Error("canonical Flow evidence manifest is missing");
+  const manifest = JSON.parse(manifestBytes.toString("utf8")) as JsonRecord;
+  if (!Array.isArray(manifest.evidence)) throw new Error("canonical Flow evidence manifest is invalid");
+  const attachmentId = `lifecycle-authority:${requestSha256}`;
+  const entries = (manifest.evidence as unknown[]).filter((entry): entry is JsonRecord =>
+    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) && (entry as JsonRecord).id === attachmentId,
+  );
+  if (entries.length !== 1) throw new Error("historical Flow attachment must occur exactly once");
+  const entry = entries[0]!;
+  const storedPath = `evidence/${attachmentId}.json`;
+  const expectedOriginalPath = path.relative(projectRoot, path.join(sessionDir, "trust.bundle"));
+  if (
+    entry.kind !== "trust.bundle"
+    || entry.stored_path !== storedPath
+    || (entry.original_path !== undefined && entry.original_path !== expectedOriginalPath)
+    || typeof entry.sha256 !== "string"
+    || (entry.superseded_by !== undefined && entry.superseded_by !== null)
+  ) {
+    throw new Error("historical Flow attachment does not match the deterministic repair anchor");
+  }
+  const storedFile = path.resolve(flowRoot, storedPath);
+  const evidenceRoot = path.join(flowRoot, "evidence");
+  if (path.dirname(storedFile) !== evidenceRoot || storedFile !== path.join(evidenceRoot, `${attachmentId}.json`)) {
+    throw new Error("historical Flow stored path escapes the canonical evidence directory");
+  }
+  const storedBytes = readProtectedRegularFileBytes(storedFile, "historical Flow stored trust bundle", 4 * 1024 * 1024);
+  if (!storedBytes || createHash("sha256").update(storedBytes).digest("hex") !== entry.sha256) {
+    throw new Error("historical Flow stored trust bundle digest does not match its manifest");
+  }
+  const historicalBundle = JSON.parse(storedBytes.toString("utf8")) as JsonRecord;
+  if (!historicalBundle || typeof historicalBundle !== "object" || Array.isArray(historicalBundle) || !Array.isArray(historicalBundle.claims)) {
+    throw new Error("historical Flow stored trust bundle is invalid");
+  }
+  const prefix = selectUniqueHistoricalLedgerPrefix(historicalBundle, events, String(completion.result_core_sha256));
+  const historicalEvent = prefix.events.at(-1) as JsonRecord | undefined;
+  const historicalAuthorization = historicalEvent?.signed_authorization as JsonRecord | undefined;
+  const signature = historicalAuthorization?.signature as JsonRecord | undefined;
+  if (
+    !historicalEvent || !historicalAuthorization || !signature
+    || historicalEvent.operation !== completion.action
+    || historicalEvent.run_id !== slug
+    || historicalAuthorization.project_root !== projectRoot
+    || typeof signature.key_id !== "string"
+    || typeof historicalAuthorization.nonce !== "string"
+  ) {
+    throw new Error("historical completion has no matching signed ledger authorization");
+  }
+  const continuity = assertAppendOnlyCritiqueHistory(historicalBundle.claims as JsonRecord[], bundle.claims as JsonRecord[]);
+  const currentEdges = critiqueResolutionEdgeProjectionSummary(bundle.claims as JsonRecord[]);
+  const historicalAuthorizationSha256 = canonicalSha256(historicalAuthorization);
+  const historicalCompletionSha256 = createHash("sha256").update(JSON.stringify(completion)).digest("hex");
+  const operationId = canonicalSha256({
+    project: path.resolve(projectRoot),
+    run_id: slug,
+    action: completion.action,
+    key_id: signature.key_id,
+    nonce: historicalAuthorization.nonce,
+  });
+  const durableRecord = {
+    authorization_sha256: historicalAuthorizationSha256,
+    request_sha256: requestSha256,
+    result_core_sha256: completion.result_core_sha256,
+    completion,
+  };
+  const bridge: JsonRecord = {
+    historical_completion_sha256: historicalCompletionSha256,
+    historical_completion_request_sha256: requestSha256,
+    historical_completion_action: completion.action,
+    historical_completion_result_core_sha256: completion.result_core_sha256,
+    historical_attachment_id: attachmentId,
+    historical_manifest_entry_sha256: canonicalSha256(entry),
+    historical_stored_path: storedPath,
+    historical_stored_raw_sha256: createHash("sha256").update(storedBytes).digest("hex"),
+    historical_stored_bundle_sha256: canonicalSha256(historicalBundle),
+    historical_durable_operation_id: operationId,
+    historical_durable_completion_record_sha256: canonicalSha256(durableRecord),
+    historical_ledger_prefix_length: prefix.length,
+    historical_ledger_prefix_raw_sha256: prefix.raw_sha256,
+    historical_ledger_prefix_canonical_sha256: prefix.canonical_sha256,
+    historical_ledger_prefix_tail_hash: prefix.tail_hash,
+    historical_critique_projection_version: continuity.historical.version,
+    historical_critique_projection_sha256: continuity.historical.digest,
+    historical_critique_projection_length: continuity.historical.length,
+    historical_critique_projection_tail_hash: continuity.historical.tail_hash,
+    current_critique_projection_version: continuity.current.version,
+    current_critique_projection_sha256: continuity.current.digest,
+    current_critique_projection_length: continuity.current.length,
+    current_critique_projection_tail_hash: continuity.current.tail_hash,
+    historical_resolution_edge_projection_sha256: continuity.historical_edges.digest,
+    historical_resolution_edge_projection_count: continuity.historical_edges.count,
+    current_resolution_edge_projection_sha256: currentEdges.digest,
+    current_resolution_edge_projection_count: currentEdges.count,
+    current_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+    current_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"),
+    current_ledger_length: events.length,
+    current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
+  };
+  bridge.historical_bridge_sha256 = critiqueResolutionHistoryBridgeDigest(bridge);
+  return bridge as Record<string, string | number>;
 }
 
 function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {

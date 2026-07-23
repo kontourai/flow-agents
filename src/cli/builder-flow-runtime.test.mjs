@@ -30,11 +30,13 @@ import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-ac
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
+import * as critiqueResolutionRuntime from "../../build/src/cli/critique-resolution.js";
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
+import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
@@ -2649,6 +2651,37 @@ test("history-repair authorization is a distinct signed request bound to the exa
     preimage_ledger_length: 1,
     preimage_ledger_tail_hash: "1".repeat(64),
     current_completion_sha256: "2".repeat(64),
+    historical_completion_sha256: "6".repeat(64),
+    historical_completion_request_sha256: "7".repeat(64),
+    historical_completion_action: "resolve-critique",
+    historical_completion_result_core_sha256: "8".repeat(64),
+    historical_attachment_id: `lifecycle-authority:${"7".repeat(64)}`,
+    historical_manifest_entry_sha256: "9".repeat(64),
+    historical_stored_path: `evidence/lifecycle-authority:${"7".repeat(64)}.json`,
+    historical_stored_raw_sha256: "a".repeat(64),
+    historical_stored_bundle_sha256: "b".repeat(64),
+    historical_durable_operation_id: "operation:historical",
+    historical_durable_completion_record_sha256: "c".repeat(64),
+    historical_ledger_prefix_length: 1,
+    historical_ledger_prefix_raw_sha256: "d".repeat(64),
+    historical_ledger_prefix_canonical_sha256: "d".repeat(64),
+    historical_ledger_prefix_tail_hash: "e".repeat(64),
+    historical_critique_projection_version: "1.0",
+    historical_critique_projection_sha256: "1".repeat(64),
+    historical_critique_projection_length: 2,
+    historical_critique_projection_tail_hash: "2".repeat(64),
+    current_critique_projection_version: "1.0",
+    current_critique_projection_sha256: "3".repeat(64),
+    current_critique_projection_length: 3,
+    current_critique_projection_tail_hash: "4".repeat(64),
+    historical_resolution_edge_projection_sha256: "5".repeat(64),
+    historical_resolution_edge_projection_count: 1,
+    current_resolution_edge_projection_sha256: "5".repeat(64),
+    current_resolution_edge_projection_count: 1,
+    current_bundle_sha256: "6".repeat(64),
+    current_ledger_sha256: "7".repeat(64),
+    current_ledger_length: 1,
+    current_ledger_tail_hash: "e".repeat(64),
     preserved_resolution_sha256: "3".repeat(64),
     missing_resolution_event_id: `critique-resolution:${"4".repeat(64)}`,
     missing_authorization_sha256: "5".repeat(64),
@@ -2657,6 +2690,7 @@ test("history-repair authorization is a distinct signed request bound to the exa
     requested_at: "2030-01-02T00:00:00.000Z",
     expires_at: "2030-01-02T00:10:00.000Z",
   };
+  fields.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(fields);
   const { unsigned, signingPayload } = buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields);
   assert.equal(unsigned.operation, "repair-critique-resolution-history");
   assert.deepEqual(unsigned, { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields });
@@ -2672,6 +2706,207 @@ test("history-repair authorization is a distinct signed request bound to the exa
     }).unsigned.operation,
     unsigned.operation,
     "ordinary resolve-critique authorization is not a private history-repair shortcut",
+  );
+});
+
+test("versioned critique projections are identical across package and installed runtime and enforce append-only history", () => {
+  const makeRecord = ({ sequence, predecessor, reviewer, verdict, status = "verified", reviewedAt }) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: reviewedAt,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status, fieldOrBehavior: base.summary, createdAt: reviewedAt, updatedAt: reviewedAt,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash, claim_status: status },
+    };
+  };
+  const first = makeRecord({ sequence: 1, predecessor: CRITIQUE_CHAIN_GENESIS, reviewer: "reviewer-a", verdict: "fail", reviewedAt: "2030-01-01T00:00:00.000Z" });
+  const second = makeRecord({ sequence: 2, predecessor: first.metadata.critique_record_hash, reviewer: "reviewer-b", verdict: "pass", reviewedAt: "2030-01-01T00:01:00.000Z" });
+  const edge = {
+    schema_version: "1.0", kind: "cross-reviewer", prior_record_id: first.metadata.critique_record_id,
+    resolving_record_id: second.metadata.critique_record_id, resolver: second.metadata.reviewer,
+    resolved_lane_ids: [], resolved_finding_ids: [], resolved_at: "2030-01-01T00:01:00.000Z",
+    authorization_sha256: "a".repeat(64), resolution_event_id: `critique-resolution:${"a".repeat(64)}`,
+  };
+  first.status = "superseded"; first.metadata.claim_status = "superseded"; first.metadata.superseded_by = second.metadata.critique_record_id; first.metadata.critique_resolution = edge;
+  const third = makeRecord({ sequence: 3, predecessor: second.metadata.critique_record_hash, reviewer: "reviewer-c", verdict: "pass", reviewedAt: "2030-01-01T00:02:00.000Z" });
+  const historical = [first, second];
+  const current = [...historical, third];
+
+  for (const functionName of ["critiqueHistoryProjectionSummary", "critiqueResolutionEdgeProjectionSummary"]) {
+    assert.deepEqual(
+      critiqueResolutionRuntime[functionName](current),
+      installedLifecycleRuntime[functionName](current),
+      `${functionName} must be byte-semantically identical across package and installed runtime`,
+    );
+  }
+  const continuity = critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, current);
+  assert.equal(continuity.historical.length, 2);
+  assert.equal(continuity.current.length, 3);
+  assert.equal(continuity.historical_edges.digest, continuity.current_historical_edges.digest);
+
+  const altered = structuredClone(current); altered[0].metadata.reviewer = "edited";
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, altered), /exact historical prefix/i);
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, current.slice(1)), /deletes|prefix/i);
+  const reordered = structuredClone(current);
+  [reordered[0].metadata.critique_sequence, reordered[1].metadata.critique_sequence] = [2, 1];
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, reordered), /prefix|noncontiguous/i);
+  const inserted = structuredClone(current); inserted[2].metadata.critique_sequence = 4;
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, inserted), /noncontiguous/i);
+  const edgeDrift = structuredClone(current); edgeDrift[0].metadata.critique_resolution.resolver = "other-reviewer";
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, edgeDrift), /prefix|resolution edges/i);
+});
+
+test("historical completion prefix selection requires one exact ordered prefix", () => {
+  const storedBundle = { schema_version: "1.0", claims: [] };
+  const events = [{ event_hash: "a".repeat(64) }, { event_hash: "b".repeat(64) }];
+  const target = lifecycleAuthorityResultDigest({ ...storedBundle, critique_resolution_events: events.slice(0, 1) });
+  const selected = critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target);
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected.events, events.slice(0, 1));
+  assert.equal(selected.tail_hash, events[0].event_hash);
+  assert.deepEqual(selected, installedLifecycleRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target));
+  assert.throws(() => critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, "f".repeat(64)), /exactly one.*found 0/i);
+  assert.throws(
+    () => critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target, () => target),
+    /exactly one.*found 3/i,
+  );
+});
+
+test("public history-repair request deterministically derives every historical/current bridge binding", async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-public-bridge-"));
+  const slug = "history-repair-public-bridge";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", slug);
+  const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+  const makeRecord = ({ sequence, predecessor, reviewer, verdict, reviewedAt }) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: reviewedAt,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status: "verified", fieldOrBehavior: base.summary, createdAt: reviewedAt, updatedAt: reviewedAt,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash },
+    };
+  };
+  try {
+    const first = makeRecord({ sequence: 1, predecessor: CRITIQUE_CHAIN_GENESIS, reviewer: "reviewer-a", verdict: "fail", reviewedAt: "2030-01-01T00:00:00.000Z" });
+    const second = makeRecord({ sequence: 2, predecessor: first.metadata.critique_record_hash, reviewer: "reviewer-b", verdict: "pass", reviewedAt: "2030-01-01T00:01:00.000Z" });
+    const third = makeRecord({ sequence: 3, predecessor: second.metadata.critique_record_hash, reviewer: "reviewer-c", verdict: "pass", reviewedAt: "2030-01-01T00:02:00.000Z" });
+    const historicalBundle = { schema_version: "1.0", claims: [first, second] };
+    const currentBundle = { schema_version: "1.0", claims: [first, second, third] };
+    const historicalAuthorization = {
+      project_root: projectRoot, run_id: slug, nonce: "historical-nonce",
+      signature: { algorithm: "ed25519", key_id: "historical-key", value: "signed" },
+    };
+    const event = {
+      schema_version: "1.0", event_id: "historical-event", sequence: 1, predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+      operation: "resolve-critique", run_id: slug, subject: SUBJECT, event_hash: "a".repeat(64),
+      signed_authorization: historicalAuthorization,
+    };
+    const requestSha256 = "b".repeat(64);
+    const completion = {
+      schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
+      request_sha256: requestSha256, run_id: slug, operation_status: "applied",
+      result_core_sha256: lifecycleAuthorityResultDigest({ ...historicalBundle, critique_resolution_events: [event] }),
+      coordinator_runtime_sha256: "c".repeat(64), completed_at: "2030-01-01T00:01:30.000Z",
+      signature: { algorithm: "ed25519", value: "root-signed" },
+    };
+    const storedBytes = Buffer.from(`${JSON.stringify(historicalBundle, null, 2)}\n`);
+    const attachmentId = `lifecycle-authority:${requestSha256}`;
+    const entry = {
+      id: attachmentId, kind: "trust.bundle", gate_id: "verify-gate", attached_at: "2030-01-01T00:01:30.000Z",
+      original_path: `.kontourai/flow-agents/${slug}/trust.bundle`,
+      stored_path: `evidence/${attachmentId}.json`,
+      sha256: createHash("sha256").update(storedBytes).digest("hex"),
+    };
+    fs.mkdirSync(path.join(flowRoot, "evidence"), { recursive: true });
+    fs.mkdirSync(sessionDir, { recursive: true });
+    writeJson(path.join(sessionDir, "state.json"), {
+      schema_version: "1.0", task_slug: slug, work_item_refs: [SUBJECT],
+      status: "active", phase: "verification", updated_at: "2030-01-01T00:02:00.000Z",
+      next_action: { status: "continue", summary: "test fixture" },
+    });
+    fs.writeFileSync(path.join(flowRoot, "evidence", `${attachmentId}.json`), storedBytes, { mode: 0o644 });
+    writeJson(path.join(flowRoot, FLOW_RUN_EVIDENCE_MANIFEST_PATH), { schema_version: "1.0", evidence: [entry] });
+    const bundleBytes = Buffer.from(`${JSON.stringify(currentBundle, null, 2)}\n`);
+    const ledgerBytes = Buffer.from(`${JSON.stringify({ schema_version: "1.0", events: [event] }, null, 2)}\n`);
+    const bridge = workflowRuntime.discoverCritiqueResolutionHistoryRepairBridge({
+      sessionDir, slug, projectRoot, bundleBytes, bundle: currentBundle, ledgerBytes, events: [event], completion,
+    });
+    assert.equal(bridge.historical_attachment_id, attachmentId);
+    assert.equal(bridge.historical_ledger_prefix_length, 1);
+    assert.equal(bridge.historical_critique_projection_length, 2);
+    assert.equal(bridge.current_critique_projection_length, 3);
+    assert.equal(bridge.current_bundle_sha256, createHash("sha256").update(bundleBytes).digest("hex"));
+    assert.equal(bridge.current_ledger_sha256, createHash("sha256").update(ledgerBytes).digest("hex"));
+    assert.equal(bridge.historical_bridge_sha256, builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(bridge));
+
+    writeJson(path.join(flowRoot, FLOW_RUN_EVIDENCE_MANIFEST_PATH), { schema_version: "1.0", evidence: [entry, structuredClone(entry)] });
+    assert.throws(
+      () => workflowRuntime.discoverCritiqueResolutionHistoryRepairBridge({
+        sessionDir, slug, projectRoot, bundleBytes, bundle: currentBundle, ledgerBytes, events: [event], completion,
+      }),
+      /attachment must occur exactly once/i,
+    );
+    for (const [flag, value] of [
+      ["--historical-stored-path", "caller-selected.json"],
+      ["--historical-ledger-prefix-length", "0"],
+      ["--historical-completion-request-sha256", "f".repeat(64)],
+      ["--historical-flow-run", "other-run"],
+    ]) {
+      await assert.rejects(
+        workflowMain([
+          "repair-critique-resolution-history-request", "--session-dir", sessionDir,
+          "--prior-record-id", first.metadata.critique_record_id, "--resolving-record-id", second.metadata.critique_record_id,
+          flag, value,
+        ]),
+        new RegExp(`does not support.*${flag.slice(2)}`, "i"),
+      );
+    }
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("history-repair authorization parser rejects every missing bridge field and unknown fields", () => {
+  const fields = {
+    schema_version: "1.0", operation: "repair-critique-resolution-history", project_root: "/project", run_id: "run-1", subject: SUBJECT,
+    prior_record_id: "prior", prior_record_hash: "a".repeat(64), resolving_record_id: "resolving", resolving_record_hash: "b".repeat(64),
+    expected_resolver: "reviewer-b", prior_snapshot_sha256: "c".repeat(64), resolving_snapshot_sha256: "d".repeat(64), prior_head_sha: "none", resolving_head_sha: "none",
+    preimage_bundle_sha256: "e".repeat(64), preimage_ledger_sha256: "f".repeat(64), preimage_ledger_length: 0, preimage_ledger_tail_hash: "0".repeat(64),
+    current_completion_sha256: "1".repeat(64), historical_completion_sha256: "1".repeat(64), historical_completion_request_sha256: "2".repeat(64),
+    historical_completion_action: "resolve-critique", historical_completion_result_core_sha256: "3".repeat(64),
+    historical_attachment_id: "lifecycle-authority:historical", historical_manifest_entry_sha256: "4".repeat(64), historical_stored_path: "evidence/historical.json",
+    historical_stored_raw_sha256: "5".repeat(64), historical_stored_bundle_sha256: "6".repeat(64), historical_durable_operation_id: "operation:historical",
+    historical_durable_completion_record_sha256: "7".repeat(64), historical_ledger_prefix_length: 0, historical_ledger_prefix_raw_sha256: "8".repeat(64), historical_ledger_prefix_canonical_sha256: "8".repeat(64),
+    historical_ledger_prefix_tail_hash: "0".repeat(64), historical_critique_projection_version: "1.0", historical_critique_projection_sha256: "9".repeat(64),
+    historical_critique_projection_length: 2, historical_critique_projection_tail_hash: "a".repeat(64), current_critique_projection_sha256: "b".repeat(64),
+    current_critique_projection_version: "1.0", current_critique_projection_length: 3, current_critique_projection_tail_hash: "c".repeat(64), historical_resolution_edge_projection_sha256: "d".repeat(64),
+    historical_resolution_edge_projection_count: 1, current_resolution_edge_projection_sha256: "d".repeat(64), current_resolution_edge_projection_count: 1,
+    current_bundle_sha256: "e".repeat(64), current_ledger_sha256: "f".repeat(64), current_ledger_length: 0, current_ledger_tail_hash: "0".repeat(64),
+    preserved_resolution_sha256: "1".repeat(64), missing_resolution_event_id: "critique-resolution:missing", missing_authorization_sha256: "2".repeat(64),
+    reason_code: "coordinator-external-ledger-overwrite-v1", nonce: "nonce", requested_at: "2030-01-01T00:00:00.000Z", expires_at: "2030-01-01T00:10:00.000Z",
+    signature: { algorithm: "ed25519", key_id: "operator", value: "signed" },
+  };
+  fields.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(fields);
+  const expected = { projectRoot: "/project", runId: "run-1", subject: SUBJECT, now: "2030-01-01T00:01:00.000Z" };
+  const bridgeFields = Object.keys(fields).filter((field) => field.startsWith("historical_") || field.startsWith("current_"));
+  for (const field of bridgeFields) {
+    const missing = structuredClone(fields); delete missing[field];
+    assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization(missing, expected), /unexpected or missing fields/i, field);
+  }
+  assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization({ ...fields, caller_selected_prefix: 0 }, expected), /unexpected or missing fields/i);
+  assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization({ ...fields, current_bundle_sha256: "0".repeat(64) }, expected), /bridge digest is invalid/i);
+  const staleProjection = { ...fields, current_critique_projection_sha256: "0".repeat(64) };
+  staleProjection.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(staleProjection);
+  assert.throws(
+    () => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization(staleProjection, {
+      ...expected,
+      bindings: { current_critique_projection_sha256: fields.current_critique_projection_sha256, current_bundle_sha256: fields.current_bundle_sha256 },
+    }),
+    /current_critique_projection_sha256 does not match the expected bridge/i,
   );
 });
 

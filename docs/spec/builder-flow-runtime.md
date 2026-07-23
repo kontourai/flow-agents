@@ -484,6 +484,32 @@ explicit reason `coordinator-external-ledger-overwrite-v1`. The coordinator
 refuses a present original, a prior repair, a changed edge/preimage/completion,
 or any wrong subject, reviewer, snapshot, or ledger state.
 
+The bridge is deliberately narrower than accepting an old receipt. It requires
+all three historical anchors together: (1) the root-signed historical
+completion, (2) the Flow attachment selected by that completion request SHA-256
+and its protected stored Trust Bundle snapshot, and (3) the root-only durable
+operation, completion, and applied nonce records selected from the signed event
+in the one reproducing ledger prefix. Each anchor proves a different fact;
+none can stand in for either of the others. The coordinator finds exactly one
+current-ledger prefix whose events and stored snapshot reproduce the signed
+historical result core. Zero or multiple prefixes fail closed.
+
+A stale completion is continuity evidence for this one bridge only. It is not
+an exact-current completion and is therefore forbidden to Builder,
+artifact-validation, ordinary resolution, and final-gate consumers. A later
+critique may append after the historical completion without minting a new
+completion; that is precisely why strict consumers must continue to reject the
+stale receipt until the bridge produces a new exact-current one.
+
+Only the installed root-owned coordinator reads and verifies durable operation,
+completion, and nonce records. It verifies the complete bridge before issuing a
+mutation capability and repeats that verification immediately before handing
+the capability to the unprivileged worker. The worker independently performs
+the raw bundle and ledger preimage CAS checks before Flow synchronization and
+again before publication. A changed attachment, snapshot, critique/edge
+projection, bundle, ledger, or durable record fails without a partial bridge
+event or Flow attachment.
+
 A repair never fabricates or substitutes the lost original signature,
 timestamp, reviewer, or authorization. It appends one distinct repair event,
 discloses the missing-original identifiers and reason, emits a new signed
@@ -494,6 +520,17 @@ original is absent. Missing, duplicate, competing original-and-repair,
 unmatched, reconstruction-looking, invalid-signature, or broken-chain evidence
 is `FAIL`; without an installed root-owned helper and verification key, the
 positive mutation path remains `NOT_VERIFIED`.
+
+The durable operation lock serializes an operator's signed request with replay
+and prepared recovery. An exact completed request replays without rewriting the
+newer receipt; a prepared request resumes only after the same two root checks
+and transaction recovery. Session and canonical Flow artifacts are journaled as
+one transaction, so a Flow or publication fault restores both snapshots and
+does not append an event or attach a receipt. Operators first run the read-only
+request command, sign its exact payload outside the worktree, invoke the
+installed helper once, and retain the resulting root-signed completion as the
+current receipt; no agent or package caller can substitute a durable anchor or
+choose a helper/key path.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

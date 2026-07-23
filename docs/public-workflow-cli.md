@@ -263,6 +263,34 @@ proof per cross-reviewer edge: either its original event or one repair for a
 missing original. Zero, both, duplicates, unmatched events, altered edge data,
 or an invalid event chain fail validation.
 
+The historical bridge has three jointly required anchors: the root-signed
+historical completion; the canonical Flow manifest entry selected by that
+completion request SHA-256 plus its protected stored Trust Bundle snapshot; and
+the request-keyed root-only durable operation, completion, and applied nonce
+records. The coordinator accepts only one ledger prefix that reproduces the
+historical completion core with that stored snapshot. A missing or tampered
+durable record, attachment, snapshot, critique/edge projection, or an
+ambiguous prefix fails closed.
+
+An old completion proves continuity for this repair request; it is never a
+current completion. Builder synchronization, artifact validation, ordinary
+resolution, and final gates continue to require an exact-current receipt and
+must reject it. This remains true when a later critique is appended without a
+new completion. Only a successful bridge produces the one new exact-current
+completion and Flow attachment those strict consumers can use.
+
+The root-owned helper verifies both durable-state and historical anchors before
+it grants a one-use worker capability, then verifies them again immediately
+before mutation. The worker performs raw Trust Bundle and ledger compare-and-
+swap checks during preparation and again before publication. The request lock
+serializes operator actions: an exact completed request replays without
+overwriting a newer receipt; prepared recovery repeats the checks; and any
+session/Flow fault rolls back both artifact trees without a partial event or
+attachment. The serialized operator flow is read-only request generation,
+external Ed25519 signing, one helper invocation, then retention of the
+root-signed completion; neither a repository file nor package caller is a
+durable authority root.
+
 ```bash
 # Read-only: emit the precise payload that an external operator must sign.
 flow_agents workflow repair-critique-resolution-history-request \

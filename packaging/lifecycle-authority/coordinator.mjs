@@ -5,7 +5,16 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
-import { coordinatorRuntimeSha256, repairCritiqueResolutionHistoryTransition, resolveCritiqueTransition, validateResolutionEventLedger } from "./runtime-v1.mjs";
+import {
+  assertAppendOnlyCritiqueHistory,
+  coordinatorRuntimeSha256,
+  critiqueResolutionEdgeProjectionSummary,
+  critiqueResolutionHistoryBridgeDigest,
+  repairCritiqueResolutionHistoryTransition,
+  resolveCritiqueTransition,
+  selectUniqueHistoricalLedgerPrefix,
+  validateResolutionEventLedger,
+} from "./runtime-v1.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
@@ -215,6 +224,15 @@ function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
   if (completion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, resolutionEvents)) throw new Error("current lifecycle completion does not bind the exact bundle and resolution ledger");
   return completion;
 }
+function verifyHistoricalLifecycleCompletion(paths, completion) {
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  exact(completion, fields, "historical lifecycle completion");
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || !["applied", "replayed"].includes(completion.operation_status) || !/^[a-f0-9]{64}$/.test(completion.request_sha256) || !/^[a-f0-9]{64}$/.test(completion.result_core_sha256) || !record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string") throw new Error("historical lifecycle completion identity is invalid");
+  const { signature, ...unsigned } = completion;
+  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
+  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("historical lifecycle completion signature is invalid");
+  return completion;
+}
 function sha256File(file, label) { return sha256(protectedRegularFile(file, label, 16 * 1024 * 1024)); }
 function exactObject(value, expected, label) {
   if (canonicalJson(value) !== canonicalJson(expected)) throw new Error(`${label} does not match the pinned Flow reducer identity`);
@@ -247,6 +265,75 @@ function canonicalFlowPaths(paths) {
     reportJson: path.join(root, "report.json"),
     reportMarkdown: path.join(root, "report.md")
   };
+}
+function historicalAttachment(paths, authorization, completion) {
+  const files = canonicalFlowPaths(paths);
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  if (!Array.isArray(manifest.evidence)) throw new Error("canonical Flow evidence manifest is invalid");
+  const attachmentId = `lifecycle-authority:${completion.request_sha256}`;
+  if (authorization.historical_attachment_id !== attachmentId) throw new Error("history repair authorization does not bind the historical Flow attachment");
+  const entries = manifest.evidence.filter((entry) => record(entry) && entry.id === attachmentId);
+  if (entries.length !== 1) throw new Error("historical Flow attachment must occur exactly once");
+  const entry = entries[0];
+  const expectedPath = `evidence/${attachmentId}.json`;
+  if (entry.kind !== "trust.bundle" || entry.stored_path !== expectedPath || authorization.historical_stored_path !== expectedPath || entry.sha256 !== authorization.historical_stored_raw_sha256 || sha256(canonicalJson(entry)) !== authorization.historical_manifest_entry_sha256) throw new Error("historical Flow attachment does not match the signed bridge");
+  const evidenceRoot = path.join(files.root, "evidence");
+  const storedFile = path.resolve(files.root, entry.stored_path);
+  if (!within(storedFile, evidenceRoot) || storedFile !== path.join(evidenceRoot, `${attachmentId}.json`)) throw new Error("historical Flow stored path escapes the canonical evidence directory");
+  const bytes = protectedRegularFile(storedFile, "historical Flow stored trust bundle", 4 * 1024 * 1024);
+  if (sha256(bytes) !== authorization.historical_stored_raw_sha256) throw new Error("historical Flow stored trust bundle digest does not match the signed bridge");
+  const bundle = JSON.parse(bytes.toString("utf8"));
+  if (!record(bundle) || !Array.isArray(bundle.claims) || sha256(bundle) !== authorization.historical_stored_bundle_sha256) throw new Error("historical Flow stored trust bundle semantic digest does not match the signed bridge");
+  return { id: attachmentId, entry, stored_path: expectedPath, bytes, bundle };
+}
+function historicalCompletionForBridge(paths, authorization) {
+  const completion = verifyHistoricalLifecycleCompletion(paths, protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "historical lifecycle completion", 256 * 1024));
+  const digest = jsonSha256(completion);
+  if (authorization.historical_completion_sha256 !== digest || authorization.historical_completion_request_sha256 !== completion.request_sha256 || authorization.historical_completion_action !== completion.action || authorization.historical_completion_result_core_sha256 !== completion.result_core_sha256 || authorization.current_completion_sha256 !== digest) throw new Error("history repair authorization does not bind the authenticated historical completion");
+  return { completion, digest };
+}
+function exactBridgeSummary(summary, currentClaims, authorization, prefix) {
+  const field = (name) => authorization[`historical_${name}`];
+  if (field("critique_projection_version") !== summary.historical.version || field("critique_projection_sha256") !== summary.historical.digest || field("critique_projection_length") !== summary.historical.length || field("critique_projection_tail_hash") !== summary.historical.tail_hash || authorization.current_critique_projection_version !== summary.current.version || authorization.current_critique_projection_sha256 !== summary.current.digest || authorization.current_critique_projection_length !== summary.current.length || authorization.current_critique_projection_tail_hash !== summary.current.tail_hash || authorization.historical_resolution_edge_projection_sha256 !== summary.historical_edges.digest || authorization.historical_resolution_edge_projection_count !== summary.historical_edges.count) throw new Error("history repair authorization critique projection binding changed");
+  const currentEdges = critiqueResolutionEdgeProjectionSummary(currentClaims);
+  if (authorization.current_resolution_edge_projection_sha256 !== currentEdges.digest || authorization.current_resolution_edge_projection_count !== currentEdges.count) throw new Error("history repair authorization current resolution-edge projection changed");
+  if (authorization.historical_ledger_prefix_length !== prefix.length || authorization.historical_ledger_prefix_raw_sha256 !== prefix.raw_sha256 || authorization.historical_ledger_prefix_canonical_sha256 !== prefix.canonical_sha256 || authorization.historical_ledger_prefix_tail_hash !== prefix.tail_hash) throw new Error("history repair authorization historical ledger prefix changed");
+}
+function deriveHistoricalRepairBridge(paths, authorization, bundleBytes, bundle, ledger) {
+  if (authorization.operation !== "repair-critique-resolution-history" || authorization.current_bundle_sha256 !== sha256(bundleBytes) || authorization.current_ledger_sha256 !== sha256(ledger.bytes) || authorization.current_ledger_length !== ledger.events.length || authorization.current_ledger_tail_hash !== (ledger.events.at(-1)?.event_hash ?? "0".repeat(64))) throw new Error("history repair authorization does not bind the exact current preimages");
+  const historical = historicalCompletionForBridge(paths, authorization);
+  const attachment = historicalAttachment(paths, authorization, historical.completion);
+  const prefix = selectUniqueHistoricalLedgerPrefix(attachment.bundle, ledger.events, historical.completion.result_core_sha256);
+  // A durable operation identity comes only from the signed authority event in
+  // the unique reproducing prefix. A zero-length prefix has no such anchor.
+  const historicalEvent = prefix.events.at(-1);
+  if (!record(historicalEvent?.signed_authorization) || historicalEvent.operation !== historical.completion.action || historicalEvent.run_id !== paths.runId || historicalEvent.signed_authorization.project_root !== paths.projectRoot) throw new Error("historical completion has no matching signed ledger authorization");
+  const identity = operationIdentity({ action: historical.completion.action, request: { project_root: paths.projectRoot, session_dir: paths.sessionDir } }, historicalEvent.signed_authorization);
+  if (authorization.historical_durable_operation_id !== identity.id) throw new Error("history repair authorization durable operation identity changed");
+  const summary = assertAppendOnlyCritiqueHistory(attachment.bundle.claims, bundle.claims);
+  exactBridgeSummary(summary, bundle.claims, authorization, prefix);
+  if (authorization.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(authorization)) throw new Error("history repair authorization bridge digest is invalid");
+  return { digest: authorization.historical_bridge_sha256, completion_sha256: historical.digest, durable_operation_id: identity.id, durable_key_id: identity.keyId, durable_nonce: identity.nonce, historical_completion: historical.completion, historical_event: historicalEvent };
+}
+function verifyHistoricalDurableAnchor(bridge, authorization, historicalCompletion) {
+  const completionFile = path.join(STATE_ROOT, "completions", `${bridge.durable_operation_id}.json`);
+  const durableCompletion = durableJson(completionFile, "historical durable completion record");
+  const historicalAuthorizationSha256 = sha256(canonicalJson(historicalCompletion.event.signed_authorization));
+  const expectedCompletion = { authorization_sha256: historicalAuthorizationSha256, request_sha256: historicalCompletion.completion.request_sha256, result_core_sha256: historicalCompletion.completion.result_core_sha256, completion: historicalCompletion.completion };
+  if (canonicalJson(durableCompletion) !== canonicalJson(expectedCompletion) || sha256(canonicalJson(durableCompletion)) !== authorization.historical_durable_completion_record_sha256) throw new Error("historical durable completion record does not match the signed bridge");
+  const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${bridge.durable_key_id}\u0000${bridge.durable_nonce}`)}.json`);
+  const nonce = durableJson(nonceFile, "historical durable nonce record");
+  const expectedNonce = { schema_version: PROTOCOL_VERSION, operation_id: bridge.durable_operation_id, authorization_sha256: historicalAuthorizationSha256, key_id: bridge.durable_key_id, nonce: bridge.durable_nonce, request_sha256: historicalCompletion.completion.request_sha256, status: "applied", result_core_sha256: historicalCompletion.completion.result_core_sha256 };
+  if (canonicalJson(nonce) !== canonicalJson(expectedNonce)) throw new Error("historical durable nonce record does not match the signed bridge");
+}
+function verifyRootHistoricalBridge(paths, authorization) {
+  const bundleBytes = protectedRegularFile(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
+  const bundle = JSON.parse(bundleBytes.toString("utf8"));
+  const ledger = loadResolutionEventLedger(paths, bundle, authorization, authorization.operation);
+  const bridge = deriveHistoricalRepairBridge(paths, authorization, bundleBytes, bundle, ledger);
+  verifyHistoricalDurableAnchor(bridge, authorization, { completion: bridge.historical_completion, event: bridge.historical_event });
+  return publicBridge(bridge);
 }
 function openGateId(definition, state) {
   const matches = Object.entries(definition.gates ?? {}).filter(([, gate]) => record(gate) && gate.step === state.current_step).map(([id]) => id);
@@ -381,7 +468,10 @@ async function withDurableLock(requestSha256, callback) {
   fs.mkdirSync(lock, { mode: 0o700 });
   try { return await callback(); } finally { fs.rmdirSync(lock); }
 }
-async function executeMutation(envelope, paths, authorization, completionRecord = null) {
+function publicBridge(bridge) {
+  return { digest: bridge.digest, completion_sha256: bridge.completion_sha256, durable_operation_id: bridge.durable_operation_id, durable_key_id: bridge.durable_key_id, durable_nonce: bridge.durable_nonce };
+}
+async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null) {
     if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
     if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
@@ -390,15 +480,16 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const before = JSON.parse(beforeBytes.toString("utf8"));
       const ledger = loadResolutionEventLedger(paths, before, authorization, envelope.action);
       const resolutionEvents = ledger.events;
-      const currentCompletion = envelope.action === "repair-critique-resolution-history"
-        ? verifyCurrentLifecycleCompletion(paths, before, resolutionEvents)
+      const bridge = envelope.action === "repair-critique-resolution-history"
+        ? deriveHistoricalRepairBridge(paths, authorization, beforeBytes, before, ledger)
         : null;
+      if (bridge && (!record(verifiedBridge) || canonicalJson(publicBridge(bridge)) !== canonicalJson(verifiedBridge))) throw new Error("history repair bridge was not verified by the protected coordinator");
       const reduced = envelope.action === "resolve-critique"
         ? resolveCritiqueTransition({ bundle: before, resolution_events: resolutionEvents, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id })
         : repairCritiqueResolutionHistoryTransition({
           bundle: before, resolution_events: resolutionEvents, authorization,
           prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id,
-          current_completion_sha256: jsonSha256(currentCompletion), ledger_bytes_sha256: sha256(ledger.bytes),
+          current_completion_sha256: bridge.completion_sha256, ledger_bytes_sha256: sha256(ledger.bytes),
         });
       const sessionBundle = reduced.bundle;
       const nextResolutionEvents = reduced.resolution_events;
@@ -416,6 +507,7 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
         assertAuthorizedBundlePreimage(finalBytes, envelope.action, authorization);
         if (!finalBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
         assertResolutionEventLedgerPreimage(paths, ledger);
+        if (bridge && canonicalJson(publicBridge(deriveHistoricalRepairBridge(paths, authorization, finalBytes, JSON.parse(finalBytes.toString("utf8")), loadResolutionEventLedger(paths, JSON.parse(finalBytes.toString("utf8")), authorization, envelope.action)))) !== canonicalJson(verifiedBridge)) throw new Error("history repair bridge changed during mutation preparation");
         if (envelope.action === "resolve-critique") atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
         writeResolutionEventLedger(paths, nextResolutionEvents, ledger);
         if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
@@ -467,6 +559,11 @@ async function processRootOperation(envelope) {
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
+    let verifiedBridge = null;
+    if (envelope.action === "repair-critique-resolution-history") {
+      const paths = canonicalMutationPaths(envelope.request);
+      verifiedBridge = verifyRootHistoricalBridge(paths, authorization);
+    }
     const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
     const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
     let resumePrepared = false;
@@ -485,7 +582,16 @@ async function processRootOperation(envelope) {
       }
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
-    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared }) }, caller);
+    // The child rechecks all worktree inputs immediately before publication. Do
+    // the matching root-only completion/nonce read immediately before handing
+    // it the mutation capability, so a changed durable anchor cannot be used
+    // by a prepared recovery or race between the two root passes.
+    if (envelope.action === "repair-critique-resolution-history") {
+      const secondBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+      if (canonicalJson(secondBridge) !== canonicalJson(verifiedBridge)) throw new Error("history repair bridge changed between root verification passes");
+      verifiedBridge = secondBridge;
+    }
+    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
     if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
     const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
@@ -523,7 +629,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     }
     if (payload.kind !== "mutate") throw new Error("mutation worker request is invalid");
     const value = verifiedCapability(payload.capability, "mutation-capability");
-    if (!record(value.envelope) || !record(value.authorization) || typeof value.resume_prepared !== "boolean") throw new Error("mutation worker request is invalid");
+    if (!record(value.envelope) || !record(value.authorization) || typeof value.resume_prepared !== "boolean" || (value.verified_bridge !== undefined && !record(value.verified_bridge))) throw new Error("mutation worker request is invalid");
     const envelope = validateEnvelope(value.envelope);
     if (value.authorization.operation !== envelope.action || value.authorization.run_id !== path.basename(path.resolve(envelope.request.session_dir))) throw new Error("mutation worker authorization does not bind the request");
     if (value.resume_prepared && envelope.action === "archive" && !fs.existsSync(envelope.request.session_dir)) {
@@ -536,7 +642,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     const paths = canonicalMutationPaths(envelope.request);
     if (value.resume_prepared && ["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) rollbackCommittedTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(value.authorization)) });
     if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
-    return executeMutation(envelope, paths, value.authorization);
+    return executeMutation(envelope, paths, value.authorization, null, value.verified_bridge ?? null);
   }
   const lines = input.split(/\r?\n/).filter(Boolean);
   if (lines.length !== 1) throw new Error("coordinator requires exactly one JSON request line");

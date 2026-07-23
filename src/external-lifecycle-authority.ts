@@ -87,6 +87,22 @@ function canonical(value: unknown): string {
 export function lifecycleAuthorityResultDigest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
+
+/**
+ * Exact-current predicate for strict lifecycle consumers. Historical bridge
+ * evidence is deliberately not an input: callers first authenticate the
+ * completion, then require the complete current bundle and ledger core.
+ */
+export function lifecycleAuthorityCompletionBindsExactState(
+  completion: JsonRecord,
+  runId: string,
+  bundle: JsonRecord,
+  resolutionEvents: JsonRecord[],
+): boolean {
+  return ["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action))
+    && completion.run_id === runId
+    && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents });
+}
 function digest(value: unknown): string { return createHash("sha256").update(canonical(value)).digest("hex"); }
 
 /**

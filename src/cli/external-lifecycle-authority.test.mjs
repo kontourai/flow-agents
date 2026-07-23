@@ -9,6 +9,8 @@ const {
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
   invokeExternalLifecycleAuthority,
+  lifecycleAuthorityCompletionBindsExactState,
+  lifecycleAuthorityResultDigest,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
 } = lifecycleAuthority;
@@ -18,6 +20,23 @@ const digest = "a".repeat(64);
 const completion = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: digest, run_id: "run-1", operation_status: "applied", result_core_sha256: "b".repeat(64), coordinator_runtime_sha256: "c".repeat(64), completed_at: "2026-07-20T00:00:00.000Z", signature: { algorithm: "ed25519", value: "signed-by-external-authority" } };
 const valid = { schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION, action, request_sha256: digest, status: "accepted", result: { run_id: "run-1", operation_status: "applied", completion } };
 const output = (overrides = {}) => `${JSON.stringify({ ...valid, ...overrides })}\n`;
+
+test("strict lifecycle consumers reject a historical core and accept only the new exact-current post-repair core", () => {
+  const bundle = { schema_version: "1.0", claims: [{ id: "current-review" }] };
+  const historicalEvents = [{ event_id: "historical" }];
+  const postRepairEvents = [...historicalEvents, { event_id: "repair" }];
+  const historicalCompletion = {
+    action: "resolve-critique", run_id: "run-1",
+    result_core_sha256: lifecycleAuthorityResultDigest({ schema_version: "1.0", claims: [], critique_resolution_events: historicalEvents }),
+  };
+  assert.equal(lifecycleAuthorityCompletionBindsExactState(historicalCompletion, "run-1", bundle, postRepairEvents), false);
+  const postRepairCompletion = {
+    action: "repair-critique-resolution-history", run_id: "run-1",
+    result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: postRepairEvents }),
+  };
+  assert.equal(lifecycleAuthorityCompletionBindsExactState(postRepairCompletion, "run-1", bundle, postRepairEvents), true);
+  assert.equal(lifecycleAuthorityCompletionBindsExactState({ ...postRepairCompletion, run_id: "other" }, "run-1", bundle, postRepairEvents), false);
+});
 
 function protectedDirectory() {
   return { isSymbolicLink: () => false, isFile: () => false, uid: 0, mode: 0o755 };

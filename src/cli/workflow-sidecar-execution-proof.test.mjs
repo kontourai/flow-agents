@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 
 import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
+import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 
 const commandLogChain = createRequire(import.meta.url)("../../scripts/lib/command-log-chain.js");
 
@@ -241,6 +242,22 @@ test("critique authority gates ignore embedded ledger events and require a prote
   assert.deepEqual(externalCritiqueAuthorityForGate(dir, bundle), { events: [{ event_id: "external-event" }], completionVerified: false }, "an external ledger still needs a verified completion");
   fs.chmodSync(ledger, 0o666);
   assert.deepEqual(externalCritiqueAuthorityForGate(dir, bundle), { events: [], completionVerified: false }, "group/world-writable external ledgers fail closed");
+});
+
+test("sidecar and gate authority remain exact-current across the historical repair bridge", () => {
+  const bundle = { schema_version: "1.0", claims: [{ id: "later-public-review", metadata: { origin: "critique" } }] };
+  const historicalEvents = [{ event_id: "historical-resolution" }];
+  const currentEvents = [...historicalEvents, { event_id: "history-repair" }];
+  const staleCompletion = {
+    action: "resolve-critique", run_id: "repair-run",
+    result_core_sha256: lifecycleAuthorityResultDigest({ schema_version: "1.0", claims: [], critique_resolution_events: historicalEvents }),
+  };
+  assert.equal(lifecycleAuthorityCompletionBindsExactState(staleCompletion, "repair-run", bundle, currentEvents), false, "a valid bridge does not make a stale completion gate authority");
+  const exactCompletion = {
+    action: "repair-critique-resolution-history", run_id: "repair-run",
+    result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: currentEvents }),
+  };
+  assert.equal(lifecycleAuthorityCompletionBindsExactState(exactCompletion, "repair-run", bundle, currentEvents), true, "only the new post-repair completion satisfies the exact-current gate contract");
 });
 
 test("critique gate freshness permits stale passing anchors but requires one current substantive PASS", () => {

@@ -195,3 +195,76 @@ test("runtime v1 repairs only an already-superseded edge with a separately signe
     "ordinary resolution cannot silently stand in for explicit history repair",
   );
 });
+
+test("runtime v1 records and verifies the exact historical bridge digest on a repair event", () => {
+  const { preservedBundle, emptyLedger, repairAuthorization } = missingOriginalResolutionFixture();
+  const history = lifecycleRuntime.critiqueHistoryProjectionSummary(preservedBundle.claims);
+  const edges = lifecycleRuntime.critiqueResolutionEdgeProjectionSummary(preservedBundle.claims);
+  const bridgeFields = {
+    historical_completion_sha256: "1".repeat(64),
+    historical_completion_request_sha256: "2".repeat(64),
+    historical_completion_action: "resolve-critique",
+    historical_completion_result_core_sha256: "3".repeat(64),
+    historical_attachment_id: "lifecycle-authority:historical",
+    historical_manifest_entry_sha256: "4".repeat(64),
+    historical_stored_path: "evidence/historical.json",
+    historical_stored_raw_sha256: "5".repeat(64),
+    historical_stored_bundle_sha256: "6".repeat(64),
+    historical_durable_operation_id: "operation:historical",
+    historical_durable_completion_record_sha256: "7".repeat(64),
+    historical_ledger_prefix_length: 0,
+    historical_ledger_prefix_raw_sha256: "8".repeat(64),
+    historical_ledger_prefix_canonical_sha256: "8".repeat(64),
+    historical_ledger_prefix_tail_hash: "0".repeat(64),
+    historical_critique_projection_version: history.version,
+    historical_critique_projection_sha256: history.digest,
+    historical_critique_projection_length: history.length,
+    historical_critique_projection_tail_hash: history.tail_hash,
+    current_critique_projection_version: history.version,
+    current_critique_projection_sha256: history.digest,
+    current_critique_projection_length: history.length,
+    current_critique_projection_tail_hash: history.tail_hash,
+    historical_resolution_edge_projection_sha256: edges.digest,
+    historical_resolution_edge_projection_count: edges.count,
+    current_resolution_edge_projection_sha256: edges.digest,
+    current_resolution_edge_projection_count: edges.count,
+    current_bundle_sha256: repairAuthorization.preimage_bundle_sha256,
+    current_ledger_sha256: repairAuthorization.preimage_ledger_sha256,
+    current_ledger_length: 0,
+    current_ledger_tail_hash: "0".repeat(64),
+  };
+  const bridgedAuthorization = {
+    ...repairAuthorization,
+    ...bridgeFields,
+    historical_bridge_sha256: lifecycleRuntime.critiqueResolutionHistoryBridgeDigest(bridgeFields),
+  };
+  const repaired = lifecycleRuntime.repairCritiqueResolutionHistoryTransition({
+    bundle: preservedBundle, resolution_events: emptyLedger.events, authorization: bridgedAuthorization,
+    prior_record_id: "prior", resolving_record_id: "resolving",
+    current_completion_sha256: repairAuthorization.current_completion_sha256,
+    ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
+  });
+  assert.equal(repaired.resolution_events[0].verified_bridge_sha256, bridgedAuthorization.historical_bridge_sha256);
+
+  assert.throws(
+    () => lifecycleRuntime.repairCritiqueResolutionHistoryTransition({
+      bundle: preservedBundle, resolution_events: emptyLedger.events,
+      authorization: { ...bridgedAuthorization, historical_attachment_id: "lifecycle-authority:altered" },
+      prior_record_id: "prior", resolving_record_id: "resolving",
+      current_completion_sha256: repairAuthorization.current_completion_sha256,
+      ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
+    }),
+    /bridge digest is invalid/i,
+  );
+  const staleCurrent = { ...bridgedAuthorization, current_bundle_sha256: "f".repeat(64) };
+  staleCurrent.historical_bridge_sha256 = lifecycleRuntime.critiqueResolutionHistoryBridgeDigest(staleCurrent);
+  assert.throws(
+    () => lifecycleRuntime.repairCritiqueResolutionHistoryTransition({
+      bundle: preservedBundle, resolution_events: emptyLedger.events, authorization: staleCurrent,
+      prior_record_id: "prior", resolving_record_id: "resolving",
+      current_completion_sha256: repairAuthorization.current_completion_sha256,
+      ledger_bytes_sha256: repairAuthorization.preimage_ledger_sha256,
+    }),
+    /exact current preimages/i,
+  );
+});

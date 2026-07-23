@@ -5,6 +5,7 @@ type AnyRecord = Record<string, any>;
 
 const HASH_RE = /^[a-f0-9]{64}$/i;
 export const CRITIQUE_CHAIN_GENESIS = "0".repeat(64);
+export const CRITIQUE_HISTORY_PROJECTION_VERSION = "1.0";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -80,6 +81,142 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
     critique_resolution: metadata.critique_resolution,
     claim_status: claim.status,
   };
+}
+
+function projectionRecord(claim: AnyRecord): AnyRecord {
+  const record = critiqueFromClaim(claim);
+  return {
+    critique_record_id: record.critique_record_id,
+    critique_record_hash: record.critique_record_hash,
+    critique_predecessor_hash: record.critique_predecessor_hash,
+    critique_sequence: record.critique_sequence,
+    reviewer: record.reviewer,
+    verdict: record.verdict,
+    claim_status: record.claim_status,
+    summary: record.summary ?? null,
+    workflow_subject_ref: record.workflow_subject_ref,
+    review_target: record.review_target ?? { artifacts: [] },
+    findings: record.findings ?? [],
+    lanes: record.lanes ?? [],
+    reviewed_at: record.reviewed_at ?? null,
+    created_at: claim.createdAt ?? null,
+    updated_at: claim.updatedAt ?? null,
+    superseded_by: record.superseded_by ?? null,
+    critique_resolution: record.critique_resolution ?? null,
+  };
+}
+
+function sha256Canonical(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
+
+export function critiqueHistoryProjection(claims: AnyRecord[]): AnyRecord {
+  const records = claims
+    .filter((claim) => claim?.metadata?.origin === "critique")
+    .map(projectionRecord)
+    .sort((left, right) => Number(left.critique_sequence) - Number(right.critique_sequence));
+  return { schema_version: CRITIQUE_HISTORY_PROJECTION_VERSION, kind: "kontourai.critique-history", records };
+}
+
+export function critiqueHistoryProjectionSummary(claims: AnyRecord[]): AnyRecord {
+  const projection = critiqueHistoryProjection(claims);
+  const records = projection.records as AnyRecord[];
+  return {
+    version: CRITIQUE_HISTORY_PROJECTION_VERSION,
+    digest: sha256Canonical(projection),
+    length: records.length,
+    tail_hash: records.at(-1)?.critique_record_hash ?? CRITIQUE_CHAIN_GENESIS,
+    projection,
+  };
+}
+
+export function critiqueResolutionEdgeProjection(claims: AnyRecord[]): AnyRecord {
+  const edges = (critiqueHistoryProjection(claims).records as AnyRecord[])
+    .filter((record) => record.superseded_by !== null || record.critique_resolution !== null)
+    .map((record) => ({
+      critique_record_id: record.critique_record_id,
+      superseded_by: record.superseded_by,
+      critique_resolution: record.critique_resolution,
+    }));
+  return { schema_version: CRITIQUE_HISTORY_PROJECTION_VERSION, kind: "kontourai.critique-resolution-edges", edges };
+}
+
+export function critiqueResolutionEdgeProjectionSummary(claims: AnyRecord[]): AnyRecord {
+  const projection = critiqueResolutionEdgeProjection(claims);
+  return {
+    version: CRITIQUE_HISTORY_PROJECTION_VERSION,
+    digest: sha256Canonical(projection),
+    count: (projection.edges as AnyRecord[]).length,
+    projection,
+  };
+}
+
+export function assertAppendOnlyCritiqueHistory(historicalClaims: AnyRecord[], currentClaims: AnyRecord[]): AnyRecord {
+  const historical = critiqueHistoryProjectionSummary(historicalClaims);
+  const current = critiqueHistoryProjectionSummary(currentClaims);
+  const historicalRecords = historical.projection.records as AnyRecord[];
+  const currentRecords = current.projection.records as AnyRecord[];
+  if (currentRecords.length < historicalRecords.length) throw new Error("current critique history deletes historical records");
+  for (const [index, historicalRecord] of historicalRecords.entries()) {
+    if (canonical(currentRecords[index]) !== canonical(historicalRecord)) throw new Error("current critique history is not an exact historical prefix");
+  }
+  for (const [index, record] of currentRecords.entries()) {
+    if (record.critique_sequence !== index + 1) throw new Error("current critique history append is noncontiguous");
+    const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : currentRecords[index - 1]!.critique_record_hash;
+    if (record.critique_predecessor_hash !== predecessor) throw new Error("current critique history append predecessor is invalid");
+    if (critiqueRecordHash(record) !== record.critique_record_hash) throw new Error("current critique history append record hash is invalid");
+  }
+  const historicalEdges = critiqueResolutionEdgeProjectionSummary(historicalClaims);
+  const currentHistoricalEdges = critiqueResolutionEdgeProjectionSummary(
+    currentClaims.filter((claim) => {
+      const sequence = claim?.metadata?.critique_sequence;
+      return Number.isSafeInteger(sequence) && sequence <= historicalRecords.length;
+    }),
+  );
+  if (historicalEdges.digest !== currentHistoricalEdges.digest || historicalEdges.count !== currentHistoricalEdges.count) {
+    throw new Error("historical critique resolution edges changed");
+  }
+  return { historical, current, historical_edges: historicalEdges, current_historical_edges: currentHistoricalEdges };
+}
+
+function syntheticCompletionCore(bundle: AnyRecord, events: AnyRecord[]): string {
+  return sha256Canonical({ ...bundle, critique_resolution_events: events });
+}
+
+export function selectUniqueHistoricalLedgerPrefix(
+  storedBundle: AnyRecord,
+  currentEvents: AnyRecord[],
+  historicalResultCoreSha256: string,
+  digestCandidate: (bundle: AnyRecord, events: AnyRecord[]) => string = syntheticCompletionCore,
+): AnyRecord {
+  if (!Array.isArray(currentEvents) || !HASH_RE.test(historicalResultCoreSha256)) throw new Error("historical ledger prefix inputs are invalid");
+  const matches = Array.from({ length: currentEvents.length + 1 }, (_, length) => currentEvents.slice(0, length))
+    .filter((events) => digestCandidate(storedBundle, events) === historicalResultCoreSha256);
+  if (matches.length !== 1) throw new Error(`historical completion requires exactly one reproducing ledger prefix; found ${matches.length}`);
+  const events = matches[0]!;
+  return {
+    length: events.length,
+    raw_sha256: createHash("sha256").update(JSON.stringify({ schema_version: "1.0", events })).digest("hex"),
+    canonical_sha256: sha256Canonical({ schema_version: "1.0", events }),
+    tail_hash: events.at(-1)?.event_hash ?? CRITIQUE_CHAIN_GENESIS,
+    events,
+  };
+}
+
+const HISTORY_REPAIR_BRIDGE_FIELDS = [
+  "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+  "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+  "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+  "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+  "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+  "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+  "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+  "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+] as const;
+
+export function critiqueResolutionHistoryBridgeDigest(value: AnyRecord): string {
+  return createHash("sha256").update(JSON.stringify(Object.fromEntries(HISTORY_REPAIR_BRIDGE_FIELDS.map((field) => [field, value[field]])))).digest("hex");
 }
 
 type GraphState = {
@@ -174,6 +311,11 @@ function validateEvents(state: GraphState): void {
     else if (state.projectRoot && !state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
     if (event.operation === "repair-critique-resolution-history") {
       if (event.signed_authorization.operation !== "repair-critique-resolution-history" || event.signed_authorization.missing_resolution_event_id !== event.missing_resolution_event_id || event.signed_authorization.missing_authorization_sha256 !== event.missing_authorization_sha256 || event.signed_authorization.reason_code !== "coordinator-external-ledger-overwrite-v1" || state.resolutionEvents.some((other) => other !== event && other.operation === "resolve-critique" && (other.event_id === event.missing_resolution_event_id || other.authorization_sha256 === event.missing_authorization_sha256))) state.errors.push("critique resolution repair event is incomplete or reconstructs an original authority event");
+      if (event.signed_authorization.historical_bridge_sha256 !== undefined
+        && (event.verified_bridge_sha256 !== event.signed_authorization.historical_bridge_sha256
+          || event.verified_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(event.signed_authorization))) {
+        state.errors.push("critique resolution repair event does not bind the verified historical bridge");
+      }
     }
     if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");
     const prior = state.byId.get(String(event.prior_record_id)); const resolving = state.byId.get(String(event.resolving_record_id));
