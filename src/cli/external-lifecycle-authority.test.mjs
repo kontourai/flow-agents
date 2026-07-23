@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
 
 const {
@@ -124,6 +125,49 @@ function completionVerificationKeyHost({
     },
     get closed() { return closed; },
   };
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function signedCompletion(overrides = {}) {
+  const unsigned = {
+    schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+    kind: "kontourai.lifecycle-authority.completion",
+    action,
+    request_sha256: digest,
+    run_id: "run-1",
+    operation_status: "applied",
+    result_core_sha256: "b".repeat(64),
+    coordinator_runtime_sha256: "c".repeat(64),
+    completed_at: "2026-07-20T00:00:00.000Z",
+    ...overrides,
+  };
+  return {
+    ...unsigned,
+    signature: {
+      algorithm: "ed25519",
+      value: sign(null, Buffer.from(canonical(unsigned)), completionVerificationKeyPair.privateKey).toString("base64"),
+    },
+  };
+}
+
+function withCompletionVerificationKey(callback) {
+  const mutableFs = createRequire(import.meta.url)("node:fs");
+  const host = completionVerificationKeyHost();
+  const methods = ["lstatSync", "readlinkSync", "accessSync", "openSync", "fstatSync", "readFileSync", "closeSync"];
+  const originals = Object.fromEntries(methods.map((method) => [method, mutableFs[method]]));
+  try {
+    for (const method of methods) mutableFs[method] = host[method].bind(host);
+    syncBuiltinESMExports();
+    return callback();
+  } finally {
+    for (const method of methods) mutableFs[method] = originals[method];
+    syncBuiltinESMExports();
+  }
 }
 
 test("lifecycle authority helper identity is immutable and ignores caller executable selection", () => {
@@ -282,6 +326,48 @@ test("lifecycle authority response rejects extra fields and malformed results", 
   assert.throws(() => validateLifecycleAuthorityResponse(output({ status: "rejected" }), action, digest), /rejected/);
   assert.throws(() => validateLifecycleAuthorityResponse(output({ result: { ...valid.result, completion: { ...completion, request_sha256: "b".repeat(64) } } }), action, digest), /completion does not bind/);
 });
+
+test("lifecycle authority response accepts completed replays only with an authenticated immutable applied completion", () => withCompletionVerificationKey(() => {
+  for (const replayAction of ["resolve-critique", "repair-critique-resolution-history", "cancel", "archive"]) {
+    const appliedCompletion = signedCompletion({ action: replayAction });
+    const replay = {
+      schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+      action: replayAction,
+      request_sha256: digest,
+      status: "accepted",
+      result: { run_id: "run-1", operation_status: "replayed", completion: appliedCompletion },
+    };
+    assert.deepEqual(validateLifecycleAuthorityResponse(`${JSON.stringify(replay)}\n`, replayAction, digest), replay.result, `${replayAction} completed replay is accepted`);
+    assert.deepEqual(validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, operation_status: "applied" } })}\n`, replayAction, digest), { ...replay.result, operation_status: "applied" }, `${replayAction} applied response remains accepted`);
+
+    const replayedCompletion = signedCompletion({ action: replayAction, operation_status: "replayed" });
+    for (const responseStatus of ["applied", "replayed"]) {
+      assert.throws(
+        () => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, operation_status: responseStatus, completion: replayedCompletion } })}\n`, replayAction, digest),
+        /completion status does not match/,
+        `${replayAction} ${responseStatus} response rejects a replayed immutable completion`,
+      );
+    }
+  }
+}));
+
+test("lifecycle authority replay response keeps action request run core and signature bindings fail-closed", () => withCompletionVerificationKey(() => {
+  const appliedCompletion = signedCompletion();
+  const replay = {
+    schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+    action,
+    request_sha256: digest,
+    status: "accepted",
+    result: { run_id: "run-1", operation_status: "replayed", completion: appliedCompletion },
+  };
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, action: "archive" })}\n`, action, digest), /action is invalid/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, request_sha256: "d".repeat(64) })}\n`, action, digest), /request digest/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, completion: signedCompletion({ action: "archive" }) } })}\n`, action, digest), /completion does not bind/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, completion: signedCompletion({ request_sha256: "d".repeat(64) }) } })}\n`, action, digest), /completion does not bind/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, completion: signedCompletion({ run_id: "other-run" }) } })}\n`, action, digest), /completion does not bind/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, completion: { ...appliedCompletion, result_core_sha256: "d".repeat(64) } } })}\n`, action, digest), /signature is invalid/);
+  assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...replay, result: { ...replay.result, completion: { ...appliedCompletion, signature: { ...appliedCompletion.signature, value: "A".repeat(appliedCompletion.signature.value.length) } } } })}\n`, action, digest), /signature is invalid/);
+}));
 
 test("package-side bundle validation cannot turn a helper response into authorization", () => {
   const verifyBase = { ...valid, action: "verify-authorization", result: { verified: true } };

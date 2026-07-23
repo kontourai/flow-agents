@@ -243,7 +243,10 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   exact(parsed.result, ["run_id", "operation_status", "completion"], "lifecycle authority mutation result");
   if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
   const completion = validateSignedCompletion(parsed.result.completion, action, requestSha256, parsed.result.run_id);
-  if (completion.operation_status !== parsed.result.operation_status) throw new Error("lifecycle authority completion status does not match the response");
+  // A replay returns the immutable completion from the original mutation.
+  // That completion is necessarily `applied`; the response itself reports
+  // `replayed` to describe this invocation. No replayed completion is valid.
+  if (completion.operation_status !== "applied") throw new Error("lifecycle authority completion status does not match the response");
   return parsed.result;
 }
 
