@@ -88,7 +88,7 @@ derive_signal() { # <runtime> [decl_json_path]
   local rt="$1" decl="${2:-}" log; log="$TMP/econ-$RANDOM.jsonl"; : > "$log"
   local extra=()
   [[ -n "$decl" ]] && extra=(env FLOW_AGENTS_CAPABILITY_DECL_FILE="$decl")
-  "${extra[@]}" env TELEMETRY_CONFIG_FILE="$EMPTY_CONF" TELEMETRY_ECONOMICS_LOG_FILE="$log" \
+  ${extra[@]+"${extra[@]}"} env TELEMETRY_CONFIG_FILE="$EMPTY_CONF" TELEMETRY_ECONOMICS_LOG_FILE="$log" \
     bash "$EMITTER" "$(mk_event "$rt")" >/dev/null 2>&1
   jq -c '.signals.per_delegation_tokens' < "$log" 2>/dev/null
 }

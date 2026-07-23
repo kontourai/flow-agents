@@ -123,7 +123,7 @@ _run_tool_event() {
   touch "$TMPLOG"
   before_lines=$(wc -l < "$TMPLOG" | tr -d ' ')
 
-  echo "$input" | env "${common_env[@]}" "${extra_env[@]}" bash "$TELEMETRY_SH" "$hook_type" dev 2>/dev/null
+  echo "$input" | env "${common_env[@]}" ${extra_env[@]+"${extra_env[@]}"} bash "$TELEMETRY_SH" "$hook_type" dev 2>/dev/null
 
   tail -n +"$((before_lines + 1))" "$TMPLOG" 2>/dev/null | tail -1
 }
