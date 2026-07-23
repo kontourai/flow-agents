@@ -2829,9 +2829,9 @@ export function isNarrativeArtifactContent(fileBytes: Buffer | string): boolean 
       && Array.isArray(value.sources)) return true;
     return false;
   } catch {
-    return text.includes("flow-agents-narrative-composer")
-      && text.includes("# Grounded Execution Narrative")
-      && text.includes("## Authority provenance");
+    return /(?:^|\r?\n)# Grounded Execution Narrative(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)## Authority provenance(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)- Narrative composer:\s*flow-agents-narrative-composer(?:\s|$)/.test(text);
   }
 }
 
