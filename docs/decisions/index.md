@@ -29,6 +29,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
 | [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |
 | [model-routing](./model-routing.md) | current | Model routing |
+| [portable-host-integration](./portable-host-integration.md) | current | Portable host integration boundary |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [survey-evidence-flow-gates](./survey-evidence-flow-gates.md) | current | Survey evidence for paused Flow gates |

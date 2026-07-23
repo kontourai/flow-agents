@@ -288,6 +288,24 @@ export {
   discoverSurveyGateReviewWork,
   publishSurveyGateReviewWork,
 } from "./survey-flow-gate-review-work.js";
+
+export {
+  deriveHostIntegrationLimitations,
+  generateHostConformanceEvidence,
+} from "./conduit-host-integration.js";
+export type {
+  AgentHostAdapter,
+  AssetKind,
+  ConformanceReport as HostConformanceReport,
+  ConformanceResult as HostConformanceResult,
+  GeneratedHostConformanceEvidence,
+  HostCapabilities,
+  InstallationReceipt,
+  IntegrationFidelity,
+  LifecycleEvent,
+  LifecycleOutcome,
+  PortableAsset,
+} from "./conduit-host-integration.js";
 export type {
   DiscoverSurveyGateReviewWorkInput,
   PublishedSurveyGateReviewWork,
