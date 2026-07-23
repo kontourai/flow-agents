@@ -4682,17 +4682,41 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // string scoping is the strongest honest enforcement available today and matches the granularity
   // the critique record already has.
   const _supersedeMarker = critique.critique_record_id;
+  const resolvingLaneStatus = new Map((Array.isArray(critique.lanes) ? critique.lanes : [])
+    .map((lane: AnyObj) => [lane.id, lane.status]));
+  const resolvingFindingStatus = new Map((Array.isArray(critique.findings) ? critique.findings : [])
+    .map((finding: AnyObj) => [finding.id, finding.status]));
+  const sameReviewerResolution = (prior: AnyObj): AnyObj => {
+    const resolvedLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : [])
+      .filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
+    const resolvedFindingIds = (Array.isArray(prior.findings) ? prior.findings : [])
+      .filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+    if (resolvedLaneIds.some((laneId: string) => resolvingLaneStatus.get(laneId) !== "pass")) {
+      die(`record-critique recheck must pass every previously failed lane before superseding ${prior.id}`);
+    }
+    if (resolvedFindingIds.some((findingId: string) =>
+      !["fixed", "accepted", "deferred", "false_positive"].includes(String(resolvingFindingStatus.get(findingId))))) {
+      die(`record-critique recheck must resolve every previously open finding before superseding ${prior.id}`);
+    }
+    return {
+      schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: prior.critique_record_id,
+      resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
+      resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
+    };
+  };
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
     const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
     const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
     if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
-      const resolvedLaneIds = (Array.isArray(e.lanes) ? e.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
-      const resolvedFindingIds = (Array.isArray(e.findings) ? e.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
-      return { ...e, superseded_by: _supersedeMarker, critique_resolution: {
-        schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: e.critique_record_id,
-        resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
-        resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
-      } };
+      return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
+    }
+    const resolution = e.critique_resolution;
+    if (critique.verdict === "pass"
+      && e.id === critique.id
+      && eSuperseded
+      && eReviewer === critique.reviewer
+      && resolution?.kind === "same-reviewer-recheck") {
+      return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
     }
     return e;
   });
