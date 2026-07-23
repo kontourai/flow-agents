@@ -71,8 +71,13 @@ function requiredText(value: string, name: string): string {
 export function bindHostWorkflowSession(
   input: HostWorkflowBindingInput,
 ): HostWorkflowBinding {
-  const artifactRoot = path.resolve(requiredText(input.artifactRoot, "artifactRoot"));
-  const artifactDir = path.resolve(requiredText(input.artifactDir, "artifactDir"));
+  const artifactRootInput = requiredText(input.artifactRoot, "artifactRoot");
+  const artifactDirInput = requiredText(input.artifactDir, "artifactDir");
+  if (!path.isAbsolute(artifactRootInput) || !path.isAbsolute(artifactDirInput)) {
+    throw new TypeError("artifactRoot and artifactDir must be absolute paths");
+  }
+  const artifactRoot = fs.realpathSync(artifactRootInput);
+  const artifactDir = fs.realpathSync(artifactDirInput);
   const relativeDir = path.relative(artifactRoot, artifactDir);
   if (
     relativeDir === "" ||
@@ -93,7 +98,9 @@ export function bindHostWorkflowSession(
 
   const state = (() => {
     try {
-      return JSON.parse(fs.readFileSync(path.join(artifactDir, "state.json"), "utf8")) as {
+      const stateFile = path.join(artifactDir, "state.json");
+      if (fs.lstatSync(stateFile).isSymbolicLink()) return {};
+      return JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
         branch?: unknown;
       };
     } catch {

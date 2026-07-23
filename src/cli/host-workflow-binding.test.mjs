@@ -51,7 +51,44 @@ test("bindHostWorkflowSession rejects unsafe actor and task boundaries", () => {
     const base = { artifactRoot: root, artifactDir: task, owner: "host", source: "resume" };
     assert.throws(() => bindHostWorkflowSession({ ...base, actorKey: "a:b" }), /actorKey/);
     assert.throws(
+      () => bindHostWorkflowSession({ ...base, artifactRoot: ".kontourai/flow-agents", actorKey: "actor" }),
+      /absolute paths/,
+    );
+    assert.throws(
       () => bindHostWorkflowSession({ ...base, artifactDir: workspace, actorKey: "actor" }),
+      /inside artifactRoot/,
+    );
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("bindHostWorkflowSession rejects a task symlink escaping the artifact root", (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-symlink-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const outside = path.join(workspace, "outside-task");
+    const linkedTask = path.join(root, "linked-task");
+    fs.mkdirSync(root, { recursive: true });
+    fs.mkdirSync(outside);
+    try {
+      fs.symlinkSync(outside, linkedTask, "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+        t.skip(`directory symlinks unavailable: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+    assert.throws(
+      () =>
+        bindHostWorkflowSession({
+          artifactRoot: root,
+          artifactDir: linkedTask,
+          actorKey: "actor",
+          owner: "host",
+          source: "resume",
+        }),
       /inside artifactRoot/,
     );
   } finally {
