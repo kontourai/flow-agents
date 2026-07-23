@@ -133,7 +133,8 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
-The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, and `archive`. Pause,
+The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, `archive`,
+`resolve-critique`, and `repair-critique-resolution-history`. Pause,
 resume, and release require the current assignment actor and an explicit reason. `critique`
 records the `clean-critique` claim but does not independently attach it to Flow or advance a gate. Cancel and
 archive require a signed user/operator authorization file. Flow owns the canonical run
@@ -237,6 +238,46 @@ also appends a separately hashed event binding the authorization digest and
 exact edge. The local event chain is tamper-evident; deployments requiring
 non-repudiation should additionally retain the signed authorization and anchor
 the resulting state in their provider-neutral durable audit store.
+
+### Repairing an irrecoverable legacy authority-history gap
+
+`workflow repair-critique-resolution-history-request` and
+`workflow repair-critique-resolution-history` are deliberately distinct from
+ordinary resolution. They are available only for an already-superseded,
+cross-reviewer edge whose original `resolve-critique` event is absent from the
+external `lifecycle-authority.resolution-events.json` ledger. They do not
+reconstruct that original event, signature, timestamp, reviewer, or Trust
+Bundle claim. Instead, a newly signed repair authorization records the missing
+original event ID and authorization digest with the fixed disclosure reason
+`coordinator-external-ledger-overwrite-v1`.
+
+The request binds the exact protected Trust Bundle bytes, external-ledger
+digest/length/tail, current signed completion digest, preserved edge digest,
+both critique records and hashes, reviewer, snapshots/heads, project/run/
+subject, nonce, request time, and expiry. Changing any of those values, finding
+the original event, or finding a prior repair rejects without mutation. A
+successful repair appends exactly one `repair-critique-resolution-history`
+event, writes a new root-signed completion and Flow attachment, and leaves
+`trust.bundle` byte-identical. The strict graph accepts exactly one authority
+proof per cross-reviewer edge: either its original event or one repair for a
+missing original. Zero, both, duplicates, unmatched events, altered edge data,
+or an invalid event chain fail validation.
+
+```bash
+# Read-only: emit the precise payload that an external operator must sign.
+flow_agents workflow repair-critique-resolution-history-request \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  > critique-history-repair.request.json
+
+# After the operator adds the Ed25519 signature outside the worktree:
+flow_agents workflow repair-critique-resolution-history \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  --authorization-file critique-history-repair.authorization.json
+```
 
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"

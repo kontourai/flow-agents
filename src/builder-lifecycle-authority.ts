@@ -45,7 +45,37 @@ export interface CritiqueResolutionAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
-type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization;
+export interface CritiqueResolutionHistoryRepairAuthorization {
+  schema_version: "1.0";
+  operation: "repair-critique-resolution-history";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  prior_record_id: string;
+  prior_record_hash: string;
+  resolving_record_id: string;
+  resolving_record_hash: string;
+  expected_resolver: string;
+  prior_snapshot_sha256: string;
+  resolving_snapshot_sha256: string;
+  prior_head_sha: string;
+  resolving_head_sha: string;
+  preimage_bundle_sha256: string;
+  preimage_ledger_sha256: string;
+  preimage_ledger_length: number;
+  preimage_ledger_tail_hash: string;
+  current_completion_sha256: string;
+  preserved_resolution_sha256: string;
+  missing_resolution_event_id: string;
+  missing_authorization_sha256: string;
+  reason_code: "coordinator-external-ledger-overwrite-v1";
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization;
 
 export function critiqueResolutionAuthorizationPayload(value: Omit<CritiqueResolutionAuthorization, "signature">): string {
   return JSON.stringify(value);
@@ -56,6 +86,17 @@ export function buildUnsignedCritiqueResolutionAuthorization(fields: Omit<Critiq
 } {
   const unsigned = { schema_version: "1.0", operation: "resolve-critique", ...fields } as const;
   return { unsigned, signingPayload: critiqueResolutionAuthorizationPayload(unsigned) };
+}
+
+export function critiqueResolutionHistoryRepairAuthorizationPayload(value: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields: Omit<CritiqueResolutionHistoryRepairAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">; signingPayload: string;
+} {
+  const unsigned = { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields } as const;
+  return { unsigned, signingPayload: critiqueResolutionHistoryRepairAuthorizationPayload(unsigned) };
 }
 
 export function loadCritiqueResolutionAuthorization(fileInput: string, expected: {

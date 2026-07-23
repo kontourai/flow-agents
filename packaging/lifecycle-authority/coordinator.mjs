@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
-import { coordinatorRuntimeSha256, resolveCritiqueTransition } from "./runtime-v1.mjs";
+import { coordinatorRuntimeSha256, repairCritiqueResolutionHistoryTransition, resolveCritiqueTransition, validateResolutionEventLedger } from "./runtime-v1.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
@@ -22,6 +22,7 @@ const ACTION_FIELDS = {
   cancel: ["action", "project_root", "session_dir", "authorization_file"],
   archive: ["action", "project_root", "session_dir", "authorization_file"],
   "resolve-critique": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
+  "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
 };
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -81,15 +82,18 @@ function authorityRegistry() {
   if (parsed.schema_version !== PROTOCOL_VERSION || !Array.isArray(parsed.keys)) throw new Error("authority registry is invalid");
   return parsed;
 }
-function verifyAuthorization(file) {
-  const authorization = JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8"));
+function verifySignedAuthorization(authorization, { projectRoot = null, requireCurrentExpiry = true } = {}) {
   if (!record(authorization.signature)) throw new Error("authorization signature is required");
   const key = authorityRegistry().keys.find((candidate) => record(candidate) && candidate.id === authorization.signature.key_id);
   if (!record(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || /PRIVATE KEY/.test(key.public_key_pem)) throw new Error("authorization key is not trusted");
   const { signature, ...unsigned } = authorization;
   if (signature.algorithm !== "ed25519" || typeof signature.value !== "string" || !crypto.verify(null, Buffer.from(JSON.stringify(unsigned)), crypto.createPublicKey(key.public_key_pem), Buffer.from(signature.value, "base64"))) throw new Error("authorization signature is invalid");
-  if (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at)) throw new Error("authorization is expired");
+  if (projectRoot !== null && authorization.project_root !== projectRoot) throw new Error("authorization does not bind the canonical project root");
+  if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
   return authorization;
+}
+function verifyAuthorization(file) {
+  return verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")));
 }
 function atomicWrite(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -149,6 +153,55 @@ async function inProjectTransaction(paths, binding, action) {
 }
 function protectedJson(file, label, maxBytes = 4 * 1024 * 1024) {
   return JSON.parse(protectedRegularFile(file, label, maxBytes).toString("utf8"));
+}
+function resolutionEventLedgerFile(paths) { return path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json"); }
+function hasCrossReviewerEdge(bundle) {
+  return Array.isArray(bundle?.claims) && bundle.claims.some((claim) => claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer");
+}
+function loadResolutionEventLedger(paths, bundle, authorization, action = authorization.operation) {
+  const file = resolutionEventLedgerFile(paths);
+  if (!fs.existsSync(file)) {
+    if (hasCrossReviewerEdge(bundle)) throw new Error("resolution event ledger is required after a cross-reviewer edge; repair is required");
+    return [];
+  }
+  const ledger = protectedJson(file, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+  exact(ledger, ["schema_version", "events"], "lifecycle authority resolution event ledger");
+  if (ledger.schema_version !== PROTOCOL_VERSION || !Array.isArray(ledger.events)) throw new Error("lifecycle authority resolution event ledger is invalid");
+  validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" });
+  for (const event of ledger.events) verifySignedAuthorization(event.signed_authorization, { projectRoot: paths.projectRoot, requireCurrentExpiry: false });
+  return ledger.events;
+}
+function writeResolutionEventLedger(paths, events) {
+  validateResolutionEventLedger(events);
+  atomicWrite(resolutionEventLedgerFile(paths), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events }, null, 2)}\n`, 0o644);
+}
+function assertAuthorizedBundlePreimage(bytes, action, authorization) {
+  const field = action === "resolve-critique"
+    ? "prior_bundle_sha256"
+    : action === "repair-critique-resolution-history"
+      ? "preimage_bundle_sha256"
+      : null;
+  if (!field) throw new Error("bundle preimage verification is unsupported for this action");
+  if (sha256(bytes) !== authorization[field]) {
+    throw new Error(action === "resolve-critique" ? "critique resolution preimage bundle digest changed" : "history repair preimage bundle digest changed");
+  }
+}
+function jsonSha256(value) { return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
+  // The ledger persists beside the Trust Bundle, but completions retain the
+  // established synthetic-bundle shape for compatibility with prior receipts.
+  return sha256({ ...bundle, critique_resolution_events: resolutionEvents });
+}
+function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
+  const completion = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024);
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  exact(completion, fields, "current lifecycle completion");
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || !["applied", "replayed"].includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256) || typeof completion.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.result_core_sha256) || !record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string") throw new Error("current lifecycle completion identity is invalid");
+  const { signature, ...unsigned } = completion;
+  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
+  if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("current lifecycle completion signature is invalid");
+  if (completion.result_core_sha256 !== lifecycleAuthorityResultDigest(bundle, resolutionEvents)) throw new Error("current lifecycle completion does not bind the exact bundle and resolution ledger");
+  return completion;
 }
 function sha256File(file, label) { return sha256(protectedRegularFile(file, label, 16 * 1024 * 1024)); }
 function exactObject(value, expected, label) {
@@ -318,24 +371,38 @@ async function withDurableLock(requestSha256, callback) {
 }
 async function executeMutation(envelope, paths, authorization, completionRecord = null) {
     if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
-    if (envelope.action === "resolve-critique") {
+    if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+      assertAuthorizedBundlePreimage(beforeBytes, envelope.action, authorization);
       const before = JSON.parse(beforeBytes.toString("utf8"));
-      if (sha256(beforeBytes) !== authorization.prior_bundle_sha256) throw new Error("critique resolution preimage bundle digest changed");
-      const reduced = resolveCritiqueTransition({ bundle: before, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id });
-      const resultCoreSha256 = sha256(reduced);
-      // Coordinator receipts and append-only resolution authorizations live
-      // beside, never inside, the upstream Hachure trust bundle.
-      const sessionBundle = { ...reduced };
-      const resolutionEvents = Array.isArray(sessionBundle.critique_resolution_events) ? sessionBundle.critique_resolution_events : [];
-      delete sessionBundle.critique_resolution_events;
+      const resolutionEvents = loadResolutionEventLedger(paths, before, authorization, envelope.action);
+      const currentCompletion = envelope.action === "repair-critique-resolution-history"
+        ? verifyCurrentLifecycleCompletion(paths, before, resolutionEvents)
+        : null;
+      const reduced = envelope.action === "resolve-critique"
+        ? resolveCritiqueTransition({ bundle: before, resolution_events: resolutionEvents, authorization, prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id })
+        : repairCritiqueResolutionHistoryTransition({
+          bundle: before, resolution_events: resolutionEvents, authorization,
+          prior_record_id: envelope.request.prior_record_id, resolving_record_id: envelope.request.resolving_record_id,
+          current_completion_sha256: jsonSha256(currentCompletion),
+        });
+      const sessionBundle = reduced.bundle;
+      const nextResolutionEvents = reduced.resolution_events;
+      const resultCoreSha256 = lifecycleAuthorityResultDigest(sessionBundle, nextResolutionEvents);
       await inProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
+        // Keep the signed request bound to the exact protected bytes at the
+        // mutation boundary, not to a parsed and reserialized object.
+        const currentBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+        assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
+        if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
         await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
-        // Recheck the exact preimage immediately before the atomic replace.
-        if (!fs.readFileSync(bundleFile).equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
-        atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
-        atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.resolution-events.json"), `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events: resolutionEvents }, null, 2)}\n`, 0o644);
+        // Recheck the exact preimage immediately before the session mutation.
+        const finalBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+        assertAuthorizedBundlePreimage(finalBytes, envelope.action, authorization);
+        if (!finalBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
+        if (envelope.action === "resolve-critique") atomicWrite(bundleFile, `${JSON.stringify(sessionBundle, null, 2)}\n`, 0o644);
+        writeResolutionEventLedger(paths, nextResolutionEvents);
         if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
       });
       return { result_core_sha256: resultCoreSha256, run_id: paths.runId };
@@ -380,7 +447,7 @@ async function processRootOperation(envelope) {
       const prior = durableJson(completionFile, "completion record");
       if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256) throw new Error("consumed lifecycle authorization record does not match the exact request");
       const completionRecord = completion(envelope, { runId: identity.runId }, "replayed", prior.result_core_sha256);
-      if (envelope.action === "resolve-critique") childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
     const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
@@ -408,7 +475,7 @@ async function processRootOperation(envelope) {
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.
-    if (envelope.action === "resolve-critique") childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
   });
 }
@@ -439,7 +506,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(projectRoot, archived) }), run_id: runId };
     }
     const paths = canonicalMutationPaths(envelope.request);
-    if (value.resume_prepared && envelope.action === "resolve-critique") rollbackCommittedTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(value.authorization)) });
+    if (value.resume_prepared && ["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) rollbackCommittedTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(value.authorization)) });
     if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
     return executeMutation(envelope, paths, value.authorization);
   }

@@ -10,11 +10,11 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
@@ -30,7 +30,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -41,6 +41,7 @@ Public workflow verbs:
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
   resolve-critique    Resolve a repaired historical critique through a later review record.
+  repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
   drive               Continue the canonical run through an explicit runtime adapter.
   publish-delivery    Publish the current session's verified trust bundle for CI reconciliation.
   pause               Pause the current run as its assignment actor.
@@ -74,6 +75,8 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "repair-critique-resolution-history-request") return repairCritiqueResolutionHistoryRequest(sessionDir, argv.slice(1));
+  if (verb === "repair-critique-resolution-history") return repairCritiqueResolutionHistory(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "publish-delivery") {
     assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
@@ -1402,10 +1405,77 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash),
     resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash),
     expected_resolver: String(resolving.reviewer), resolved_lane_ids: unresolvedLaneIds, resolved_finding_ids: unresolvedFindingIds,
-    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest),
-    prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
     nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
     requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
+async function repairCritiqueResolutionHistory(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow repair-critique-resolution-history");
+  const priorRecordId = flagString(parsed.flags, "prior-record-id");
+  const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!priorRecordId || !resolvingRecordId || !authorizationFile) throw new Error("workflow repair-critique-resolution-history requires both critique record ids and a signed --authorization-file <path>");
+  const { projectRoot } = readBoundSession(sessionDir);
+  const report = invokeExternalLifecycleAuthority({ action: "repair-critique-resolution-history", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: priorRecordId, resolving_record_id: resolvingRecordId });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Critique history repair was already recorded." : "Recorded a signed critique-resolution history repair.");
+  return 0;
+}
+
+async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), "workflow repair-critique-resolution-history-request");
+  const priorRecordId = flagString(parsed.flags, "prior-record-id");
+  const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
+  if (!priorRecordId || !resolvingRecordId) throw new Error("workflow repair-critique-resolution-history-request requires both critique record ids");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const bundleFile = path.join(sessionDir, "trust.bundle");
+  const bundleBytes = fs.readFileSync(bundleFile);
+  const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+  if (Object.hasOwn(bundle, "critique_resolution_events")) throw new Error("workflow history repair refuses a Trust Bundle containing external authority events");
+  const claims = normalizedCritiqueClaims(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []);
+  const claimFor = (id: string): JsonRecord => {
+    const matches = claims.filter((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === id);
+    if (matches.length !== 1) throw new Error(`critique record ${id} is missing or ambiguous`);
+    return matches[0]!;
+  };
+  const priorClaim = claimFor(priorRecordId); const resolvingClaim = claimFor(resolvingRecordId);
+  const prior = priorClaim.metadata as JsonRecord; const resolving = resolvingClaim.metadata as JsonRecord;
+  const edge = prior.critique_resolution as JsonRecord | undefined;
+  if (priorClaim.status !== "superseded" || prior.superseded_by !== resolvingRecordId || !edge || edge.kind !== "cross-reviewer") throw new Error("workflow history repair requires an already-superseded cross-reviewer edge");
+  if (String(edge.prior_record_id) !== priorRecordId || String(edge.resolving_record_id) !== resolvingRecordId || String(edge.resolver) !== String(resolving.reviewer)) throw new Error("workflow history repair edge does not bind the selected critiques");
+  const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+  const ledger = readJsonFile(eventsFile, "lifecycle authority resolution event ledger") as JsonRecord;
+  const events = Array.isArray(ledger.events) ? ledger.events as JsonRecord[] : (() => { throw new Error("workflow history repair requires a valid external resolution event ledger"); })();
+  const originalEventId = String(edge.resolution_event_id); const originalAuthorization = String(edge.authorization_sha256);
+  if (events.some((event) => event.event_id === originalEventId || event.authorization_sha256 === originalAuthorization)) throw new Error("workflow history repair refuses an edge whose original signed event is already present");
+  if (events.some((event) => event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id === originalEventId || event.missing_authorization_sha256 === originalAuthorization))) throw new Error("workflow history repair already exists for the selected edge");
+  const completion = verifyLifecycleAuthorityCompletion(readJsonFile(path.join(sessionDir, "lifecycle-authority.completion.json"), "lifecycle authority completion"));
+  if (!(["resolve-critique", "repair-critique-resolution-history"] as string[]).includes(String(completion.action)) || completion.run_id !== slug) throw new Error("workflow history repair requires the current root-signed lifecycle completion");
+  if (completion.result_core_sha256 !== lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events })) {
+    throw new Error("workflow history repair requires a current completion bound to the exact trust bundle and resolution ledger");
+  }
+  const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+  if (!subject || subject !== prior.workflow_subject_ref || subject !== resolving.workflow_subject_ref) throw new Error("workflow history repair requires one matching bound subject");
+  const snapshot = (record: JsonRecord): JsonRecord => record.review_target && typeof record.review_target === "object" && (record.review_target as JsonRecord).workspace_snapshot && typeof (record.review_target as JsonRecord).workspace_snapshot === "object" ? (record.review_target as JsonRecord).workspace_snapshot as JsonRecord : {};
+  const priorWorkspace = snapshot(prior); const resolvingWorkspace = snapshot(resolving);
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const now = new Date(); const tail = events.at(-1);
+  const request = buildUnsignedCritiqueResolutionHistoryRepairAuthorization({
+    project_root: projectRoot, run_id: slug, subject,
+    prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash), resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash), expected_resolver: String(resolving.reviewer),
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), preimage_ledger_sha256: createHash("sha256").update(JSON.stringify(ledger)).digest("hex"), preimage_ledger_length: events.length, preimage_ledger_tail_hash: String(tail?.event_hash ?? "0".repeat(64)),
+    current_completion_sha256: createHash("sha256").update(JSON.stringify(completion)).digest("hex"), preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
+    missing_resolution_event_id: originalEventId, missing_authorization_sha256: originalAuthorization, reason_code: "coordinator-external-ledger-overwrite-v1",
+    nonce: `critique-history-repair-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
   });
   console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
   return 0;

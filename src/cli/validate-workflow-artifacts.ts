@@ -416,7 +416,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
           const completion = readJson(path.join(dir, "lifecycle-authority.completion.json")).value;
           try {
             const verified = verifyLifecycleAuthorityCompletion(completion);
-            externalCompletionVerified = verified.action === "resolve-critique"
+            externalCompletionVerified = ["resolve-critique", "repair-critique-resolution-history"].includes(String(verified.action))
               && verified.run_id === path.basename(dir)
               && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
           } catch {

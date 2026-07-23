@@ -460,6 +460,41 @@ separately. The installer keeps its prior coordinator, runtime, pin, and reducer
 rollback. Neither the package caller nor an authorization record can override the helper, key, or
 installed source selected by this boundary.
 
+### External resolution ledger and legacy history repair
+
+`lifecycle-authority.resolution-events.json` is a protected, append-only,
+external ledger, not a field in the Hachure Trust Bundle. Before every ordinary
+resolution or repair, the coordinator requires a schema-valid, regular,
+group/world-non-writable ledger and validates its ordered sequence, predecessor/event
+hashes, unique event and authorization IDs, signed authorization bindings,
+run/subject bindings, and one-to-one graph coverage. The completion result core
+binds the Trust Bundle plus that separate ledger using the established
+synthetic-bundle compatibility shape; package validation and Builder consume
+the signed completion read-only.
+
+The narrow `repair-critique-resolution-history` operation addresses only the
+historical coordinator failure in which earlier external events were
+irrecoverably overwritten. It applies solely to an already-superseded
+cross-reviewer edge with its original resolution event absent. Its new,
+separately signed authorization must bind the exact raw Trust Bundle preimage,
+ledger digest/length/tail, current completion digest, preserved resolution-edge
+digest, missing original event ID and authorization digest, review records,
+reviewer, snapshots/heads, project/run/subject, nonce, time, expiry, and the
+explicit reason `coordinator-external-ledger-overwrite-v1`. The coordinator
+refuses a present original, a prior repair, a changed edge/preimage/completion,
+or any wrong subject, reviewer, snapshot, or ledger state.
+
+A repair never fabricates or substitutes the lost original signature,
+timestamp, reviewer, or authorization. It appends one distinct repair event,
+discloses the missing-original identifiers and reason, emits a new signed
+completion, and leaves the protected `trust.bundle` bytes unchanged. Strict
+graph validation requires exactly one proof for each cross-reviewer edge:
+either the original `resolve-critique` event or one matching repair when the
+original is absent. Missing, duplicate, competing original-and-repair,
+unmatched, reconstruction-looking, invalid-signature, or broken-chain evidence
+is `FAIL`; without an installed root-owned helper and verification key, the
+positive mutation path remains `NOT_VERIFIED`.
+
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not
 cancellation authority. Repository files, package bytes, and Git refs are explicitly never

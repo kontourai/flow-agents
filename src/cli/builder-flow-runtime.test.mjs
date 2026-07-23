@@ -22,7 +22,9 @@ import {
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
 import * as builderFlowRuntime from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import * as builderLifecycleAuthority from "../../build/src/builder-lifecycle-authority.js";
+import { lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
@@ -2618,6 +2620,69 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
     request: { reason: "test", authority: { kind: "operator_request", actor: "operator", request_ref: "fixture://legacy", requested_at: NOW } },
   });
   assert.equal(unsigned.assignment_actor.human, "operator");
+});
+
+test("history-repair authorization is a distinct signed request bound to the exact missing authority edge", () => {
+  const buildUnsignedCritiqueResolutionHistoryRepairAuthorization = builderLifecycleAuthority.buildUnsignedCritiqueResolutionHistoryRepairAuthorization;
+  const critiqueResolutionHistoryRepairAuthorizationPayload = builderLifecycleAuthority.critiqueResolutionHistoryRepairAuthorizationPayload;
+  assert.equal(
+    typeof buildUnsignedCritiqueResolutionHistoryRepairAuthorization,
+    "function",
+    "RED: a separately signed history-repair authorization builder must exist; ordinary resolve-critique authorization cannot reconstruct missing history",
+  );
+  assert.equal(typeof critiqueResolutionHistoryRepairAuthorizationPayload, "function");
+  const fields = {
+    project_root: "/tmp/repair-history-project",
+    run_id: "run-1",
+    subject: SUBJECT,
+    prior_record_id: "critique:prior",
+    prior_record_hash: "a".repeat(64),
+    resolving_record_id: "critique:resolving",
+    resolving_record_hash: "b".repeat(64),
+    expected_resolver: "independent-reviewer",
+    prior_snapshot_sha256: "c".repeat(64),
+    resolving_snapshot_sha256: "d".repeat(64),
+    prior_head_sha: "none",
+    resolving_head_sha: "none",
+    preimage_bundle_sha256: "e".repeat(64),
+    preimage_ledger_sha256: "f".repeat(64),
+    preimage_ledger_length: 1,
+    preimage_ledger_tail_hash: "1".repeat(64),
+    current_completion_sha256: "2".repeat(64),
+    preserved_resolution_sha256: "3".repeat(64),
+    missing_resolution_event_id: `critique-resolution:${"4".repeat(64)}`,
+    missing_authorization_sha256: "5".repeat(64),
+    reason_code: "coordinator-external-ledger-overwrite-v1",
+    nonce: "repair-history-once",
+    requested_at: "2030-01-02T00:00:00.000Z",
+    expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  const { unsigned, signingPayload } = buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields);
+  assert.equal(unsigned.operation, "repair-critique-resolution-history");
+  assert.deepEqual(unsigned, { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields });
+  assert.equal(signingPayload, critiqueResolutionHistoryRepairAuthorizationPayload(unsigned));
+  assert.notEqual(
+    buildUnsignedCritiqueResolutionAuthorization({
+      project_root: fields.project_root, run_id: fields.run_id, subject: fields.subject,
+      prior_bundle_sha256: fields.preimage_bundle_sha256, prior_record_id: fields.prior_record_id, prior_record_hash: fields.prior_record_hash,
+      resolving_record_id: fields.resolving_record_id, resolving_record_hash: fields.resolving_record_hash,
+      expected_resolver: fields.expected_resolver, resolved_lane_ids: [], resolved_finding_ids: [],
+      prior_snapshot_sha256: fields.prior_snapshot_sha256, resolving_snapshot_sha256: fields.resolving_snapshot_sha256,
+      prior_head_sha: "none", resolving_head_sha: "none", nonce: fields.nonce, requested_at: fields.requested_at, expires_at: fields.expires_at,
+    }).unsigned.operation,
+    unsigned.operation,
+    "ordinary resolve-critique authorization is not a private history-repair shortcut",
+  );
+});
+
+test("ordinary resolution and history repair completion cores preserve the synthetic-ledger compatibility shape", () => {
+  const bundle = { schema_version: "1.0", claims: [{ id: "claim-1", value: "pass" }] };
+  for (const operation of ["resolve-critique", "repair-critique-resolution-history"]) {
+    const resolutionEvents = [{ operation, event_id: `${operation}:event`, event_hash: "a".repeat(64) }];
+    const exactCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents });
+    assert.notEqual(exactCore, lifecycleAuthorityResultDigest({ bundle, resolution_events: resolutionEvents }), `${operation} completion must retain the established synthetic-ledger compatibility shape`);
+    assert.equal(exactCore, lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents }), `${operation} completion binds the exact current bundle and external ledger`);
+  }
 });
 
 test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {

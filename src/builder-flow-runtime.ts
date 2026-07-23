@@ -1203,7 +1203,7 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
   const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
   const expectedCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events });
-  if (completion.action !== "resolve-critique" || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
+  if (!["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action)) || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
     throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
   }
   return { events, verified: true };

@@ -138,11 +138,16 @@ function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, sta
 }
 
 function validateResolutionEvent(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {
-  const events = state.resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
-  if (resolution.kind === "cross-reviewer" && events.length !== 1) { state.errors.push("cross-reviewer critique resolution must link one append-only authorization event"); return; }
-  if (events.length !== 1) return;
-  const event = events[0]!; state.referencedEventIds.add(String(event.event_id));
-  if (event.subject !== prior.workflow_subject_ref || event.prior_record_id !== prior.critique_record_id || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer || event.authorization_sha256 !== resolution.authorization_sha256 || canonical(event.edge) !== canonical(resolution)) state.errors.push("critique resolution authorization event does not bind the exact edge");
+  const originals = state.resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
+  const repairs = state.resolutionEvents.filter((event) => event.operation === "repair-critique-resolution-history" && event.missing_resolution_event_id === resolution.resolution_event_id && event.missing_authorization_sha256 === resolution.authorization_sha256);
+  if (resolution.kind === "cross-reviewer" && originals.length + repairs.length !== 1) { state.errors.push("cross-reviewer critique resolution requires exactly one original or repair authority proof"); return; }
+  if (originals.length + repairs.length !== 1) return;
+  const event = originals[0] ?? repairs[0]!;
+  state.referencedEventIds.add(String(event.event_id));
+  const bound = event.subject === prior.workflow_subject_ref && event.prior_record_id === prior.critique_record_id && event.prior_record_hash === prior.critique_record_hash && event.resolving_record_id === resolving.critique_record_id && event.resolving_record_hash === resolving.critique_record_hash && event.resolver === resolving.reviewer && canonical(event.edge) === canonical(resolution);
+  if (!bound) { state.errors.push("critique resolution authorization event does not bind the exact edge"); return; }
+  if (event.operation === "resolve-critique" && event.authorization_sha256 !== resolution.authorization_sha256) state.errors.push("critique resolution original authorization event does not bind the preserved edge");
+  if (event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id !== resolution.resolution_event_id || event.missing_authorization_sha256 !== resolution.authorization_sha256 || event.signed_authorization?.preserved_resolution_sha256 !== createHash("sha256").update(JSON.stringify(resolution)).digest("hex"))) state.errors.push("critique resolution repair event does not bind the missing original authority edge");
 }
 
 function validateDescendant(prior: AnyRecord, resolving: AnyRecord, state: GraphState): void {
@@ -156,12 +161,20 @@ function validateEvents(state: GraphState): void {
   state.resolutionEvents.forEach((event, index) => {
     const { event_hash: hash, ...unsigned } = event; const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : state.resolutionEvents[index - 1]?.event_hash;
     if (event.sequence !== index + 1 || event.predecessor_hash !== predecessor || createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") !== hash) state.errors.push("critique resolution events must form one valid append-only hash chain");
-    if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
+    const expectedId = event.operation === "resolve-critique"
+      ? `critique-resolution:${String(event.authorization_sha256)}`
+      : event.operation === "repair-critique-resolution-history"
+        ? `critique-resolution-history-repair:${String(event.authorization_sha256)}`
+        : "";
+    if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== expectedId) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
     if (!state.referencedEventIds.has(String(event.event_id))) state.errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
-    if (event.operation !== "resolve-critique" || !state.projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
-    else if (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
+    if (!["resolve-critique", "repair-critique-resolution-history"].includes(event.operation) || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
+    else if (state.projectRoot && (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id)) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
     else if (createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex") !== event.authorization_sha256) state.errors.push("critique resolution signed authorization does not match its event");
-    else if (!state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    else if (state.projectRoot && !state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    if (event.operation === "repair-critique-resolution-history") {
+      if (event.signed_authorization.operation !== "repair-critique-resolution-history" || event.signed_authorization.missing_resolution_event_id !== event.missing_resolution_event_id || event.signed_authorization.missing_authorization_sha256 !== event.missing_authorization_sha256 || event.signed_authorization.reason_code !== "coordinator-external-ledger-overwrite-v1" || state.resolutionEvents.some((other) => other !== event && other.operation === "resolve-critique" && (other.event_id === event.missing_resolution_event_id || other.authorization_sha256 === event.missing_authorization_sha256))) state.errors.push("critique resolution repair event is incomplete or reconstructs an original authority event");
+    }
     if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");
     const prior = state.byId.get(String(event.prior_record_id)); const resolving = state.byId.get(String(event.resolving_record_id));
     if (!prior || !resolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(prior, resolving, event.edge)) state.errors.push("critique resolution event resulting bundle core digest is invalid");

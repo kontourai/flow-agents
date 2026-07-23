@@ -8,7 +8,7 @@ export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flo
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
 export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
-const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
+const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
 export interface ExternalLifecycleMutationResult {
@@ -234,7 +234,7 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
 /** The external helper owns validation, locking, replay/CAS, and every write. */
 export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
   if (!ACTIONS.has(request.action)) throw new Error("unsupported lifecycle authority action");
-  const fields = request.action === "resolve-critique"
+  const fields = request.action === "resolve-critique" || request.action === "repair-critique-resolution-history"
       ? ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"]
       : ["action", "project_root", "session_dir", "authorization_file"];
   exact(request as JsonRecord, fields, "lifecycle authority request");
@@ -251,7 +251,7 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
     throw new Error(stderr || "external lifecycle authority rejected the request");
   }
   const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
-  const expectedRunId = request.action === "resolve-critique" ? path.basename(String(request.session_dir)) : path.basename(String(request.session_dir));
+  const expectedRunId = path.basename(String(request.session_dir));
   if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
   return result;
 }
