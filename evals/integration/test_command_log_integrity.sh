@@ -306,6 +306,58 @@ else
   _fail "T5: denied append authority did not emit the visible redacted diagnostic"
 fi
 
+# ─── Test 6: a false generation release is visible, redacted, and still append-only ──
+echo ""
+echo "Test 6: hook generation-release uncertainty is visible and redacted"
+
+T6="$TMP/t6"; seed_repo "$T6" t6
+capture_t6_err=$(CAPTURE_PATH="$CAPTURE" FIXTURE_ROOT="$T6" node <<'NODE' 2>&1 >/dev/null
+const path = require("path");
+const capturePath = process.env.CAPTURE_PATH;
+const chainRelative = ["..", "lib", "command-log-chain" + ".js"].join(path.sep);
+const chain = require(path.resolve(path.dirname(capturePath), chainRelative));
+const originalRelease = chain.releaseGenerationLock;
+chain.releaseGenerationLock = () => false;
+try {
+  const capture = require(capturePath);
+  capture.run(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    cwd: process.env.FIXTURE_ROOT,
+    tool_input: { command: "echo HOOK_RELEASE_SECRET_756" },
+    tool_response: { exitCode: 0 },
+  }));
+} finally {
+  chain.releaseGenerationLock = originalRelease;
+}
+NODE
+)
+if [[ -f "$T6/.kontourai/flow-agents/t6/command-log.jsonl" ]]; then
+  _pass "T6: release uncertainty retains the append-only captured record"
+else
+  _fail "T6: release uncertainty did not retain the captured record"
+fi
+if echo "$capture_t6_err" | grep -qi "generation release uncertain.*operator recovery"; then
+  _pass "T6: false generation release emits an immediate recovery diagnostic"
+else
+  _fail "T6: false generation release did not emit the required recovery diagnostic"
+fi
+if ! echo "$capture_t6_err" | grep -q "HOOK_RELEASE_SECRET_756"; then
+  _pass "T6: release uncertainty diagnostic is redacted"
+else
+  _fail "T6: release uncertainty diagnostic exposed command content: $capture_t6_err"
+fi
+
+# ─── Test 7: source contract matches the fail-open authority behavior ─────────────────
+echo ""
+echo "Test 7: hook comments do not promise an unchained fallback write"
+
+if rg -q "falls back to writing the plain record" "$CAPTURE"; then
+  _fail "T7: stale hook contract still claims a plain-record fallback after authority failure"
+else
+  _pass "T7: hook contract states authority failure leaves the command log unchanged"
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 echo ""
 if [[ "$errors" -eq 0 ]]; then

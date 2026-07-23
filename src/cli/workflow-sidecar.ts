@@ -3258,7 +3258,9 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
       }
       fs.appendFileSync(logFile, `${lines.join("\n")}\n`);
     } finally {
-      chain.releaseGenerationLock(lock);
+      if (!chain.releaseGenerationLock(lock)) {
+        process.stderr.write("[record-gate-claim] writer observation generation release uncertain; later capture may require operator recovery\n");
+      }
     }
   } catch (error) {
     process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
@@ -3385,6 +3387,9 @@ export function appendWriterTransactionAbort(capability: WriterTransactionAbortC
     } finally {
       writerTransactionAbortTestHooks?.beforeLockRelease?.(lock.file);
       releaseResult = chain.releaseGenerationLock(lock);
+      if (!releaseResult) {
+        process.stderr.write("[record-gate-claim] transaction abort generation release uncertain; operator recovery required\n");
+      }
     }
     return appendResult && releaseResult;
   } catch {

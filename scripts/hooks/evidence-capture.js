@@ -36,8 +36,9 @@
  *   real tamper-proof boundary is the signed checkpoint (B1). The chain raises the
  *   local bar and catches casual/accidental tampering and corruption.
  *
- *   Fail-open: any chain computation error falls back to writing the plain record
- *   without `_chain`. A chain failure must NEVER block capture or corrupt the log.
+ *   Fail-open: a chain or append-authority failure leaves the log unchanged; this
+ *   hook never writes an unchained fallback record. A capture failure must NEVER
+ *   block the agent or corrupt the log.
  *
  * Exit-code nuance: the host payload exposes `tool_response`/`tool_output`/`error`
  * (per docs/spec/runtime-hook-surface.md §1, postToolUse). A clean integer exit
@@ -352,7 +353,9 @@ function run(rawInput) {
       const recordToWrite = { ...record, _chain: { seq, prevHash, hash } };
       fs.appendFileSync(logFile, JSON.stringify(recordToWrite) + '\n');
     } finally {
-      releaseGenerationLock(lock);
+      if (!releaseGenerationLock(lock)) {
+        process.stderr.write('[evidence-capture] command-log generation release uncertain; later capture may require operator recovery\n');
+      }
     }
   } catch { /* fail-open: capture never blocks or corrupts */ }
   return rawInput;

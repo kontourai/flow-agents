@@ -193,6 +193,8 @@ test("transaction abort journal rereads and rejects post-fsync corruption", () =
 test("transaction abort journal rejects lock replacement during descriptor release", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-lock-replacement-"));
   let replacement = "";
+  let stderr = "";
+  const writeStderr = process.stderr.write;
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({
     beforeLockRelease: (lockFile) => {
       fs.renameSync(lockFile, `${lockFile}.parked`);
@@ -201,11 +203,15 @@ test("transaction abort journal rejects lock replacement during descriptor relea
     },
   });
   try {
+    process.stderr.write = ((chunk) => { stderr += String(chunk); return true; });
     assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), "transaction-lock-replaced"), false);
   } finally {
+    process.stderr.write = writeStderr;
     workflowSidecar.setWriterTransactionAbortTestHooksForTest(undefined);
   }
   assert.equal(fs.readFileSync(path.join(directory, "command-log.jsonl.lock.0"), "utf8"), replacement);
+  assert.match(stderr, /generation release uncertain.*operator recovery/i, "a false abort-journal release result must be visible immediately");
+  assert.doesNotMatch(stderr, /foreign|transaction-lock-replaced|command-log\.jsonl\.lock\.0/i, "release uncertainty diagnostics must stay redacted");
 });
 
 test("explicit gate verdicts remain authoritative over successful and failing command observations", () => {

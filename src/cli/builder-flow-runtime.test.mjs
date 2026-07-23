@@ -589,6 +589,117 @@ for (const faultAt of cleanupResources) {
   });
 }
 
+test("a returned evidence transaction failure retains its primary cause when outer cleanup is uncertain", async () => {
+  const session = makeSession("staged-returned-failure-cleanup-primary");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let cleanupInjected = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterRecord: () => { throw new Error("returned transaction primary failure"); },
+    candidateResourceClose: (resource) => {
+      if (resource === "candidate-file") {
+        cleanupInjected = true;
+        throw new Error("outer cleanup fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "returned failure cleanup composition",
+    ]);
+    assert.ok(result.error, "the returned evidence transaction failure remains a public failure");
+    assert.match(String(result.error), /returned transaction primary failure/i, "cleanup uncertainty must not replace the returned transaction cause");
+    assert.match(String(result.error), /cleanup uncertainty/i, "the secondary cleanup uncertainty remains visible without replacing the primary cause");
+    assert.equal(cleanupInjected, true, "the deterministic outer cleanup fault was exercised");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("an exclusively-created canonical descriptor is guarded during cleanup", async () => {
+  const session = makeSession("staged-canonical-close-guard");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let canonicalCloseAttempted = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateResourceClose: (resource) => {
+      if (resource === "canonical-trust") {
+        canonicalCloseAttempted = true;
+        throw new Error("canonical descriptor close fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "canonical descriptor close recovery",
+    ]);
+    assert.equal(canonicalCloseAttempted, true, "the exclusively-created canonical descriptor must use the guarded close path");
+    assert.ok(result.error, "a successful publication plus canonical-close uncertainty is recovery-required");
+    assert.match(String(result.error), /recovery required.*no retry/i);
+    assert.match(String(result.error), /canonical.*cleanup uncertainty/i);
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("a canonical close fault keeps the earlier canonical write failure primary", async () => {
+  const session = makeSession("staged-canonical-close-primary");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let canonicalCloseAttempted = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateCommitWrite: () => 0,
+    candidateResourceClose: (resource) => {
+      if (resource === "canonical-trust") {
+        canonicalCloseAttempted = true;
+        throw new Error("canonical descriptor close fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "canonical write and close failure composition",
+    ]);
+    assert.equal(canonicalCloseAttempted, true, "the canonical descriptor close is attempted after the earlier write failure");
+    assert.ok(result.error);
+    assert.match(String(result.error), /canonical trust write returned zero or invalid byte count/i, "the write failure remains primary");
+    assert.match(String(result.error), /cleanup uncertainty.*canonical-trust/i, "the close failure remains secondary recovery context");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+for (const [phase, installDrift] of [
+  ["before exclusive creation", (session) => ({
+    beforeCandidateCommit: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+  ["after exclusive creation", (session) => ({
+    afterCanonicalCreate: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+]) {
+  test(`persistent cooperative session-parent drift ${phase} is recovery-required without writing the replacement namespace`, async () => {
+    const session = makeSession(`staged-session-parent-drift-${phase.replaceAll(" ", "-")}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(installDrift(session));
+    try {
+      const result = await captureWorkflowPublicResult([
+        "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", `session parent drift ${phase}`,
+      ]);
+      assert.ok(result.error, `${phase}: persistent parent drift must not report a successful publication`);
+      assert.match(String(result.error), /pinned session directory pathname changed/i, `${phase}: diagnose the parent identity drift, not an unrelated child-path symptom`);
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false, `${phase}: the replacement namespace must not receive a transaction-owned canonical bundle`);
+      assert.equal(fs.readFileSync(path.join(session.sessionDir, "foreign-sentinel"), "utf8"), "foreign replacement namespace\n");
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  });
+}
+
 test("attached prior-present commit preserves both baseline inode and foreign pathname replacement", async () => {
   const session = makeSession("staged-commit-present-path-replacement");
   claimAmbientSessionAssignment(session);
@@ -724,6 +835,13 @@ function makeSession(slug = "runtime-projection") {
   fs.writeFileSync(path.join(projectRoot, "review-target", "implementation.txt"), "reviewed implementation\n");
   fs.writeFileSync(path.join(projectRoot, "review-target", "delivery.md"), "reviewed delivery artifact\n");
   return { projectRoot, artifactRoot, sessionDir, slug };
+}
+
+function replacePinnedSessionDirectoryForTest(session) {
+  const parked = `${session.sessionDir}-pinned`;
+  fs.renameSync(session.sessionDir, parked);
+  fs.mkdirSync(session.sessionDir);
+  fs.writeFileSync(path.join(session.sessionDir, "foreign-sentinel"), "foreign replacement namespace\n");
 }
 
 function writeJson(file, value) {

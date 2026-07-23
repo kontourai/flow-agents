@@ -184,6 +184,25 @@ test("canonical writer authority denial leaves a broken command log byte-identic
   assert.equal(fs.readFileSync(log, "utf8"), broken, "denied append authority must not manufacture an unchained fallback");
 });
 
+test("ordinary writer release uncertainty emits one immediate redacted diagnostic", (t) => {
+  const dir = tempSession(t);
+  const sentinel = "WRITER_RELEASE_SECRET_756";
+  const originalRelease = chain.releaseGenerationLock;
+  const originalWrite = process.stderr.write;
+  let stderr = "";
+  chain.releaseGenerationLock = () => false;
+  process.stderr.write = ((chunk) => { stderr += String(chunk); return true; });
+  try {
+    appendWriterObservedCommands(dir, [{ command: `echo ${sentinel}`, exit_code: 0, output_sha256: "a".repeat(64) }], NOW);
+  } finally {
+    process.stderr.write = originalWrite;
+    chain.releaseGenerationLock = originalRelease;
+  }
+  assert.equal(readEntries(dir).length, 1, "ordinary observation capture remains append-only and fail-open");
+  assert.match(stderr, /generation release uncertain.*operator recovery/i, "release uncertainty must not be silently ignored");
+  assert.doesNotMatch(stderr, new RegExp(sentinel), "release diagnostics must not expose raw command content");
+});
+
 test("append is fail-open: an unwritable session dir does not throw", () => {
   assert.doesNotThrow(() => appendWriterObservedCommands("/nonexistent/definitely-missing", [{ command: "x", exit_code: 0, output_sha256: "e".repeat(64) }], NOW));
 });

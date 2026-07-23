@@ -346,6 +346,24 @@ foreign target is permitted. Once exclusive creation has succeeded, any later un
 both the staged candidate and reachable owned canonical residue, returns `recovery required` with
 no retry, and requires explicit recovery rather than rollback.
 
+The transaction also pins the session-directory descriptor and checks its pathname identity before
+exclusive creation, immediately after it, and after the parent fsync. A persistent cooperative
+rename or replacement is therefore reported as `recovery required` with no retry and must not
+write a canonical bundle into the replacement namespace. Those checks detect ordinary local races;
+they do not claim atomic protection against replacement-and-restoration between checks.
+
+Flow and Flow Agents runtime state is local state writable by the invoking OS user. The protocol
+provides cooperative serialization, non-overwrite behavior, append-only observations, and visible
+recovery boundaries; it is not a privilege boundary against a malicious process running as that
+same user, which can directly rewrite runtime state, candidates, logs, locks, or executable code.
+Hostile same-user ABA namespace manipulation and direct same-user state forgery are explicitly
+out of scope and `NOT_VERIFIED`. No native helper is required for that excluded threat model.
+
+If Flow retains an evidence `*.candidate` receipt or the local transaction retains a staged
+candidate, treat it as recovery evidence rather than a retry instruction: do not promote, rename,
+replay, delete, or manually attach it. A prior no-retry result remains authoritative until an
+explicit recovery procedure is available.
+
 Command-log serialization likewise leaves audit residue. The legacy
 `command-log.jsonl.lock` pathname is a permanent versioned fence, created and validated
 exclusively with no-follow semantics and durable descriptor/parent checks before a generation can
@@ -355,7 +373,9 @@ highest valid generation must be durably `released` before the next generation c
 Active, malformed, stale, or replaced highest generations are never stolen, deleted, or
 automatically superseded. Ordinary capture denied append authority leaves the command log
 byte-for-byte unchanged and emits only a redacted diagnostic; transaction abort remains fail
-closed. There is no automatic crashed-generation recovery or lock cleanup; authenticated recovery
+closed. A false generation-release result emits an immediate redacted diagnostic: ordinary hook
+and writer observation capture remain append-only/fail-open, while transaction abort returns false
+so public evidence becomes recovery-required with no retry. There is no automatic crashed-generation recovery or lock cleanup; authenticated recovery
 of that state is explicitly `NOT_VERIFIED` and outside #756, so retain the residue until an
 explicit artifact-lifecycle action is appropriate.
 
