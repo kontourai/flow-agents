@@ -47,6 +47,24 @@ export type RunCorrelationInput = {
   identities: Record<RunCorrelationIdentityKey, RunCorrelationIdentity>;
 };
 
+export type RunCorrelationPresence =
+  | { status: "present"; envelope: RunCorrelationEnvelope }
+  | { status: "incomplete"; reason: string };
+
+export type RunCorrelationCarrier<T extends Record<string, unknown>> = T & {
+  run_correlation: RunCorrelationEnvelope;
+};
+
+export type RuntimeCorrelationIdentitySupport =
+  | { status: "supported" }
+  | { status: "partial"; note: string }
+  | { status: "unsupported"; reason: string }
+  | { status: "not_applicable"; reason: string };
+
+export type RuntimeCorrelationIdentityDeclaration = Readonly<
+  Record<RunCorrelationIdentityKey, RuntimeCorrelationIdentitySupport>
+>;
+
 export class RunCorrelationValidationError extends Error {
   readonly issues: readonly string[];
 
@@ -134,4 +152,103 @@ export function createRunCorrelationEnvelope(input: RunCorrelationInput): RunCor
     correlation_id: input.correlation_id ?? `run-${randomUUID()}`,
     identities: input.identities,
   });
+}
+
+export function attachRunCorrelation<T extends Record<string, unknown>>(
+  record: T,
+  envelope: unknown,
+): RunCorrelationCarrier<T> {
+  return {
+    ...structuredClone(record),
+    run_correlation: validateRunCorrelationEnvelope(envelope),
+  };
+}
+
+export function readRunCorrelation(record: unknown): RunCorrelationPresence {
+  if (!isRecord(record) || !("run_correlation" in record)) {
+    return {
+      status: "incomplete",
+      reason: "record predates run correlation or its producer did not provide an envelope",
+    };
+  }
+  return {
+    status: "present",
+    envelope: validateRunCorrelationEnvelope(record.run_correlation),
+  };
+}
+
+const runtimeIdentityDeclarations = {
+  "claude-code": runtimeDeclaration({
+    runtime_session: supportedIdentity(),
+    runtime_turn: supportedIdentity(),
+    agent: supportedIdentity(),
+    delegation_trace: unsupportedSupport("the runtime does not expose delegation trace context"),
+    delegation_span: unsupportedSupport("the runtime does not expose delegation span context"),
+  }),
+  codex: runtimeDeclaration({
+    runtime_session: supportedIdentity(),
+    runtime_turn: supportedIdentity(),
+    agent: supportedIdentity(),
+    delegation_trace: unsupportedSupport("the runtime does not expose delegation trace context"),
+    delegation_span: unsupportedSupport("the runtime does not expose delegation span context"),
+  }),
+  kiro: runtimeDeclaration({
+    runtime_session: supportedIdentity(),
+    runtime_turn: supportedIdentity(),
+    agent: supportedIdentity(),
+    delegation_trace: unsupportedSupport("the runtime does not expose delegation trace context"),
+    delegation_span: unsupportedSupport("the runtime does not expose delegation span context"),
+  }),
+  opencode: runtimeDeclaration({
+    runtime_session: supportedIdentity(),
+    runtime_turn: {
+      status: "partial",
+      note: "turn identity is unavailable in non-interactive run mode",
+    },
+    agent: supportedIdentity(),
+    delegation_trace: unsupportedSupport("the runtime does not expose delegation trace context"),
+    delegation_span: unsupportedSupport("the runtime does not expose delegation span context"),
+  }),
+  pi: runtimeDeclaration({
+    runtime_session: supportedIdentity(),
+    runtime_turn: supportedIdentity(),
+    agent: supportedIdentity(),
+    delegation_trace: unsupportedSupport("the runtime does not expose delegation trace context"),
+    delegation_span: unsupportedSupport("the runtime does not expose delegation span context"),
+  }),
+  "codex-local": runtimeDeclaration({}),
+  "strands-local": runtimeDeclaration({}),
+} as const satisfies Record<string, RuntimeCorrelationIdentityDeclaration>;
+
+export const RUNTIME_CORRELATION_IDENTITY_DECLARATIONS:
+Readonly<Record<string, RuntimeCorrelationIdentityDeclaration>> = runtimeIdentityDeclarations;
+
+export function runtimeCorrelationIdentityDeclaration(
+  runtime: string,
+): RuntimeCorrelationIdentityDeclaration {
+  const canonical = runtime.trim().toLowerCase() === "kiro-cli"
+    ? "kiro"
+    : runtime.trim().toLowerCase();
+  return structuredClone(runtimeIdentityDeclarations[canonical as keyof typeof runtimeIdentityDeclarations]
+    ?? runtimeDeclaration({}));
+}
+
+function runtimeDeclaration(
+  overrides: Partial<Record<RunCorrelationIdentityKey, RuntimeCorrelationIdentitySupport>>,
+): RuntimeCorrelationIdentityDeclaration {
+  return Object.fromEntries(RUN_CORRELATION_IDENTITY_KEYS.map((key) => [
+    key,
+    overrides[key] ?? {
+      status: "not_applicable",
+      reason: `${key} is owned outside this runtime adapter`,
+    },
+  ])) as RuntimeCorrelationIdentityDeclaration;
+}
+
+function supportedIdentity(): RuntimeCorrelationIdentitySupport {
+  return { status: "supported" };
+}
+
+function unsupportedSupport(reason: string): RuntimeCorrelationIdentitySupport {
+  return { status: "unsupported", reason };
 }
