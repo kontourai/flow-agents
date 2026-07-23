@@ -713,7 +713,13 @@ const NODE_BIN = basename(process.execPath).startsWith('node') ? process.execPat
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 
 export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
-  const root = directory || process.cwd();
+  const resolvedWorktree = typeof worktree === 'string' ? resolve(worktree) : null;
+  const fallbackRoot = typeof directory === 'string' && directory ? directory : process.cwd();
+  // opencode uses the filesystem root as its worktree sentinel outside a Git
+  // checkout. In that case directory is the active task root.
+  const root = resolvedWorktree && resolvedWorktree !== dirname(resolvedWorktree)
+    ? resolvedWorktree
+    : fallbackRoot;
   const projectBundleRoot = resolve(PLUGIN_DIR, '..', '..');
   const globalRuntimeRoot = join(resolve(PLUGIN_DIR, '..'), '.flow-agents', 'runtime');
   const runtimeRoot = existsSync(join(globalRuntimeRoot, 'scripts', 'hooks'))
@@ -723,12 +729,12 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
   // Deterministic load marker. opencode invokes this factory at startup but
   // does not reliably surface plugin console output to its log file, and its
   // internal "loading plugin" message was dropped in opencode 1.17.x. Write a
-  // marker into the workspace telemetry dir so acceptance tests can confirm the
-  // plugin loaded without depending on opencode internals. Best-effort only.
+  // marker into the Flow Agents runtime-artifact dir so acceptance tests can
+  // confirm the plugin loaded without depending on opencode internals.
   try {
-    const telemetryDir = join(root, '.telemetry');
-    mkdirSync(telemetryDir, { recursive: true });
-    writeFileSync(join(telemetryDir, 'opencode-plugin.loaded'), 'flow-agents');
+    const artifactDir = join(root, '.kontourai', 'flow-agents');
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, 'opencode-plugin.loaded'), 'flow-agents');
   } catch (_err) {
     // Marker is diagnostic only; never block plugin load on a write failure.
   }
