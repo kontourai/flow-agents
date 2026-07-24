@@ -27,7 +27,7 @@
         "runtime_turn": { "$ref": "#/$defs/identity" },
         "flow_run": { "$ref": "#/$defs/identity" },
         "flow_step": { "$ref": "#/$defs/identity" },
-        "work_item": { "$ref": "#/$defs/identity" },
+        "work_item": { "$ref": "#/$defs/workItemIdentity" },
         "agent": { "$ref": "#/$defs/identity" },
         "delegation_trace": { "$ref": "#/$defs/identity" },
         "delegation_span": { "$ref": "#/$defs/identity" },
@@ -41,6 +41,12 @@
       "minLength": 1,
       "maxLength": 255,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$"
+    },
+    "workItemIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}|(?:[A-Za-z0-9][A-Za-z0-9._@-]*:)?[A-Za-z0-9._@-]+(?:/[A-Za-z0-9._@-]+)+(?:#[A-Za-z0-9._@-]+)?)$"
     },
     "reason": {
       "type": "string",
@@ -57,6 +63,30 @@
           "properties": {
             "status": { "const": "present" },
             "value": { "$ref": "#/$defs/opaqueIdentifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": {
+              "enum": ["unavailable", "unsupported", "not_applicable"]
+            },
+            "reason": { "$ref": "#/$defs/reason" }
+          }
+        }
+      ]
+    },
+    "workItemIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "value"],
+          "properties": {
+            "status": { "const": "present" },
+            "value": { "$ref": "#/$defs/workItemIdentifier" }
           }
         },
         {

@@ -7,7 +7,7 @@ import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 
-import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir } from "@kontourai/flow";
+import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
@@ -28,6 +28,7 @@ import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
+import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, stageDeliveryDestination, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
@@ -166,6 +167,7 @@ syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
+const currentPointer = require("../../scripts/hooks/lib/current-pointer.js");
 const runtimeTestSeams = await loadRuntimeTestSeams();
 const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
 const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
@@ -227,7 +229,7 @@ function makeSession(slug = "runtime-projection") {
   });
   writeJson(path.join(artifactRoot, "current.json"), {
     active_slug: slug,
-    artifact_dir: `.kontourai/flow-agents/${slug}`,
+    artifact_dir: slug,
     updated_at: NOW,
   });
   fs.mkdirSync(path.join(projectRoot, "review-target"), { recursive: true });
@@ -295,6 +297,14 @@ function consumedAuthorizationRecords(session) {
 }
 
 function claimSessionAssignment(session) {
+  const existing = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+  if (existing?.status === "claimed" && existing.actor_key === ACTOR_KEY) return;
+  if (existing?.status === "claimed") {
+    performLocalRelease(session.artifactRoot, session.slug, existing.actor, {
+      actorKey: existing.actor_key,
+      reason: "test holder replacement",
+    });
+  }
   performLocalClaim(session.artifactRoot, session.slug, ACTOR, {
     ttlSeconds: 1800,
     actorKey: ACTOR_KEY,
@@ -307,6 +317,14 @@ function claimSessionAssignment(session) {
 
 function claimAmbientSessionAssignment(session) {
   const ambient = resolveCurrentAssignmentActor();
+  const existing = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+  if (existing?.status === "claimed" && existing.actor_key === ambient.actorKey) return ambient;
+  if (existing?.status === "claimed") {
+    performLocalRelease(session.artifactRoot, session.slug, existing.actor, {
+      actorKey: existing.actor_key,
+      reason: "test holder replacement",
+    });
+  }
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, {
     ttlSeconds: 1800,
     actorKey: ambient.actorKey,
@@ -316,6 +334,17 @@ function claimAmbientSessionAssignment(session) {
     reason: "test",
   });
   return ambient;
+}
+
+async function startClaimedBuilderFlowSession(input) {
+  const sessionDir = path.resolve(input.sessionDir);
+  const artifactRoot = path.dirname(sessionDir);
+  claimAmbientSessionAssignment({
+    sessionDir,
+    artifactRoot,
+    slug: path.basename(sessionDir),
+  });
+  return startBuilderFlowSession(input);
 }
 
 function lifecycleAuthorization(session, operation, name, overrides = {}) {
@@ -655,7 +684,7 @@ async function writeAndSync(session, entries) {
 
 test("small-model client can start and advance from projected actions without choosing Flow steps", async () => {
   const session = makeSession();
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
 
   assert.equal(started.run.state.current_step, "pull-work");
   assert.deepEqual(started.projection.next_action.skills, ["pull-work"]);
@@ -723,9 +752,169 @@ test("small-model client can start and advance from projected actions without ch
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
 });
 
+test("production Builder start mints and reuses one actor-bound run correlation", async () => {
+  const first = makeSession("correlated-production-start");
+  const firstOwner = claimAmbientSessionAssignment(first);
+  const otherActorFile = path.join(first.artifactRoot, "current", "other-actor.json");
+  const otherActorPointer = {
+    schema_version: "1.0",
+    active_slug: first.slug,
+    artifact_dir: first.slug,
+    updated_at: NOW,
+    owner: "other-host",
+    source: "session-start",
+    active_agents: [],
+    binding_id: "binding-other-actor",
+  };
+  writeJson(otherActorFile, otherActorPointer);
+
+  const started = await startClaimedBuilderFlowSession({ sessionDir: first.sessionDir });
+  assert.equal(started.run.correlation.status, "present");
+  const correlation = started.run.correlation.envelope;
+  assert.equal(correlation.identities.flow_run.value, first.slug);
+  assert.equal(correlation.identities.work_item.value, SUBJECT);
+  const runtimeSessionSupport = runtimeCorrelationIdentityDeclaration(firstOwner.actor.runtime).runtime_session;
+  if (runtimeSessionSupport.status === "supported" || runtimeSessionSupport.status === "partial") {
+    assert.deepEqual(correlation.identities.runtime_session, {
+      status: "present",
+      value: firstOwner.actor.session_id,
+    });
+  } else {
+    assert.deepEqual(correlation.identities.runtime_session, runtimeSessionSupport);
+  }
+  assert.equal(correlation.identities.agent.value, firstOwner.actorKey);
+  assert.deepEqual(started.projection.run_correlation, correlation);
+  assert.deepEqual(
+    JSON.parse(started.run.state.params.run_correlation),
+    correlation,
+  );
+  const actorBinding = currentPointer.readOwnCurrentPointer(first.artifactRoot, firstOwner.actorKey).payload;
+  assert.equal(actorBinding.artifact_dir, first.slug);
+  assert.equal(actorBinding.binding_id, correlation.correlation_id);
+  assert.deepEqual(readJson(otherActorFile), otherActorPointer);
+
+  const retried = await startClaimedBuilderFlowSession({ sessionDir: first.sessionDir });
+  assert.deepEqual(retried.run.correlation, started.run.correlation);
+  assert.deepEqual(retried.projection.run_correlation, correlation);
+
+  const second = makeSession("correlated-production-start-second");
+  claimAmbientSessionAssignment(second);
+  const concurrent = await startClaimedBuilderFlowSession({ sessionDir: second.sessionDir });
+  assert.equal(concurrent.run.correlation.status, "present");
+  assert.notEqual(
+    concurrent.run.correlation.envelope.correlation_id,
+    correlation.correlation_id,
+  );
+
+  const overlapping = makeSession("correlated-overlapping-start");
+  claimAmbientSessionAssignment(overlapping);
+  const [left, right] = await Promise.all([
+    startClaimedBuilderFlowSession({ sessionDir: overlapping.sessionDir }),
+    startClaimedBuilderFlowSession({ sessionDir: overlapping.sessionDir }),
+  ]);
+  assert.deepEqual(left.run.correlation, right.run.correlation);
+});
+
+test("production Builder start rejects a claimed assignment owned by another actor", async () => {
+  const session = makeSession("correlated-foreign-assignment");
+  claimSessionAssignment(session);
+  await assert.rejects(
+    () => startBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /must be actively held by the current workflow actor/,
+  );
+  assert.equal(fs.existsSync(runDir(session.slug, session.projectRoot)), false);
+});
+
+test("production Builder start refuses to mint correlation without an authenticated assignment", async () => {
+  const session = makeSession("correlated-missing-assignment");
+  await assert.rejects(
+    () => startBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /assignment.*actively held/,
+  );
+  assert.equal(fs.existsSync(runDir(session.slug, session.projectRoot)), false);
+});
+
+test("legacy Builder runs project explicit schema-valid incomplete correlation", async () => {
+  const session = makeSession("legacy-incomplete-correlation");
+  await startBuilderFlowRun({
+    cwd: session.projectRoot,
+    runId: session.slug,
+    subject: SUBJECT,
+    flowId: "builder.build",
+  });
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.deepEqual(synchronized.projection.run_correlation, {
+    status: "incomplete",
+    reason: "record predates run correlation or its producer did not provide an envelope",
+  });
+});
+
+test("persisted Builder correlation cannot be downgraded to an incomplete marker", async () => {
+  const session = makeSession("correlation-downgrade");
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const flowStateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
+  const flowState = readJson(flowStateFile);
+  flowState.params.run_correlation = JSON.stringify({
+    status: "incomplete",
+    reason: "identity was removed after canonical persistence",
+  });
+  writeJson(flowStateFile, flowState);
+  await assert.rejects(
+    () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /run correlation envelope|schema_version|identities/,
+  );
+  assert.deepEqual(started.projection.run_correlation, readJson(path.join(session.sessionDir, "state.json")).run_correlation);
+});
+
+test("persisted Builder correlation cannot cross-join another Work Item", async () => {
+  const session = makeSession("correlation-work-item-mismatch");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const flowStateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
+  const flowState = readJson(flowStateFile);
+  const correlation = JSON.parse(flowState.params.run_correlation);
+  correlation.identities.work_item = { status: "present", value: "local:work-item/different" };
+  flowState.params.run_correlation = JSON.stringify(correlation);
+  writeJson(flowStateFile, flowState);
+  await assert.rejects(
+    () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /correlation\.identities\.work_item.*match subject/,
+  );
+});
+
+test("Builder start rejects a cross-joined Work Item before creating Flow state", async () => {
+  const session = makeSession("correlation-start-work-item-mismatch");
+  const unavailable = (name) => ({ status: "unavailable", reason: `${name} unavailable in fixture` });
+  const correlation = {
+    schema_version: "1.0",
+    correlation_id: "run-correlation-start-mismatch",
+    identities: {
+      runtime_session: unavailable("runtime session"),
+      runtime_turn: unavailable("runtime turn"),
+      flow_run: { status: "present", value: session.slug },
+      flow_step: unavailable("flow step"),
+      work_item: { status: "present", value: "local:work-item/different" },
+      agent: unavailable("agent"),
+      delegation_trace: unavailable("delegation trace"),
+      delegation_span: unavailable("delegation span"),
+      terminal_record: unavailable("terminal record"),
+    },
+  };
+  await assert.rejects(
+    () => startBuilderFlowRun({
+      cwd: session.projectRoot,
+      runId: session.slug,
+      subject: SUBJECT,
+      flowId: "builder.build",
+      correlation,
+    }),
+    /correlation\.identities\.work_item.*match subject/,
+  );
+  assert.equal(fs.existsSync(runDir(session.slug, session.projectRoot)), false);
+});
+
 test("gate-action implementation policy permits code only at builder.build/execute", async () => {
   const session = makeSession("gate-action-implementation-policy");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -756,19 +945,19 @@ test("gate-action artifact identity reads reject symlinks and oversized files", 
     const outside = path.join(session.projectRoot, "outside-release.json");
     fs.writeFileSync(outside, "{}\n");
     fs.symlinkSync(outside, path.join(session.sessionDir, "release.json"));
-    await assert.rejects(startBuilderFlowSession({ sessionDir: session.sessionDir }), /ELOOP|regular file|changed identity/);
+    await assert.rejects(startClaimedBuilderFlowSession({ sessionDir: session.sessionDir }), /ELOOP|regular file|changed identity/);
   });
 
   await t.test("oversized", async () => {
     const session = makeSession("gate-action-artifact-oversized");
     fs.writeFileSync(path.join(session.sessionDir, "release.json"), Buffer.alloc(1_048_577));
-    await assert.rejects(startBuilderFlowSession({ sessionDir: session.sessionDir }), /bounded regular file/);
+    await assert.rejects(startClaimedBuilderFlowSession({ sessionDir: session.sessionDir }), /bounded regular file/);
   });
 });
 
 test("Builder projection preserves Flow continuation semantics for exceptional statuses", async () => {
   const session = makeSession("continuation-status-projection");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const stateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
   const original = readJson(stateFile);
   for (const [status, expected] of [
@@ -785,7 +974,7 @@ test("Builder projection preserves Flow continuation semantics for exceptional s
 
 test("accepted Flow exceptions explicitly waive the current envelope requirements", async () => {
   const session = makeSession("accepted-exception-envelope");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const exception = await acceptException(session.slug, {
     cwd: session.projectRoot,
     gate: "pull-work-gate",
@@ -820,7 +1009,7 @@ test("all-optional effective Flow gate overrides advance during canonical sync w
   });
   assert.deepEqual(directEnvelope.stop_condition.required.skill_ids, []);
   fs.rmSync(unevaluated.dir, { recursive: true, force: true });
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(started.attached, false);
   assert.equal(started.run.state.current_step, "design-probe");
   assert.deepEqual(started.gateActionEnvelope.action.skills.map((skill) => skill.id), ["pickup-probe"]);
@@ -829,7 +1018,7 @@ test("all-optional effective Flow gate overrides advance during canonical sync w
 
 test("weak structured consumer advances real Builder gates through envelope public interfaces", async () => {
   const session = makeSession("continuation-driver-two-steps");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const visited = [];
 
   const result = await driveBuilderFlowSession({
@@ -894,7 +1083,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
     }],
     goal_fit: { status: "pending", summary: "The bounded continuation is still active." },
   });
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const unrelatedSlug = "unrelated-pointer-session";
   const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
   fs.mkdirSync(unrelatedDir, { recursive: true });
@@ -1021,7 +1210,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
 
   const adapter = path.join(session.projectRoot, "signed-evidence-adapter.mjs");
   const commandFile = path.join(session.projectRoot, "signed-evidence-adapter-command.json");
@@ -1108,8 +1297,8 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
 
 test("public workflow drive rejects a non-owner before adapter execution", async () => {
   const session = makeSession("continuation-driver-owner");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const marker = path.join(session.projectRoot, "adapter-ran");
   const adapter = path.join(session.projectRoot, "adapter.mjs");
   const commandFile = path.join(session.projectRoot, "adapter-command.json");
@@ -1130,7 +1319,7 @@ test("public workflow drive rejects a non-owner before adapter execution", async
 
 test("sync attaches the staged trust.bundle bytes when the session bundle is replaced", async () => {
   const session = makeSession("snapshot-attachment");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const originalEntries = [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })];
   writeBundle(session.sessionDir, originalEntries);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
@@ -1162,7 +1351,7 @@ test("public evidence rejects an intervening Flow mutation and removes unattache
   const session = makeSession("evidence-head-race");
   claimAmbientSessionAssignment(session);
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected race fixture.\n");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await workflowSidecarMain([
     "record-gate-claim", session.sessionDir,
     "--expectation", "selected-work", "--status", "not_verified", "--summary", "pre-race bundle fixture",
@@ -1199,7 +1388,7 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
   const session = makeSession("evidence-amendment-race");
   claimAmbientSessionAssignment(session);
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected amendment-race fixture.\n");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const flowModule = new URL("../../node_modules/@kontourai/flow/dist/index.js", import.meta.url).href;
   const mutator = path.join(session.projectRoot, "amend-flow-head.mjs");
   fs.writeFileSync(mutator, `
@@ -1241,7 +1430,7 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
 
 test("a gate claim recorded for an older Flow head stays inert until freshly re-recorded", async () => {
   const session = makeSession("stale-gate-claim-head");
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const staleHead = flowRunHead(started.run.state);
   const authority = { kind: "user_request", actor: "stale-gate-claim-head-test", request_ref: "test:stale-gate-claim-head", requested_at: new Date().toISOString() };
   await pauseRun(session.slug, { cwd: session.projectRoot, reason: "advance the canonical head", authority });
@@ -1271,7 +1460,7 @@ test("a gate claim recorded for an older Flow head stays inert until freshly re-
 
 test("an unbound current-gate claim is rejected instead of receiving the current head implicitly", async () => {
   const session = makeSession("unbound-gate-claim-head");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
   writeBundle(session.sessionDir, [entry]);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
@@ -1286,7 +1475,7 @@ test("an unbound current-gate claim is rejected instead of receiving the current
 
 test("a check claim cannot bypass head binding by stripping all gate-claim metadata", async () => {
   const session = makeSession("stripped-gate-claim-head");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
   writeBundle(session.sessionDir, [entry]);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
@@ -1303,7 +1492,7 @@ test("a check claim cannot bypass head binding by impersonating exempt producer 
   for (const forgedOrigin of ["critique", "acceptance"]) {
     await t.test(forgedOrigin, async () => {
       const session = makeSession(`forged-${forgedOrigin}-origin`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
       writeBundle(session.sessionDir, [entry]);
       const bundleFile = path.join(session.sessionDir, "trust.bundle");
@@ -1325,7 +1514,7 @@ test("a check claim cannot bypass head binding by impersonating exempt producer 
 
 test("direct sidecar gate recording derives the exact projected Flow head", async () => {
   const session = makeSession("direct-sidecar-gate-head");
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await workflowSidecarMain([
     "record-gate-claim", session.sessionDir,
     "--expectation", "selected-work",
@@ -1339,7 +1528,7 @@ test("direct sidecar gate recording derives the exact projected Flow head", asyn
 
 test("post-plan acceptance shrinking is rejected before a later bundle write", async () => {
   const session = makeSession("acceptance-contract-integrity");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -1389,7 +1578,7 @@ test("post-plan acceptance shrinking is rejected before a later bundle write", a
 
 test("direct sidecar gate recording cannot inject a head without an exact Flow projection", async () => {
   const session = makeSession("direct-sidecar-injected-head");
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const stateFile = path.join(session.sessionDir, "state.json");
   const sidecar = readJson(stateFile);
   delete sidecar.flow_run;
@@ -1409,14 +1598,14 @@ test("direct sidecar gate recording cannot inject a head without an exact Flow p
 test("public evidence quarantines a committed bundle when producer durability reporting fails", async () => {
   const session = makeSession("producer-durability-failure");
   claimAmbientSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
   const beforeManifest = readJson(manifestFile);
   const realFsyncSync = fs.fsyncSync;
   let injectedFailure = false;
   fs.fsyncSync = (descriptor) => {
-    if (fs.fstatSync(descriptor).isDirectory() && !injectedFailure) {
+    if (fs.fstatSync(descriptor).isDirectory() && fs.existsSync(bundleFile) && !injectedFailure) {
       injectedFailure = true;
       throw Object.assign(new Error("fixture directory fsync failure"), { code: "EIO" });
     }
@@ -1445,11 +1634,11 @@ test("start rejects a requested Builder flow that differs from the existing run 
   for (const [existingFlowId, requestedFlowId] of [["builder.shape", "builder.build"], ["builder.build", "builder.shape"]]) {
     await t.test(`${existingFlowId} cannot resume as ${requestedFlowId}`, async () => {
       const session = makeSession(`flow-mismatch-${existingFlowId.replace('.', '-')}`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir, flowId: existingFlowId });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir, flowId: existingFlowId });
       const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
       const beforeProjection = snapshotProjectionTargets(session);
       await assert.rejects(
-        () => startBuilderFlowSession({ sessionDir: session.sessionDir, flowId: requestedFlowId }),
+        () => startClaimedBuilderFlowSession({ sessionDir: session.sessionDir, flowId: requestedFlowId }),
         new RegExp(`requested ${requestedFlowId} does not match the existing ${existingFlowId} run`),
       );
       assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
@@ -1461,7 +1650,7 @@ test("start rejects a requested Builder flow that differs from the existing run 
 test("pause and resume preserve the current Flow step and active assignment", async () => {
   const session = makeSession("lifecycle-pause-resume");
   claimAmbientSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const before = readJson(path.join(runDir(session.slug, session.projectRoot), "state.json"));
 
   const paused = await pauseBuilderFlowSession({
@@ -1487,7 +1676,7 @@ test("pause and resume preserve the current Flow step and active assignment", as
 externalAuthorityE2E("authorized cancellation is canonical, terminal, and releases the assignment exactly once", async () => {
   const session = makeSession("lifecycle-cancel");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const authorizationFile = liveLifecycleAuthorization(session, "cancel", "cancel");
 
   const canceled = await cancelBuilderFlowSession({
@@ -1516,7 +1705,7 @@ externalAuthorityE2E("authorized cancellation is canonical, terminal, and releas
 externalAuthorityE2E("prepareBuilderCancelRequest emits a payload that, signed by the operator key, cancels the run end-to-end", async () => {
   const session = makeSession("friendly-cancel-e2e");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
 
   const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
   // Identity is carried from the run's active assignment, never fabricated.
@@ -1552,7 +1741,12 @@ externalAuthorityE2E("prepareBuilderCancelRequest emits a payload that, signed b
 
 test("prepareBuilderCancelRequest refuses a run with no assignment holder", async () => {
   const session = makeSession("friendly-cancel-no-holder");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startBuilderFlowRun({
+    cwd: session.projectRoot,
+    runId: session.slug,
+    subject: SUBJECT,
+    flowId: "builder.build",
+  });
   await assert.rejects(
     () => prepareBuilderCancelRequest({ sessionDir: session.sessionDir }),
     /no assignment holder/,
@@ -1561,14 +1755,13 @@ test("prepareBuilderCancelRequest refuses a run with no assignment holder", asyn
 
 test("prepareBuilderCancelRequest canonicalizes a legacy missing-human assignment without rewriting it", async () => {
   const session = makeSession("friendly-cancel-legacy-actor");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   claimSessionAssignment(session);
   const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
   const legacyAssignment = readJson(assignmentFile);
   delete legacyAssignment.actor.human;
   writeJson(assignmentFile, legacyAssignment);
   const before = fs.readFileSync(assignmentFile, "utf8");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
-
   const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
   assert.deepEqual(req.authorization.assignment_actor, ACTOR);
   assert.equal(req.signingPayload, JSON.stringify(req.authorization));
@@ -1592,8 +1785,8 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
 
 test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {
   const session = makeSession("friendly-cancel-custom");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const req = await prepareBuilderCancelRequest({
     sessionDir: session.sessionDir,
     reason: "stale orphaned run",
@@ -1609,8 +1802,8 @@ test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry wi
 
 externalAuthorityE2E("a cancel-request payload signed with the WRONG key is rejected (signature lock intact)", async () => {
   const session = makeSession("friendly-cancel-badsig");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
   // Default (live) timing so the request is not expired — the signature, not the
   // clock, must be what rejects it.
   const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
@@ -1626,8 +1819,8 @@ externalAuthorityE2E("a cancel-request payload signed with the WRONG key is reje
 
 test("builder-run cancel-request CLI writes the unsigned authorization and prints signing guidance", async () => {
   const session = makeSession("friendly-cancel-cli");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const outFile = path.join(session.projectRoot, "out.unsigned.json");
 
   const output = [];
@@ -1666,7 +1859,7 @@ test("builder-run cancel-request CLI writes the unsigned authorization and print
 externalAuthorityE2E("cancel-request signing-payload parity holds for non-ASCII reason/actor (unicode regression)", async () => {
   const session = makeSession("friendly-cancel-unicode");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const req = await prepareBuilderCancelRequest({
     sessionDir: session.sessionDir,
     reason: "café — Ünïcödé 😀 العربية",
@@ -1686,7 +1879,7 @@ externalAuthorityE2E("cancel-request signing-payload parity holds for non-ASCII 
 externalAuthorityE2E("prepareBuilderCancelRequest mints from the released assignment once the run is canceled (redemption-gate aligned)", async () => {
   const session = makeSession("friendly-cancel-recovery");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   // Cancel the run first — this releases the assignment and sets status=canceled.
   const first = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
   const firstSigned = {
@@ -1707,8 +1900,17 @@ externalAuthorityE2E("prepareBuilderCancelRequest mints from the released assign
 
 test("assignment release is independent of Flow lifecycle", async () => {
   const session = makeSession("lifecycle-release-assignment");
-  claimAmbientSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const ambient = claimAmbientSessionAssignment(session);
+  currentPointer.writePerActorCurrent(session.artifactRoot, ambient.actorKey, {
+    schema_version: "1.0",
+    active_slug: session.slug,
+    artifact_dir: session.slug,
+    updated_at: NOW,
+    owner: "test",
+    source: "session-start",
+    active_agents: [],
+  });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
 
   const released = await releaseBuilderFlowAssignment({
@@ -1719,12 +1921,251 @@ test("assignment release is independent of Flow lifecycle", async () => {
   assert.equal(released.assignmentReleased, true);
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
   assert.equal(readJson(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)).status, "released");
+  assert.equal(currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload, null);
+  const retired = readJson(currentPointer.perActorCurrentFile(session.artifactRoot, ambient.actorKey));
+  assert.equal(retired.binding_status, "retired");
+  assert.equal(retired.binding_reason, "assignment_released");
+  await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  const stillRetired = readJson(currentPointer.perActorCurrentFile(session.artifactRoot, ambient.actorKey));
+  assert.equal(stillRetired.binding_status, "retired");
+  assert.equal(stillRetired.binding_reason, "assignment_released");
+});
+
+test("assignment release remains retryable when its durable record write fails", async () => {
+  const session = makeSession("lifecycle-release-retry");
+  const ambient = claimAmbientSessionAssignment(session);
+  currentPointer.writePerActorCurrent(session.artifactRoot, ambient.actorKey, {
+    schema_version: "1.0",
+    active_slug: session.slug,
+    artifact_dir: session.slug,
+    updated_at: NOW,
+    owner: "test",
+    source: "session-start",
+    active_agents: [],
+  });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
+  const realRenameSync = fs.renameSync;
+  let injectedFailure = false;
+  fs.renameSync = (source, destination) => {
+    if (!injectedFailure && path.resolve(String(destination)) === path.resolve(assignmentFile)) {
+      injectedFailure = true;
+      throw Object.assign(new Error("fixture assignment replacement failure"), { code: "EIO" });
+    }
+    return realRenameSync(source, destination);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      releaseBuilderFlowAssignment({
+        sessionDir: session.sessionDir,
+        reason: "fixture failed assignment release",
+      }),
+      /fixture assignment replacement failure/,
+    );
+  } finally {
+    fs.renameSync = realRenameSync;
+    syncBuiltinESMExports();
+  }
+
+  assert.equal(readJson(assignmentFile).status, "claimed");
+  const stillActive = currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload;
+  assert.equal(stillActive.artifact_dir, session.slug);
+  assert.equal(stillActive.binding_status, undefined);
+
+  const retried = await releaseBuilderFlowAssignment({
+    sessionDir: session.sessionDir,
+    reason: "fixture retried assignment release",
+  });
+  assert.equal(retried.assignmentReleased, true);
+  assert.equal(readJson(assignmentFile).status, "released");
+  assert.equal(currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload, null);
+});
+
+test("assignment release retries pointer retirement after the assignment committed", async () => {
+  const session = makeSession("lifecycle-release-pointer-retry");
+  const ambient = claimAmbientSessionAssignment(session);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
+  const actorFile = currentPointer.perActorCurrentFile(session.artifactRoot, ambient.actorKey);
+  const realRenameSync = fs.renameSync;
+  let injectedFailure = false;
+  fs.renameSync = (source, destination) => {
+    if (!injectedFailure && path.basename(String(destination)) === path.basename(actorFile)) {
+      injectedFailure = true;
+      throw Object.assign(new Error("fixture pointer replacement failure"), { code: "EIO" });
+    }
+    return realRenameSync(source, destination);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      releaseBuilderFlowAssignment({
+        sessionDir: session.sessionDir,
+        reason: "fixture failed pointer retirement",
+      }),
+      /fixture pointer replacement failure/,
+    );
+  } finally {
+    fs.renameSync = realRenameSync;
+    syncBuiltinESMExports();
+  }
+
+  assert.equal(readJson(assignmentFile).status, "released");
+  assert.equal(currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload.artifact_dir, session.slug);
+  const retried = await releaseBuilderFlowAssignment({
+    sessionDir: session.sessionDir,
+    reason: "fixture retried pointer retirement",
+  });
+  assert.equal(retried.assignmentReleased, true);
+  assert.equal(currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload, null);
+});
+
+test("terminal Flow projection supersedes matching actor bindings", async () => {
+  const session = makeSession("lifecycle-terminal-binding");
+  const ambient = resolveCurrentAssignmentActor();
+  currentPointer.writePerActorCurrent(session.artifactRoot, ambient.actorKey, {
+    schema_version: "1.0",
+    active_slug: session.slug,
+    artifact_dir: session.slug,
+    updated_at: NOW,
+    owner: "test",
+    source: "session-start",
+    active_agents: [],
+  });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "terminal pointer fixture",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://terminal-binding",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(synchronized.run.state.status, "canceled");
+  assert.equal(currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload, null);
+  const retired = readJson(currentPointer.perActorCurrentFile(session.artifactRoot, ambient.actorKey));
+  assert.equal(retired.binding_status, "retired");
+  assert.equal(retired.binding_reason, "flow_canceled");
+});
+
+test("terminal Flow projection cannot retire a newer generation of the same task binding", async () => {
+  const session = makeSession("lifecycle-terminal-stale-binding");
+  const ambient = claimAmbientSessionAssignment(session);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const newerBinding = {
+    ...currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload,
+    binding_id: "binding-newer-host-session",
+    source: "session-resume",
+  };
+  currentPointer.writePerActorCurrent(session.artifactRoot, ambient.actorKey, newerBinding);
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "stale terminal projection fixture",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://terminal-stale-binding",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(synchronized.run.state.status, "canceled");
+  assert.equal(
+    currentPointer.readOwnCurrentPointer(session.artifactRoot, ambient.actorKey).payload.binding_id,
+    newerBinding.binding_id,
+  );
+});
+
+test("legacy terminal Flow projection cannot retire a generated host binding", async () => {
+  const session = makeSession("lifecycle-terminal-legacy-binding");
+  await startBuilderFlowRun({
+    cwd: session.projectRoot,
+    runId: session.slug,
+    subject: SUBJECT,
+    flowId: "builder.build",
+  });
+  const actor = resolveCurrentAssignmentActor();
+  const newerBinding = {
+    schema_version: "1.0",
+    active_slug: session.slug,
+    artifact_dir: session.slug,
+    updated_at: NOW,
+    owner: "host",
+    source: "session-resume",
+    active_agents: [],
+    binding_id: "binding-newer-host-session",
+  };
+  currentPointer.writePerActorCurrent(session.artifactRoot, actor.actorKey, newerBinding);
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "legacy terminal projection fixture",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://terminal-legacy-binding",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(synchronized.run.state.status, "canceled");
+  assert.deepEqual(
+    currentPointer.readOwnCurrentPointer(session.artifactRoot, actor.actorKey).payload,
+    newerBinding,
+  );
+});
+
+test("projection CAS conflict preserves newer state and leaves every pointer unchanged", async () => {
+  const session = makeSession("projection-cas-rollback");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "projection CAS rollback fixture",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://projection-cas-rollback",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+  const stateFile = path.join(session.sessionDir, "state.json");
+  const stateBefore = fs.readFileSync(stateFile, "utf8");
+  const globalFile = path.join(session.artifactRoot, "current.json");
+  const globalBefore = fs.readFileSync(globalFile, "utf8");
+  const originalReplace = currentPointer.replaceCurrentPointersIfUnchanged;
+  const concurrentState = `${JSON.stringify({
+    ...JSON.parse(stateBefore),
+    updated_at: "2026-07-24T02:00:00.000Z",
+    next_action: { status: "blocked", summary: "A newer writer owns this state." },
+  }, null, 2)}\n`;
+  currentPointer.replaceCurrentPointersIfUnchanged = () => {
+    fs.writeFileSync(stateFile, concurrentState);
+    return "changed";
+  };
+  try {
+    await assert.rejects(
+      () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+      /projection target.*changed during projection/,
+    );
+  } finally {
+    currentPointer.replaceCurrentPointersIfUnchanged = originalReplace;
+  }
+  assert.equal(fs.readFileSync(stateFile, "utf8"), concurrentState);
+  assert.equal(fs.readFileSync(globalFile, "utf8"), globalBefore);
 });
 
 externalAuthorityE2E("archive rejects active runs and retains canceled Flow and session artifacts", async () => {
   const session = makeSession("lifecycle-archive");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const cancelAuthorization = liveLifecycleAuthorization(session, "cancel", "archive-cancel");
   const authorizationFile = liveLifecycleAuthorization(session, "archive", "archive");
   const beforeReject = snapshotTree(session.sessionDir);
@@ -1757,7 +2198,7 @@ externalAuthorityE2E("archive rejects active runs and retains canceled Flow and 
 externalAuthorityE2E("archive rejects a symlinked archive root without moving the session", async () => {
   const session = makeSession("lifecycle-archive-symlink");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const cancelAuthorization = liveLifecycleAuthorization(session, "cancel", "archive-symlink-cancel");
   const authorizationFile = liveLifecycleAuthorization(session, "archive", "archive-symlink");
   await cancelBuilderFlowSession({
@@ -1780,7 +2221,7 @@ externalAuthorityE2E("archive rejects a symlinked archive root without moving th
 externalAuthorityE2E("archive retries the exact consumed authorization after an interrupted prepared move", async () => {
   const session = makeSession("lifecycle-archive-recovery");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await cancelBuilderFlowSession({
     sessionDir: session.sessionDir,
     authorizationFile: liveLifecycleAuthorization(session, "cancel", "archive-recovery-cancel"),
@@ -1829,7 +2270,7 @@ externalAuthorityE2E("mismatched and expired cancellation authority fail before 
     await t.test(name, async () => {
       const session = makeSession(`lifecycle-reject-${name}`);
       claimSessionAssignment(session);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
       const beforeProjection = snapshotProjectionTargets(session);
       const beforeAssignment = snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`));
@@ -1849,7 +2290,7 @@ externalAuthorityE2E("mismatched and expired cancellation authority fail before 
 externalAuthorityE2E("conflicting cancellation request replay is rejected without a second transition or release", async () => {
   const session = makeSession("lifecycle-conflicting-replay");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await cancelBuilderFlowSession({
     sessionDir: session.sessionDir,
     authorizationFile: liveLifecycleAuthorization(session, "cancel", "cancel-original"),
@@ -1868,7 +2309,7 @@ externalAuthorityE2E("conflicting cancellation request replay is rejected withou
 externalAuthorityE2E("tampered or unsigned cancellation authority fails before mutation", async () => {
   const session = makeSession("lifecycle-signature-reject");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const authorizationFile = liveLifecycleAuthorization(session, "cancel", "signature-reject");
   const tampered = readJson(authorizationFile);
   tampered.request.reason = "agent-authored replacement";
@@ -1884,7 +2325,7 @@ externalAuthorityE2E("tampered or unsigned cancellation authority fails before m
 externalAuthorityE2E("expired authority can finish side effects for its matching canonical cancellation", async () => {
   const session = makeSession("lifecycle-cancel-recovery");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const authorizationFile = expiredLifecycleAuthorization(session, "cancel", "cancel-recovery");
   const authorization = readJson(authorizationFile);
   await cancelBuilderBuildRun({
@@ -1908,7 +2349,7 @@ externalAuthorityE2E("builder-run exposes lifecycle actions without caller-selec
   const session = makeSession("lifecycle-cli");
   const ambient = resolveCurrentAssignmentActor();
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, { actorKey: ambient.actorKey, ttlSeconds: 1800, branch: `agent/${session.slug}`, artifactDir: session.sessionDir, workItemRef: SUBJECT, reason: "test" });
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(await builderRunMain(["start", "--session-dir", session.sessionDir]), 64);
   assert.equal(await builderRunMain(["sync", "--session-dir", session.sessionDir]), 64);
   assert.equal(await builderRunMain([
@@ -1934,7 +2375,7 @@ externalAuthorityE2E("builder-run exposes lifecycle actions without caller-selec
 
 test("automatic start refuses a slug-bound run for another Work Item without mutation", async () => {
   const session = makeSession("start-subject-mismatch");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const sidecar = readJson(path.join(session.sessionDir, "state.json"));
   sidecar.work_item_refs = ["local:work-item/other"];
   writeJson(path.join(session.sessionDir, "state.json"), sidecar);
@@ -1942,7 +2383,7 @@ test("automatic start refuses a slug-bound run for another Work Item without mut
   const beforeProjection = snapshotProjectionTargets(session);
 
   await assert.rejects(
-    () => startBuilderFlowSession({ sessionDir: session.sessionDir }),
+    () => startClaimedBuilderFlowSession({ sessionDir: session.sessionDir }),
     /flow_run\.state\.subject.*selected Work Item/,
   );
   assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
@@ -1951,9 +2392,9 @@ test("automatic start refuses a slug-bound run for another Work Item without mut
 
 test("automatic start refuses a sidecar changed after its immutable subject snapshot", async () => {
   const session = makeSession("start-sidecar-race");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
-  const startup = startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const startup = startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const changed = readJson(path.join(session.sessionDir, "state.json"));
   changed.next_action = { status: "continue", summary: "concurrent change" };
   writeJson(path.join(session.sessionDir, "state.json"), changed);
@@ -1966,7 +2407,7 @@ test("automatic start refuses a sidecar changed after its immutable subject snap
 
 test("wrong workflow subject is rejected before canonical Flow mutation", async () => {
   const session = makeSession("wrong-subject");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const beforeState = readJson(path.join(runDir(session.slug, session.projectRoot), "state.json"));
   const beforeManifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
   writeBundle(session.sessionDir, [bundleClaim({
@@ -1986,7 +2427,7 @@ test("wrong workflow subject is rejected before canonical Flow mutation", async 
 
 test("failed verification projects Flow-owned route-back attempt and budget", async () => {
   const session = makeSession("route-back-projection");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2061,7 +2502,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
 
 test("execute plan_gap routes to plan and invalidates the execute action context", async () => {
   const session = makeSession("execute-plan-gap-projection");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2116,7 +2557,7 @@ test("execute plan_gap routes to plan and invalidates the execute action context
 
 test("an amendment successor that is not the shipped Builder definition is rejected before runtime projection", async () => {
   const session = makeSession("effective-definition-amendment");
-  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const successor = { ...structuredClone(started.run.definition), version: "1.1-amended-test" };
   const beforeState = structuredClone(started.run.state);
 
@@ -2145,7 +2586,7 @@ test("an amendment successor that is not the shipped Builder definition is rejec
 
 test("a different passing reviewer cannot hide a disputed critique in the same gate visit", async () => {
   const session = makeSession("same-visit-reviewer-handoff");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2182,7 +2623,7 @@ test("a different passing reviewer cannot hide a disputed critique in the same g
 externalAuthorityE2E("an authenticated final reviewer resolves an earlier repaired critique without erasing audit history", async () => {
   const session = makeSession("cross-reviewer-critique-resolution");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2392,7 +2833,7 @@ externalAuthorityE2E("a scrubbed thirteen-review repair history migrates through
   // provider, or runtime identifiers into a public test fixture.
   const session = makeSession("scrubbed-critique-history");
   claimSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2507,7 +2948,7 @@ test("trusted Git ancestry rejects a divergent repair snapshot", () => {
 
 test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
   const session = makeSession("producer-superseded-verify");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2534,7 +2975,7 @@ test("producer-superseded FAIL is audit history and live PASS drives verify", as
 
 test("partial passing review snapshot waits for the complete verify expectation set", async () => {
   const session = makeSession("atomic-review-sync");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2602,7 +3043,7 @@ test("partial passing review snapshot waits for the complete verify expectation 
 
 test("expectation_ids labels cannot satisfy a mismatched trust bundle claim", async () => {
   const session = makeSession("mislabeled-partial-gate");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2648,7 +3089,7 @@ test("initial gate boundary rejects pre-run and far-future claims", async () => 
     ["far-future", new Date(Date.now() + 60 * 60_000).toISOString()],
   ]) {
     const session = makeSession(`freshness-${name}`);
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const result = await writeAndSync(session, [bundleClaim({
       expectation: "selected-work",
       claimType: "builder.pull-work.selected",
@@ -2662,7 +3103,7 @@ test("initial gate boundary rejects pre-run and far-future claims", async () => 
 
 test("prior claim identity is rejected after re-entry and a new identity can recover", async () => {
   const session = makeSession("same-digest-reentry");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2774,7 +3215,7 @@ test("upgrade rebuild preserves legacy critique identity until a versioned new r
 
 test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {
   const session = makeSession("stale-critique-artifact");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2792,7 +3233,7 @@ test("passing tests-evidence rejects a critique whose reviewed artifact changed"
 
 test("stale passing critique remains audit history when a current exact-workspace critique passes", async () => {
   const session = makeSession("stale-passing-current-clean");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2818,7 +3259,7 @@ test("stale passing critique remains audit history when a current exact-workspac
 
 test("stale passing critique with a changed reviewed workflow artifact does not block a current exact critique", async () => {
   const session = makeSession("stale-passing-workflow-artifact");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2844,7 +3285,7 @@ test("stale passing critique with a changed reviewed workflow artifact does not 
 
 test("stale open critique remains blocking even when a different reviewer supplies a current clean critique", async () => {
   const session = makeSession("stale-open-current-clean");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2872,7 +3313,7 @@ test("stale open critique remains blocking even when a different reviewer suppli
 
 test("malformed stale passing critique remains blocking when a current clean critique exists", async () => {
   const session = makeSession("malformed-stale-current-clean");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2900,7 +3341,7 @@ test("malformed stale passing critique remains blocking when a current clean cri
 
 test("passing tests-evidence rejects a successful command that executed zero tests", async () => {
   const session = makeSession("zero-test-evidence");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2919,7 +3360,7 @@ test("passing tests-evidence rejects a successful command that executed zero tes
 
 test("passing tests-evidence rejects a critique after implementation source changed", async () => {
   const session = makeSession("stale-critique-workspace");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
   await writeAndSync(session, [
     bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
@@ -2963,7 +3404,7 @@ test("workspace review rejects a nested root inside a Git worktree", () => {
 test("publish-change reports an external capability gap and self-authored results cannot pass", async () => {
   const session = makeSession("composed-completion");
   const ambient = claimAmbientSessionAssignment(session);
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const steps = [
     () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
     () => [
@@ -3074,7 +3515,7 @@ test("publish-change reports an external capability gap and self-authored result
 });
 
 async function advanceSessionToPrOpen(session) {
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const steps = [
     () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
     () => [
@@ -3599,7 +4040,7 @@ test("pr-open route-back with an undeclared reason still throws and mutates noth
 
 test("recovery loads the slug-bound run, restores every matching projection, and preserves every Flow byte", async () => {
   const session = makeSession("recover-active");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const advanced = await writeAndSync(session, [bundleClaim({
     expectation: "selected-work",
     claimType: "builder.pull-work.selected",
@@ -3609,11 +4050,13 @@ test("recovery loads the slug-bound run, restores every matching projection, and
 
   writeJson(path.join(session.artifactRoot, "current", "codex.json"), {
     active_slug: session.slug,
+    artifact_dir: session.slug,
     active_step_id: "stale-step",
     updated_at: NOW,
   });
   writeJson(path.join(session.artifactRoot, "current", "other.json"), {
     active_slug: "another-session",
+    artifact_dir: "another-session",
     active_step_id: "untouched-step",
     updated_at: NOW,
   });
@@ -3653,7 +4096,7 @@ test("recovery fails before any write for invalid Work Item cardinality and Flow
   for (const [name, refs, pattern] of cases) {
     await t.test(name, async () => {
       const session = makeSession(`recover-${name.replaceAll(" ", "-")}`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const state = readJson(path.join(session.sessionDir, "state.json"));
       state.work_item_refs = refs;
       writeJson(path.join(session.sessionDir, "state.json"), state);
@@ -3663,17 +4106,17 @@ test("recovery fails before any write for invalid Work Item cardinality and Flow
 
   await t.test("persisted state subject mismatch", async () => {
     const session = makeSession("recover-state-subject-mismatch");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const file = path.join(runDir(session.slug, session.projectRoot), "state.json");
     const state = readJson(file);
     state.subject = "local:work-item/other";
     writeJson(file, state);
-    await assertRecoveryRejectsWithoutWrites(session, /flow_run\.state\.subject.*selected Work Item/);
+    await assertRecoveryRejectsWithoutWrites(session, /correlation\.identities\.work_item.*match subject/);
   });
 
   await t.test("persisted params subject mismatch", async () => {
     const session = makeSession("recover-params-subject-mismatch");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const file = path.join(runDir(session.slug, session.projectRoot), "state.json");
     const state = readJson(file);
     state.params.subject = "local:work-item/other";
@@ -3683,7 +4126,7 @@ test("recovery fails before any write for invalid Work Item cardinality and Flow
 
   await t.test("absent persisted params subject is allowed", async () => {
     const session = makeSession("recover-params-subject-absent");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const flowDirectory = runDir(session.slug, session.projectRoot);
     const file = path.join(flowDirectory, "state.json");
     const state = readJson(file);
@@ -3714,7 +4157,7 @@ test("recovery fails closed for invalid sidecars and missing or corrupt canonica
 
   await t.test("task slug mismatch", async () => {
     const session = makeSession("recover-task-slug-mismatch");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const state = readJson(path.join(session.sessionDir, "state.json"));
     state.task_slug = "other";
     writeJson(path.join(session.sessionDir, "state.json"), state);
@@ -3723,14 +4166,14 @@ test("recovery fails closed for invalid sidecars and missing or corrupt canonica
 
   await t.test("missing sidecar state", async () => {
     const session = makeSession("recover-missing-sidecar-state");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     fs.rmSync(path.join(session.sessionDir, "state.json"));
     await assertRecoveryRejectsWithoutWrites(session, /sessionDir.*state\.json/);
   });
 
   await t.test("corrupt sidecar state", async () => {
     const session = makeSession("recover-corrupt-sidecar-state");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     fs.writeFileSync(path.join(session.sessionDir, "state.json"), "not-json\n");
     await assertRecoveryRejectsWithoutWrites(session, /JSON|parse|Unexpected/i);
   });
@@ -3741,7 +4184,7 @@ test("recovery fails closed for invalid sidecars and missing or corrupt canonica
   ]) {
     await t.test(name, async () => {
       const session = makeSession(`recover-${name.replaceAll(" ", "-").toLowerCase()}`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       fs.writeFileSync(path.join(runDir(session.slug, session.projectRoot), relativeFile), "not-json\n");
       await assertRecoveryRejectsWithoutWrites(session, /JSON|parse|invalid|Unexpected/i);
     });
@@ -3753,7 +4196,7 @@ test("recovery fails closed for invalid sidecars and missing or corrupt canonica
   ]) {
     await t.test(name, async () => {
       const session = makeSession(`recover-${name.replaceAll(" ", "-")}`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const file = path.join(runDir(session.slug, session.projectRoot), "definition.json");
       const definition = readJson(file);
       mutate(definition);
@@ -3765,7 +4208,7 @@ test("recovery fails closed for invalid sidecars and missing or corrupt canonica
 
 test("recover and sync remain separate: recovery leaves bundle unattached and sync evaluates it", async () => {
   const session = makeSession("recover-then-sync");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   writeBundle(session.sessionDir, [bundleClaim({
     expectation: "selected-work",
     claimType: "builder.pull-work.selected",
@@ -3787,7 +4230,7 @@ test("recover and sync remain separate: recovery leaves bundle unattached and sy
 
 test("builder-run recover accepts only a session directory and rejects caller-selected identity", async () => {
   const session = makeSession("recover-cli");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(await builderRunMain(["recover", "--session-dir", session.sessionDir]), 0);
   assert.equal(await builderRunMain(["recover", "--session-dir", session.sessionDir, "--run-id", "other"]), 64);
   assert.equal(await builderRunMain(["recover", "--session-dir", session.sessionDir, "--step-id", "verify"]), 64);
@@ -3796,7 +4239,7 @@ test("builder-run recover accepts only a session directory and rejects caller-se
 
 test("recovery refuses a sidecar changed after its immutable subject snapshot", async () => {
   const session = makeSession("recover-sidecar-race");
-  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const flowDirectory = runDir(session.slug, session.projectRoot);
   const beforeFlow = snapshotTree(flowDirectory);
   const recovery = recoverBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -3814,7 +4257,7 @@ test("recovery parses every projection target before writing any target", async 
   for (const target of ["global", "actor"]) {
     await t.test(`malformed ${target} pointer`, async () => {
       const session = makeSession(`recover-malformed-${target}-pointer`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const state = readJson(path.join(session.sessionDir, "state.json"));
       state.next_action = { status: "continue", summary: "stale projection" };
       writeJson(path.join(session.sessionDir, "state.json"), state);
@@ -3831,7 +4274,7 @@ test("recovery parses every projection target before writing any target", async 
 test("recovery rejects symlinked session and projection targets before writes", async (t) => {
   await t.test("session directory symlink", async () => {
     const session = makeSession("recover-session-symlink");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const target = path.join(session.artifactRoot, "recover-session-symlink-target");
     fs.renameSync(session.sessionDir, target);
     fs.symlinkSync(target, session.sessionDir, "dir");
@@ -3844,7 +4287,7 @@ test("recovery rejects symlinked session and projection targets before writes", 
 
   await t.test("state.json symlink", async () => {
     const session = makeSession("recover-state-symlink");
-    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
     const stateFile = path.join(session.sessionDir, "state.json");
     const target = path.join(session.sessionDir, "state-target.json");
     fs.renameSync(stateFile, target);
@@ -3859,10 +4302,10 @@ test("recovery rejects symlinked session and projection targets before writes", 
   for (const targetKind of ["global pointer", "actor pointer", "dangling actor pointer", "actor directory"]) {
     await t.test(targetKind, async () => {
       const session = makeSession(`recover-${targetKind.replaceAll(" ", "-")}-symlink`);
-      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
       const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-pointer-symlink-"));
       const externalPointer = path.join(externalRoot, "current.json");
-      writeJson(externalPointer, { active_slug: session.slug, active_step_id: "stale", updated_at: NOW });
+      writeJson(externalPointer, { active_slug: session.slug, artifact_dir: session.slug, active_step_id: "stale", updated_at: NOW });
       if (targetKind === "global pointer") {
         fs.rmSync(path.join(session.artifactRoot, "current.json"));
         fs.symlinkSync(externalPointer, path.join(session.artifactRoot, "current.json"));
@@ -3871,6 +4314,7 @@ test("recovery rejects symlinked session and projection targets before writes", 
         fs.mkdirSync(actorRoot, { recursive: true });
         fs.symlinkSync(targetKind === "dangling actor pointer" ? path.join(externalRoot, "missing.json") : externalPointer, path.join(actorRoot, "codex.json"));
       } else {
+        fs.rmSync(path.join(session.artifactRoot, "current"), { recursive: true });
         fs.symlinkSync(externalRoot, path.join(session.artifactRoot, "current"), "dir");
       }
       const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));

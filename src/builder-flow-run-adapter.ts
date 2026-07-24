@@ -185,7 +185,7 @@ export async function startBuilderFlowRun(input: StartBuilderFlowRunInput): Prom
 
   const correlation = input.correlation === undefined
     ? undefined
-    : validateBuilderCorrelation(input.correlation, input.runId);
+    : validateBuilderCorrelation(input.correlation, input.runId, input.subject);
   const runId = input.runId ?? (
     correlation?.identities.flow_run.status === "present"
       ? correlation.identities.flow_run.value
@@ -242,7 +242,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     const expectedRunHead = input.expectedRunHead ?? flowRunHead(run.state);
     const attached = await attachEvidence(
       input.runId,
-      trustBundleAttachOptions(cwd, evidence, validatedSha256, expectedRunHead, correlationFromState(run.state)),
+      trustBundleAttachOptions(cwd, evidence, validatedSha256, expectedRunHead, correlationFromState(run.state, input.runId)),
     );
     if (attached.sha256 !== validatedSha256) {
       throw new BuilderBuildRunInputError("evidence.file", "changed after validation before Flow attachment");
@@ -331,7 +331,7 @@ function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string):
     manifest: run.manifest,
     config: run.config,
     freshnessTransitions: [],
-    correlation: correlationFromState(run.state),
+    correlation: correlationFromState(run.state, runId),
   };
 }
 
@@ -523,7 +523,11 @@ function trustBundleAttachOptions(
   };
 }
 
-function validateBuilderCorrelation(value: unknown, requestedRunId: string | undefined): RunCorrelationEnvelope {
+function validateBuilderCorrelation(
+  value: unknown,
+  requestedRunId: string | undefined,
+  requestedSubject?: string,
+): RunCorrelationEnvelope {
   const envelope = validateRunCorrelationEnvelope(value);
   const flowRun = envelope.identities.flow_run;
   if (flowRun.status !== "present") {
@@ -532,10 +536,17 @@ function validateBuilderCorrelation(value: unknown, requestedRunId: string | und
   if (requestedRunId !== undefined && flowRun.value !== requestedRunId) {
     throw new BuilderBuildRunInputError("correlation.identities.flow_run", "must match runId");
   }
+  const workItem = envelope.identities.work_item;
+  if (
+    requestedSubject !== undefined
+    && (workItem.status !== "present" || workItem.value !== requestedSubject)
+  ) {
+    throw new BuilderBuildRunInputError("correlation.identities.work_item", "must match subject");
+  }
   return envelope;
 }
 
-function correlationFromState(state: FlowRunState): RunCorrelationPresence {
+function correlationFromState(state: FlowRunState, runId: string): RunCorrelationPresence {
   const params = isRecord((state as unknown as Record<string, unknown>).params)
     ? (state as unknown as Record<string, unknown>).params as Record<string, unknown>
     : {};
@@ -543,7 +554,7 @@ function correlationFromState(state: FlowRunState): RunCorrelationPresence {
     return readRunCorrelation({});
   }
   if (typeof params.run_correlation !== "string") {
-    return readRunCorrelation({ run_correlation: params.run_correlation });
+    return { status: "present", envelope: validateBuilderCorrelation(params.run_correlation, runId, state.subject) };
   }
   let parsed: unknown;
   try {
@@ -551,7 +562,7 @@ function correlationFromState(state: FlowRunState): RunCorrelationPresence {
   } catch {
     throw new BuilderBuildRunInputError("flow_run.state.params.run_correlation", "must contain a valid JSON envelope");
   }
-  return readRunCorrelation({ run_correlation: parsed });
+  return { status: "present", envelope: validateBuilderCorrelation(parsed, runId, state.subject) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

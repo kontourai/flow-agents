@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { flowAgentsPackageVersion } from "./lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
@@ -19,7 +21,7 @@ import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization
 import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
-import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
+import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
@@ -46,6 +48,9 @@ import {
   startBuilderFlowRun,
   type BuilderFlowRunResult,
 } from "./builder-flow-run-adapter.js";
+import { createBuilderRunCorrelation } from "./builder-run-correlation.js";
+import { retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
+import { replaceStateIfUnchanged } from "./lib/state-file-lock.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -108,6 +113,12 @@ type SidecarSnapshot = {
   raw: string;
 };
 
+type BuilderActorBinding = {
+  actor: ActorStruct;
+  actorKey: string;
+  bindingId: string;
+};
+
 type ProjectionTargetSnapshot = {
   file: string;
   raw: string | null;
@@ -118,7 +129,11 @@ type ProjectionTargetSnapshot = {
 type PreparedProjectionWrites = {
   targets: ProjectionTargetSnapshot[];
   actorEntries: string[] | null;
-  writes: Array<{ file: string; content: string }>;
+  writes: Array<{
+    file: string;
+    content: string;
+    pointerReplacement?: { expectedRaw: string | null; payload: AnyRecord };
+  }>;
 };
 
 type TrustBundleSnapshot = {
@@ -129,32 +144,42 @@ type TrustBundleSnapshot = {
 
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
-  const sidecarSnapshot = readSidecarSnapshot(context);
-  const subject = workflowSubject(sidecarSnapshot.state);
-  const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
-  let run: BuilderFlowRunResult;
-  try {
-    run = await loadBuilderFlowRun({
-      cwd: context.projectRoot,
-      runId: context.slug,
-    });
-    if (run.definitionId !== requestedFlowId) {
-      throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
-    }
-  } catch (error) {
-    if (!isRunNotFound(error)) throw error;
-    run = await startBuilderFlowRun({
-      cwd: context.projectRoot,
-      runId: context.slug,
-      subject,
-      flowId: requestedFlowId,
-      params: {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    const sidecarSnapshot = readSidecarSnapshot(context);
+    const subject = workflowSubject(sidecarSnapshot.state);
+    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
+    let run: BuilderFlowRunResult;
+    try {
+      run = await loadBuilderFlowRun({
+        cwd: context.projectRoot,
+        runId: context.slug,
+      });
+      if (run.definitionId !== requestedFlowId) {
+        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
+      }
+    } catch (error) {
+      if (!isRunNotFound(error)) throw error;
+      const correlationActor = resolveBuilderCorrelationActor(context, subject);
+      run = await startBuilderFlowRun({
+        cwd: context.projectRoot,
+        runId: context.slug,
         subject,
-      },
-    });
-  }
-  assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot);
+        flowId: requestedFlowId,
+        correlation: createBuilderRunCorrelation({
+          runId: context.slug,
+          workItemRef: subject,
+          actor: correlationActor.actor,
+          actorKey: correlationActor.actorKey,
+        }),
+        params: {
+          subject,
+        },
+      });
+    }
+    assertRunSubjectBinding(run, subject);
+    const binding = resolveBuilderActorBinding(context, subject, run);
+    return syncAndProject(context, run, sidecarSnapshot, undefined, binding);
+  });
 }
 
 export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -491,11 +516,25 @@ export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInp
 export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
-    const prepared = prepareAgentLifecycleChange(input, context);
+    const prepared = prepareAssignmentRelease(input, context);
     const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
-    const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
+    const released = prepared.alreadyReleased
+      ? null
+      : performLocalReleaseUnderLock(
+          context.artifactRoot,
+          context.slug,
+          prepared.actor,
+          { actorKey: prepared.actorKey, reason: input.reason },
+        );
+    retireHostWorkflowSession({
+      artifactRoot: context.artifactRoot,
+      artifactDir: context.sessionDir,
+      actorKey: prepared.actorKey,
+      bindingId: runCorrelationId(run),
+      reason: "assignment_released",
+    });
     const { progressSnapshot } = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
-    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, progressSnapshot, attached: false, assignmentReleased: released !== null };
+    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, progressSnapshot, attached: false, assignmentReleased: released !== null || prepared.alreadyReleased };
   });
 }
 
@@ -545,8 +584,86 @@ function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, cont
   return { sidecarSnapshot, actor: resolved.actor, actorKey: resolved.actorKey };
 }
 
+function prepareAssignmentRelease(
+  input: BuilderFlowAgentLifecycleInput,
+  context: SessionContext,
+): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string; alreadyReleased: boolean } {
+  if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
+  const resolved = resolveCurrentAssignmentActor();
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const assignment = readLocalRecord(context.artifactRoot, context.slug);
+  if (
+    !assignment
+    || !["claimed", "released"].includes(assignment.status)
+    || assignment.actor_key !== resolved.actorKey
+    || !sameActor(assignment.actor, resolved.actor)
+  ) {
+    throw new BuilderBuildRunInputError("assignment", "must be held or previously released by the current workflow actor");
+  }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
+    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  }
+  return {
+    sidecarSnapshot,
+    actor: resolved.actor,
+    actorKey: resolved.actorKey,
+    alreadyReleased: assignment.status === "released",
+  };
+}
+
 function sameActor(left: ActorStruct, right: ActorStruct): boolean {
   return isDeepStrictEqual({ ...left, human: left.human ?? null }, { ...right, human: right.human ?? null });
+}
+
+function resolveBuilderCorrelationActor(
+  context: SessionContext,
+  subject: string,
+): { actor: ActorStruct; actorKey: string } {
+  const resolved = resolveCurrentAssignmentActor();
+  const assignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  if (!assignment || assignment.status !== "claimed") {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by the current workflow actor");
+  }
+  if (!assignment.actor_key || !assignment.actor) {
+    throw new BuilderBuildRunInputError("assignment", "the active assignment must carry canonical actor identity");
+  }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
+    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  }
+  if (assignment.actor_key !== resolved.actorKey || !sameActor(assignment.actor, resolved.actor)) {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by the current workflow actor");
+  }
+  return { actor: assignment.actor, actorKey: assignment.actor_key };
+}
+
+function resolveBuilderActorBinding(
+  context: SessionContext,
+  subject: string,
+  run: BuilderFlowRunResult,
+): BuilderActorBinding {
+  const actor = resolveBuilderCorrelationActor(context, subject);
+  if (run.correlation.status !== "present") {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must contain a canonical correlation envelope before binding the authenticated actor",
+    );
+  }
+  const envelope = run.correlation.envelope;
+  if (
+    envelope.identities.agent.status !== "present"
+    || envelope.identities.agent.value !== actor.actorKey
+    || (
+      envelope.identities.runtime_session.status === "present"
+      && envelope.identities.runtime_session.value !== actor.actor.session_id
+    )
+  ) {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must remain bound to the authenticated assignment actor",
+    );
+  }
+  return { ...actor, bindingId: envelope.correlation_id };
 }
 
 async function syncAndProject(
@@ -554,6 +671,7 @@ async function syncAndProject(
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
   expectedRunHead?: string,
+  binding?: BuilderActorBinding,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -614,7 +732,7 @@ async function syncAndProject(
   }
   assertLifecycleResolutionAttestation(context, run);
   const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
-  writeProjection(context, projection, sidecarSnapshot.raw, "projection");
+  writeProjection(context, projection, sidecarSnapshot.raw, "projection", binding);
   return {
     sessionDir: context.sessionDir,
     projectRoot: context.projectRoot,
@@ -660,6 +778,12 @@ function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): vo
     && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
     && run.state.params.subject !== subject) {
     throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
+  }
+  if (run.correlation.status === "present") {
+    const workItem = run.correlation.envelope.identities.work_item;
+    if (workItem.status !== "present" || workItem.value !== subject) {
+      throw new BuilderBuildRunInputError("flow_run.state.params.run_correlation.identities.work_item", "must match the selected Work Item");
+    }
   }
 }
 
@@ -1456,6 +1580,9 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
   return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
+    run_correlation: run.correlation.status === "present"
+      ? run.correlation.envelope
+      : { status: "incomplete", reason: run.correlation.reason },
     status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
@@ -1476,10 +1603,46 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   } };
 }
 
-function writeProjection(context: SessionContext, projection: AnyRecord, expectedStateRaw: string, operation: string): void {
-  const prepared = prepareProjectionWrites(context, projection, expectedStateRaw, operation);
+function writeProjection(
+  context: SessionContext,
+  projection: AnyRecord,
+  expectedStateRaw: string,
+  operation: string,
+  binding?: BuilderActorBinding,
+): void {
+  const prepared = prepareProjectionWrites(context, projection, expectedStateRaw, operation, binding);
   assertProjectionTargetsUnchanged(context, prepared, operation);
-  for (const write of prepared.writes) writeExistingFileNoFollow(write.file, write.content);
+  const stateWrite = prepared.writes.find((write) => write.file === context.stateFile);
+  const pointerWrites = prepared.writes.filter((write) => write.pointerReplacement);
+  if (!stateWrite) {
+    throw new BuilderBuildRunInputError("state.json", `was not prepared during ${operation}`);
+  }
+  const globalFile = path.join(context.artifactRoot, "current.json");
+  const globalTarget = prepared.targets.find((target) => target.file === globalFile);
+  const result = currentPointerHelper().replaceCurrentPointersIfUnchanged(
+    context.artifactRoot,
+    pointerWrites.map((write) => ({
+      file: write.file,
+      expectedRaw: write.pointerReplacement!.expectedRaw,
+      payload: write.pointerReplacement!.payload,
+    })),
+    {
+      expectedGlobalRaw: globalTarget?.raw ?? null,
+      expectedActorEntries: prepared.actorEntries,
+    },
+    () => {
+      if (!replaceStateIfUnchanged(
+        context.stateFile,
+        expectedStateRaw,
+        stateWrite.content,
+      )) {
+        throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
+      }
+    },
+  );
+  if (result !== "updated") {
+    throw new BuilderBuildRunInputError("projection target", `changed during ${operation}`);
+  }
 }
 
 function prepareProjectionWrites(
@@ -1487,16 +1650,44 @@ function prepareProjectionWrites(
   projection: AnyRecord,
   expectedStateRaw: string,
   operation: string,
+  binding?: BuilderActorBinding,
 ): PreparedProjectionWrites {
-  const targets: ProjectionTargetSnapshot[] = [];
-  const writes: Array<{ file: string; content: string }> = [];
   const stateTarget = readProjectionTarget(context.stateFile, context.sessionDir, "state.json");
-  targets.push(stateTarget);
   if (stateTarget.raw !== expectedStateRaw) {
     throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
   }
-  writes.push({ file: context.stateFile, content: `${JSON.stringify(projection, null, 2)}\n` });
+  const discovered = discoverProjectionPointers(context, binding);
+  const writes: PreparedProjectionWrites["writes"] = [
+    { file: context.stateFile, content: `${JSON.stringify(projection, null, 2)}\n` },
+  ];
+  for (const file of discovered.pointerFiles) {
+    const target = discovered.targets.find((candidate) => candidate.file === file)!;
+    const write = buildPointerProjectionWrite(
+      context,
+      projection,
+      target,
+      discovered.boundActorFile,
+      binding,
+    );
+    if (write) writes.push(write);
+  }
+  return {
+    targets: [stateTarget, ...discovered.targets],
+    actorEntries: discovered.actorEntries,
+    writes,
+  };
+}
 
+function discoverProjectionPointers(
+  context: SessionContext,
+  binding?: BuilderActorBinding,
+): {
+  targets: ProjectionTargetSnapshot[];
+  pointerFiles: string[];
+  actorEntries: string[] | null;
+  boundActorFile: string | null;
+} {
+  const targets: ProjectionTargetSnapshot[] = [];
   const pointerFiles: string[] = [];
   const globalPointer = path.join(context.artifactRoot, "current.json");
   const globalTarget = readOptionalProjectionTarget(globalPointer, context.artifactRoot, "current.json");
@@ -1523,20 +1714,71 @@ function prepareProjectionWrites(
       pointerFiles.push(file);
     }
   }
-
-  for (const file of pointerFiles) {
-    const target = targets.find((candidate) => candidate.file === file)!;
-    const pointer = parseProjectionTarget(target);
-    if (!isRecord(pointer) || pointer.active_slug !== context.slug) continue;
-    const output = {
-      ...pointer,
-      active_flow_id: projection.flow_run.definition_id,
-      active_step_id: projection.flow_run.current_step,
-      updated_at: projection.updated_at,
-    };
-    writes.push({ file, content: `${JSON.stringify(output, null, 2)}\n` });
+  const boundActorFile = binding
+    ? currentPointerHelper().perActorCurrentFile(context.artifactRoot, binding.actorKey)
+    : null;
+  if (boundActorFile && !pointerFiles.includes(boundActorFile)) {
+    targets.push({
+      file: boundActorFile,
+      raw: null,
+      root: actorRoot,
+      field: `current/${path.basename(boundActorFile)}`,
+    });
+    pointerFiles.push(boundActorFile);
   }
-  return { targets, actorEntries, writes };
+  return { targets, pointerFiles, actorEntries, boundActorFile };
+}
+
+function buildPointerProjectionWrite(
+  context: SessionContext,
+  projection: AnyRecord,
+  target: ProjectionTargetSnapshot,
+  boundActorFile: string | null,
+  binding?: BuilderActorBinding,
+): PreparedProjectionWrites["writes"][number] | null {
+  const pointer = target.raw === null ? null : parseProjectionTarget(target);
+  const isGlobalPointer = target.file === path.join(context.artifactRoot, "current.json");
+  const relativeDir = path.relative(context.artifactRoot, context.sessionDir);
+  if (binding && !isGlobalPointer && target.file !== boundActorFile) return null;
+  if (isRecord(pointer) && pointer.artifact_dir !== relativeDir) return null;
+  if (!isRecord(pointer) && target.file !== boundActorFile) return null;
+  if (isRecord(pointer) && pointer.binding_status === "retired") return null;
+  const projectedBindingId = isRecord(projection.run_correlation)
+    && typeof projection.run_correlation.correlation_id === "string"
+    ? projection.run_correlation.correlation_id
+    : null;
+  const terminal = ["completed", "canceled", "failed", "archived"].includes(projection.flow_run.status);
+  if (
+    terminal
+    && !binding
+    && isRecord(pointer)
+    && (
+      projectedBindingId
+        ? pointer.binding_id !== projectedBindingId
+        : typeof pointer.binding_id === "string"
+    )
+  ) return null;
+  const { binding_status: _status, binding_reason: _reason, ...active } = isRecord(pointer) ? pointer : {};
+  const output = {
+    ...active,
+    schema_version: "1.0",
+    active_slug: context.slug,
+    artifact_dir: relativeDir,
+    owner: isRecord(pointer) && typeof pointer.owner === "string" ? pointer.owner : "flow-agents",
+    source: isRecord(pointer) && typeof pointer.source === "string" ? pointer.source : "builder-start",
+    active_agents: isRecord(pointer) && Array.isArray(pointer.active_agents) ? pointer.active_agents : [],
+    active_flow_id: projection.flow_run.definition_id,
+    active_step_id: projection.flow_run.current_step,
+    ...(typeof projection.branch === "string" ? { branch: projection.branch } : {}),
+    ...(binding ? { binding_id: binding.bindingId } : {}),
+    updated_at: projection.updated_at,
+    ...(terminal ? { binding_status: "retired", binding_reason: `flow_${projection.flow_run.status}` } : {}),
+  };
+  return {
+    file: target.file,
+    content: `${JSON.stringify(output, null, 2)}\n`,
+    pointerReplacement: { expectedRaw: target.raw, payload: output },
+  };
 }
 
 function assertProjectionTargetsUnchanged(
@@ -1628,13 +1870,38 @@ function pathIsWithin(candidate: string, root: string): boolean {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
-function writeExistingFileNoFollow(file: string, content: string): void {
-  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW);
-  try {
-    fs.writeFileSync(descriptor, content);
-  } finally {
-    fs.closeSync(descriptor);
+function currentPointerHelper(): {
+  perActorCurrentFile(flowAgentsDir: string, actorKey: string): string;
+  replaceCurrentPointersIfUnchanged(
+    flowAgentsDir: string,
+    replacements: Array<{
+      file: string;
+      expectedRaw: string | null;
+      payload: AnyRecord;
+    }>,
+    options?: {
+      expectedGlobalRaw?: string | null;
+      expectedActorEntries?: string[] | null;
+    },
+    commit?: () => void,
+  ): "updated" | "changed";
+} {
+  const require = createRequire(import.meta.url);
+  const helperPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../scripts/hooks/lib/current-pointer.js",
+  );
+  return require(helperPath);
+}
+
+function runCorrelationId(run: BuilderFlowRunResult): string {
+  if (run.correlation.status !== "present") {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must contain a canonical correlation envelope for binding retirement",
+    );
   }
+  return run.correlation.envelope.correlation_id;
 }
 
 function phaseForStep(phaseMap: unknown, stepId: string): string | null {

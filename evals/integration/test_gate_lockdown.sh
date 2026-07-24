@@ -476,11 +476,11 @@ echo "--- AC1.22: CLI sidecar uses fs for state/trust files (not Write/Edit tool
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const okState = /writeJson\(path\.join\(dir,\s*['\"]state\.json['\"]\)/.test(src);
+const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(src);
 const okBundle = /writeTrustBundleAtomically\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
-const okWriteJson = /function writeJson.*fs\.writeFileSync/.test(src);
+const okWriteJson = /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(src);
 const okAtomicBundleWriter = /function writeTrustBundleAtomically[\s\S]*fs\.writeFileSync\(descriptor,[\s\S]*fs\.renameSync\(temporary, file\)/.test(src);
-if (!okState) { console.error('ERROR: writeJson(state.json) not found'); process.exit(1); }
+if (!okState) { console.error('ERROR: locked state.json writer route not found'); process.exit(1); }
 if (!okBundle) { console.error('ERROR: writeTrustBundleAtomically(trust.bundle) not found'); process.exit(1); }
 if (!okWriteJson) { console.error('ERROR: writeJson not using fs.writeFileSync'); process.exit(1); }
 if (!okAtomicBundleWriter) { console.error('ERROR: atomic trust bundle writer does not use fs.writeFileSync->fs.renameSync'); process.exit(1); }

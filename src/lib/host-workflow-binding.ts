@@ -1,7 +1,9 @@
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { containsSensitiveCredential } from "../run-correlation.js";
 
 export interface HostWorkflowBindingInput {
   /** Absolute `.kontourai/flow-agents` artifact root owned by the host workspace. */
@@ -17,6 +19,8 @@ export interface HostWorkflowBindingInput {
   updatedAt?: string;
   activeFlowId?: string;
   activeStepId?: string;
+  /** Unique generation returned to the host and required for retirement. */
+  bindingId?: string;
 }
 
 export interface HostWorkflowBinding {
@@ -30,6 +34,18 @@ export interface HostWorkflowBinding {
   branch?: string;
   active_flow_id?: string;
   active_step_id?: string;
+  binding_id: string;
+  binding_status?: "retired";
+  binding_reason?: string;
+}
+
+export interface RetireHostWorkflowBindingInput {
+  artifactRoot: string;
+  artifactDir: string;
+  actorKey: string;
+  bindingId: string;
+  reason: string;
+  updatedAt?: string;
 }
 
 interface CurrentPointerHelper {
@@ -37,10 +53,30 @@ interface CurrentPointerHelper {
     artifactRoot: string,
     actorKey: string,
     payload: HostWorkflowBinding,
+    validate?: () => void,
   ): void;
+  retireOwnCurrentPointer(
+    artifactRoot: string,
+    actorKey: string,
+    activeSlug: string,
+    bindingId: string,
+    reason: string,
+    updatedAt: string,
+    validate?: () => void,
+  ): "retired" | "not-bound" | "changed";
 }
 
 const ACTOR_KEY = /^[A-Za-z0-9_.-]{1,64}$/;
+const CANONICAL_ACTOR_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$/;
+const BINDING_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$/;
+type DirectoryIdentity = { dev: number; ino: number };
+type HostPaths = {
+  artifactRoot: string;
+  artifactDir: string;
+  relativeDir: string;
+  rootIdentity: DirectoryIdentity;
+  taskIdentity: DirectoryIdentity;
+};
 
 function currentPointerHelper(): CurrentPointerHelper {
   const require = createRequire(import.meta.url);
@@ -59,6 +95,127 @@ function requiredText(value: string, name: string): string {
   return normalized;
 }
 
+function validatedBindingId(value: string): string {
+  const bindingId = requiredText(value, "bindingId");
+  if (!BINDING_ID.test(bindingId) || containsSensitiveCredential(bindingId)) {
+    throw new TypeError("bindingId must be a bounded, non-sensitive opaque identifier");
+  }
+  return bindingId;
+}
+
+function publicMetadata(value: string, name: string): string {
+  const normalized = requiredText(value, name);
+  if (
+    normalized.length > 255
+    || /[\u0000-\u001f\u007f]/.test(normalized)
+    || /^(?:\/|[A-Za-z]:[\\/]|\\\\|[A-Za-z][A-Za-z0-9+.-]*:\/\/)/.test(normalized)
+    || containsSensitiveCredential(normalized)
+  ) {
+    throw new TypeError(`${name} must be bounded public metadata without paths or credentials`);
+  }
+  return normalized;
+}
+
+function publicIdentifier(value: string, name: string): string {
+  const normalized = publicMetadata(value, name);
+  if (!BINDING_ID.test(normalized)) {
+    throw new TypeError(`${name} must be a bounded public identifier`);
+  }
+  return normalized;
+}
+
+function validatedTimestamp(value?: string): string {
+  if (value === undefined) return new Date().toISOString();
+  const normalized = publicMetadata(value, "updatedAt");
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) throw new TypeError("updatedAt must be a valid date-time");
+  return parsed.toISOString();
+}
+
+function validatedBranch(value: string): string {
+  const branch = publicMetadata(value, "branch");
+  if (
+    /\s|\\|\.\.|@\{|\/\/|^\//.test(branch)
+    || branch.endsWith(".")
+    || branch.endsWith("/")
+    || branch.split("/").some((part) => !part || part.startsWith(".") || part.endsWith(".lock"))
+  ) {
+    throw new TypeError("branch must be a bounded git-ref-shaped value");
+  }
+  return branch;
+}
+
+function directoryIdentity(directory: string, name: string): DirectoryIdentity {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new TypeError(`${name} must be a real directory`);
+  }
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function sameIdentity(left: fs.Stats, right: DirectoryIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function resolveHostPaths(rootInput: string, taskInput: string): HostPaths {
+  if (!path.isAbsolute(rootInput) || !path.isAbsolute(taskInput)) {
+    throw new TypeError("artifactRoot and artifactDir must be absolute paths");
+  }
+  const artifactRoot = fs.realpathSync(rootInput);
+  const artifactDir = fs.realpathSync(taskInput);
+  const relativeDir = path.relative(artifactRoot, artifactDir);
+  if (
+    relativeDir === "" || relativeDir === "." || relativeDir === ".."
+    || relativeDir.startsWith(`..${path.sep}`) || path.isAbsolute(relativeDir)
+  ) {
+    throw new TypeError("artifactDir must identify a task directory inside artifactRoot");
+  }
+  return {
+    artifactRoot,
+    artifactDir,
+    relativeDir,
+    rootIdentity: directoryIdentity(artifactRoot, "artifactRoot"),
+    taskIdentity: directoryIdentity(artifactDir, "artifactDir"),
+  };
+}
+
+function assertHostPaths(paths: HostPaths): void {
+  const root = fs.lstatSync(paths.artifactRoot);
+  const task = fs.lstatSync(paths.artifactDir);
+  if (
+    root.isSymbolicLink() || !root.isDirectory() || !sameIdentity(root, paths.rootIdentity)
+    || task.isSymbolicLink() || !task.isDirectory() || !sameIdentity(task, paths.taskIdentity)
+  ) {
+    throw new Error("host workflow artifact directories changed during binding");
+  }
+}
+
+function readTaskBranch(paths: HostPaths): string | null {
+  const stateFile = path.join(paths.artifactDir, "state.json");
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(stateFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const named = fs.lstatSync(stateFile);
+    assertHostPaths(paths);
+    if (
+      !opened.isFile() || named.isSymbolicLink() || !named.isFile()
+      || !sameIdentity(named, { dev: opened.dev, ino: opened.ino })
+    ) {
+      throw new Error("host workflow state changed during binding");
+    }
+    const state = JSON.parse(fs.readFileSync(descriptor, "utf8")) as { branch?: unknown };
+    return typeof state.branch === "string" && state.branch ? validatedBranch(state.branch) : null;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 /**
  * Bind an embedding host's stable actor to one active Flow Agents task.
  *
@@ -73,22 +230,7 @@ export function bindHostWorkflowSession(
 ): HostWorkflowBinding {
   const artifactRootInput = requiredText(input.artifactRoot, "artifactRoot");
   const artifactDirInput = requiredText(input.artifactDir, "artifactDir");
-  if (!path.isAbsolute(artifactRootInput) || !path.isAbsolute(artifactDirInput)) {
-    throw new TypeError("artifactRoot and artifactDir must be absolute paths");
-  }
-  const artifactRoot = fs.realpathSync(artifactRootInput);
-  const artifactDir = fs.realpathSync(artifactDirInput);
-  const relativeDir = path.relative(artifactRoot, artifactDir);
-  if (
-    relativeDir === "" ||
-    relativeDir === "." ||
-    relativeDir.startsWith(`..${path.sep}`) ||
-    relativeDir === ".." ||
-    path.isAbsolute(relativeDir)
-  ) {
-    throw new TypeError("artifactDir must identify a task directory inside artifactRoot");
-  }
-
+  const paths = resolveHostPaths(artifactRootInput, artifactDirInput);
   const actorKey = requiredText(input.actorKey, "actorKey");
   if (!ACTOR_KEY.test(actorKey) || actorKey.toLowerCase() === "local") {
     throw new TypeError(
@@ -96,36 +238,58 @@ export function bindHostWorkflowSession(
     );
   }
 
-  const state = (() => {
-    try {
-      const stateFile = path.join(artifactDir, "state.json");
-      if (fs.lstatSync(stateFile).isSymbolicLink()) return {};
-      return JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
-        branch?: unknown;
-      };
-    } catch {
-      return {};
-    }
-  })();
+  const branch = readTaskBranch(paths);
   const payload: HostWorkflowBinding = {
     schema_version: "1.0",
-    active_slug: path.basename(artifactDir),
-    artifact_dir: relativeDir,
-    updated_at: input.updatedAt ?? new Date().toISOString(),
-    owner: requiredText(input.owner, "owner"),
-    source: requiredText(input.source, "source"),
+    active_slug: path.basename(paths.artifactDir),
+    artifact_dir: paths.relativeDir,
+    updated_at: validatedTimestamp(input.updatedAt),
+    owner: publicMetadata(input.owner, "owner"),
+    source: publicMetadata(input.source, "source"),
     active_agents: [],
-    ...(typeof state.branch === "string" && state.branch
-      ? { branch: state.branch }
-      : {}),
+    binding_id: input.bindingId
+      ? validatedBindingId(input.bindingId)
+      : `binding-${randomUUID()}`,
+    ...(branch ? { branch } : {}),
     ...(input.activeFlowId
-      ? { active_flow_id: requiredText(input.activeFlowId, "activeFlowId") }
+      ? { active_flow_id: publicIdentifier(input.activeFlowId, "activeFlowId") }
       : {}),
     ...(input.activeStepId
-      ? { active_step_id: requiredText(input.activeStepId, "activeStepId") }
+      ? { active_step_id: publicIdentifier(input.activeStepId, "activeStepId") }
       : {}),
   };
 
-  currentPointerHelper().writePerActorCurrent(artifactRoot, actorKey, payload);
+  assertHostPaths(paths);
+  currentPointerHelper().writePerActorCurrent(
+    paths.artifactRoot,
+    actorKey,
+    payload,
+    () => assertHostPaths(paths),
+  );
   return payload;
+}
+
+export function retireHostWorkflowSession(
+  input: RetireHostWorkflowBindingInput,
+): "retired" | "not-bound" | "changed" {
+  const paths = resolveHostPaths(
+    requiredText(input.artifactRoot, "artifactRoot"),
+    requiredText(input.artifactDir, "artifactDir"),
+  );
+  const actorKey = requiredText(input.actorKey, "actorKey");
+  if (!CANONICAL_ACTOR_KEY.test(actorKey) || actorKey.toLowerCase() === "local") {
+    throw new TypeError(
+      "actorKey must be a bounded canonical actor key and must not be 'local'",
+    );
+  }
+  assertHostPaths(paths);
+  return currentPointerHelper().retireOwnCurrentPointer(
+    paths.artifactRoot,
+    actorKey,
+    paths.relativeDir,
+    validatedBindingId(input.bindingId),
+    publicMetadata(input.reason, "reason"),
+    validatedTimestamp(input.updatedAt),
+    () => assertHostPaths(paths),
+  );
 }

@@ -254,7 +254,10 @@ directory each time it starts or resumes that task, then supplies the same key
 as `FLOW_AGENTS_ACTOR` while invoking canonical hooks. The contract writes only
 the actor-scoped pointer: it does not claim assignment, create workflow state,
 or overwrite the shared compatibility pointer. This keeps lifecycle authority
-with the host while preserving Flow Agents' cross-actor isolation.
+with the host while preserving Flow Agents' cross-actor isolation. Each bind
+returns a unique `binding_id`. The host retains that value and passes it as
+`bindingId` to `retireHostWorkflowSession()` so a delayed end callback cannot
+retire a newer binding of the same actor and task.
 
 ## 8. Guard point 3 — the verify-hold publish gate (the one hard fence)
 

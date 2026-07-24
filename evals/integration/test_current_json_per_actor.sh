@@ -914,6 +914,153 @@ else
   fail "FINDING 1: record-agent-event did not migrate/update the per-actor pointer as expected: $(cat "$TMPDIR_EVAL/ac440-migrate-verify.err")"
 fi
 
+# 7.9 Retirement is an authoritative actor-scoped tombstone, and the bind/retire operations
+# serialize on one lock. No interleaving may let retirement overwrite a newer task binding.
+AC440_RETIRE_ROOT="$TMPDIR_EVAL/ac440-retire-project/.kontourai/flow-agents"
+if CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$AC440_RETIRE_ROOT" node - <<'NODE' 2>"$TMPDIR_EVAL/ac440-retire.err"
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const helper = require(process.env.CP_HELPER_ARG);
+const root = process.env.DIR_ARG;
+const actor = 'eval-actor-440-retire';
+const helperPath = process.env.CP_HELPER_ARG;
+
+function child(source, args) {
+  return new Promise((resolve, reject) => {
+    const childProcess = spawn(process.execPath, ['-e', source, helperPath, root, actor, ...args], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    childProcess.stderr.setEncoding('utf8');
+    childProcess.stderr.on('data', (chunk) => { stderr += chunk; });
+    childProcess.on('error', reject);
+    childProcess.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr || `child exited ${code}`)));
+  });
+}
+
+const writeSource = `
+  const h = require(process.argv[1]);
+  h.writePerActorCurrent(process.argv[2], process.argv[3], {
+    active_slug: process.argv[4],
+    artifact_dir: process.argv[4],
+    binding_id: process.argv[4],
+    binding_status: 'active'
+  });
+`;
+const retireSource = `
+  const h = require(process.argv[1]);
+  h.retireOwnCurrentPointer(process.argv[2], process.argv[3], process.argv[4], process.argv[4], 'ended', new Date().toISOString());
+`;
+const replaceSource = `
+  const fs = require('fs');
+  const h = require(process.argv[1]);
+  const file = h.perActorCurrentFile(process.argv[2], process.argv[3]);
+  const expected = fs.readFileSync(file, 'utf8');
+  const payload = JSON.parse(expected);
+  h.replacePerActorCurrentIfUnchanged(process.argv[2], file, expected, {
+    ...payload,
+    active_step_id: 'verify'
+  });
+`;
+const updateSource = `
+  const h = require(process.argv[1]);
+  h.updateCurrentPointersForBinding(process.argv[2], process.argv[3], process.argv[4], (payload) => ({
+    ...payload,
+    active_agents: [{ agent_id: 'reviewer', status: 'active' }]
+  }));
+`;
+
+(async () => {
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, 'current.json'), JSON.stringify({
+    active_slug: 'stale-global',
+    artifact_dir: 'stale-global'
+  }));
+
+  for (let index = 0; index < 12; index += 1) {
+    const oldSlug = `old-${index}`;
+    const newSlug = `new-${index}`;
+    helper.writePerActorCurrent(root, actor, {
+      active_slug: oldSlug,
+      artifact_dir: oldSlug,
+      binding_id: oldSlug,
+      binding_status: 'active'
+    });
+    await Promise.all([
+      child(retireSource, [oldSlug]),
+      child(writeSource, [newSlug]),
+    ]);
+    const current = helper.readOwnCurrentPointer(root, actor);
+    if (!current.payload || current.payload.active_slug !== newSlug || current.payload.binding_status !== 'active') {
+      throw new Error(`new binding was lost after concurrent retirement: ${JSON.stringify(current)}`);
+    }
+  }
+
+  for (let index = 0; index < 12; index += 1) {
+    const oldSlug = `agent-old-${index}`;
+    const newSlug = `agent-new-${index}`;
+    helper.publishCurrentPointers(root, actor, {
+      active_slug: oldSlug,
+      artifact_dir: oldSlug,
+      binding_id: oldSlug,
+      binding_status: 'active'
+    });
+    await Promise.all([
+      child(updateSource, [oldSlug]),
+      child(writeSource, [newSlug]),
+    ]);
+    const current = helper.readOwnCurrentPointer(root, actor);
+    if (!current.payload || current.payload.active_slug !== newSlug || current.payload.binding_status !== 'active') {
+      throw new Error(`agent update overwrote a newer binding: ${JSON.stringify(current)}`);
+    }
+  }
+
+  for (let index = 0; index < 12; index += 1) {
+    const oldSlug = `projection-old-${index}`;
+    const newSlug = `projection-new-${index}`;
+    helper.writePerActorCurrent(root, actor, {
+      active_slug: oldSlug,
+      artifact_dir: oldSlug,
+      binding_id: oldSlug,
+      binding_status: 'active'
+    });
+    await Promise.all([
+      child(replaceSource, []),
+      child(writeSource, [newSlug]),
+    ]);
+    const current = helper.readOwnCurrentPointer(root, actor);
+    if (!current.payload || current.payload.active_slug !== newSlug || current.payload.binding_status !== 'active') {
+      throw new Error(`new binding was lost after concurrent projection: ${JSON.stringify(current)}`);
+    }
+  }
+
+  const active = helper.readOwnCurrentPointer(root, actor).payload;
+  const result = helper.retireOwnCurrentPointer(
+    root,
+    actor,
+    active.artifact_dir,
+    active.binding_id,
+    'ended',
+    new Date().toISOString()
+  );
+  if (result !== 'retired') throw new Error(`unexpected retirement result: ${result}`);
+  const own = helper.readOwnCurrentPointer(root, actor);
+  const compatible = helper.readCurrentPointer(root, actor);
+  if (own.payload !== null || compatible.payload !== null) {
+    throw new Error(`retired binding revived through fallback: ${JSON.stringify({ own, compatible })}`);
+  }
+})().catch((error) => {
+  console.error(error.stack || error);
+  process.exit(1);
+});
+NODE
+then
+  pass "actor pointer retirement serializes with rebinding and suppresses stale fallback"
+else
+  fail "actor pointer retirement lost a newer binding or revived stale fallback: $(cat "$TMPDIR_EVAL/ac440-retire.err")"
+fi
+
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then

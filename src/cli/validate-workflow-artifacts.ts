@@ -11,6 +11,7 @@ import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } fr
 // shared lib so workflow-sidecar.ts's `fixture write --from-json` validates against the SAME
 // schema-matching logic this file uses -- see src/lib/mini-json-schema.ts's header comment.
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
+import { validateRunCorrelationPresence } from "../run-correlation.js";
 
 // Resolve bundled JSON Schemas relative to this compiled script's own package
 // location (build/src/cli/validate-workflow-artifacts.js -> ../../../schemas), NOT
@@ -230,7 +231,22 @@ function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
   const schemaFile = sidecarSchemas[path.basename(file)];
   if (schemaFile) {
     const schema = JSON.parse(readText(path.join(packageRoot, schemaFile)));
-    validateSchemaValue(file, value, schema, path.basename(file), issues, schema);
+    const schemaRegistry = {
+      "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json": JSON.parse(
+        readText(path.join(packageRoot, "schemas/run-correlation-envelope.schema.json")),
+      ),
+    };
+    validateSchemaValue(file, value, schema, path.basename(file), issues, schema, schemaRegistry);
+    if (path.basename(file) === "state.json" && value.run_correlation) {
+      try {
+        validateRunCorrelationPresence(value.run_correlation);
+      } catch (error) {
+        issues.push({
+          path: file,
+          message: error instanceof Error ? error.message : "state.json.run_correlation is invalid",
+        });
+      }
+    }
   }
   if (path.basename(file) === "evidence.json") {
     const checks = Array.isArray(value.checks) ? value.checks : [];
