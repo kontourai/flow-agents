@@ -300,7 +300,11 @@ grep -q "120 env CONSOLE_AUTH_TOKEN" "$TIMEOUT_LOG" && pass "MED-4: the timeout 
 
 # MED-3: the log file is operator-private (umask 077 -> mode 600), and the lock directory
 # no longer exists once the run has completed (released).
-LOG_MODE="$(stat -f '%Lp' "$LOG_D" 2>/dev/null || stat -c '%a' "$LOG_D" 2>/dev/null)"
+# Independent assignments (never combined in one $(cmd1 || cmd2) substitution): GNU stat's
+# `-f` means "filesystem status", not BSD/macOS's `-f FORMAT` -- combined inside one command
+# substitution, a partial-success-then-nonzero-exit on Linux would APPEND the fallback's
+# output after the first command's own (wrong-mode) stdout instead of cleanly replacing it.
+LOG_MODE="$(stat -f '%Lp' "$LOG_D" 2>/dev/null)" || LOG_MODE="$(stat -c '%a' "$LOG_D" 2>/dev/null)"
 [[ "$LOG_MODE" == "600" ]] && pass "MED-3: console-board-sync.log is created with mode 600 (umask 077)" || fail "MED-3: expected log mode 600, got $LOG_MODE"
 [[ ! -d "$DATA_D/console-board-sync.lock" ]] && pass "HIGH-4: the lock directory is released after a completed run" || fail "HIGH-4: the lock directory was left behind after a completed run"
 
@@ -324,7 +328,7 @@ DATA_BIG="$TMP/data-caseBig"
 rc=$?
 [[ "$rc" -eq 0 ]] && pass "MED-3 cap: script still exits 0 despite a huge child output" || fail "MED-3 cap: exited $rc"
 LOG_BIG="$DATA_BIG/console-board-sync.log"
-LOG_BIG_SIZE="$(stat -f%z "$LOG_BIG" 2>/dev/null || stat -c%s "$LOG_BIG" 2>/dev/null)"
+LOG_BIG_SIZE="$(stat -f%z "$LOG_BIG" 2>/dev/null)" || LOG_BIG_SIZE="$(stat -c%s "$LOG_BIG" 2>/dev/null)"
 [[ -n "$LOG_BIG_SIZE" && "$LOG_BIG_SIZE" -lt $((1024 * 1024)) ]] \
   && pass "MED-3 cap: the log stayed well under the 2MB child output (actual: ${LOG_BIG_SIZE} bytes)" \
   || fail "MED-3 cap: the log grew unbounded from the child's output (actual: ${LOG_BIG_SIZE:-unknown} bytes)"

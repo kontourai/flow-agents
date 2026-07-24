@@ -104,7 +104,15 @@ acquire_lock() {
     return 0
   fi
   local lock_epoch now age
-  lock_epoch=$(stat -f%m "$LOCK_DIR" 2>/dev/null || stat -c%Y "$LOCK_DIR" 2>/dev/null || echo 0)
+  # BUG FIX (real-CI-caught): each stat variant MUST be its own separate assignment+||,
+  # never combined inside one $(cmd1 || cmd2) command substitution. GNU stat's `-f` means
+  # "filesystem status" (not BSD/macOS's `-f FORMAT`), so on Linux `stat -f%m X` treats `%m`
+  # as a SECOND bogus file argument; if X still resolves, stat prints a real (but wrong-mode)
+  # dump for X and then exits NONZERO overall (because the `%m` "file" failed) -- which,
+  # inside a single combined $(... || ...), lets the second command's output get APPENDED
+  # after the first command's partial stdout instead of cleanly replacing it. Three
+  # independent assignments (mirroring lib/config.sh's telemetry_conf_trusted) avoid this.
+  lock_epoch=$(stat -f%m "$LOCK_DIR" 2>/dev/null) || lock_epoch=$(stat -c%Y "$LOCK_DIR" 2>/dev/null) || lock_epoch=0
   now=$(date +%s)
   age=$((now - lock_epoch))
   if [[ "$lock_epoch" -gt 0 && "$age" -gt "$STALE_LOCK_AGE_SECONDS" ]]; then
@@ -132,7 +140,8 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG_FILE" 2>/
 # keeps the file identity stable for tailing) once past LOG_MAX_BYTES, same convention as
 # the reference ~/.flow-agents console-board-runner.sh rotation. ---
 if [[ -f "$LOG_FILE" ]]; then
-  log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+  # Same fix as lock_epoch above: independent assignments, never combined in one $(...).
+  log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null) || log_size=$(stat -c%s "$LOG_FILE" 2>/dev/null) || log_size=0
   [[ "$log_size" -gt "$LOG_MAX_BYTES" ]] && : >"$LOG_FILE"
 fi
 [[ "$LOCK_STATE" == "stale-recovered" ]] && log "recovered a stale lock older than ${STALE_LOCK_AGE_SECONDS}s (an interrupted/crashed prior run) -- proceeding"
