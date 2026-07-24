@@ -172,7 +172,10 @@ function signedCompletion(overrides = {}) {
 
 function withCompletionVerificationKey(callback) {
   const mutableFs = createRequire(import.meta.url)("node:fs");
-  const host = completionVerificationKeyHost();
+  const host = completionVerificationKeyHost({
+    platform: process.platform,
+    etcIsAlias: process.platform === "darwin",
+  });
   const methods = ["lstatSync", "readlinkSync", "accessSync", "openSync", "fstatSync", "readFileSync", "closeSync"];
   const originals = Object.fromEntries(methods.map((method) => [method, mutableFs[method]]));
   try {

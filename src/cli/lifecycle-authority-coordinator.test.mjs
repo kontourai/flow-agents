@@ -692,7 +692,10 @@ test("coordinator declares a protected external ledger loader and chain validato
 });
 
 test("coordinator protected-loads the external ledger, rejects an untrusted historical authorization, and fails closed when a post-edge ledger is absent", async () => {
-  const { directory, loadResolutionEventLedger } = await loadProtectedReadFromCoordinator();
+  const registryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-coordinator-untrusted-registry-"));
+  const registryFile = path.join(registryDirectory, "keys.json");
+  fs.writeFileSync(registryFile, JSON.stringify({ schema_version: "1.0", keys: [] }), { mode: 0o600 });
+  const { directory, loadResolutionEventLedger } = await loadProtectedReadFromCoordinator({ registryFile });
   try {
     const fixture = twoEdgeLedgerFixture();
     const sessionDir = path.join(directory, "session");
@@ -713,6 +716,7 @@ test("coordinator protected-loads the external ledger, rejects an untrusted hist
     );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(registryDirectory, { recursive: true, force: true });
   }
 });
 
