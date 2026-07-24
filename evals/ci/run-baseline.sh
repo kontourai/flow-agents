@@ -208,6 +208,7 @@ LANE_RUNTIME_AND_KIT=(
   "Telemetry sanitize usage integration"
   "Telemetry task slug integration"
   "Economics record integration"
+  "Console board sync integration"
   "Capability declarations integration"
   "Learning review proposals integration"
   "Utterance check integration"
