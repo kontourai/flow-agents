@@ -6,14 +6,30 @@ writer script.
 
 Use an exact package version from an isolated npm prefix. This prevents a repository-local
 dependency with the same version from intercepting the command. Generated workflow actions and
-doctor remediation include this isolation automatically:
+doctor remediation include this isolation automatically. For an existing session, prefer the
+exact isolated command in `next_action.command` from `workflow status --json`. If a wrapper is
+needed, set `FLOW_AGENTS_PACKAGE` to that command's exact package spec (or the exact spec from
+doctor remediation). The wrapper deliberately has no default: it fails closed instead of guessing
+a release that may not contain the documented workflow surface.
 
 ```bash
+# Copy the exact package spec emitted for this active workflow.
+FLOW_AGENTS_PACKAGE='<exact-package-spec-from-workflow-status-or-doctor>'
+
 flow_agents() (
+  : "${FLOW_AGENTS_PACKAGE:?set FLOW_AGENTS_PACKAGE to the exact package spec emitted by workflow status or doctor}"
   root=$(mktemp -d) || exit 1
   trap 'rm -rf "$root"' EXIT HUP INT TERM
   npm exec --yes --prefix "$root" \
-    --package=@kontourai/flow-agents@3.6.0 -- flow-agents "$@"
+    --package="$FLOW_AGENTS_PACKAGE" -- flow-agents "$@"
+)
+
+flow_agents_validate_artifacts() (
+  : "${FLOW_AGENTS_PACKAGE:?set FLOW_AGENTS_PACKAGE to the exact package spec emitted by workflow status or doctor}"
+  root=$(mktemp -d) || exit 1
+  trap 'rm -rf "$root"' EXIT HUP INT TERM
+  npm exec --yes --prefix "$root" \
+    --package="$FLOW_AGENTS_PACKAGE" -- flow-agents-validate-artifacts "$@"
 )
 
 flow_agents workflow start \
@@ -49,6 +65,51 @@ Flow Agents verifies that the current actor is the confirmed holder, retains tha
 as selected-work evidence, and creates a local runtime lease mirror for atomic session mutation.
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
+
+## Canonical fan-out waves
+
+Use the public wave commands to write the session-bound `waves.json`; do not hand-write a
+manifest or pass an output path. Declare every expected worker before dispatch, record each
+worker-reported terminal result, then reconcile once. All commands emit a single JSON result and
+require the canonical `.kontourai/flow-agents/<safe-slug>` session directory.
+
+```bash
+flow_agents workflow wave-declare \
+  --session-dir .kontourai/flow-agents/example \
+  --wave-id execute-wave-1 \
+  --step execute \
+  --worker-json '{"worker_id":"implementer","task":"Implement the planned source change.","role":"tool-worker","owned_files":["src/example.ts"]}' \
+  --worker-json '{"worker_id":"verifier","task":"Verify the declared acceptance criteria.","role":"tool-verifier"}'
+
+flow_agents workflow wave-result \
+  --session-dir .kontourai/flow-agents/example \
+  --wave-id execute-wave-1 \
+  --worker-id implementer \
+  --status completed \
+  --summary "Implemented the planned source change."
+
+flow_agents workflow wave-reconcile \
+  --session-dir .kontourai/flow-agents/example \
+  --wave-id execute-wave-1
+
+flow_agents_validate_artifacts --skip-markdown-validation \
+  .kontourai/flow-agents/example/waves.json
+```
+
+`wave-result` accepts only `completed`, `failed`, or `blocked`; `success`,
+`changes_requested`, `reported_at`, and other legacy synonyms fail without mutating the file.
+`wave-reconcile` derives counts and status from stored records. It records every missing expected
+worker as `not_reported`, names them in the `N of M reported` summary, and is `complete` only
+when every expected worker recorded a worker-reported terminal result. A closed wave is immutable:
+declare a follow-up wave instead of altering a reconciliation. The writer holds the session
+subject lock, authenticates the active assignment actor, binds the wave step to the active
+canonical Flow run, rejects symlinked or writable fixed ancestry/preimages, enforces bounded
+documents and collections, validates the entire candidate with the same schema and reconciliation
+semantics as the independent validator, and atomically publishes it. A failure after canonical
+rename is reported as `commit_uncertain` with the staged digest and readback status; retry the exact
+same command, which recovers idempotently if those exact bytes committed. Portable Node has no
+`renameat`; pinned directory descriptors and immediate identity checks detect persistent
+cooperative pathname drift, not hostile same-user ABA.
 
 ## Approved cross-repository rollouts
 

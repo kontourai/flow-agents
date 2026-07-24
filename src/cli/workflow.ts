@@ -24,6 +24,7 @@ import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-pro
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import { declareWave, reconcileWave, recordWaveResult, waveStepOwnsCanonicalStep } from "./workflow-waves.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,7 +33,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "wave-declare", "wave-result", "wave-reconcile", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -47,6 +48,9 @@ Public workflow verbs:
   repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
   drive               Continue the canonical run through an explicit runtime adapter.
   publish-delivery    Publish the current session's verified trust bundle for CI reconciliation.
+  wave-declare        Declare one fan-out wave and its expected workers before dispatch.
+  wave-result         Record one expected worker's completed, failed, or blocked result.
+  wave-reconcile      Derive and record reconciliation for a declared wave.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -73,6 +77,16 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "start") return start(argv.slice(1));
   if (verb === "doctor") return doctor(argv.slice(1));
 
+  if (verb === "wave-declare" || verb === "wave-result" || verb === "wave-reconcile") {
+    const explicitSession = flagString(parsed.flags, "session-dir");
+    if (!explicitSession) throw new Error(`workflow ${verb} requires an explicit --session-dir .kontourai/flow-agents/<slug>`);
+    if (parsed.flags["artifact-root"] !== undefined) throw new Error(`workflow ${verb} does not support --artifact-root; pass the canonical --session-dir explicitly`);
+    const waveSessionDir = validateCanonicalSessionDir(path.resolve(explicitSession));
+    if (verb === "wave-declare") return await waveDeclare(waveSessionDir, parsed.flags);
+    if (verb === "wave-result") return await waveResult(waveSessionDir, parsed.flags);
+    return await waveReconcile(waveSessionDir, parsed.flags);
+  }
+
   const sessionDir = resolveSessionDir(parsed.flags);
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
@@ -88,10 +102,66 @@ export async function main(argv: string[]): Promise<number> {
     assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
     return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"));
   }
-
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+function parsePublicJson(value: string, flag: string): JsonRecord {
+  if (Buffer.byteLength(value, "utf8") > 65_536) throw new Error(`${flag} must not exceed 65536 UTF-8 bytes`);
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("must be an object");
+    return parsed as JsonRecord;
+  } catch (error) {
+    throw new Error(`${flag} must be a JSON object: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function authorizeWaveMutation(sessionDir: string, expectedStep: string): Promise<void> {
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+  const run = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+  if (run.state.status !== "active") throw new Error(`workflow waves requires an active canonical Flow run; ${slug} is ${run.state.status}`);
+  if (!waveStepOwnsCanonicalStep(run.definitionId, run.state.current_step, expectedStep)) {
+    throw new Error(`workflow waves declared step ${expectedStep} does not own canonical ${run.definitionId} Flow current_step ${run.state.current_step}`);
+  }
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+}
+
+async function waveDeclare(sessionDir: string, flags: ReturnType<typeof parseArgs>["flags"]): Promise<number> {
+  assertOnlyFlags(flags, new Set(["session-dir", "wave-id", "step", "worker-json", "json"]), "workflow wave-declare");
+  const workers = flagList(flags, "worker-json");
+  if (workers.length > 128) throw new Error("workflow wave-declare accepts at most 128 --worker-json values");
+  const report = await declareWave(sessionDir, (expectedStep) => authorizeWaveMutation(sessionDir, expectedStep), {
+    wave_id: flagString(flags, "wave-id"),
+    step: flagString(flags, "step"),
+    workers: workers.map((value) => parsePublicJson(value, "--worker-json")),
+  });
+  console.log(JSON.stringify(report));
+  return 0;
+}
+
+async function waveResult(sessionDir: string, flags: ReturnType<typeof parseArgs>["flags"]): Promise<number> {
+  assertOnlyFlags(flags, new Set(["session-dir", "wave-id", "worker-id", "status", "summary", "evidence-ref-json", "json"]), "workflow wave-result");
+  const evidenceRefs = flagList(flags, "evidence-ref-json");
+  if (evidenceRefs.length > 32) throw new Error("workflow wave-result accepts at most 32 --evidence-ref-json values");
+  const report = await recordWaveResult(sessionDir, (expectedStep) => authorizeWaveMutation(sessionDir, expectedStep), {
+    wave_id: flagString(flags, "wave-id"),
+    worker_id: flagString(flags, "worker-id"),
+    status: flagString(flags, "status"),
+    summary: flagString(flags, "summary"),
+    evidence_refs: evidenceRefs.map((value) => parsePublicJson(value, "--evidence-ref-json")),
+  });
+  console.log(JSON.stringify(report));
+  return 0;
+}
+
+async function waveReconcile(sessionDir: string, flags: ReturnType<typeof parseArgs>["flags"]): Promise<number> {
+  assertOnlyFlags(flags, new Set(["session-dir", "wave-id", "json"]), "workflow wave-reconcile");
+  const report = await reconcileWave(sessionDir, (expectedStep) => authorizeWaveMutation(sessionDir, expectedStep), { wave_id: flagString(flags, "wave-id") });
+  console.log(JSON.stringify(report));
+  return 0;
 }
 
 async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boolean): Promise<number> {

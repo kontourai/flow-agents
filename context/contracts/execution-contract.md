@@ -53,7 +53,9 @@ drops a worker's stream is worse than one that errors.
   declare it in the session's `waves.json` sidecar (schema:
   `schemas/workflow-waves.schema.json`): `wave_id`, owning step, and one
   `expected_workers` entry per worker. The expected count (M) must exist before
-  any result arrives.
+  any result arrives. Use `flow-agents workflow wave-declare --session-dir
+  .kontourai/flow-agents/<slug> --wave-id <id> --step <step> --worker-json
+  <worker>`; it is the supported session-bound writer, not a generic JSON path API.
 - **One terminal record per worker.** Each worker lands exactly one terminal
   status record: `completed`, `failed`, or `blocked`. Duplicate records and
   undeclared reporters are validation errors.
@@ -62,7 +64,25 @@ drops a worker's stream is worse than one that errors.
   record as `not_reported` — never silently absorb a missing worker — then
   record the wave's `reconciliation` with `expected_count` M, `reported_count`
   N, and an explicit "N of M reported" summary naming the `not_reported`
-  workers (for example "2 of 3 reported; worker-3 not_reported").
+  workers (for example "2 of 3 reported; worker-3 not_reported"). Record
+  worker-reported results through `flow-agents workflow wave-result` and close
+  through `flow-agents workflow wave-reconcile`; the reconcile action derives
+  counts, missing records, and status rather than accepting caller-authored
+  reconciliation fields.
+- **Authority and publication.** Every wave mutation requires an explicit
+  `--session-dir`, the active matching assignment actor, an active canonical
+  Flow run, and an owning wave step equal to that run's `current_step`.
+  The sole explicit owner-step mapping is `review` at the `builder.build`
+  `verify` step, where the delegated `review-work` wave runs before verification;
+  other steps require a literal match. The
+  writer keeps those checks and the transition under the same subject lock,
+  bounded-reads protected state/preimages, stages and rereads a `0600`
+  candidate, and publishes through a pinned session-directory durability
+  boundary. A failure after rename is `commit_uncertain`, includes the
+  candidate digest/readback result, and routes to an exact idempotent retry.
+  Node does not expose portable `renameat`; pinned descriptors plus immediate
+  pre/post identity checks detect persistent cooperative pathname drift but
+  are not a defense against hostile same-user ABA.
 - **Incomplete is visible, never silent.** A wave is `complete` only when N
   equals M. An incomplete wave stays visible data and routes to re-dispatch, a
   blocker report, or an explicit accepted gap; it must never be treated as

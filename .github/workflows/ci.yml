@@ -212,6 +212,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workflow-sidecar-writer-integration
 
+      - name: Workflow waves writer integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check workflow-waves-writer-integration
+
       - name: Sidecar field preservation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check sidecar-field-preservation-integration
