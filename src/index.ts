@@ -32,10 +32,12 @@ export {
   RunCorrelationValidationError,
   RUNTIME_CORRELATION_IDENTITY_DECLARATIONS,
   attachRunCorrelation,
+  containsSensitiveCredential,
   createRunCorrelationEnvelope,
   readRunCorrelation,
   runtimeCorrelationIdentityDeclaration,
   validateRunCorrelationEnvelope,
+  validateRunCorrelationPresence,
 } from "./run-correlation.js";
 export type {
   AbsentRunCorrelationIdentity,
@@ -574,10 +576,11 @@ export {
   LEGACY_TELEMETRY_DIR,
   telemetryDataDir,
 } from "./lib/local-artifact-root.js";
-export { bindHostWorkflowSession } from "./lib/host-workflow-binding.js";
+export { bindHostWorkflowSession, retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
 export type {
   HostWorkflowBinding,
   HostWorkflowBindingInput,
+  RetireHostWorkflowBindingInput,
 } from "./lib/host-workflow-binding.js";
 
 export {

@@ -87,6 +87,28 @@ else
   _fail "sidecar writer did not read explicit artifact root: $(cat "$TMPDIR_EVAL/previous-current-explicit.out" "$TMPDIR_EVAL/previous-current-explicit.err")"
 fi
 
+REQUIRED_POINTER_PROJECT="$TMPDIR_EVAL/required-pointer-project"
+REQUIRED_POINTER_ROOT="$REQUIRED_POINTER_PROJECT/.kontourai/flow-agents"
+mkdir -p "$REQUIRED_POINTER_ROOT"
+printf 'not-a-directory\n' > "$REQUIRED_POINTER_ROOT/current"
+if FLOW_AGENTS_ACTOR=required-pointer-actor node "$ROOT/build/src/cli.js" workflow start \
+  --artifact-root "$REQUIRED_POINTER_ROOT" \
+  --flow builder.shape \
+  --task-slug required-pointer \
+  --title "Required actor pointer" \
+  --source-request "Canonical Builder startup must require its actor-scoped binding." \
+  --summary "Refuse startup when the actor pointer cannot be published." \
+  --criterion "No canonical Flow run is minted without the actor binding" \
+  >"$TMPDIR_EVAL/required-pointer.out" 2>"$TMPDIR_EVAL/required-pointer.err"; then
+  _fail "canonical Builder start succeeded without publishing its actor-scoped current pointer"
+elif grep -q "required per-actor current pointer" "$TMPDIR_EVAL/required-pointer.err" \
+  && [[ ! -e "$REQUIRED_POINTER_PROJECT/.kontourai/flow/runs/required-pointer" ]] \
+  && [[ ! -e "$REQUIRED_POINTER_ROOT/current.json" ]]; then
+  _pass "canonical Builder start fails closed before Flow allocation when actor pointer publication fails"
+else
+  _fail "canonical Builder pointer failure was not fail-closed: $(cat "$TMPDIR_EVAL/required-pointer.out" "$TMPDIR_EVAL/required-pointer.err")"
+fi
+
 TRAVERSAL_ROOT="$TMPDIR_EVAL/traversal-repo/.kontourai/flow-agents"
 TRAVERSAL_OUTSIDE="$TMPDIR_EVAL/traversal-outside-existing"
 mkdir -p "$TRAVERSAL_ROOT" "$TRAVERSAL_OUTSIDE"
@@ -586,6 +608,32 @@ else
   _fail "sidecar writer (#309 setup) failed to seed branch-full-sequence: $(cat "$TMPDIR_EVAL/branch-seq-ensure.out" "$TMPDIR_EVAL/branch-seq-ensure.err")"
 fi
 
+# Builder runtime projects this immutable envelope before later lifecycle commands rewrite
+# state.json. Seed that production shape here so the full rewrite and merge writers both prove
+# they retain it.
+node - "$BRANCH_SEQ_DIR/state.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, "utf8"));
+const absent = (reason) => ({ status: "unavailable", reason });
+state.run_correlation = {
+  schema_version: "1.0",
+  correlation_id: "run-branch-full-sequence",
+  identities: {
+    runtime_session: { status: "present", value: "session-branch-full-sequence" },
+    runtime_turn: absent("turn is not established yet"),
+    flow_run: { status: "present", value: "branch-full-sequence" },
+    flow_step: absent("the envelope spans changing Flow steps"),
+    work_item: { status: "present", value: "github:kontourai/flow-agents#924" },
+    agent: { status: "present", value: "codex:session-branch-full-sequence" },
+    delegation_trace: absent("delegation is not established yet"),
+    delegation_span: absent("delegation is not established yet"),
+    terminal_record: absent("the terminal record does not exist yet"),
+  },
+};
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+
 BRANCH_SEQ_PLAN_ARTIFACT="$BRANCH_SEQ_DIR/branch-full-sequence--plan-work.md"
 cat > "$BRANCH_SEQ_PLAN_ARTIFACT" <<'MARKDOWN'
 ---
@@ -611,10 +659,11 @@ if flow_agents_node "$WRITER" init-plan "$BRANCH_SEQ_PLAN_ARTIFACT" \
   --summary "Planning sidecars initialized from a branch-less plan artifact." \
   --next-action "Advance to execution." \
   --timestamp "2026-07-01T00:04:21Z" >"$TMPDIR_EVAL/branch-seq-initplan.out" 2>"$TMPDIR_EVAL/branch-seq-initplan.err" \
-  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
-  _pass "sidecar writer (#309) preserves the already-recorded branch across init-plan even when the plan artifact carries no branch: line"
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
+  && rg -q '"correlation_id": "run-branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
+  _pass "sidecar writer (#309) preserves branch and run correlation across init-plan even when the plan artifact carries no branch: line"
 else
-  _fail "sidecar writer (#309) DROPPED the branch on init-plan: $(cat "$TMPDIR_EVAL/branch-seq-initplan.out" "$TMPDIR_EVAL/branch-seq-initplan.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+  _fail "sidecar writer (#309) DROPPED branch or run correlation on init-plan: $(cat "$TMPDIR_EVAL/branch-seq-initplan.out" "$TMPDIR_EVAL/branch-seq-initplan.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
 fi
 
 if flow_agents_node "$WRITER" advance-state "$BRANCH_SEQ_DIR" \
@@ -624,10 +673,11 @@ if flow_agents_node "$WRITER" advance-state "$BRANCH_SEQ_DIR" \
   --next-action "Run checks." \
   --timestamp "2026-07-01T00:04:22Z" >"$TMPDIR_EVAL/branch-seq-advance.out" 2>"$TMPDIR_EVAL/branch-seq-advance.err" \
   && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
+  && rg -q '"correlation_id": "run-branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
   && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$SESSION_ROOT/current.json"; then
-  _pass "sidecar writer (#309) still carries the branch in state.json and its current.json mirror after advance-state"
+  _pass "sidecar writer (#309) still carries branch and run correlation in state.json after advance-state"
 else
-  _fail "sidecar writer (#309) lost the branch by advance-state, or current.json mirror drifted: $(cat "$TMPDIR_EVAL/branch-seq-advance.out" "$TMPDIR_EVAL/branch-seq-advance.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+  _fail "sidecar writer (#309) lost branch or run correlation by advance-state, or current.json mirror drifted: $(cat "$TMPDIR_EVAL/branch-seq-advance.out" "$TMPDIR_EVAL/branch-seq-advance.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
 fi
 
 # #309 backfill repro: an ALREADY-BROKEN pre-fix session (state.json has no branch key at all,

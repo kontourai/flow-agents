@@ -76,10 +76,27 @@ export class RunCorrelationValidationError extends Error {
 }
 
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$/;
-const credentialPattern = /(?:bearer\s+|(?:api[_-]?key|token|secret|password)\s*[:=]|(?:sk|gh[oprsu])_[A-Za-z0-9_-]{8,})/i;
+const workItemIdentityPattern = /^(?:[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}|(?:[A-Za-z0-9][A-Za-z0-9._@-]*:)?[A-Za-z0-9._@-]+(?:\/[A-Za-z0-9._@-]+)+(?:#[A-Za-z0-9._@-]+)?)$/;
+const credentialPatterns = [
+  /bearer\s+/i,
+  /(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|secret|password)\s*[:=]/i,
+  /(?:sk|gh[oprsu]|npm|pypi|hf)_[A-Za-z0-9_-]{8,}/i,
+  /github_pat_[A-Za-z0-9_]{12,}/i,
+  /xox[baprs]-[A-Za-z0-9-]{8,}/i,
+  /glpat-[A-Za-z0-9_-]{8,}/i,
+  /AKIA[A-Z0-9]{12,}/,
+  /AIza[A-Za-z0-9_-]{20,}/,
+  /ya29\.[A-Za-z0-9_-]{8,}/i,
+  /SG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  /(?:whsec|[srp]k_(?:live|test))_[A-Za-z0-9_-]{8,}/i,
+  /(?:^|[^A-Za-z0-9])sk-(?:proj-|ant-)?[A-Za-z0-9_-]{8,}/i,
+  /sq0(?:atp|csp)-[A-Za-z0-9_-]{8,}/i,
+  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\./,
+] as const;
 const allowedEnvelopeKeys = new Set(["schema_version", "correlation_id", "identities"]);
 const allowedPresentKeys = new Set(["status", "value"]);
 const allowedAbsentKeys = new Set(["status", "reason"]);
+const allowedIncompleteKeys = new Set(["status", "reason"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -89,10 +106,15 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
   return Object.keys(value).every((key) => allowed.has(key));
 }
 
-function isSafeIdentity(value: unknown): value is string {
+export function containsSensitiveCredential(value: string): boolean {
+  return credentialPatterns.some((pattern) => pattern.test(value));
+}
+
+function isSafeIdentity(value: unknown, key?: RunCorrelationIdentityKey): value is string {
   return typeof value === "string"
-    && identityPattern.test(value)
-    && !credentialPattern.test(value);
+    && value.length <= 255
+    && (key === "work_item" ? workItemIdentityPattern : identityPattern).test(value)
+    && !containsSensitiveCredential(value);
 }
 
 function isSafeReason(value: unknown): value is string {
@@ -100,7 +122,7 @@ function isSafeReason(value: unknown): value is string {
     && value.length > 0
     && value.length <= 512
     && !/[\u0000-\u001f\u007f]/.test(value)
-    && !credentialPattern.test(value);
+    && !containsSensitiveCredential(value);
 }
 
 export function validateRunCorrelationEnvelope(value: unknown): RunCorrelationEnvelope {
@@ -134,7 +156,7 @@ export function validateRunCorrelationEnvelope(value: unknown): RunCorrelationEn
       }
       if (identity.status === "present") {
         if (!hasOnlyKeys(identity, allowedPresentKeys)) issues.push(`identities.${key} has invalid present properties`);
-        if (!isSafeIdentity(identity.value)) issues.push(`identities.${key}.value must be a bounded opaque identifier`);
+        if (!isSafeIdentity(identity.value, key)) issues.push(`identities.${key}.value must be a bounded opaque identifier`);
       } else {
         if (!hasOnlyKeys(identity, allowedAbsentKeys)) issues.push(`identities.${key} has invalid absent properties`);
         if (!isSafeReason(identity.reason)) issues.push(`identities.${key}.reason must be a bounded non-sensitive explanation`);
@@ -144,6 +166,24 @@ export function validateRunCorrelationEnvelope(value: unknown): RunCorrelationEn
 
   if (issues.length > 0) throw new RunCorrelationValidationError(issues);
   return structuredClone(value) as RunCorrelationEnvelope;
+}
+
+export function validateRunCorrelationPresence(value: unknown): RunCorrelationPresence {
+  if (isRecord(value) && value.status === "incomplete") {
+    const issues: string[] = [];
+    if (!hasOnlyKeys(value, allowedIncompleteKeys)) {
+      issues.push("incomplete run correlation has unknown properties");
+    }
+    if (!isSafeReason(value.reason)) {
+      issues.push("incomplete run correlation reason must be a bounded non-sensitive explanation");
+    }
+    if (issues.length > 0) throw new RunCorrelationValidationError(issues);
+    return structuredClone(value) as RunCorrelationPresence;
+  }
+  return {
+    status: "present",
+    envelope: validateRunCorrelationEnvelope(value),
+  };
 }
 
 export function createRunCorrelationEnvelope(input: RunCorrelationInput): RunCorrelationEnvelope {
@@ -171,10 +211,7 @@ export function readRunCorrelation(record: unknown): RunCorrelationPresence {
       reason: "record predates run correlation or its producer did not provide an envelope",
     };
   }
-  return {
-    status: "present",
-    envelope: validateRunCorrelationEnvelope(record.run_correlation),
-  };
+  return validateRunCorrelationPresence(record.run_correlation);
 }
 
 const runtimeIdentityDeclarations = {

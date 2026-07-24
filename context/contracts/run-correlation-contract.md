@@ -47,6 +47,18 @@ string-only parameter contract stores the canonical JSON bytes; Builder load
 and evaluation validate those bytes before exposing them. Trust evidence
 analytics carry either the same envelope or the explicit incomplete result.
 
+Production `startBuilderFlowSession` serializes allocation per selected subject
+and mints that envelope exactly once from the canonical Flow run id, selected
+Work Item, and authenticated assignment actor. Start requires the current
+runtime actor to match the claimed assignment's canonical actor and actor key.
+The same envelope is projected into the task's `state.json`; its correlation id
+is the generation on the actor-scoped current pointer. Canonical state commits
+before pointer projection, and retirement compares that generation so a
+delayed callback cannot retire a newer binding. Recovery reuses the
+Flow-persisted envelope; only a genuinely absent legacy parameter projects an
+explicit `incomplete` result. A persisted envelope cannot be downgraded to that
+legacy marker.
+
 `reconstructRun` rebuilds a run account from identity-bearing facts only. A
 complete account contains runtime session and turn facts, tool results, Flow
 gates and route-backs, delegations, trust references, economics, and a terminal

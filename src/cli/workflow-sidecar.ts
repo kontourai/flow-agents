@@ -15,11 +15,13 @@ import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json
 import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
+import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
+import { validateRunCorrelationPresence } from "../run-correlation.js";
 import {
   EVIDENCE_REF_FIELD_SCHEMAS,
   EVIDENCE_REF_KINDS,
@@ -57,7 +59,14 @@ function readRegularFileNoFollow(file: string, label: string): Buffer {
     fs.closeSync(fd);
   }
 }
-export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
+export function writeJson(file: string, payload: AnyObj): void {
+  if (path.basename(file) === "state.json") {
+    writeStateJson(file, payload);
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
+}
 
 function writeTrustBundleAtomically(file: string, payload: AnyObj): void {
   const directory = path.dirname(file);
@@ -88,6 +97,89 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const line = spacedLine(payload, Object.keys(payload).sort());
   fs.appendFileSync(file, `${line}\n`);
+}
+
+function openJsonlAppend(file: string): { descriptor: number; created: boolean } {
+  try {
+    return {
+      descriptor: fs.openSync(
+      file,
+      fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
+      ),
+      created: false,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return {
+      descriptor: fs.openSync(
+        file,
+        fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT
+          | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+        0o600,
+      ),
+      created: true,
+    };
+  }
+}
+
+function appendJsonlContent(descriptor: number, content: Buffer, file: string): void {
+  let offset = 0;
+  while (offset < content.byteLength) {
+    const written = fs.writeSync(descriptor, content, offset, content.byteLength - offset);
+    if (written <= 0) throw new Error(`JSONL event append made no progress: ${file}`);
+    offset += written;
+  }
+  fs.fsyncSync(descriptor);
+}
+
+function rollbackJsonlAppend(
+  file: string,
+  opened: fs.Stats,
+  initialSize: number,
+  contentLength: number,
+  created: boolean,
+): void {
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const current = fs.fstatSync(descriptor);
+    if (
+      !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
+      || current.size !== initialSize + contentLength
+    ) {
+      throw new Error(`JSONL event target changed before rollback: ${file}`);
+    }
+    fs.ftruncateSync(descriptor, initialSize);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  if (!created) return;
+  const current = fs.lstatSync(file);
+  if (current.dev !== opened.dev || current.ino !== opened.ino || current.size !== 0) {
+    throw new Error(`JSONL event target changed before cleanup: ${file}`);
+  }
+  fs.unlinkSync(file);
+}
+
+function stageJsonlAppend(file: string, payload: AnyObj): { rollback: () => void } {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const content = Buffer.from(`${spacedLine(payload, Object.keys(payload).sort())}\n`);
+  const { descriptor, created } = openJsonlAppend(file);
+  const opened = fs.fstatSync(descriptor);
+  if (!opened.isFile()) {
+    fs.closeSync(descriptor);
+    throw new Error(`JSONL event target must be a regular file: ${file}`);
+  }
+  const initialSize = opened.size;
+  try {
+    appendJsonlContent(descriptor, content, file);
+  } catch (error) {
+    try { fs.ftruncateSync(descriptor, initialSize); fs.fsyncSync(descriptor); }
+    finally { fs.closeSync(descriptor); if (created) try { fs.unlinkSync(file); } catch {} }
+    throw error;
+  }
+  fs.closeSync(descriptor);
+  return { rollback: () => rollbackJsonlAppend(file, opened, initialSize, content.byteLength, created) };
 }
 function die(message: string): never { throw new Error(message); }
 export class FlowProjectionRegenerationRequiredError extends Error {
@@ -140,8 +232,30 @@ function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
     const value = loadJsonInputFile(fromJson);
     const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "schemas", "workflow-state.schema.json");
     const schema = JSON.parse(read(schemaPath));
+    const correlationSchema = JSON.parse(read(path.join(path.dirname(schemaPath), "run-correlation-envelope.schema.json")));
     const issues: SchemaIssue[] = [];
-    validateSchemaValue("state.json", value, schema, "state", issues);
+    validateSchemaValue(
+      "state.json",
+      value,
+      schema,
+      "state",
+      issues,
+      schema,
+      { "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json": correlationSchema },
+    );
+    const fixtureValue = value && typeof value === "object" && !Array.isArray(value)
+      ? value as AnyObj
+      : {};
+    if (fixtureValue.run_correlation) {
+      try {
+        validateRunCorrelationPresence(fixtureValue.run_correlation);
+      } catch (error) {
+        issues.push({
+          path: "state.json",
+          message: error instanceof Error ? error.message : "state.run_correlation is invalid",
+        });
+      }
+    }
     if (issues.length > 0) {
       die(`fixture write refused: content does not satisfy workflow-state.schema.json:\n${issues.map((i) => `  - ${i.message}`).join("\n")}\n(use --malformed --content to author an intentionally-invalid fixture)`);
     }
@@ -1782,6 +1896,14 @@ function loadCurrentPointerHelper(): {
   readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+  publishCurrentPointers: (flowAgentsDir: string, actorKey: string | undefined, payload: AnyObj) => void;
+  updateCurrentPointersForBinding: (
+    flowAgentsDir: string,
+    actorKey: string | undefined,
+    artifactDir: string,
+    update: (payload: AnyObj) => AnyObj,
+    stage?: () => { rollback: () => void },
+  ) => number;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/current-pointer.js");
@@ -1790,6 +1912,14 @@ function loadCurrentPointerHelper(): {
     readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+    publishCurrentPointers: (flowAgentsDir: string, actorKey: string | undefined, payload: AnyObj) => void;
+    updateCurrentPointersForBinding: (
+      flowAgentsDir: string,
+      actorKey: string | undefined,
+      artifactDir: string,
+      update: (payload: AnyObj) => AnyObj,
+      stage?: () => { rollback: () => void },
+    ) => number;
   };
 }
 
@@ -1843,7 +1973,17 @@ function validateRunnableCheckCommand(check: AnyObj, context: string): void {
  * byte-identical to this function's pre-#291 behavior — with a stderr note mirroring the existing
  * unresolved-actor branch-naming diagnostic.
  */
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, actorKey?: string): void {
+function writeCurrent(
+  root: string,
+  dir: string,
+  timestamp: string,
+  owner: string,
+  source: string,
+  flowId?: string,
+  stepId?: string,
+  actorKey?: string,
+  requireActorProjection = false,
+): void {
   // #289: mirror the active session's already-recorded branch (state.json.branch) into
   // current.json so consumers of current.json (which has no schema of its own — not one of the
   // 9 schemas under schemas/) see the routing branch without re-reading state.json separately.
@@ -1863,18 +2003,24 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     ...(flowId ? { active_flow_id: flowId } : {}),
     ...(stepId ? { active_step_id: stepId } : {}),
   };
-  writeJson(path.join(root, "current.json"), payload);
   if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
     try {
-      loadCurrentPointerHelper().writePerActorCurrent(root, actorKey, payload);
+      loadCurrentPointerHelper().publishCurrentPointers(root, actorKey, payload);
+      return;
     } catch (err) {
-      // Best-effort projection only — the legacy file above is already durable and authoritative;
-      // a failure here must never affect ensure-session's own exit code (fail-open, visible).
+      if (requireActorProjection) {
+        throw new Error(`failed to write required per-actor current pointer: ${err instanceof Error ? err.message : String(err)}`);
+      }
       process.stderr.write(`[ensure-session] failed to write per-actor current pointer: ${err instanceof Error ? err.message : String(err)}\n`);
+      loadCurrentPointerHelper().publishCurrentPointers(root, undefined, payload);
+      return;
     }
+  } else if (requireActorProjection) {
+    throw new Error("canonical Builder start requires a resolved actor-scoped current pointer");
   } else {
     process.stderr.write("[ensure-session] actor unresolved or not provided; per-actor current.json projection skipped (legacy current.json remains authoritative)\n");
   }
+  loadCurrentPointerHelper().publishCurrentPointers(root, undefined, payload);
 }
 function loadCurrent(root: string): AnyObj | null {
   const file = path.join(root, "current.json");
@@ -1913,33 +2059,31 @@ export function currentWorkflowSessionDir(root: string): string | null {
  * The two checks are independent: either, both, or neither may fire depending on which
  * pointer(s) currently reference `dir`.
  */
-function updateCurrentAgent(root: string, dir: string, agentId: string, status: string, timestamp: string, actorKey?: string): void {
+function updateCurrentAgent(
+  root: string,
+  dir: string,
+  agentId: string,
+  status: string,
+  timestamp: string,
+  eventFile: string,
+  event: AnyObj,
+  actorKey?: string,
+): void {
   const applyAgentUpdate = (payload: AnyObj): AnyObj => {
     const active = Array.isArray(payload.active_agents) ? payload.active_agents.filter((a: AnyObj) => a.agent_id !== agentId) : [];
     if (status === "active" || status === "blocked") active.push({ agent_id: agentId, status, updated_at: timestamp });
     return { ...payload, active_agents: active, updated_at: timestamp };
   };
 
-  const cur = loadCurrent(root);
-  if (cur && path.resolve(root, cur.artifact_dir ?? "") === path.resolve(dir)) {
-    writeJson(path.join(root, "current.json"), applyAgentUpdate(cur));
-  }
-
-  if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
-    const helper = loadCurrentPointerHelper();
-    // #440 fix-wave 3: read through the legacy-aware path (readOwnCurrentPointer tries the new
-    // collision-resistant filename first, then falls back to the pre-fix-wave-2 legacy filename)
-    // instead of a direct fs read of perActorCurrentFile() alone — a direct read of ONLY the new
-    // filename would silently skip this active_agents/updated_at projection for a pointer a
-    // still-running pre-fix-wave-2 sidecar wrote under the old name. The write below always goes
-    // through writePerActorCurrent (new filename only), so the pointer migrates to the new name
-    // on first touch.
-    const pointer = helper.readOwnCurrentPointer(root, actorKey);
-    const perActor = pointer.payload;
-    if (perActor && path.resolve(root, perActor.artifact_dir ?? "") === path.resolve(dir)) {
-      helper.writePerActorCurrent(root, actorKey, applyAgentUpdate(perActor));
-    }
-  }
+  loadCurrentPointerHelper().updateCurrentPointersForBinding(
+    root,
+    actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)
+      ? actorKey
+      : undefined,
+    path.relative(root, dir),
+    applyAgentUpdate,
+    () => stageJsonlAppend(eventFile, event),
+  );
 }
 
 function initSidecars(
@@ -1972,31 +2116,43 @@ function initSidecars(
   //      the deliver markdown itself as the init-plan artifact).
   // This makes the branch survive every subsequent initSidecars call (init-plan, or a resumed
   // ensure-session) at this single choke point, without patching every other writer.
-  const existingState = loadJson(path.join(dir, "state.json"));
-  const existingBranch = existingState.branch;
   const deliverMdPath = path.join(dir, `${slug}--deliver.md`);
   const deliverBranch = fs.existsSync(deliverMdPath) ? markdownField(read(deliverMdPath), "branch") : "";
-  const branch = existingBranch || deliverBranch || (markdown ? markdownField(markdown, "branch") : "");
   // #309 (scope addition): created_at is write-once, same class as the branch-drop bug above —
   // initSidecars fully rewrites state.json on every call (including a repair/backfill re-run of
   // init-plan against an already-existing session), so naively re-stamping created_at from the
   // current call's timestamp silently rewrites a session's original creation time. Preserve the
   // existing state.json's created_at when present; stamp only on true first-creation.
   // updated_at still reflects "now" on every call — that field is intentionally mutable.
-  const retainedWorkItemRefs = workItemRefs.length > 0 ? workItemRefs : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
   const nextActionSummary = typeof nextAction === "string" ? nextAction : String(nextAction.summary ?? summary);
   const nextActionPayload = typeof nextAction === "string"
     ? { status: "continue", summary: nextAction || summary }
     : { status: "continue", ...nextAction, summary: nextActionSummary };
-  writeJson(path.join(dir, "state.json"), {
-    ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
-    ...(branch ? { branch } : {}),
-    ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
-    ...(existingState.flow_run && typeof existingState.flow_run === "object" && !Array.isArray(existingState.flow_run)
-      ? { flow_run: existingState.flow_run }
-      : {}),
-    artifact_paths: relArtifacts(dir),
-    next_action: nextActionPayload,
+  updateStateJson(path.join(dir, "state.json"), (existingState) => {
+    const branch = existingState.branch || deliverBranch || (markdown ? markdownField(markdown, "branch") : "");
+    const retainedWorkItemRefs = workItemRefs.length > 0
+      ? workItemRefs
+      : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
+    if (
+      existingState.run_correlation
+      && typeof existingState.run_correlation === "object"
+      && !Array.isArray(existingState.run_correlation)
+    ) {
+      validateRunCorrelationPresence(existingState.run_correlation);
+    }
+    return {
+      ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
+      ...(branch ? { branch } : {}),
+      ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
+      ...(existingState.run_correlation && typeof existingState.run_correlation === "object" && !Array.isArray(existingState.run_correlation)
+        ? { run_correlation: existingState.run_correlation }
+        : {}),
+      ...(existingState.flow_run && typeof existingState.flow_run === "object" && !Array.isArray(existingState.flow_run)
+        ? { flow_run: existingState.flow_run }
+        : {}),
+      artifact_paths: relArtifacts(dir),
+      next_action: nextActionPayload,
+    };
   });
   writeJson(path.join(dir, "acceptance.json"), {
     ...sidecarBase(slug), source_request: sourceRequest,
@@ -2466,7 +2622,17 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     && typeof persistedCurrent?.active_step_id === "string"
     ? persistedCurrent.active_step_id
     : entry.stepId;
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", entry.flowId || undefined, resumedStep || undefined, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
+  writeCurrent(
+    root,
+    dir,
+    timestamp,
+    "workflow-sidecar",
+    "ensure-session",
+    entry.flowId || undefined,
+    resumedStep || undefined,
+    actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
+    entry.flowId === "builder.build" || entry.flowId === "builder.shape",
+  );
   if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
@@ -2593,8 +2759,8 @@ function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
     ...(model ? { model } : {}),
     ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
   };
-  appendJsonl(path.join(dir, "agents", agent, "events.jsonl"), event);
-  updateCurrentAgent(root, dir, agent, event.status, timestamp, actorKey);
+  const eventFile = path.join(dir, "agents", agent, "events.jsonl");
+  updateCurrentAgent(root, dir, agent, event.status, timestamp, eventFile, event, actorKey);
   return 0;
 }
 
@@ -3561,7 +3727,15 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   });
 }
 export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
-  writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
+  updateStateJson(path.join(dir, "state.json"), (state) => ({
+    ...state,
+    ...sidecarBase(slug),
+    status,
+    phase,
+    updated_at: timestamp,
+    artifact_paths: relArtifacts(dir),
+    next_action: { status: next, summary },
+  }));
 }
 // ─── Phase 4c: bundle-only helpers ───────────────────────────────────────────
 // After 4c, evidence.json and critique.json are no longer written.

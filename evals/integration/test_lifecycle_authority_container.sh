@@ -83,18 +83,17 @@ if su -s /bin/bash nobody -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null"; t
 cat > /work/setup-fixture.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path';
 import { startBuilderFlowSession } from './build/src/builder-flow-runtime.js';
-import { performLocalClaim } from './build/src/cli/assignment-provider.js';
+import { performLocalClaim, resolveCurrentAssignmentActor } from './build/src/cli/assignment-provider.js';
 const project = '/tmp/lifecycle-authority-e2e';
 const subject = 'local:work-item/lifecycle-authority-e2e';
-const actor = { runtime: 'fixture', session_id: 'lifecycle-e2e', host: 'container', human: null };
-const actorKey = 'fixture:lifecycle-e2e:container';
+const { actor, actorKey } = resolveCurrentAssignmentActor();
 const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); };
 async function makeSession(slug) {
   const session = path.join(project, '.kontourai', 'flow-agents', slug);
   write(path.join(session, 'state.json'), { schema_version: '1.0', task_slug: slug, status: 'planned', phase: 'planning', updated_at: new Date().toISOString(), work_item_refs: [subject], next_action: { status: 'continue', summary: 'Fixture lifecycle operation.' } });
   write(path.join(session, 'acceptance.json'), { schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'The signed lifecycle transition is accepted by Builder.', status: 'pending', evidence_refs: [] }], goal_fit: { status: 'pending', summary: 'Fixture acceptance is pending.' } });
-  await startBuilderFlowSession({ sessionDir: session });
   performLocalClaim(path.join(project, '.kontourai', 'flow-agents'), slug, actor, { ttlSeconds: 1800, actorKey, branch: `fixture/${slug}`, artifactDir: slug, workItemRef: subject, reason: 'container lifecycle fixture' });
+  await startBuilderFlowSession({ sessionDir: session });
   return session;
 }
 fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(project, 'review-target'), { recursive: true });

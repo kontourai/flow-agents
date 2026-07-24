@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import Ajv2020 from "ajv/dist/2020.js";
 import {
   RUN_CORRELATION_IDENTITY_KEYS,
   RunCorrelationValidationError,
@@ -9,11 +10,16 @@ import {
   readRunCorrelation,
   runtimeCorrelationIdentityDeclaration,
   validateRunCorrelationEnvelope,
+  validateRunCorrelationPresence,
 } from "../../build/src/index.js";
 import { validateSchemaValue } from "../../build/src/lib/mini-json-schema.js";
 
 const schema = JSON.parse(readFileSync(
   new URL("../../schemas/run-correlation-envelope.schema.json", import.meta.url),
+  "utf8",
+));
+const workflowStateSchema = JSON.parse(readFileSync(
+  new URL("../../schemas/workflow-state.schema.json", import.meta.url),
   "utf8",
 ));
 
@@ -76,6 +82,44 @@ test("rejects credential-shaped identities and reasons", () => {
       && error.issues.some((issue) => issue.includes("runtime_session.value"))
       && error.issues.some((issue) => issue.includes("runtime_turn.reason")),
   );
+  const credential = (...parts) => parts.join("");
+  for (const value of [
+    credential("xox", "b-1234567890-abcdefghijklmnop"),
+    credential("AK", "IAIOSFODNN7EXAMPLE"),
+    credential("gl", "pat-abcdefghijklmnop"),
+    credential("github_", "pat_11AA22BB33CC44DD55"),
+    credential("S", "G.abcdefghijklmnop.qrstuvwxyz123456"),
+    credential("AI", "zaSyDUMMY1234567890abcdefghij"),
+    credential("wh", "sec_1234567890abcdefghijklmnop"),
+    credential("sk_", "live_1234567890abcdefghijklmnop"),
+    credential("sk-", "proj-1234567890abcdefghijklmnop"),
+    credential("sk-", "ant-api03-1234567890abcdefghijklmnop"),
+    credential("sq0", "atp-1234567890abcdefghijklmnop"),
+  ]) {
+    const tokenIdentities = explicitIdentities();
+    tokenIdentities.runtime_session = { status: "present", value };
+    assert.throws(
+      () => createRunCorrelationEnvelope({ identities: tokenIdentities }),
+      RunCorrelationValidationError,
+    );
+  }
+});
+
+test("explicit incomplete correlation is read consistently and rejects sensitive reasons", () => {
+  const incomplete = {
+    status: "incomplete",
+    reason: "the producer did not support canonical correlation",
+  };
+  assert.deepEqual(validateRunCorrelationPresence(incomplete), incomplete);
+  assert.deepEqual(readRunCorrelation({ run_correlation: incomplete }), incomplete);
+  assert.throws(
+    () => validateRunCorrelationPresence({
+      status: "incomplete",
+      reason: "token=secret-value",
+    }),
+    (error) => error instanceof RunCorrelationValidationError
+      && error.issues.some((issue) => issue.includes("non-sensitive")),
+  );
 });
 
 test("runtime-valid envelopes satisfy the shipped structural schema", () => {
@@ -83,6 +127,83 @@ test("runtime-valid envelopes satisfy the shipped structural schema", () => {
   const issues = [];
   validateSchemaValue("run-correlation.json", envelope, schema, "$", issues, schema);
   assert.deepEqual(issues, []);
+});
+
+test("authority-owned work-item references remain valid opaque identities", () => {
+  for (const value of ["github:kontourai/flow-agents#924", "kontourai/flow-agents#924"]) {
+    const identities = explicitIdentities();
+    identities.work_item = { status: "present", value };
+    const envelope = createRunCorrelationEnvelope({ identities });
+    const issues = [];
+    validateSchemaValue("run-correlation.json", envelope, schema, "$", issues, schema);
+    assert.deepEqual(issues, []);
+  }
+});
+
+test("runtime and schema both reject oversized provider work-item references", () => {
+  const identities = explicitIdentities();
+  identities.work_item = {
+    status: "present",
+    value: `github:kontourai/${"flow-agents-".repeat(30)}#924`,
+  };
+  assert.ok(identities.work_item.value.length > 255);
+  assert.throws(
+    () => createRunCorrelationEnvelope({ identities }),
+    RunCorrelationValidationError,
+  );
+  const candidate = {
+    schema_version: "1.0",
+    correlation_id: "oversized-work-item",
+    identities,
+  };
+  const issues = [];
+  validateSchemaValue("run-correlation.json", candidate, schema, "$", issues, schema);
+  assert.ok(issues.length > 0);
+});
+
+test("ordinary identifiers containing an embedded sk- sequence are not credentials", () => {
+  const identities = explicitIdentities();
+  identities.flow_run = { status: "present", value: "recover-task-slug-mismatch" };
+  const envelope = createRunCorrelationEnvelope({
+    identities,
+  });
+  assert.equal(envelope.identities.flow_run.value, "recover-task-slug-mismatch");
+});
+
+test("non-work-item identities reject paths and URI-shaped values", () => {
+  for (const value of ["/tmp/session", "C:/Users/session", "https://example.test/session"]) {
+    const identities = explicitIdentities();
+    identities.runtime_session = { status: "present", value };
+    assert.throws(
+      () => createRunCorrelationEnvelope({ identities }),
+      RunCorrelationValidationError,
+    );
+  }
+});
+
+test("shipped workflow state schema resolves canonical correlation and explicit incomplete forms", () => {
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  ajv.addSchema(schema);
+  const validate = ajv.compile(workflowStateSchema);
+  const state = {
+    schema_version: "1.0",
+    task_slug: "correlated-state",
+    status: "planned",
+    phase: "planning",
+    updated_at: "2026-07-24T00:00:00.000Z",
+    next_action: { status: "continue", summary: "Continue." },
+  };
+  assert.equal(validate({
+    ...state,
+    run_correlation: createRunCorrelationEnvelope({ identities: explicitIdentities() }),
+  }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({
+    ...state,
+    run_correlation: {
+      status: "incomplete",
+      reason: "the run predates canonical correlation",
+    },
+  }), true, JSON.stringify(validate.errors));
 });
 
 test("runtime and schema both reject a missing identity slot", () => {

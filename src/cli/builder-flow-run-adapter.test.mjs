@@ -41,14 +41,16 @@ function makeWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-flow-"));
 }
 
-function runCorrelation(runId) {
+function runCorrelation(runId, subject = SUBJECT) {
   return createRunCorrelationEnvelope({
     correlation_id: `correlation-${runId}`,
     identities: Object.fromEntries(RUN_CORRELATION_IDENTITY_KEYS.map((key) => [
       key,
       key === "flow_run"
         ? { status: "present", value: runId }
-        : { status: "unavailable", reason: `${key} is unavailable in this fixture` },
+        : key === "work_item"
+          ? { status: "present", value: subject }
+          : { status: "unavailable", reason: `${key} is unavailable in this fixture` },
     ])),
   });
 }
