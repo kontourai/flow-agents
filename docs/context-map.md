@@ -71,6 +71,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | workflow-evidence.schema.json | Flow Agents Workflow Evidence | https://flow-agents.dev/schemas/workflow-evidence.schema.json |
 | workflow-handoff.schema.json | Flow Agents Workflow Handoff | https://flow-agents.dev/schemas/workflow-handoff.schema.json |
 | workflow-learning.schema.json | Flow Agents Workflow Learning | https://flow-agents.dev/schemas/workflow-learning.schema.json |
+| workflow-outcome.schema.json | Flow Agents workflow outcome record | https://kontourai.dev/schemas/flow-agents/workflow-outcome/1.0.json |
 | workflow-release.schema.json | Flow Agents Workflow Release Readiness | https://flow-agents.dev/schemas/workflow-release.schema.json |
 | workflow-state.schema.json | Flow Agents Workflow State | https://flow-agents.dev/schemas/workflow-state.schema.json |
 | workflow-waves.schema.json | Flow Agents Workflow Waves | https://flow-agents.dev/schemas/workflow-waves.schema.json |

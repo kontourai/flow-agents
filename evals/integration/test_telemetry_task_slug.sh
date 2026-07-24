@@ -43,50 +43,43 @@ _run_event() {
 }
 
 _seed_binding() {
-  local workspace="$1" actor="$2" slug="$3" correlation_id="$4"
-  node - "$ROOT_DIR" "$workspace" "$actor" "$slug" "$correlation_id" <<'NODE'
+  local workspace="$1" actor="$2" slug="$3"
+  FLOW_AGENTS_ACTOR="$actor" node - "$ROOT_DIR" "$workspace" "$slug" <<'NODE'
 const fs = require('fs');
 const path = require('path');
-const [root, workspace, actor, slug, correlationId] = process.argv.slice(2);
-const pointers = require(path.join(root, 'scripts/hooks/lib/current-pointer.js'));
-const actorIdentity = require(path.join(root, 'scripts/hooks/lib/actor-identity.js'));
-const actorKey = actorIdentity.resolveActorIdentity({ FLOW_AGENTS_ACTOR: actor }).actor;
-const artifactRoot = path.join(workspace, '.kontourai', 'flow-agents');
-const sessionDir = path.join(artifactRoot, slug);
-const unavailable = (reason) => ({ status: 'unavailable', reason });
-const envelope = {
-  schema_version: '1.0',
-  correlation_id: correlationId,
-  identities: {
-    runtime_session: unavailable('runtime session unavailable in fixture'),
-    runtime_turn: unavailable('runtime turn unavailable in fixture'),
-    flow_run: { status: 'present', value: slug },
-    flow_step: unavailable('flow step changes during the run'),
-    work_item: { status: 'present', value: `local:work-item/${slug}` },
-    agent: { status: 'present', value: actorKey },
-    delegation_trace: unavailable('delegation trace unavailable in fixture'),
-    delegation_span: unavailable('delegation span unavailable in fixture'),
-    terminal_record: unavailable('terminal record unavailable in fixture'),
-  },
-};
-fs.mkdirSync(sessionDir, { recursive: true });
-fs.writeFileSync(path.join(sessionDir, 'state.json'), `${JSON.stringify({
-  schema_version: '1.0',
-  task_slug: slug,
-  work_item_refs: [`local:work-item/${slug}`],
-  run_correlation: envelope,
-  flow_run: { run_id: slug },
-}, null, 2)}\n`);
-pointers.writePerActorCurrent(artifactRoot, actorKey, {
-  schema_version: '1.0',
-  active_slug: slug,
-  artifact_dir: slug,
-  updated_at: '2026-07-24T05:00:00.000Z',
-  owner: 'fixture',
-  source: 'builder-start',
-  active_agents: [],
-  binding_id: correlationId,
-});
+const { pathToFileURL } = require('url');
+(async () => {
+  const [root, workspace, slug] = process.argv.slice(2);
+  const runtime = await import(pathToFileURL(path.join(root, 'build/src/builder-flow-runtime.js')).href);
+  const assignment = await import(pathToFileURL(path.join(root, 'build/src/cli/assignment-provider.js')).href);
+  const artifactRoot = path.join(workspace, '.kontourai', 'flow-agents');
+  const sessionDir = path.join(artifactRoot, slug);
+  const subject = `local:work-item/${slug}`;
+  fs.mkdirSync(sessionDir, { recursive: true });
+  if (!fs.existsSync(path.join(workspace, 'package.json'))) {
+    fs.writeFileSync(path.join(workspace, 'package.json'), '{"name":"telemetry-task-slug","private":true}\n');
+  }
+  fs.writeFileSync(path.join(sessionDir, 'state.json'), `${JSON.stringify({
+    schema_version: '1.0',
+    task_slug: slug,
+    status: 'planned',
+    phase: 'planning',
+    updated_at: new Date().toISOString(),
+    work_item_refs: [subject],
+    next_action: { status: 'continue', summary: 'Start authenticated telemetry fixture.' },
+  }, null, 2)}\n`);
+  const actor = assignment.resolveCurrentAssignmentActor();
+  assignment.performLocalClaim(artifactRoot, slug, actor.actor, {
+    ttlSeconds: 1800,
+    actorKey: actor.actorKey,
+    branch: `fixture/${slug}`,
+    artifactDir: slug,
+    workItemRef: subject,
+    reason: 'authenticated telemetry fixture',
+  });
+  const started = await runtime.startBuilderFlowSession({ sessionDir });
+  process.stdout.write(started.run.correlation.envelope.correlation_id);
+})().catch((error) => { console.error(error); process.exit(1); });
 NODE
 }
 
@@ -112,10 +105,10 @@ else
 fi
 
 echo "--- Actor-bound event carries the exact persisted envelope ---"
-_seed_binding "$WORKSPACE" runtime-one run-one correlation-one
+correlation_one=$(_seed_binding "$WORKSPACE" runtime-one run-one)
 first=$(_run_event "$input" runtime-one)
 if [[ "$(jq -r '.task_slug // empty' <<<"$first")" == "run-one" ]] \
-  && [[ "$(jq -r '.run_correlation.correlation_id // empty' <<<"$first")" == "correlation-one" ]] \
+  && [[ "$(jq -r '.run_correlation.correlation_id // empty' <<<"$first")" == "$correlation_one" ]] \
   && cmp -s \
     <(jq -S '.run_correlation' <<<"$first") \
     <(jq -S '.run_correlation' "$WORKSPACE/.kontourai/flow-agents/run-one/state.json"); then
@@ -125,20 +118,20 @@ else
 fi
 
 echo "--- Concurrent actors in one workspace remain isolated ---"
-_seed_binding "$WORKSPACE" runtime-two run-two correlation-two
+correlation_two=$(_seed_binding "$WORKSPACE" runtime-two run-two)
 actor_one=$(_run_event "$input" runtime-one)
 actor_two=$(_run_event "$input" runtime-two)
-if [[ "$(jq -r '.run_correlation.correlation_id' <<<"$actor_one")" == "correlation-one" ]] \
-  && [[ "$(jq -r '.run_correlation.correlation_id' <<<"$actor_two")" == "correlation-two" ]]; then
+if [[ "$(jq -r '.run_correlation.correlation_id' <<<"$actor_one")" == "$correlation_one" ]] \
+  && [[ "$(jq -r '.run_correlation.correlation_id' <<<"$actor_two")" == "$correlation_two" ]]; then
   _pass "two runtime actors cannot cross-stamp"
 else
   _fail "concurrent actor attribution crossed: one=$actor_one two=$actor_two"
 fi
 
 echo "--- Sequential run in one runtime replaces the prior generation ---"
-_seed_binding "$WORKSPACE" runtime-one run-three correlation-three
+correlation_three=$(_seed_binding "$WORKSPACE" runtime-one run-three)
 sequential=$(_run_event "$input" runtime-one)
-if [[ "$(jq -r '.run_correlation.correlation_id' <<<"$sequential")" == "correlation-three" ]] \
+if [[ "$(jq -r '.run_correlation.correlation_id' <<<"$sequential")" == "$correlation_three" ]] \
   && [[ "$(jq -r '.task_slug' <<<"$sequential")" == "run-three" ]]; then
   _pass "sequential binding emits only the current run generation"
 else

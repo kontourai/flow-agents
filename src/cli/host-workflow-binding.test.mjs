@@ -355,6 +355,47 @@ test("pointer validation completes before an agent-event append is staged", () =
   }
 });
 
+test("failed staged-event commit restores every current pointer", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-event-rollback-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const actor = "station.thread-rollback";
+    const payload = {
+      active_slug: "task",
+      artifact_dir: "task",
+      binding_id: "run-task",
+      binding_status: "active",
+      active_agents: [],
+    };
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, "current.json"), `${JSON.stringify(payload, null, 2)}\n`);
+    pointers.writePerActorCurrent(root, actor, payload);
+    const globalBefore = fs.readFileSync(path.join(root, "current.json"), "utf8");
+    const actorFile = pointers.perActorCurrentFile(root, actor);
+    const actorBefore = fs.readFileSync(actorFile, "utf8");
+    let rolledBack = 0;
+
+    assert.throws(
+      () => pointers.updateCurrentPointersForBinding(
+        root,
+        actor,
+        "task",
+        (current) => ({ ...current, active_agents: [{ agent_id: "worker", status: "active" }] }),
+        () => ({
+          commit: () => { throw new Error("fixture event commit failure"); },
+          rollback: () => { rolledBack += 1; },
+        }),
+      ),
+      /fixture event commit failure/,
+    );
+    assert.equal(rolledBack, 1);
+    assert.equal(fs.readFileSync(path.join(root, "current.json"), "utf8"), globalBefore);
+    assert.equal(fs.readFileSync(actorFile, "utf8"), actorBefore);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("pointer mutation rejects a lock created under a transiently swapped actor directory", (t) => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-lock-detached-"));
   const realMkdirSync = fs.mkdirSync;
@@ -444,6 +485,75 @@ test("pointer transaction restores every pointer when its state commit fails", (
     );
     assert.equal(fs.readFileSync(globalFile, "utf8"), globalRaw);
     assert.equal(fs.readFileSync(actorFile, "utf8"), actorRaw);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("pointer transaction rolls back its projection commit when pointer publication fails", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-projection-rollback-"));
+  const realRenameSync = fs.renameSync;
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const globalFile = path.join(root, "current.json");
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(globalFile, '{"artifact_dir":"task","active_step_id":"execute"}\n');
+    let rolledBack = 0;
+    fs.renameSync = (source, target) => {
+      if (path.resolve(String(target)) === path.resolve(globalFile)) {
+        throw new Error("fixture pointer publication failure");
+      }
+      return realRenameSync(source, target);
+    };
+    assert.throws(
+      () => pointers.replaceCurrentPointersIfUnchanged(
+        root,
+        [{
+          file: globalFile,
+          expectedRaw: fs.readFileSync(globalFile, "utf8"),
+          payload: { artifact_dir: "task", active_step_id: "verify" },
+        }],
+        () => () => { rolledBack += 1; },
+      ),
+      /fixture pointer publication failure/,
+    );
+    assert.equal(rolledBack, 1);
+    assert.equal(fs.readFileSync(globalFile, "utf8"), '{"artifact_dir":"task","active_step_id":"execute"}\n');
+  } finally {
+    fs.renameSync = realRenameSync;
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("binding-scoped pointer updates reject a newer generation under the lock", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-generation-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const actor = "station.thread-generation";
+    pointers.publishCurrentPointers(root, actor, {
+      active_slug: "task",
+      artifact_dir: "task",
+      binding_id: "generation-new",
+      active_agents: [],
+    });
+    let staged = false;
+    const writes = pointers.updateCurrentPointersForBinding(
+      root,
+      actor,
+      "task",
+      (payload) => ({ ...payload, active_agents: [{ agent_id: "worker" }] }),
+      () => {
+        staged = true;
+        return { commit() {}, rollback() {} };
+      },
+      "generation-old",
+    );
+    assert.equal(writes, 0);
+    assert.equal(staged, false);
+    assert.equal(
+      pointers.readOwnCurrentPointer(root, actor).payload.binding_id,
+      "generation-new",
+    );
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

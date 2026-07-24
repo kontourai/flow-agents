@@ -282,11 +282,19 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
     effective.steps![index] = compiledStep;
   }
   const effectiveSteps = effective.steps!;
-  const done = effectiveSteps.find((step) => step.id === "done" && step.next === null);
-  if (done && !Object.values(effective.gates).some((gate) => gate?.step === "done")) {
+  const gatedSteps = new Set(Object.values(effective.gates).flatMap((gate) =>
+    typeof gate?.step === "string" ? [gate.step] : []));
+  const referencedSteps = new Set(effectiveSteps.flatMap((step) =>
+    typeof step.next === "string" ? [step.next] : []));
+  const terminalSentinels = new Set(effectiveSteps
+    .filter((step) => step.next === null && !gatedSteps.has(step.id) && referencedSteps.has(step.id))
+    .map((step) => step.id));
+  if (terminalSentinels.size > 0) {
     effective.steps = effectiveSteps
-      .filter((step) => step.id !== "done")
-      .map((step) => step.next === "done" ? { ...step, next: null } : step);
+      .filter((step) => !terminalSentinels.has(step.id))
+      .map((step) => typeof step.next === "string" && terminalSentinels.has(step.next)
+        ? { ...step, next: null }
+        : step);
   }
   return effective as unknown as Record<string, unknown>;
 }

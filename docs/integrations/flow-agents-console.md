@@ -89,7 +89,7 @@ construction, so hostile control bytes are `\u`-escaped, never emitted raw.
 
 #### Economics record — flow-agents side (shipped, #349)
 
-Every kit-driven run emits **one per-run economics record** — a `kontour.console.economics` v0.1 fact
+Every kit-driven run emits **one per-run economics record** — a `kontour.console.economics` v0.2 fact
 carrying `cost`, `time`, `iterations`, and `defects` caught — so "flow kits save money and produce
 more accurate results" becomes a **measurable, falsifiable** claim. It is the measurement substrate
 for the Kit-economics telemetry initiative and is consumed by the baseline harness (#350), the

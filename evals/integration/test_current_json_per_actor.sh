@@ -868,9 +868,8 @@ else
   fail "setup: failed to downgrade the per-actor pointer to legacy-only: $(cat "$TMPDIR_EVAL/ac440-migrate-downgrade.err")"
 fi
 
-flow_agents_node "workflow-sidecar" record-agent-event \
+FLOW_AGENTS_ACTOR="$AC440_MIGRATE_ACTOR" flow_agents_node "workflow-sidecar" record-agent-event \
   --artifact-root "$AC440_MIGRATE_ROOT" \
-  --actor "$AC440_MIGRATE_ACTOR" \
   --agent-id "$AC440_MIGRATE_AGENT_ID" \
   --kind note \
   --status active \

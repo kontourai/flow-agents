@@ -99,19 +99,21 @@ classify_action_class() {
 }
 
 telemetry_session_id() {
-  local event_type="$1" agent_name="$2"
-  local session_id=""
+  local event_type="$1" agent_name="$2" stdin_json="$3"
+  local session_id="" runtime_session_id runtime_name
+  runtime_session_id=$(printf '%s' "$stdin_json" | jq -r '.session_id // ""' 2>/dev/null)
+  runtime_name="${FLOW_AGENTS_TELEMETRY_RUNTIME:-kiro-cli}"
   case "$event_type" in
-    agentSpawn)
-      session_id=$(session_start "$agent_name")
+    agentSpawn|SessionStart)
+      session_id=$(session_start "$agent_name" "$runtime_session_id" "$runtime_name")
       session_cleanup
       ;;
-    stop)
-      session_id=$(session_get)
-      session_end
+    stop|Stop|SessionEnd)
+      session_id=$(session_get "$runtime_session_id" "$runtime_name")
+      session_end "$session_id"
       ;;
     *)
-      session_id=$(session_get)
+      session_id=$(session_get "$runtime_session_id" "$runtime_name")
       # Touch session file so mtime reflects last activity
       local _sf="${TELEMETRY_SESSION_DIR}/telemetry-${PPID}"
       [[ -f "$_sf" ]] && touch "$_sf" 2>/dev/null
@@ -199,7 +201,7 @@ add_hook_context() {
   else
     raw_hook_input="null"
   fi
-  tty_name=$(session_get_tty)
+  tty_name=$(session_get_tty "$session_id")
   pid=$(cat "${TELEMETRY_SESSION_DIR}/${session_id}.session" 2>/dev/null | jq -r '.pid // empty')
   echo "$event" | jq -c \
     --arg event_name "${hook_event_name:-$event_type}" \
@@ -227,8 +229,12 @@ add_hook_context() {
 }
 
 add_run_correlation() {
-  local event="$1" stdin_json="$2" fragment
-  fragment=$(printf '%s' "$stdin_json" | node "${TELEMETRY_DIR}/run-correlation-binding.js" 2>/dev/null) || fragment=""
+  local event="$1" stdin_json="$2" event_type="$3" fragment
+  local terminal_args=()
+  case "$event_type" in
+    stop|Stop|SessionEnd) terminal_args=(--terminal-capture) ;;
+  esac
+  fragment=$(printf '%s' "$stdin_json" | node "${TELEMETRY_DIR}/run-correlation-binding.js" "${terminal_args[@]}" 2>/dev/null) || fragment=""
   if ! printf '%s' "$fragment" | jq -e '
     type == "object"
     and (.run_correlation | type == "object")
@@ -246,11 +252,38 @@ add_run_correlation() {
   printf '%s' "$event" | jq -c --argjson fragment "$fragment" '. + $fragment'
 }
 
+capture_run_usage_baseline() {
+  local event="$1" event_type="$2"
+  case "$event_type" in
+    stop|Stop|SessionEnd) printf '%s\n' "$event"; return ;;
+  esac
+  local scope_script="${TELEMETRY_DIR}/run-usage-scope.js"
+  [[ -f "$scope_script" ]] || { printf '%s\n' "$event"; return; }
+  local needs transcript_path baseline_usage baseline_start baseline_duration_s
+  needs=$(printf '%s' "$event" | node "$scope_script" --needs-capture "$TELEMETRY_SESSION_DIR" 2>/dev/null) || needs=false
+  [[ "$needs" == "true" ]] || { printf '%s\n' "$event"; return; }
+  transcript_path=$(printf '%s' "$event" | jq -r '.hook.transcript_path // ""' 2>/dev/null)
+  [[ -n "$transcript_path" && -f "$transcript_path" ]] || { printf '%s\n' "$event"; return; }
+  baseline_usage=$(usage_parse_transcript "$transcript_path")
+  [[ -n "$baseline_usage" ]] || baseline_usage='{"by_model":[],"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"estimated_cost_usd":null,"pricing_version":null}'
+  baseline_start=$(jq -r '.start_time // empty' "${TELEMETRY_SESSION_DIR}/${session_id}.session" 2>/dev/null)
+  if [[ "$baseline_start" =~ ^[0-9]+$ ]]; then
+    baseline_duration_s=$(( $(date +%s) - baseline_start ))
+    [[ "$baseline_duration_s" -lt 0 ]] && baseline_duration_s=0
+  else
+    baseline_duration_s=0
+  fi
+  baseline_usage=$(printf '%s' "$baseline_usage" | jq -c --argjson duration "$baseline_duration_s" '.duration_s = $duration')
+  printf '%s' "$event" | jq -c --argjson usage "$baseline_usage" '.usage = $usage' \
+    | node "$scope_script" --capture "$TELEMETRY_SESSION_DIR" >/dev/null 2>&1 || true
+  printf '%s\n' "$event"
+}
+
 add_runtime_context() {
   local event="$1" event_type="$2" stdin_json="$3"
   local cwd tty_name pid
   cwd=$(echo "$stdin_json" | jq -r '.cwd // ""')
-  tty_name=$(session_get_tty)
+  tty_name=$(session_get_tty "$session_id")
   pid=$(cat "${TELEMETRY_SESSION_DIR}/${session_id}.session" 2>/dev/null | jq -r '.pid // empty')
   if [[ "$event_type" == "agentSpawn" ]]; then
     local sys_json ws_json auth_json
@@ -855,41 +888,48 @@ add_stop_data_and_emit_usage() {
           by_model: ($tu.by_model // null)
         })
       }')
+    local scope_script="${TELEMETRY_DIR}/run-usage-scope.js"
+    if [[ -f "$scope_script" ]]; then
+      usage_event=$(printf '%s' "$usage_event" | node "$scope_script" --delta "$TELEMETRY_SESSION_DIR" 2>/dev/null) || usage_event=""
+    fi
+    [[ -n "$usage_event" ]] || return 0
     transport_emit "$usage_event"
 
     # Per-run kit-economics record (#349, console ADR 0003). Best-effort + DETACHED so it can never
     # alter existing telemetry timing or fail the stop hook: assemble one kontour.console.economics
     # fact from this session.usage event + the run's review sidecars, write it local-first, then
-    # opt-in relay it. Resolve the sidecar paths from the run cwd's active-session pointer; the
-    # emitter defaults every field cleanly when a sidecar is absent.
+    # opt-in relay it. Resolve sidecars only from the event's authenticated Builder slug and require
+    # state.json to carry the exact same correlation envelope. Shared current.json is never a join.
     local econ_script="${TELEMETRY_DIR}/economics-record.sh"
     if [[ -f "$econ_script" ]]; then
-      local econ_cwd econ_slug econ_state econ_acceptance econ_critique
-      econ_cwd=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
-      [[ -z "$econ_cwd" || ! -d "$econ_cwd" ]] && econ_cwd="$PWD"
-      # Active slug from the canonical current pointer first, falling back to the legacy pointer.
-      econ_slug=""
-      if [[ -f "$econ_cwd/.kontourai/flow-agents/current.json" ]]; then
-        econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.kontourai/flow-agents/current.json" 2>/dev/null)
-      elif [[ -f "$econ_cwd/.flow-agents/current.json" ]]; then
-        econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.flow-agents/current.json" 2>/dev/null)
+      local sidecar_snapshot workflow_outcome outcome_event
+      sidecar_snapshot=$(printf '%s' "$usage_event" \
+        | node "${TELEMETRY_DIR}/run-correlation-binding.js" --sidecar-snapshot --terminal-capture 2>/dev/null) || sidecar_snapshot=""
+      workflow_outcome=$(printf '%s' "$sidecar_snapshot" | jq -c \
+        --argjson correlation "$(printf '%s' "$usage_event" | jq -c '.run_correlation')" '
+          select(.run_correlation == $correlation)
+          | .sidecars.state.workflow_outcome
+          | select(
+              .source == "canonical_flow_projection"
+              and (.process_status == "completed"
+                or .process_status == "blocked"
+                or .process_status == "canceled"
+                or .process_status == "failed"
+                or .process_status == "not_verified")
+              and .quality_status == "not_independently_evaluated"
+            )
+        ' 2>/dev/null)
+      if [[ -n "$workflow_outcome" ]]; then
+        outcome_event=$(echo "$usage_event" | jq -c \
+          --argjson workflow_outcome "$workflow_outcome" '
+          .event_type = "workflow.outcome"
+          | .event_id = (.event_id + "-workflow-outcome")
+          | del(.usage)
+          | .workflow_outcome = $workflow_outcome
+        ')
+        transport_emit "$outcome_event"
       fi
-      econ_state="" econ_acceptance="" econ_critique="" econ_agents_dir=""
-      if [[ -n "$econ_slug" ]]; then
-        # state.json under .kontourai/flow-agents/<slug>/ (fallback .flow-agents/<slug>/); the run's
-        # per-agent event logs live alongside it in <slug>/agents/ (#415 delegations[] source).
-        for d in "$econ_cwd/.kontourai/flow-agents/$econ_slug" "$econ_cwd/.flow-agents/$econ_slug"; do
-          [[ -f "$d/state.json" ]] && { econ_state="$d/state.json"; [[ -d "$d/agents" ]] && econ_agents_dir="$d/agents"; break; }
-        done
-        [[ -f "$econ_cwd/.flow-agents/$econ_slug/acceptance.json" ]] && econ_acceptance="$econ_cwd/.flow-agents/$econ_slug/acceptance.json"
-        [[ -f "$econ_cwd/.flow-agents/$econ_slug/critique.json" ]] && econ_critique="$econ_cwd/.flow-agents/$econ_slug/critique.json"
-      fi
-      local econ_args=("$usage_event")
-      [[ -n "$econ_state" ]] && econ_args+=(--state "$econ_state")
-      [[ -n "$econ_acceptance" ]] && econ_args+=(--acceptance "$econ_acceptance")
-      [[ -n "$econ_critique" ]] && econ_args+=(--critique "$econ_critique")
-      [[ -n "$econ_agents_dir" ]] && econ_args+=(--agents-dir "$econ_agents_dir")
-      (bash "$econ_script" "${econ_args[@]}") </dev/null >/dev/null 2>&1 &
+      (bash "$econ_script" "$usage_event") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
     fi
 
@@ -965,17 +1005,20 @@ main() {
   local stdin_json="${3:-}"
   [[ -z "$stdin_json" ]] && stdin_json='{}'
 
-  session_id=$(telemetry_session_id "$event_type" "$agent_name")
+  session_id=$(telemetry_session_id "$event_type" "$agent_name" "$stdin_json")
   local event
   event=$(build_base_event "$session_id" "$(schema_event_type "$event_type")" "$agent_name")
   event=$(add_hook_context "$event" "$event_type" "$stdin_json")
-  event=$(add_run_correlation "$event" "$stdin_json")
+  event=$(add_run_correlation "$event" "$stdin_json" "$event_type")
+  event=$(capture_run_usage_baseline "$event" "$event_type")
   event=$(add_runtime_context "$event" "$event_type" "$stdin_json")
   event=$(add_event_specific_data "$event" "$event_type" "$agent_name" "$stdin_json")
 
   transport_emit "$event"
   
-  [[ "$event_type" == "stop" ]] && transport_maybe_rotate
+  case "$event_type" in
+    stop|Stop|SessionEnd) transport_maybe_rotate ;;
+  esac
 }
 
 # Capture stdin before backgrounding (background subshell gets /dev/null)

@@ -228,6 +228,83 @@ else
   _fail "sidecar writer did not record delegation-safe agent event: $(cat "$TMPDIR_EVAL/agent-event.out" "$TMPDIR_EVAL/agent-event.err")"
 fi
 
+UNRESOLVED_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/unresolved-worker/events.jsonl"
+cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-unresolved-agent.json"
+if NODE_ENV=test FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 \
+  flow_agents_node "$WRITER" record-agent-event \
+    --artifact-root "$SESSION_ROOT" \
+    --agent-id unresolved-worker \
+    --kind evidence \
+    --status active \
+    --summary "An unresolved process must not mutate the shared current run." \
+    >"$TMPDIR_EVAL/unresolved-agent-event.out" 2>&1; then
+  _fail "sidecar writer accepted an unresolved agent-event actor"
+elif rg -q 'requires a resolved authenticated runtime actor' "$TMPDIR_EVAL/unresolved-agent-event.out" \
+  && [[ ! -e "$UNRESOLVED_AGENT_EVENT_PATH" ]] \
+  && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-unresolved-agent.json"; then
+  _pass "sidecar writer rejects unresolved agent-event actors without shared-run mutation"
+else
+  _fail "sidecar writer unresolved-actor rejection left mutation or unclear diagnostics: $(cat "$TMPDIR_EVAL/unresolved-agent-event.out")"
+fi
+
+SPOOFED_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/spoofed-worker/events.jsonl"
+if flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --actor another-runtime \
+  --agent-id spoofed-worker \
+  --kind evidence \
+  --status active \
+  --summary "A caller must not select another runtime actor." >"$TMPDIR_EVAL/spoofed-agent-event.out" 2>&1; then
+  _fail "sidecar writer accepted caller-selected actor authority"
+elif rg -q 'does not accept --actor' "$TMPDIR_EVAL/spoofed-agent-event.out" \
+  && [[ ! -e "$SPOOFED_AGENT_EVENT_PATH" ]]; then
+  _pass "sidecar writer rejects caller-selected actor authority"
+else
+  _fail "sidecar writer actor-spoof rejection was incomplete: $(cat "$TMPDIR_EVAL/spoofed-agent-event.out")"
+fi
+
+NESTED_AGENT_OUTSIDE="$TMPDIR_EVAL/nested-agent-outside"
+mkdir -p "$NESTED_AGENT_OUTSIDE"
+ln -s "$NESTED_AGENT_OUTSIDE" "$ENSURED_DIR/ag""ents/symlink-worker"
+if flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --agent-id symlink-worker \
+  --kind evidence \
+  --status active \
+  --summary "Nested symlinks must not redirect agent events." >"$TMPDIR_EVAL/nested-agent-symlink.out" 2>&1; then
+  _fail "sidecar writer followed a nested agent-event symlink"
+elif rg -q 'regular directory' "$TMPDIR_EVAL/nested-agent-symlink.out" \
+  && [[ ! -e "$NESTED_AGENT_OUTSIDE/events.jsonl" ]]; then
+  _pass "sidecar writer rejects nested agent-event symlinks without outside writes"
+else
+  _fail "sidecar writer nested-symlink rejection was incomplete: $(cat "$TMPDIR_EVAL/nested-agent-symlink.out")"
+fi
+rm "$ENSURED_DIR/ag""ents/symlink-worker"
+
+EVENT_SYMLINK_AGENT="symlink-event-worker"
+EVENT_SYMLINK_AGENT_DIR="$ENSURED_DIR/ag""ents/$EVENT_SYMLINK_AGENT"
+EVENT_SYMLINK_OUTSIDE="$TMPDIR_EVAL/symlink-event-outside.jsonl"
+EVENT_STAGE_TMP="$TMPDIR_EVAL/event-stage-tmp"
+mkdir -p "$EVENT_SYMLINK_AGENT_DIR" "$EVENT_STAGE_TMP"
+printf '%s\n' '{"outside":true}' > "$EVENT_SYMLINK_OUTSIDE"
+ln -s "$EVENT_SYMLINK_OUTSIDE" "$EVENT_SYMLINK_AGENT_DIR/events.jsonl"
+cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-event-symlink.json"
+if TMPDIR="$EVENT_STAGE_TMP" flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --agent-id "$EVENT_SYMLINK_AGENT" \
+  --kind evidence \
+  --status active \
+  --summary "A symlinked event stream must fail without staging residue." >"$TMPDIR_EVAL/event-symlink.out" 2>&1; then
+  _fail "sidecar writer followed a symlinked agent event stream"
+elif rg -q 'anchored agent event append failed' "$TMPDIR_EVAL/event-symlink.out" \
+  && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-event-symlink.json" \
+  && cmp -s "$EVENT_SYMLINK_OUTSIDE" <(printf '%s\n' '{"outside":true}') \
+  && [[ -z "$(find "$EVENT_STAGE_TMP" -mindepth 1 -print -quit)" ]]; then
+  _pass "sidecar writer rejects symlinked event streams and removes failed staging state"
+else
+  _fail "sidecar writer event-stream symlink rejection left mutation or staging residue: $(cat "$TMPDIR_EVAL/event-symlink.out")"
+fi
+
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
 TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evil-agent-outside.jsonl"
 if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
@@ -293,21 +370,21 @@ else
 fi
 
 LATE_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/late-worker/events.jsonl"
-if flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --artifact-dir "$ENSURED_DIR" \
   --agent-id late-worker \
   --kind completed \
   --status done \
   --summary "A late worker finished the old workflow after a newer session became active." \
-  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/late-agent-event.out" 2>"$TMPDIR_EVAL/late-agent-event.err" \
-  && [[ -f "$LATE_AGENT_EVENT_PATH" ]] \
-  && rg -q '"agent_id": "late-worker"' "$LATE_AGENT_EVENT_PATH" \
-  && rg -q '"active_slug": "fresh-session"' "$SESSION_ROOT/current.json" \
-  && ! rg -q '"agent_id": "late-worker"' "$SESSION_ROOT/current.json"; then
-  _pass "sidecar writer keeps late explicit agent events from stealing current workflow"
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/late-agent-event.out" 2>"$TMPDIR_EVAL/late-agent-event.err"; then
+  _fail "sidecar writer accepted a late event after the actor binding moved"
+elif rg -q 'current actor binding' "$TMPDIR_EVAL/late-agent-event.err" \
+  && [[ ! -e "$LATE_AGENT_EVENT_PATH" ]] \
+  && rg -q '"active_slug": "fresh-session"' "$SESSION_ROOT/current.json"; then
+  _pass "sidecar writer rejects late events after the actor binding moves"
 else
-  _fail "sidecar writer let a late explicit agent event change current workflow: $(cat "$TMPDIR_EVAL/late-agent-event.out" "$TMPDIR_EVAL/late-agent-event.err")"
+  _fail "sidecar writer late-event rejection was incomplete: $(cat "$TMPDIR_EVAL/late-agent-event.out" "$TMPDIR_EVAL/late-agent-event.err")"
 fi
 
 COPIED_ROOT="$TMPDIR_EVAL/copied-workflows"
@@ -317,21 +394,23 @@ cp -R "$ENSURED_DIR" "$COPIED_DIR"
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json"
 COPIED_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/copied-worker/events.jsonl"
 if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$COPIED_ROOT" \
   --artifact-dir "$COPIED_DIR" \
   --agent-id copied-worker \
   --kind evidence \
   --status done \
   --summary "A copied workflow outside the default root records without hanging." \
-  --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/copied-agent-event.out" 2>"$TMPDIR_EVAL/copied-agent-event.err" \
-  && [[ -f "$COPIED_AGENT_EVENT_PATH" ]] \
-  && rg -q '"agent_id": "copied-worker"' "$COPIED_AGENT_EVENT_PATH" \
+  --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/copied-agent-event.out" 2>"$TMPDIR_EVAL/copied-agent-event.err"; then
+  _fail "sidecar writer accepted an event in an unbound copied workflow"
+elif rg -q 'current actor binding|current pointer' "$TMPDIR_EVAL/copied-agent-event.err" \
+  && [[ ! -e "$COPIED_AGENT_EVENT_PATH" ]] \
   && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json" \
   && [[ ! -e "$COPIED_ROOT/.workflow-sidecar.lockdir" ]] \
   && [[ ! -e "$COPIED_DIR/.workflow-sidecar.lockdir" ]] \
   && [[ ! -e "$SESSION_ROOT/.workflow-sidecar.lockdir" ]]; then
-  _pass "sidecar writer records bounded explicit events in copied workflow dirs"
+  _pass "sidecar writer rejects events in unbound copied workflow dirs"
 else
-  _fail "sidecar writer copied explicit event failed or left residue: $(cat "$TMPDIR_EVAL/copied-agent-event.out" "$TMPDIR_EVAL/copied-agent-event.err")"
+  _fail "sidecar writer copied-workflow rejection failed or left residue: $(cat "$TMPDIR_EVAL/copied-agent-event.out" "$TMPDIR_EVAL/copied-agent-event.err")"
 fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-mismatch-agent.json"

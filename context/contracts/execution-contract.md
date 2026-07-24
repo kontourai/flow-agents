@@ -168,9 +168,13 @@ npm run workflow:sidecar -- record-agent-event \
 ```
 
 These land as top-level `role`, `model`, and (for escalations) `escalated_from`
-fields on the JSONL event under `agents/<agent-id>/events.jsonl`. The shape is
-additive: events without a routing decision are byte-identical to before, so no
-existing consumer breaks. An economics consumer reads events where `role` is
+fields on the JSONL event under `agents/<agent-id>/events.jsonl`. The writer
+derives runtime actor identity from the environment and stamps that actor-bound
+run-correlation envelope; `--actor` is not accepted on this write surface. If
+the actor binding does not match the target session, the append is refused.
+Free-text
+`summary` remains local workflow context and is not copied into economics
+records. An economics consumer reads authenticated events where `role` is
 present as one priced delegation each; `escalated_from` marks the entries that
 cost more because a gate caught a cheaper tier.
 

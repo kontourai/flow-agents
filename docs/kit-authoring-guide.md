@@ -107,6 +107,12 @@ Flow Definitions may compose another declared Flow Definition at a step with `us
 
 The child flow should declare the gates for those step ids and list the claim types it intentionally exposes in `exports` (expectation ids are also accepted for non-claim expectations). Composition fails closed when a child gate expectation is not exported. Parent verification is still determined by trust-bundle claims: required child claims that are missing, disputed, or `not_verified` prevent the composed parent from being treated as verified.
 
+An optional named terminal sentinel may make the source definition easier to
+read, for example `{ "id": "shape-done", "next": null }`. When that sentinel is
+referenced by another step and has no gate, effective-definition compilation
+removes it and sets its predecessor's `next` to `null`, which is Flow's native
+completion edge. The sentinel name is not significant.
+
 ## Validate
 
 Before installing or sharing a kit, run validation from the flow-agents checkout:

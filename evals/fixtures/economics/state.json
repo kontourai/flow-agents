@@ -1,11 +1,33 @@
 {
   "schema_version": "1.0",
   "task_slug": "kontourai-flow-agents-349",
+  "run_correlation": {
+    "schema_version": "1.0",
+    "correlation_id": "run-economics-349",
+    "identities": {
+      "runtime_session": { "status": "present", "value": "kontourai-flow-agents-349-run-01" },
+      "runtime_turn": { "status": "unavailable", "reason": "the terminal usage snapshot has no active turn" },
+      "flow_run": { "status": "present", "value": "kontourai-flow-agents-349" },
+      "flow_step": { "status": "unavailable", "reason": "the workflow step changes during the run" },
+      "work_item": { "status": "present", "value": "local:work-item/kontourai-flow-agents-349" },
+      "agent": { "status": "present", "value": "claude-code:economics-fixture" },
+      "delegation_trace": { "status": "unsupported", "reason": "the runtime does not expose delegation trace context" },
+      "delegation_span": { "status": "unsupported", "reason": "the runtime does not expose delegation span context" },
+      "terminal_record": { "status": "unavailable", "reason": "the terminal record is minted after run activation" }
+    }
+  },
+  "workflow_outcome": {
+    "schema_version": "1.0",
+    "source": "canonical_flow_projection",
+    "flow_status": "completed",
+    "process_status": "completed",
+    "verification_status": "PASS",
+    "quality_status": "not_independently_evaluated"
+  },
   "repo": "kontourai/flow-agents",
   "status": "verified",
   "phase": "verify",
   "iterations": { "count": 2, "route_backs": 1 },
   "gate_fires": 3,
-  "human_wait_s": 45,
-  "verification_verdict": "PASS"
+  "human_wait_s": 45
 }

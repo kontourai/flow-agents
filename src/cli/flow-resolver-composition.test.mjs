@@ -28,6 +28,14 @@ test("effective Builder definition materializes uses_flow and Flow-native comple
   );
 });
 
+test("effective definitions compile named ungated terminal sentinels to Flow-native completion", () => {
+  const definition = resolveEffectiveFlowDefinition("builder.shape", REPO_ROOT);
+  assert.ok(definition);
+  assert.ok(!definition.steps.some((step) => step.id === "shape-done"));
+  assert.equal(definition.steps.find((step) => step.id === "file-issues")?.next, null);
+  assert.doesNotThrow(() => validateDefinition(definition));
+});
+
 test("composed pr-open-gate declares the missing_evidence repair route to verify (#695 item a)", () => {
   const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
   assert.ok(definition);

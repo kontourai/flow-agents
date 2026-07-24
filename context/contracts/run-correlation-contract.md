@@ -65,9 +65,49 @@ falls back to shared `current.json`, a newest-run scan, or a task-slug join.
 The adapter validates the task projection with this contract, requires the
 pointer generation to equal `correlation_id`, verifies the Flow run and actor
 identities, and rechecks the pointer after reading state. A valid event embeds
-the exact persisted envelope unchanged. An event before activation, after
-retirement, during a binding change, or against malformed/tampered state emits
-an explicit content-free `incomplete` correlation instead.
+the exact persisted envelope unchanged. An event before activation, during a
+binding change, or against malformed/tampered state emits an explicit
+content-free `incomplete` correlation instead. Ordinary events also treat
+retirement as incomplete. Stop and SessionEnd may consume only their actor's
+exact retired generation when the retirement reason matches the canonical
+terminal Flow status.
+
+Delegation events inherit the already-validated telemetry envelope. Economics
+records copy it from the authenticated `session.usage` source and may join task
+sidecars only when `state.json` contains the exact same envelope. Terminal
+workflow outcomes are persisted by the canonical Builder projection before an
+actor binding can retire; Stop telemetry may mirror that projection through the
+generation-bound terminal handoff but must not invent an outcome from hook
+timing. Shared current pointers, task paths, and
+timestamps are not correlation authorities for any of these producers.
+
+Agent-event delegation inputs carry the exact envelope from their authenticated
+runtime actor binding; callers cannot select another actor for this writer.
+An unresolved runtime actor is rejected before any event or shared-pointer
+mutation. The writer revalidates the sampled actor binding generation while
+holding the pointer mutation lock, so a same-session rebind cannot stamp an old
+envelope onto a new generation.
+Economics ignores unbound or differently correlated agent events. The first
+non-terminal correlated hook observation seals a cumulative usage baseline for
+that correlation. Terminal usage subtracts that baseline and declares run-scoped
+delta semantics for tokens, cost, and elapsed duration. If no baseline exists,
+the session-wide snapshot remains local
+and cannot relay. Hosted relay additionally waits for a canonical terminal outcome
+and uses `correlation_id` as the immutable run identity.
+
+An authenticated producer holds Flow's canonical per-run mutation lock across
+its complete read or write transaction. While holding that lock it proves that
+the recovery fence is open and that the projected run head, status, and step
+match canonical Flow.
+Legacy local events without a correlation binding may remain inspectable, but
+they cannot become authenticated economics or terminal facts.
+
+The terminal workflow outcome distinguishes completed, blocked, canceled,
+failed, and not verified process states. It records verification status derived
+from the canonical Flow `verify-gate` outcome separately and fixes quality status
+to `not_independently_evaluated`.
+Artifact-derived task status remains a different observational source and
+cannot impersonate the runtime outcome.
 
 `reconstructRun` rebuilds a run account from identity-bearing facts only. A
 complete account contains runtime session and turn facts, tool results, Flow

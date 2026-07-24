@@ -6,6 +6,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 
 const MAX_STATE_BYTES = 1024 * 1024;
+const MAX_AGENT_EVENTS_BYTES = 4 * 1024 * 1024;
 
 function incomplete(reason) {
   return {
@@ -34,6 +35,11 @@ function packageRoot() {
 
 async function correlationContract() {
   const modulePath = path.join(ROOT, 'build', 'src', 'run-correlation.js');
+  return import(pathToFileURL(modulePath).href);
+}
+
+async function builderProjectionContract() {
+  const modulePath = path.join(ROOT, 'build', 'src', 'builder-flow-runtime.js');
   return import(pathToFileURL(modulePath).href);
 }
 
@@ -79,14 +85,14 @@ function taskDirectoryUnchanged(task) {
   }
 }
 
-function readStableJson(file, task) {
+function readStableText(file, directory, maxBytes = MAX_STATE_BYTES) {
   let descriptor;
   try {
     const resolved = path.resolve(file);
-    if (path.dirname(resolved) !== task.path || !taskDirectoryUnchanged(task)) return null;
+    if (path.dirname(resolved) !== directory.path || !taskDirectoryUnchanged(directory)) return null;
     descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.size > MAX_STATE_BYTES) return null;
+    if (!opened.isFile() || opened.size > maxBytes) return null;
     const raw = fs.readFileSync(descriptor, 'utf8');
     const named = fs.lstatSync(resolved);
     if (
@@ -94,16 +100,62 @@ function readStableJson(file, task) {
       || !named.isFile()
       || named.dev !== opened.dev
       || named.ino !== opened.ino
-      || !taskDirectoryUnchanged(task)
+      || !taskDirectoryUnchanged(directory)
     ) {
       return null;
     }
-    return JSON.parse(raw);
+    return raw;
   } catch {
     return null;
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
   }
+}
+
+function readStableJson(file, directory) {
+  const raw = readStableText(file, directory);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function readStableAgentEvents(task) {
+  const agentsDir = safeTaskDirectory(task.path, 'agents');
+  if (!agentsDir) return [];
+  const events = [];
+  let totalBytes = 0;
+  let names;
+  try {
+    names = fs.readdirSync(agentsDir.path);
+  } catch {
+    return [];
+  }
+  for (const name of names.sort()) {
+    const agentDir = safeTaskDirectory(agentsDir.path, name);
+    if (!agentDir) continue;
+    const raw = readStableText(
+      path.join(agentDir.path, 'events.jsonl'),
+      agentDir,
+      MAX_AGENT_EVENTS_BYTES - totalBytes,
+    );
+    if (raw === null) continue;
+    totalBytes += Buffer.byteLength(raw);
+    if (totalBytes > MAX_AGENT_EVENTS_BYTES) return [];
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) events.push(parsed);
+      } catch {
+        return [];
+      }
+    }
+    if (!taskDirectoryUnchanged(agentsDir) || !taskDirectoryUnchanged(task)) return [];
+  }
+  return events;
 }
 
 function pointerMatches(left, right) {
@@ -118,7 +170,12 @@ function pointerMatches(left, right) {
   );
 }
 
-async function resolveTelemetryRunBinding({ cwd, env = process.env } = {}) {
+async function resolveTelemetryRunBinding({
+  cwd,
+  env = process.env,
+  includeSidecars = false,
+  terminalCapture = false,
+} = {}) {
   if (typeof cwd !== 'string' || !cwd.trim()) {
     return incomplete('the runtime event did not provide a workspace');
   }
@@ -139,73 +196,143 @@ async function resolveTelemetryRunBinding({ cwd, env = process.env } = {}) {
   }
 
   const artifactRoot = flowAgentsArtifactRoot(workspace);
-  const before = currentPointer.readOwnCurrentPointer(artifactRoot, resolvedActor.actor);
-  const pointer = before.payload;
+  const readPointer = terminalCapture
+    ? currentPointer.readOwnCurrentPointerRecord
+    : currentPointer.readOwnCurrentPointer;
+  const discovered = readPointer(artifactRoot, resolvedActor.actor);
+  const discoveredPointer = discovered.payload;
   if (
-    before.source !== 'per-actor'
-    || !pointer
-    || pointer.binding_status === 'retired'
+    discovered.source !== 'per-actor'
+    || !discoveredPointer
   ) {
     return incomplete('no authenticated Builder run is bound to this runtime session');
   }
   if (
-    typeof pointer.binding_id !== 'string'
-    || typeof pointer.active_slug !== 'string'
-    || typeof pointer.artifact_dir !== 'string'
-    || pointer.active_slug !== path.basename(pointer.artifact_dir)
+    typeof discoveredPointer.binding_id !== 'string'
+    || typeof discoveredPointer.active_slug !== 'string'
+    || typeof discoveredPointer.artifact_dir !== 'string'
+    || discoveredPointer.active_slug !== path.basename(discoveredPointer.artifact_dir)
   ) {
     return incomplete('the authenticated Builder binding is invalid');
   }
 
-  const taskDir = safeTaskDirectory(artifactRoot, pointer.artifact_dir);
-  if (!taskDir) return incomplete('the authenticated Builder binding is invalid');
-  const state = readStableJson(path.join(taskDir.path, 'state.json'), taskDir);
-  if (!state || typeof state !== 'object' || Array.isArray(state)) {
-    return incomplete('the bound Builder correlation could not be validated');
-  }
-
+  const discoveredTaskDir = safeTaskDirectory(artifactRoot, discoveredPointer.artifact_dir);
+  if (!discoveredTaskDir) return incomplete('the authenticated Builder binding is invalid');
   try {
-    const { validateRunCorrelationPresence } = await correlationContract();
-    const presence = validateRunCorrelationPresence(state.run_correlation);
-    if (presence.status !== 'present') {
-      return incomplete('the bound Builder run has incomplete correlation');
-    }
-    const envelope = presence.envelope;
-    const identities = envelope.identities;
-    if (
-      envelope.correlation_id !== pointer.binding_id
-      || identities.flow_run.status !== 'present'
-      || identities.flow_run.value !== pointer.active_slug
-      || identities.agent.status !== 'present'
-      || identities.agent.value !== resolvedActor.actor
-      || typeof state.task_slug !== 'string'
-      || state.task_slug !== pointer.active_slug
-      || !state.flow_run
-      || typeof state.flow_run !== 'object'
-      || Array.isArray(state.flow_run)
-      || state.flow_run.run_id !== pointer.active_slug
-      || !Array.isArray(state.work_item_refs)
-      || state.work_item_refs.length === 0
-      || identities.work_item.status !== 'present'
-      || !state.work_item_refs.includes(identities.work_item.value)
-      || (
-        identities.runtime_session.status === 'present'
-        && identities.runtime_session.value !== resolvedActor.actorStruct.session_id
-      )
-    ) {
-      return incomplete('the bound Builder correlation does not match its authenticated runtime binding');
-    }
+    const { withBuilderFlowProjectionCurrent } = await builderProjectionContract();
+    return await withBuilderFlowProjectionCurrent({ sessionDir: discoveredTaskDir.path }, async () => {
+      const before = readPointer(artifactRoot, resolvedActor.actor);
+      const pointer = before.payload;
+      if (before.source !== 'per-actor' || !pointer) {
+        return incomplete('no authenticated Builder run is bound to this runtime session');
+      }
+      const retiredTerminalCapture = pointer.binding_status === 'retired';
+      if (retiredTerminalCapture && !terminalCapture) {
+        return incomplete('no authenticated Builder run is bound to this runtime session');
+      }
+      if (
+        typeof pointer.binding_id !== 'string'
+        || typeof pointer.active_slug !== 'string'
+        || typeof pointer.artifact_dir !== 'string'
+        || pointer.active_slug !== path.basename(pointer.artifact_dir)
+        || pointer.active_slug !== discoveredPointer.active_slug
+      ) {
+        return incomplete('the authenticated Builder binding changed during telemetry capture');
+      }
 
-    const after = currentPointer.readOwnCurrentPointer(artifactRoot, resolvedActor.actor);
-    if (!pointerMatches(before, after)) {
-      return incomplete('the authenticated Builder binding changed during telemetry capture');
-    }
-    return {
-      run_correlation: envelope,
-      task_slug: pointer.active_slug,
-    };
+      const taskDir = safeTaskDirectory(artifactRoot, pointer.artifact_dir);
+      if (!taskDir || taskDir.path !== discoveredTaskDir.path) {
+        return incomplete('the authenticated Builder binding changed during telemetry capture');
+      }
+      const state = readStableJson(path.join(taskDir.path, 'state.json'), taskDir);
+      if (!state || typeof state !== 'object' || Array.isArray(state)) {
+        return incomplete('the bound Builder correlation could not be validated');
+      }
+
+      try {
+        const { validateRunCorrelationPresence } = await correlationContract();
+        const presence = validateRunCorrelationPresence(state.run_correlation);
+        if (presence.status !== 'present') {
+          return incomplete('the bound Builder run has incomplete correlation');
+        }
+        const envelope = presence.envelope;
+        const identities = envelope.identities;
+        const flowStatus = state.flow_run && typeof state.flow_run === 'object'
+          ? state.flow_run.status
+          : null;
+        if (
+          retiredTerminalCapture
+          && (
+            !['completed', 'canceled', 'failed', 'archived'].includes(flowStatus)
+            || pointer.binding_reason !== `flow_${flowStatus}`
+          )
+        ) {
+          return incomplete('the retired Builder binding is not a validated terminal handoff');
+        }
+        if (
+          envelope.correlation_id !== pointer.binding_id
+          || identities.flow_run.status !== 'present'
+          || identities.flow_run.value !== pointer.active_slug
+          || identities.agent.status !== 'present'
+          || identities.agent.value !== resolvedActor.actor
+          || typeof state.task_slug !== 'string'
+          || state.task_slug !== pointer.active_slug
+          || !state.flow_run
+          || typeof state.flow_run !== 'object'
+          || Array.isArray(state.flow_run)
+          || state.flow_run.run_id !== pointer.active_slug
+          || !Array.isArray(state.work_item_refs)
+          || state.work_item_refs.length === 0
+          || identities.work_item.status !== 'present'
+          || !state.work_item_refs.includes(identities.work_item.value)
+          || (
+            identities.runtime_session.status === 'present'
+            && identities.runtime_session.value !== resolvedActor.actorStruct.session_id
+          )
+        ) {
+          return incomplete('the bound Builder correlation does not match its authenticated runtime binding');
+        }
+
+        const sidecars = includeSidecars
+          ? {
+              state,
+              acceptance: readStableJson(path.join(taskDir.path, 'acceptance.json'), taskDir),
+              critique: readStableJson(path.join(taskDir.path, 'critique.json'), taskDir),
+              agent_events: readStableAgentEvents(taskDir).filter(
+                (event) => event && JSON.stringify(event.run_correlation) === JSON.stringify(envelope),
+              ),
+            }
+          : undefined;
+        const after = readPointer(artifactRoot, resolvedActor.actor);
+        if (!pointerMatches(before, after)) {
+          return incomplete('the authenticated Builder binding changed during telemetry capture');
+        }
+        if (!taskDirectoryUnchanged(taskDir)) {
+          return incomplete('the authenticated Builder binding changed during telemetry capture');
+        }
+        return {
+          run_correlation: envelope,
+          task_slug: pointer.active_slug,
+          ...(sidecars ? { sidecars } : {}),
+        };
+      } catch {
+        return incomplete('the bound Builder correlation could not be validated');
+      }
+    });
   } catch {
-    return incomplete('the bound Builder correlation could not be validated');
+    return incomplete('the bound Builder projection is fenced or stale relative to canonical Flow');
+  }
+}
+
+async function validateEventCorrelation(event) {
+  try {
+    const { readRunCorrelation } = await correlationContract();
+    const presence = readRunCorrelation(event);
+    return presence.status === 'present'
+      ? { run_correlation: presence.envelope }
+      : incomplete('the economics source event has invalid or incomplete correlation');
+  } catch {
+    return incomplete('the economics source event has invalid or incomplete correlation');
   }
 }
 
@@ -225,15 +352,24 @@ async function main() {
   } catch {
     event = {};
   }
+  if (process.argv.includes('--validate-correlation')) {
+    process.stdout.write(`${JSON.stringify(await validateEventCorrelation(event))}\n`);
+    return;
+  }
   const result = await resolveTelemetryRunBinding({
-    cwd: typeof event.cwd === 'string' ? event.cwd : '',
+    cwd: typeof event.cwd === 'string'
+      ? event.cwd
+      : (event.context && typeof event.context.cwd === 'string' ? event.context.cwd : ''),
     env: process.env,
+    includeSidecars: process.argv.includes('--sidecar-snapshot'),
+    terminalCapture: process.argv.includes('--terminal-capture'),
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
 module.exports = {
   resolveTelemetryRunBinding,
+  validateEventCorrelation,
 };
 
 if (require.main === module) {

@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
-import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -171,87 +171,67 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   fs.appendFileSync(file, `${line}\n`);
 }
 
-function openJsonlAppend(file: string): { descriptor: number; created: boolean } {
-  try {
-    return {
-      descriptor: fs.openSync(
-      file,
-      fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
-      ),
-      created: false,
-    };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return {
-      descriptor: fs.openSync(
-        file,
-        fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT
-          | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
-        0o600,
-      ),
-      created: true,
-    };
-  }
-}
-
-function appendJsonlContent(descriptor: number, content: Buffer, file: string): void {
-  let offset = 0;
-  while (offset < content.byteLength) {
-    const written = fs.writeSync(descriptor, content, offset, content.byteLength - offset);
-    if (written <= 0) throw new Error(`JSONL event append made no progress: ${file}`);
-    offset += written;
-  }
-  fs.fsyncSync(descriptor);
-}
-
-function rollbackJsonlAppend(
-  file: string,
-  opened: fs.Stats,
-  initialSize: number,
-  contentLength: number,
-  created: boolean,
-): void {
-  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW);
-  try {
-    const current = fs.fstatSync(descriptor);
-    if (
-      !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
-      || current.size !== initialSize + contentLength
-    ) {
-      throw new Error(`JSONL event target changed before rollback: ${file}`);
+function stageAnchoredAgentEvent(
+  agentDir: string,
+  identity: fs.Stats,
+  payload: AnyObj,
+): { commit: () => void; rollback: () => void } {
+  const coordinationDir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-jsonl-stage-"));
+  fs.chmodSync(coordinationDir, 0o700);
+  fs.writeFileSync(path.join(coordinationDir, "payload"), `${spacedLine(payload)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  const helper = path.join(flowAgentsPackageRoot(), "scripts", "hooks", "lib", "anchored-jsonl-stage.js");
+  const child = spawn(process.execPath, [
+    helper,
+    String(identity.dev),
+    String(identity.ino),
+    coordinationDir,
+  ], {
+    cwd: agentDir,
+    stdio: "ignore",
+  });
+  child.on("error", () => {
+    // The synchronous marker protocol below reports startup failure as a timeout.
+  });
+  const cleanup = (): void => {
+    fs.rmSync(coordinationDir, { recursive: true, force: true });
+  };
+  const waitFor = (target: "ready" | "done", timeoutMs = 5000): void => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(path.join(coordinationDir, "error"))) {
+        die(`anchored agent event append failed: ${read(path.join(coordinationDir, "error")).trim()}`);
+      }
+      if (fs.existsSync(path.join(coordinationDir, target))) return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
-    fs.ftruncateSync(descriptor, initialSize);
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  if (!created) return;
-  const current = fs.lstatSync(file);
-  if (current.dev !== opened.dev || current.ino !== opened.ino || current.size !== 0) {
-    throw new Error(`JSONL event target changed before cleanup: ${file}`);
-  }
-  fs.unlinkSync(file);
-}
-
-function stageJsonlAppend(file: string, payload: AnyObj): { rollback: () => void } {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const content = Buffer.from(`${spacedLine(payload, Object.keys(payload).sort())}\n`);
-  const { descriptor, created } = openJsonlAppend(file);
-  const opened = fs.fstatSync(descriptor);
-  if (!opened.isFile()) {
-    fs.closeSync(descriptor);
-    throw new Error(`JSONL event target must be a regular file: ${file}`);
-  }
-  const initialSize = opened.size;
+    try { child.kill(); } catch {}
+    die(`anchored agent event append timed out waiting for ${target}`);
+  };
+  const decide = (decision: "commit" | "rollback"): void => {
+    try {
+      fs.writeFileSync(path.join(coordinationDir, decision), "", { flag: "wx", mode: 0o600 });
+      waitFor("done");
+    } finally {
+      cleanup();
+    }
+  };
   try {
-    appendJsonlContent(descriptor, content, file);
+    waitFor("ready");
   } catch (error) {
-    try { fs.ftruncateSync(descriptor, initialSize); fs.fsyncSync(descriptor); }
-    finally { fs.closeSync(descriptor); if (created) try { fs.unlinkSync(file); } catch {} }
+    try {
+      fs.writeFileSync(path.join(coordinationDir, "rollback"), "", { flag: "wx", mode: 0o600 });
+    } catch {}
+    try { child.kill(); } catch {}
+    cleanup();
     throw error;
   }
-  fs.closeSync(descriptor);
-  return { rollback: () => rollbackJsonlAppend(file, opened, initialSize, content.byteLength, created) };
+  return {
+    commit: () => decide("commit"),
+    rollback: () => decide("rollback"),
+  };
 }
 function die(message: string): never { throw new Error(message); }
 export class FlowProjectionRegenerationRequiredError extends Error {
@@ -1740,6 +1720,39 @@ function requireArtifactDirUnderRoot(dir: string, root: string): void {
   if (!isUnderDir(dir, root)) die(`artifact directory must be under artifact root: ${dir} is outside ${root}`);
 }
 
+function assertRegularDirectoryNoFollow(
+  dir: string,
+  parent: string,
+  label: string,
+  expected?: fs.Stats,
+): fs.Stats {
+  const parentIdentity = fs.lstatSync(parent);
+  const identity = fs.lstatSync(dir);
+  if (!parentIdentity.isDirectory() || parentIdentity.isSymbolicLink()) {
+    die(`${label} parent must be a regular directory: ${parent}`);
+  }
+  if (!identity.isDirectory() || identity.isSymbolicLink()) {
+    die(`${label} must be a regular directory: ${dir}`);
+  }
+  if (expected && (identity.dev !== expected.dev || identity.ino !== expected.ino)) {
+    die(`${label} changed identity before the event append: ${dir}`);
+  }
+  const relative = path.relative(fs.realpathSync(parent), fs.realpathSync(dir));
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    die(`${label} escaped its expected parent: ${dir}`);
+  }
+  return identity;
+}
+
+function ensureRegularDirectoryNoFollow(dir: string, parent: string, label: string): fs.Stats {
+  try {
+    fs.mkdirSync(dir, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return assertRegularDirectoryNoFollow(dir, parent, label);
+}
+
 function isPermissionDeniedLockError(error: NodeJS.ErrnoException): boolean {
   return error.code === "EPERM" || error.code === "EACCES";
 }
@@ -2006,7 +2019,8 @@ function loadCurrentPointerHelper(): {
     actorKey: string | undefined,
     artifactDir: string,
     update: (payload: AnyObj) => AnyObj,
-    stage?: () => { rollback: () => void },
+    stage?: () => { commit: () => void; rollback: () => void },
+    expectedBindingId?: string | null,
   ) => number;
 } {
   const _req = createRequire(import.meta.url);
@@ -2022,7 +2036,8 @@ function loadCurrentPointerHelper(): {
       actorKey: string | undefined,
       artifactDir: string,
       update: (payload: AnyObj) => AnyObj,
-      stage?: () => { rollback: () => void },
+      stage?: () => { commit: () => void; rollback: () => void },
+      expectedBindingId?: string | null,
     ) => number;
   };
 }
@@ -2169,24 +2184,25 @@ function updateCurrentAgent(
   agentId: string,
   status: string,
   timestamp: string,
-  eventFile: string,
-  event: AnyObj,
   actorKey?: string,
-): void {
+  stageEvent?: () => { commit: () => void; rollback: () => void },
+  expectedBindingId?: string | null,
+): number {
   const applyAgentUpdate = (payload: AnyObj): AnyObj => {
     const active = Array.isArray(payload.active_agents) ? payload.active_agents.filter((a: AnyObj) => a.agent_id !== agentId) : [];
     if (status === "active" || status === "blocked") active.push({ agent_id: agentId, status, updated_at: timestamp });
     return { ...payload, active_agents: active, updated_at: timestamp };
   };
 
-  loadCurrentPointerHelper().updateCurrentPointersForBinding(
+  return loadCurrentPointerHelper().updateCurrentPointersForBinding(
     root,
     actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)
       ? actorKey
       : undefined,
     path.relative(root, dir),
     applyAgentUpdate,
-    () => stageJsonlAppend(eventFile, event),
+    stageEvent,
+    expectedBindingId,
   );
 }
 
@@ -2828,44 +2844,125 @@ function current(p: ReturnType<typeof parseArgs>): number {
   return 0;
 }
 
-function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
-  const hasExplicitRoot = !!opt(p, "artifact-root");
+function resolveAgentEventTarget(p: ReturnType<typeof parseArgs>): {
+  root: string;
+  dir: string;
+  actorKey: string;
+  ownPointer: AnyObj;
+  expectedBindingId: string | null;
+} {
+  if (opt(p, "actor")) {
+    die("record-agent-event does not accept --actor; actor identity comes from the authenticated runtime");
+  }
   const root = explicitArtifactRoot(p);
   const explicit = opt(p, "artifact-dir");
+  if (explicit && !opt(p, "artifact-root")) {
+    die("record-agent-event --artifact-dir requires --artifact-root for containment");
+  }
   const actorKey = resolveReadActorKey(p);
+  if (!actorKey || loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
+    die("record-agent-event requires a resolved authenticated runtime actor");
+  }
   const dir = explicit ? path.resolve(explicit) : currentDir(root, actorKey);
   if (!dir || !fs.existsSync(dir)) die("artifact directory does not exist");
   if (explicit && fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
-  if (hasExplicitRoot || !explicit) requireArtifactDirUnderRoot(dir, root);
-  const timestamp = opt(p, "timestamp", now());
-  const agent = validateAgentId(opt(p, "agent-id"));
-  // #376 model routing: optionally stamp the delegate role/model resolved from
-  // .datum/config.json onto the event so a downstream economics record (#349)
-  // can price role assignments per delegation, and so an escalate-on-gate-failure
-  // re-dispatch records which tier it climbed FROM. Fully additive/optional: when
-  // no routing flag is passed the event shape is byte-identical to before.
-  // These live as TOP-LEVEL event fields (not nested) on purpose: appendJsonl's
-  // serializer (spacedLine) uses the top-level key list as a JSON.stringify array
-  // replacer, which is an allowlist applied at every nesting level — a nested
-  // routing object would have its inner keys stripped. Flat keeps the shape a
-  // simple per-event routing record a JSONL economics feed can read directly.
-  const role = opt(p, "role");
-  const model = opt(p, "model");
-  const escalatedFrom = opt(p, "escalated-from");
-  const event = {
-    timestamp,
-    agent_id: agent,
-    kind: opt(p, "kind", "note"),
-    status: opt(p, "status", "info"),
-    summary: opt(p, "summary"),
-    ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}),
-    ...(role ? { role } : {}),
-    ...(model ? { model } : {}),
-    ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
+  requireArtifactDirUnderRoot(dir, root);
+  const ownPointer = loadCurrentPointerHelper().readOwnCurrentPointer(root, actorKey).payload;
+  if (!ownPointer || ownPointer.artifact_dir !== path.relative(root, dir)) {
+    die("record-agent-event requires the current actor binding to match the artifact directory");
+  }
+  const expectedBindingId = typeof ownPointer.binding_id === "string"
+    ? ownPointer.binding_id
+    : null;
+  return { root, dir, actorKey, ownPointer, expectedBindingId };
+}
+
+function agentEventCorrelation(root: string, dir: string, ownPointer: AnyObj | null): AnyObj {
+  const incomplete = {
+    status: "incomplete",
+    reason: "the agent event was not written through an authenticated Builder binding",
   };
-  const eventFile = path.join(dir, "agents", agent, "events.jsonl");
-  updateCurrentAgent(root, dir, agent, event.status, timestamp, eventFile, event, actorKey);
-  return 0;
+  try {
+    const state = JSON.parse(readRegularFileNoFollow(path.join(dir, "state.json"), "agent event state").toString("utf8"));
+    const presence = validateRunCorrelationPresence(state.run_correlation);
+    if (
+      presence.status === "present"
+      && ownPointer
+      && ownPointer.artifact_dir === path.relative(root, dir)
+      && ownPointer.binding_id === presence.envelope.correlation_id
+      && state.task_slug === path.basename(dir)
+      && state.flow_run?.run_id === path.basename(dir)
+    ) {
+      return presence.envelope;
+    }
+  } catch {
+    // Legacy sessions retain local progress, but cannot become authenticated economics facts.
+  }
+  return incomplete;
+}
+
+function persistAgentEvent(
+  target: ReturnType<typeof resolveAgentEventTarget>,
+  agent: string,
+  event: AnyObj,
+): void {
+  const { root, dir, actorKey, expectedBindingId } = target;
+  const agentsDir = path.join(dir, "agents");
+  const agentDir = path.join(agentsDir, agent);
+  const agentsIdentity = ensureRegularDirectoryNoFollow(agentsDir, dir, "agent event directory");
+  const agentIdentity = ensureRegularDirectoryNoFollow(agentDir, agentsDir, "agent event actor directory");
+  const updatedPointers = updateCurrentAgent(
+    root,
+    dir,
+    agent,
+    event.status,
+    event.timestamp,
+    actorKey,
+    () => {
+      assertRegularDirectoryNoFollow(agentsDir, dir, "agent event directory", agentsIdentity);
+      assertRegularDirectoryNoFollow(agentDir, agentsDir, "agent event actor directory", agentIdentity);
+      return stageAnchoredAgentEvent(agentDir, agentIdentity, event);
+    },
+    expectedBindingId,
+  );
+  if (updatedPointers === 0) {
+    die("record-agent-event requires a current pointer bound to the artifact directory");
+  }
+}
+
+async function recordAgentEvent(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const initial = resolveAgentEventTarget(p);
+  const record = (): number => {
+    const target = resolveAgentEventTarget(p);
+    if (target.root !== initial.root
+        || target.dir !== initial.dir
+        || target.actorKey !== initial.actorKey
+        || target.expectedBindingId !== initial.expectedBindingId) {
+      die("record-agent-event authenticated binding changed while waiting for the canonical Flow lock; retry against the current binding");
+    }
+    const timestamp = opt(p, "timestamp", now());
+    const agent = validateAgentId(opt(p, "agent-id"));
+    const role = opt(p, "role");
+    const model = opt(p, "model");
+    const escalatedFrom = opt(p, "escalated-from");
+    const event = {
+      timestamp,
+      agent_id: agent,
+      kind: opt(p, "kind", "note"),
+      status: opt(p, "status", "info"),
+      summary: opt(p, "summary"),
+      run_correlation: agentEventCorrelation(target.root, target.dir, target.ownPointer),
+      ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}),
+      ...(role ? { role } : {}),
+      ...(model ? { model } : {}),
+      ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
+    };
+    persistAgentEvent(target, agent, event);
+    return 0;
+  };
+  return initial.expectedBindingId === null
+    ? record()
+    : withBuilderFlowProjectionCurrent({ sessionDir: initial.dir }, record);
 }
 
 function initPlan(p: ReturnType<typeof parseArgs>): number {

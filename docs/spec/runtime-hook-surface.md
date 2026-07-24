@@ -43,10 +43,11 @@ Every Flow Agents event has a canonical name that is runtime-neutral. Adapters m
 - **`outcome`** — the evidence-oriented `pass`, `fail`, or `ambiguous` observation retained separately from lifecycle status.
 
 Every `.usage` object declares its aggregation semantics. Per-turn tool records
-use `semantics: "delta"`; session-level cumulative records use
-`semantics: "snapshot"`. Consumers sum deltas but retain only the latest snapshot
-for a given runtime stream, preventing repeated cumulative observations from
-double-counting tokens or cost.
+use `semantics: "delta"`. A correlated terminal record uses `scope: "run"`,
+`semantics: "delta"`, and `baseline_status: "present"` only after subtracting the
+cumulative transcript and elapsed-duration baseline sealed at the first
+non-terminal observation for that correlation. Without that baseline it remains an explicit session-scoped
+snapshot and is ineligible for hosted per-run economics.
 - **`outcome`** — the deterministic tri-state `pass` | `fail` | `ambiguous` from the canonical observation contract (§2.5), computed in-process by a jq port of `scripts/hooks/evidence-capture.js observeResult` so the Claude hot path stays hermetic (no node subprocess). A `PostToolUseFailure` event folds to `fail`. Never derived from stdout text or model narration. On the Codex runtime only — where the exit code lives in the rollout banner rather than the payload — the code is resolved via `scripts/hooks/lib/codex-exit-code.js` and fed through the same tri-state; an unreadable rollout degrades to `ambiguous`.
 - **`status`** — the host-surfaced integer exit code when one is cleanly present (the same fields §2.5 scans), else **`null`**.
 
@@ -111,7 +112,7 @@ it is emitted only when that correlation resolves successfully and is not an ind
 
 | Field | Semantics | Redacted? | Producer requirement |
 | --- | --- | --- | --- |
-| `run_correlation` | The exact validated envelope persisted by the actor-bound Builder run, or `{status:"incomplete", reason}`. | **No** (validated opaque identities and bounded reasons only) | Every event MUST carry this field. Unbound, retired, changing, unsupported, or invalid bindings stay explicitly incomplete. |
+| `run_correlation` | The exact validated envelope persisted by the actor-bound Builder run, or `{status:"incomplete", reason}`. | **No** (validated opaque identities and bounded reasons only) | Every event MUST carry this field. Unbound, changing, unsupported, or invalid bindings stay explicitly incomplete. A Stop/SessionEnd event may consume only its actor's exact terminal retirement generation after validating the matching terminal Flow state. |
 | `task_slug` | Top-level slug of the successfully authenticated Builder run. | **No** (an opaque run slug; carries no path or content) | Emit only with a present `run_correlation`; omit for incomplete correlation. |
 
 Canonical resolution uses `scripts/telemetry/run-correlation-binding.js`:
@@ -122,11 +123,44 @@ Canonical resolution uses `scripts/telemetry/run-correlation-binding.js`:
    through the public run-correlation contract.
 4. Require pointer generation, Flow run identity, runtime actor identity, and selected Work Item
    to agree, then re-read the actor pointer to detect a concurrent generation change.
-5. Embed the exact envelope and derive `task_slug`, or emit a content-free incomplete reason.
+5. For Stop/SessionEnd only, accept an exact actor retirement marker when its
+   `binding_reason` matches the terminal Flow status and all generation checks still hold.
+6. Embed the exact envelope and derive `task_slug`, or emit a content-free incomplete reason.
 
 The adapter reads no prompts, tool arguments, or source content. Redaction preserves valid opaque
 identity fields, while the validator rejects credential-shaped or malformed values before they can
 enter either telemetry channel.
+
+Delegation telemetry is emitted from the already-correlated tool event. Both the
+standalone `agent.delegate` record and the ordinary tool event's additive `delegation`
+projection therefore carry the exact same envelope. Runtime adapters do not reconstruct
+or post-stamp delegation identity.
+
+At stop time, `session.usage` is the authenticated source for economics correlation.
+Sidecars are captured through one descriptor-safe snapshot and are eligible only when
+the correlated task state embeds the same envelope; the shared `current.json` pointer
+is never consulted. When a validated state contains the canonical Builder
+`workflow_outcome` projection, telemetry mirrors it as a `workflow.outcome` event.
+The complete pointer, state, sidecar, and final-pointer capture runs while
+holding Flow's canonical per-run mutation lock. The binding is incomplete while
+Flow recovery is fenced or when the projected run head, status, or step differs
+from canonical Flow; hooks never relay a stale projection as authenticated
+runtime evidence.
+Telemetry does not derive a terminal state from Stop itself. If Flow already retired
+the binding, the terminal-only path validates that exact actor generation and terminal
+state rather than reviving the binding for ordinary events.
+
+Local economics keeps every Stop observation. Hosted economics relay occurs only
+when the actor binding is authenticated, a run-scoped usage baseline is present,
+and the outcome is canonical completed, canceled, or failed. It uses the
+correlation id as the immutable run id, preventing repeated Stop observations from
+being summed as independent runs.
+
+`workflow.outcome.workflow_outcome.process_status` distinguishes `completed`, `blocked`,
+`canceled`, `failed`, and `not_verified`. Its `quality_status` is fixed to
+`not_independently_evaluated`: process completion and an explicit verification verdict
+do not impersonate an independent task-quality grade. Artifact-derived status and eval
+attempt/grade records remain separate sources.
 
 ### Exit Code Protocol (Canonical Hook Scripts)
 
