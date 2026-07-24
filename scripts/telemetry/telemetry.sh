@@ -886,6 +886,19 @@ add_stop_data_and_emit_usage() {
       (bash "$econ_script" "${econ_args[@]}") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
     fi
+
+    # Hook-native console board sync (#919): detached, cwd-scoped projection+bridge of this
+    # repo's local flow-agents workflow state onto a hosted Kontour console board, wired
+    # directly after the economics-record step above in the EXACT same best-effort DETACHED
+    # shape so it can never alter telemetry timing or fail the stop hook -- board
+    # transparency rides the existing session harness, never a launchd/cron daemon. The
+    # script re-resolves config.sh itself and gate-checks console_telemetry_url + a token;
+    # it exits 0 silently with zero side effects when no hosted console sink is configured.
+    local board_sync_script="${TELEMETRY_DIR}/console-board-sync.sh"
+    if [[ -f "$board_sync_script" ]]; then
+      (bash "$board_sync_script") </dev/null >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi
   fi
 
   echo "$event"

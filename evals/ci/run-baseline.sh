@@ -87,6 +87,7 @@ CHECKS=(
   "Telemetry sanitize usage integration|bash evals/integration/test_telemetry_sanitize_usage.sh"
   "Telemetry task slug integration|bash evals/integration/test_telemetry_task_slug.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
+  "Console board sync integration|bash evals/integration/test_console_board_sync.sh"
   "Capability declarations integration|bash evals/integration/test_capability_declarations.sh"
   "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"

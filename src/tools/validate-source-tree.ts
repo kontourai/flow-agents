@@ -25,6 +25,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/telemetry/telemetry.conf", { mirror: "context/scripts/telemetry/telemetry.conf", allowedDifferences: [] }],
   ["scripts/telemetry/console-presets.sh", { mirror: "context/scripts/telemetry/console-presets.sh", allowedDifferences: [] }],
   ["scripts/telemetry/install-console-config.sh", { mirror: "context/scripts/telemetry/install-console-config.sh", allowedDifferences: [] }],
+  ["scripts/telemetry/console-board-sync.sh", { mirror: "context/scripts/telemetry/console-board-sync.sh", allowedDifferences: [] }],
   ["scripts/discover-agents.sh", { mirror: "context/scripts/discover-agents.sh", allowedDifferences: [['ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"', 'ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"']] }],
   // WS8 (AC9): scripts/hooks/* is the actively-maintained source of truth; context/ holds
   // the exported mirror. These four hooks (and the config-protection remedy lib) had drifted
