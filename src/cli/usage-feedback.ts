@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { readRunCorrelation } from "../run-correlation.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
 
@@ -23,6 +24,11 @@ interface JsonlReadResult {
 }
 
 type JsonlReadPolicy = "strict" | "quarantine";
+type OutcomeJoinReason = "missing_identity" | "invalid_correlation" | "no_match" | "ambiguous_match";
+
+type JoinIdentityResolution =
+  | { status: "present"; key: string; kind: "run_correlation" | "runtime_session" | "legacy_session" }
+  | { status: "missing" | "invalid"; reason: OutcomeJoinReason };
 
 function telemetryDir(flags: Record<string, string | boolean | string[]>): string {
   const explicit = flagString(flags, "telemetry-dir") ?? process.env.TELEMETRY_DATA_DIR;
@@ -107,6 +113,65 @@ function warnQuarantined(diagnostics: JsonlDiagnostic[]): void {
   }
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function joinIdentity(record: Record<string, unknown>): JoinIdentityResolution {
+  if ("run_correlation" in record) {
+    try {
+      const correlation = readRunCorrelation(record);
+      if (correlation.status === "present") {
+        return {
+          status: "present",
+          key: `run_correlation:${correlation.envelope.correlation_id}`,
+          kind: "run_correlation",
+        };
+      }
+    } catch {
+      return { status: "invalid", reason: "invalid_correlation" };
+    }
+  }
+  const runtime = nonEmptyString(record.runtime);
+  const runtimeSessionId = nonEmptyString(record.runtime_session_id);
+  if (runtime && runtimeSessionId) {
+    return {
+      status: "present",
+      key: `runtime_session:${runtime}:${runtimeSessionId}`,
+      kind: "runtime_session",
+    };
+  }
+  const sessionId = nonEmptyString(record.session_id);
+  if (runtime && sessionId) {
+    return {
+      status: "present",
+      key: `legacy_session:${runtime}:${sessionId}`,
+      kind: "legacy_session",
+    };
+  }
+  return { status: "missing", reason: "missing_identity" };
+}
+
+function sessionJoinIdentityKeys(record: Record<string, unknown>): string[] {
+  const keys: string[] = [];
+  if ("run_correlation" in record) {
+    try {
+      const correlation = readRunCorrelation(record);
+      if (correlation.status === "present") {
+        keys.push(`run_correlation:${correlation.envelope.correlation_id}`);
+      }
+    } catch {
+      return [];
+    }
+  }
+  const runtime = nonEmptyString(record.runtime);
+  const runtimeSessionId = nonEmptyString(record.runtime_session_id);
+  const sessionId = nonEmptyString(record.session_id);
+  if (runtime && runtimeSessionId) keys.push(`runtime_session:${runtime}:${runtimeSessionId}`);
+  if (runtime && sessionId) keys.push(`legacy_session:${runtime}:${sessionId}`);
+  return [...new Set(keys)];
+}
+
 function writeJsonlUpsert(file: string, rows: Record<string, unknown>[], key: string): void {
   const existing = new Map(strictJsonlRows(file).map((row) => [String(row[key]), row]));
   for (const row of rows) existing.set(String(row[key]), row);
@@ -154,6 +219,7 @@ function normalize(input: Record<string, unknown>[], runtime: string, flags: Rec
   return Array.from(groups, ([sessionId, events]) => ({
     schema_version: "1",
     session_id: sessionId,
+    runtime_session_id: String(events.find((event) => event.runtime_session_id)?.runtime_session_id ?? sessionId),
     source_id: flagString(flags, "source-id") ?? String(events.find((event) => event.repo)?.repo ?? fallbackSource),
     runtime,
     repo: flagString(flags, "repo") ?? String(events.find((event) => event.repo)?.repo ?? ""),
@@ -248,13 +314,47 @@ function reportData(dirs: string[], groupBy?: string): Record<string, unknown> {
   const outcomes = inputs.flatMap((input) => input.outcomes);
   const reads = inputs.flatMap((input) => input.reads).filter((read) => read.total_records > 0);
   const diagnostics = reads.flatMap((read) => read.diagnostics);
-  const outcomesBySession = new Map<string, Record<string, unknown>[]>();
-  for (const outcome of outcomes) {
-    const key = String(outcome.session_id ?? "unknown");
-    outcomesBySession.set(key, [...(outcomesBySession.get(key) ?? []), outcome]);
+  const sessionIndexesByIdentity = new Map<string, number[]>();
+  for (const [index, session] of sessions.entries()) {
+    for (const key of sessionJoinIdentityKeys(session)) {
+      sessionIndexesByIdentity.set(key, [...(sessionIndexesByIdentity.get(key) ?? []), index]);
+    }
   }
-  const success = outcomes.filter((outcome) => outcome.result === "success").length;
-  const groups = new Map<string, { sessions: number; outcomes: number; success: number; tools: number[]; rework: number }>();
+  const outcomesBySessionIndex = new Map<number, Record<string, unknown>[]>();
+  const unjoinedByReason: Record<OutcomeJoinReason, number> = {
+    missing_identity: 0,
+    invalid_correlation: 0,
+    no_match: 0,
+    ambiguous_match: 0,
+  };
+  const joinedOutcomes: Record<string, unknown>[] = [];
+  for (const outcome of outcomes) {
+    const identity = joinIdentity(outcome);
+    if (identity.status !== "present") {
+      unjoinedByReason[identity.reason] += 1;
+      continue;
+    }
+    const matches = sessionIndexesByIdentity.get(identity.key) ?? [];
+    if (matches.length === 0) {
+      unjoinedByReason.no_match += 1;
+      continue;
+    }
+    if (matches.length > 1) {
+      unjoinedByReason.ambiguous_match += 1;
+      continue;
+    }
+    const sessionIndex = matches[0];
+    outcomesBySessionIndex.set(sessionIndex, [...(outcomesBySessionIndex.get(sessionIndex) ?? []), outcome]);
+    joinedOutcomes.push(outcome);
+  }
+  const unjoinedOutcomes = outcomes.length - joinedOutcomes.length;
+  const resultCounts: Record<string, number> = {
+    ...Object.fromEntries(
+      [...VALID_RESULTS].map((result) => [result, joinedOutcomes.filter((outcome) => outcome.result === result).length]),
+    ),
+    unknown: joinedOutcomes.filter((outcome) => !VALID_RESULTS.has(String(outcome.result))).length,
+  };
+  const groups = new Map<string, { sessions: number; joinedOutcomes: number; success: number; tools: number[]; rework: number }>();
   const groupValue = (session: Record<string, unknown>, sessionOutcomes: Record<string, unknown>[]): string => {
     if (!groupBy) return "all";
     if (groupBy === "source") return String(session.source_id ?? "unknown");
@@ -262,35 +362,50 @@ function reportData(dirs: string[], groupBy?: string): Record<string, unknown> {
     if (groupBy === "task_type") return String(sessionOutcomes.find((outcome) => outcome.task_type)?.task_type ?? "unknown");
     return String(session[groupBy] ?? "unknown");
   };
-  for (const session of sessions) {
-    const sessionOutcomes = outcomesBySession.get(String(session.session_id ?? "unknown")) ?? [];
+  for (const [sessionIndex, session] of sessions.entries()) {
+    const sessionOutcomes = outcomesBySessionIndex.get(sessionIndex) ?? [];
     const key = cleanLabel(groupValue(session, sessionOutcomes));
-    const entry = groups.get(key) ?? { sessions: 0, outcomes: 0, success: 0, tools: [], rework: 0 };
+    const entry = groups.get(key) ?? { sessions: 0, joinedOutcomes: 0, success: 0, tools: [], rework: 0 };
     entry.sessions += 1;
-    entry.outcomes += sessionOutcomes.length;
+    entry.joinedOutcomes += sessionOutcomes.length;
     entry.success += sessionOutcomes.filter((outcome) => outcome.result === "success").length;
     if (session.tool_invocations !== undefined && session.tool_invocations !== null) entry.tools.push(Number(session.tool_invocations));
     entry.rework += sessionOutcomes.filter((outcome) => outcome.rework_required).length;
     groups.set(key, entry);
   }
-  const sessionIdsWithOutcomes = new Set(outcomes.map((outcome) => outcome.session_id));
+  const sessionsWithJoinedOutcomes = outcomesBySessionIndex.size;
   const avgTools = sessions.length ? sessions.reduce((total, session) => total + Number(session.tool_invocations ?? 0), 0) / sessions.length : null;
-  const reworkCount = outcomes.filter((outcome) => outcome.rework_required).length;
+  const reworkCount = joinedOutcomes.filter((outcome) => outcome.rework_required).length;
+  const partialReasons = [
+    ...(diagnostics.length ? ["malformed_records"] : []),
+    ...(unjoinedOutcomes ? ["unjoined_outcomes"] : []),
+    ...(sessionsWithJoinedOutcomes < sessions.length ? ["sessions_without_joined_outcomes"] : []),
+  ];
   return {
     measurement: {
-      partial: diagnostics.length > 0,
+      partial: partialReasons.length > 0,
+      partial_reasons: partialReasons,
       total_records: reads.reduce((total, read) => total + read.total_records, 0),
       valid_records: reads.reduce((total, read) => total + read.valid_records, 0),
       malformed_records: diagnostics.length,
       diagnostics,
+      outcome_identity: {
+        status: outcomes.length === 0 ? "unavailable" : unjoinedOutcomes ? "partial" : "complete",
+        total_records: outcomes.length,
+        joined_records: joinedOutcomes.length,
+        unjoined_records: unjoinedOutcomes,
+        unjoined_by_reason: unjoinedByReason,
+      },
     },
     summary: {
       sessions: sessions.length,
-      sessions_with_outcomes: sessionIdsWithOutcomes.size,
-      outcomes: outcomes.length,
-      success_rate: outcomes.length ? success / outcomes.length : null,
+      sessions_with_joined_outcomes: sessionsWithJoinedOutcomes,
+      joined_outcome_records: joinedOutcomes.length,
+      joined_outcome_result_counts: resultCounts,
+      joined_outcome_success_rate: joinedOutcomes.length ? resultCounts.success / joinedOutcomes.length : null,
       avg_tool_invocations: avgTools,
-      rework_rate: outcomes.length ? reworkCount / outcomes.length : null,
+      joined_outcome_rework_rate: joinedOutcomes.length ? reworkCount / joinedOutcomes.length : null,
+      joined_outcome_session_coverage: sessions.length ? sessionsWithJoinedOutcomes / sessions.length : null,
     },
     sources: Array.from(new Set(sessions.map((session) => String(session.source_id ?? "unknown")))).sort(),
     groups: Array.from(groups, ([key, entry]) => ({
@@ -298,10 +413,10 @@ function reportData(dirs: string[], groupBy?: string): Record<string, unknown> {
       group: key,
       name: key,
       sessions: entry.sessions,
-      outcomes: entry.outcomes,
-      success_rate: entry.outcomes ? entry.success / entry.outcomes : null,
+      joined_outcome_records: entry.joinedOutcomes,
+      joined_outcome_success_rate: entry.joinedOutcomes ? entry.success / entry.joinedOutcomes : null,
       avg_tool_invocations: entry.tools.length ? entry.tools.reduce((a, b) => a + b, 0) / entry.tools.length : null,
-      rework_rate: entry.outcomes ? entry.rework / entry.outcomes : null,
+      joined_outcome_rework_rate: entry.joinedOutcomes ? entry.rework / entry.joinedOutcomes : null,
     })).sort((a, b) => String(a.key).localeCompare(String(b.key))),
   };
 }
@@ -366,19 +481,23 @@ function markdownReport(data: Record<string, unknown>, groupBy?: string): string
     `- Input records: ${measurement.total_records}`,
     `- Valid records: ${measurement.valid_records}`,
     `- Malformed records quarantined: ${measurement.malformed_records}`,
+    `- Outcome records: ${(measurement.outcome_identity as Record<string, unknown>).total_records}`,
+    `- Joined outcome records: ${(measurement.outcome_identity as Record<string, unknown>).joined_records}`,
+    `- Unjoined outcome records: ${(measurement.outcome_identity as Record<string, unknown>).unjoined_records}`,
     "",
     "## Summary",
     "",
     `- Sessions: ${summary.sessions}`,
-    `- Sessions with outcomes: ${summary.sessions_with_outcomes}`,
-    `- Success rate: ${fmtRate(summary.success_rate)}`,
+    `- Sessions with joined outcomes: ${summary.sessions_with_joined_outcomes}`,
+    `- Joined-outcome success rate: ${fmtRate(summary.joined_outcome_success_rate)}`,
     `- Avg tool invocations: ${fmtNum(summary.avg_tool_invocations)}`,
-    `- Rework rate: ${fmtRate(summary.rework_rate)}`,
+    `- Joined-outcome rework rate: ${fmtRate(summary.joined_outcome_rework_rate)}`,
+    `- Joined-outcome session coverage: ${fmtRate(summary.joined_outcome_session_coverage)}`,
   ];
   if (groupBy) {
-    lines.push("", `## Groups by ${groupBy}`, "", "| Group | Sessions | Outcomes | Success rate | Avg tool invocations | Rework rate |", "| --- | ---: | ---: | ---: | ---: | ---: |");
+    lines.push("", `## Groups by ${groupBy}`, "", "| Group | Sessions | Joined outcomes | Joined-outcome success rate | Avg tool invocations | Joined-outcome rework rate |", "| --- | ---: | ---: | ---: | ---: | ---: |");
     for (const group of groups) {
-      lines.push(`| ${markdownCell(group.key)} | ${group.sessions} | ${group.outcomes} | ${fmtRate(group.success_rate)} | ${fmtNum(group.avg_tool_invocations)} | ${fmtRate(group.rework_rate)} |`);
+      lines.push(`| ${markdownCell(group.key)} | ${group.sessions} | ${group.joined_outcome_records} | ${fmtRate(group.joined_outcome_success_rate)} | ${fmtNum(group.avg_tool_invocations)} | ${fmtRate(group.joined_outcome_rework_rate)} |`);
     }
   }
   return `${lines.join("\n")}\n`;
