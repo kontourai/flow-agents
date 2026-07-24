@@ -11,7 +11,7 @@ import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, durableFlowAgentsRoot, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
@@ -600,8 +600,12 @@ export function ensureBundle(runtime: Runtime): string {
 // the install destination). It is NOT correct for a --global install: there
 // is no per-destination copy of scripts/, and CLAUDE_PROJECT_DIR varies with
 // whichever project happens to be open, so the hook resolves to a path that
-// exists in at most one project (and never for most sessions). Global
-// installs need an absolute, session-independent path instead.
+// exists in at most one project (and never for most sessions). Global installs
+// need a durable, session-independent path instead -- NOT the source-checkout/
+// npx-cache `root` this process launched from, which npx may evict at any time
+// (kontourai/flow-agents#945). vendorClaudeCodeGlobalRuntime() copies the hook
+// runtime into <dest>/.flow-agents/runtime/ and that path is substituted in
+// via rewriteCommandsForGlobalInstall below.
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
 
@@ -876,6 +880,33 @@ function addOpenCodePortableAssets(
   assets.push({ id: destinationRelative, kind, content: fs.readFileSync(source, "utf8"), targetHint: destinationRelative });
 }
 
+const GLOBAL_RUNTIME_VENDOR_DIRS = ["build", "context", "kits", "packaging", "schemas", "scripts"];
+
+/**
+ * Vendor the claude-code hook/statusline runtime (scripts/, build/, and their siblings) from the
+ * built bundle into <dest>/.flow-agents/runtime/, using the same ownership-manifest-tracked
+ * installer opencode's global install already uses (installOpencodeGlobalAssets /
+ * scripts/install-owned-files.js). Throws on any failure -- caller must not proceed to
+ * merge/write settings.json when this throws (kontourai/flow-agents#945).
+ */
+function vendorClaudeCodeGlobalRuntime(dest: string, bundle: string): void {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-claude-runtime-"));
+  try {
+    for (const entry of GLOBAL_RUNTIME_VENDOR_DIRS) {
+      const source = path.join(bundle, entry);
+      if (!fs.existsSync(source)) continue;
+      fs.cpSync(source, path.join(overlay, ".flow-agents", "runtime", entry), { recursive: true });
+    }
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+    const metadata = JSON.stringify({ runtime: "claude-code", package_version: pkgJson["version"] ?? "0.0.0" });
+    const installer = path.join(root, "scripts", "install-owned-files.js");
+    const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr.trim() || `claude-code global runtime vendoring failed with exit code ${result.status ?? "unknown"}`);
+  } finally {
+    fs.rmSync(overlay, { recursive: true, force: true });
+  }
+}
+
 async function stageOpenCodeConduitAssets(bundle: string, skillNames: string[], overlay: string): Promise<InstallationReceipt> {
   const assetSources = new Map<string, string>();
   const assets: PortableAsset[] = [];
@@ -1105,15 +1136,30 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         console.error(`flow-agents init: bundle settings missing: ${sourcePath}`);
         return 1;
       }
+      fs.mkdirSync(options.dest, { recursive: true });
+      // Vendor the hook/statusline runtime into a durable, destination-owned
+      // location BEFORE any settings.json mutation (kontourai/flow-agents#945):
+      // a global install must not depend on the ephemeral npx-cache/source-checkout
+      // path this process happened to launch from (see vendorClaudeCodeGlobalRuntime).
+      // This must succeed first -- if it fails, abort without touching settings.json.
+      try {
+        vendorClaudeCodeGlobalRuntime(options.dest, bundle);
+      } catch (error) {
+        console.error(`flow-agents init: could not vendor the claude-code hook runtime into ${options.dest}: ${(error as Error).message}`);
+        console.error(`flow-agents init: global claude-code install aborted; ${path.join(options.dest, "settings.json")} was not modified.`);
+        return 1;
+      }
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
       // Remove permissive defaults (not appropriate for global user settings).
       delete managed["permissions"];
       delete managed["skipDangerousModePermissionPrompt"];
-      // See rewriteCommandsForGlobalInstall: bundle hook commands assume
-      // CLAUDE_PROJECT_DIR points at this package; a global install must not
-      // depend on which project is currently open, so pin to an absolute path.
-      rewriteCommandsForGlobalInstall(managed, root);
-      fs.mkdirSync(options.dest, { recursive: true });
+      // Bundle hook commands assume CLAUDE_PROJECT_DIR points at this package;
+      // a global install must not depend on which project is currently open or on
+      // the ephemeral path this process launched from, so rewrite them to the
+      // durable vendored runtime root instead (see vendorClaudeCodeGlobalRuntime,
+      // kontourai/flow-agents#945).
+      const vendorRoot = path.join(durableFlowAgentsRoot(options.dest), "runtime");
+      rewriteCommandsForGlobalInstall(managed, vendorRoot);
       const destSettingsPath = path.join(options.dest, "settings.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
