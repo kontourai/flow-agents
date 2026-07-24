@@ -1,5 +1,32 @@
 # Changelog
 
+## [5.3.0](https://github.com/kontourai/flow-agents/compare/v5.2.0...v5.3.0) (2026-07-24)
+
+
+### Features
+
+* add versioned run correlation envelope ([#869](https://github.com/kontourai/flow-agents/issues/869)) ([2bd9b10](https://github.com/kontourai/flow-agents/commit/2bd9b10b826d87c1293a3d7a38dfde3c38f179c0))
+* **builder:** reclaim merged worktrees safely ([#910](https://github.com/kontourai/flow-agents/issues/910)) ([273c535](https://github.com/kontourai/flow-agents/commit/273c535d3efcfe79e0d1152f602ba949ecd298a5))
+* **console:** project workflow trust bundles in Surface's shape ([#891](https://github.com/kontourai/flow-agents/issues/891)) ([#904](https://github.com/kontourai/flow-agents/issues/904)) ([375d323](https://github.com/kontourai/flow-agents/commit/375d323cb13e662e963798f5f7ba6fa050ef7c74))
+* harden correlated telemetry semantics ([#871](https://github.com/kontourai/flow-agents/issues/871)) ([7d474d6](https://github.com/kontourai/flow-agents/commit/7d474d6275b399e701838c07885135f6fe399107))
+* mint canonical Builder run correlation ([#928](https://github.com/kontourai/flow-agents/issues/928)) ([0709651](https://github.com/kontourai/flow-agents/commit/0709651e42830f4506a06a39f26504d82de9e67d))
+* propagate run correlation through Builder records ([#870](https://github.com/kontourai/flow-agents/issues/870)) ([f802c1c](https://github.com/kontourai/flow-agents/commit/f802c1c9180f6a8db2297d9bf07fe141f9a5109c))
+* reconstruct correlated nested runs ([#872](https://github.com/kontourai/flow-agents/issues/872)) ([d4d4c8b](https://github.com/kontourai/flow-agents/commit/d4d4c8bded774e542680d3e3c9f22221d208de93))
+* **telemetry:** hook-native console board sync + --skip-invalid projection flag ([#918](https://github.com/kontourai/flow-agents/issues/918), [#919](https://github.com/kontourai/flow-agents/issues/919)) ([#929](https://github.com/kontourai/flow-agents/issues/929)) ([14604fd](https://github.com/kontourai/flow-agents/commit/14604fdf4a1f8be8efad84f944d3db26002cf578))
+* **workflow:** sign canonical gate projection ([#902](https://github.com/kontourai/flow-agents/issues/902)) ([da32dad](https://github.com/kontourai/flow-agents/commit/da32dad3e406a21a78d44dc7bc48130ed97df813))
+
+
+### Fixes
+
+* **builder:** keep execution skills out of control state ([#903](https://github.com/kontourai/flow-agents/issues/903)) ([3e62b86](https://github.com/kontourai/flow-agents/commit/3e62b8669404323c0a44d60a02888bc25bb26f51))
+* check context-map drift before push ([#875](https://github.com/kontourai/flow-agents/issues/875)) ([522441e](https://github.com/kontourai/flow-agents/commit/522441e3ff8aa4ea41d9f2968126620af1f0f7ed))
+* complete global opencode kit installs ([#880](https://github.com/kontourai/flow-agents/issues/880)) ([d4f6a30](https://github.com/kontourai/flow-agents/commit/d4f6a3054b560c951505bf860bba320d9f1dc463))
+* **opencode:** target active worktree state ([#886](https://github.com/kontourai/flow-agents/issues/886)) ([9589af2](https://github.com/kontourai/flow-agents/commit/9589af2b89f715f151d548ce01aa4d12d55da8cb))
+* quarantine malformed usage feedback sources ([#915](https://github.com/kontourai/flow-agents/issues/915)) ([650262e](https://github.com/kontourai/flow-agents/commit/650262ebabfbd36b7c6e27aa3ccb24c90890cf6a))
+* separate joined usage feedback outcomes ([#921](https://github.com/kontourai/flow-agents/issues/921)) ([8dba326](https://github.com/kontourai/flow-agents/commit/8dba3268506b48f298263a9f44058b9734cb0a01))
+* **workflow:** bind planned acceptance contract ([#899](https://github.com/kontourai/flow-agents/issues/899)) ([a5bf16a](https://github.com/kontourai/flow-agents/commit/a5bf16a7c8d1028c49330c41c8bc3402b329b047))
+* **workflow:** preserve repeated critique rechecks ([#907](https://github.com/kontourai/flow-agents/issues/907)) ([334de0c](https://github.com/kontourai/flow-agents/commit/334de0c8b33d762f0a3169ccc0cadc5ebd50310c))
+
 ## [5.2.0](https://github.com/kontourai/flow-agents/compare/v5.1.0...v5.2.0) (2026-07-23)
 
 
