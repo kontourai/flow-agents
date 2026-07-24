@@ -35,7 +35,9 @@ pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$TMPDIR_EVAL"
+  # Never let cleanup decide the verdict: this runs as the last EXIT-trap command,
+  # so a non-zero rm would clobber the script's real exit code.
+  rm -rf "$TMPDIR_EVAL" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -117,6 +119,9 @@ if (targets.length === 0) throw new Error("no FA hook/statusLine commands found 
 
 const env = { ...process.env };
 delete env.CLAUDE_PROJECT_DIR; // must not depend on this -- that is the entire point of #945
+// Telemetry otherwise spawns a detached writer that can write back into this eval's temp tree
+// after the cleanup trap has run, leaking directories across runs.
+env.FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND = "true";
 const failures = [];
 for (const target of targets) {
   const payload = JSON.stringify({ hook_event_name: target.event, cwd: process.cwd() });
@@ -213,9 +218,15 @@ echo ""
 echo "--- SEC: metacharacter destination does not inject shell into hook commands ---"
 
 INJECT_ROOT="$TMPDIR_EVAL/inject"
-INJECT_MARKER="$INJECT_ROOT/INJECTED"
-# A destination that closes the single quote, runs a command, and reopens it.
-INJECT_DEST="$INJECT_ROOT/o'brien; touch $INJECT_MARKER; echo 'x"
+INJECT_CWD="$INJECT_ROOT/exec-cwd"
+INJECT_MARKER="$INJECT_CWD/INJECTED"
+mkdir -p "$INJECT_CWD"
+# A destination that closes the single quote, runs a command, and reopens it. The payload
+# uses a RELATIVE marker name: an absolute path would make mkdir -p (and the installer's own
+# recursive mkdir) treat its slashes as separators, building a nested tree instead of the
+# single weirdly-named directory this scenario needs -- which in turn left the tree deep
+# enough that cleanup failed and clobbered the exit code (flaky false FAIL in a required lane).
+INJECT_DEST="$INJECT_ROOT/o'brien; touch INJECTED; echo 'x"
 mkdir -p "$INJECT_DEST"
 
 if FLOW_AGENTS_USER_CLAUDE_SETTINGS="$INJECT_DEST/settings.json" \
@@ -242,7 +253,7 @@ NODE
 INJECT_EXEC_FAILURES=0
 while IFS= read -r command; do
   [[ -z "$command" ]] && continue
-  printf '{"hook_event_name":"SessionStart"}' | sh -c "$command" >/dev/null 2>&1 || INJECT_EXEC_FAILURES=$((INJECT_EXEC_FAILURES + 1))
+  printf '{"hook_event_name":"SessionStart"}' | (cd "$INJECT_CWD" && FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND=true sh -c "$command") >/dev/null 2>&1 || INJECT_EXEC_FAILURES=$((INJECT_EXEC_FAILURES + 1))
 done < "$TMPDIR_EVAL/inject-cmds.txt"
 
 if [[ -e "$INJECT_MARKER" ]]; then
@@ -257,7 +268,7 @@ if grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err" 
   _fail "SEC: escaped path did not resolve (hooks broken for apostrophe home directories)"
 else
   FIRST_INJECT_CMD="$(head -1 "$TMPDIR_EVAL/inject-cmds.txt")"
-  if printf '{"hook_event_name":"SessionStart"}' | sh -c "$FIRST_INJECT_CMD" 2>"$TMPDIR_EVAL/inject-run.err" >/dev/null \
+  if printf '{"hook_event_name":"SessionStart"}' | (cd "$INJECT_CWD" && FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND=true sh -c "$FIRST_INJECT_CMD") 2>"$TMPDIR_EVAL/inject-run.err" >/dev/null \
      && ! grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err"; then
     _pass "SEC: the escaped destination still resolves and the hook runs"
   else
