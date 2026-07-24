@@ -886,6 +886,30 @@ add_stop_data_and_emit_usage() {
       (bash "$econ_script" "${econ_args[@]}") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
     fi
+
+    # Hook-native console board sync (#919): detached, cwd-scoped projection+bridge of this
+    # repo's local flow-agents workflow state onto a hosted Kontour console board, wired
+    # directly after the economics-record step above in the EXACT same best-effort DETACHED
+    # shape so it can never alter telemetry timing or fail the stop hook -- board
+    # transparency rides the existing session harness, never a launchd/cron daemon. The
+    # script re-resolves config.sh itself and gate-checks console_telemetry_url + a token;
+    # it exits 0 silently with zero side effects when no hosted console sink is configured.
+    #
+    # Review HIGH-1 fix: a globally-installed hook's TELEMETRY_DIR (and therefore config.sh's
+    # own TELEMETRY_WORKSPACE_ROOT) points at the INSTALL location, not the project the
+    # session actually stopped in -- console-board-sync.sh must never resolve its target repo
+    # from that. Resolve the session's real cwd HERE, the exact same authoritative-source +
+    # fallback the economics-record step above already uses (the usage event's own
+    # .context.cwd, falling back to $PWD), and hand it to the script explicitly via
+    # FLOW_AGENTS_BOARD_SYNC_CWD so it never has to guess at an install root.
+    local board_sync_script="${TELEMETRY_DIR}/console-board-sync.sh"
+    if [[ -f "$board_sync_script" ]]; then
+      local board_sync_cwd
+      board_sync_cwd=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
+      [[ -z "$board_sync_cwd" || ! -d "$board_sync_cwd" ]] && board_sync_cwd="$PWD"
+      (FLOW_AGENTS_BOARD_SYNC_CWD="$board_sync_cwd" bash "$board_sync_script") </dev/null >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi
   fi
 
   echo "$event"

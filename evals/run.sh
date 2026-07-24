@@ -162,6 +162,8 @@ run_static() {
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_model_routing_hints.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_console_board_sync_wiring.sh" || result=1
   return $result
 }
 
@@ -250,6 +252,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_console_tenant_isolation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_economics_record.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
   echo ""
