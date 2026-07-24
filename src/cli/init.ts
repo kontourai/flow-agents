@@ -734,10 +734,26 @@ function writeJsonAtomic(target: string, value: unknown): void {
   }
 }
 
+/**
+ * Escape an absolute path for the two nested quoting contexts a hook command lives in:
+ * the emitted template is `bash -lc '... node "$root/..." ...'`, so the substituted value sits
+ * inside double quotes that are themselves inside the outer single-quoted `bash -lc` argument.
+ * Without this, a path containing an apostrophe -- a legitimate home directory such as
+ * /Users/o'brien, or an attacker-supplied --dest -- terminates the single-quoted string and
+ * injects arbitrary shell into every hook command persisted to settings.json
+ * (kontourai/flow-agents#945 review finding).
+ */
+function shellEscapeForHookCommand(sourceRoot: string): string {
+  // Inner: neutralize what the inner shell would still expand inside "..." .
+  const innerSafe = sourceRoot.replace(/([\\"$`])/g, "\\$1");
+  // Outer: close, escape, and reopen the single-quoted bash -lc argument around each quote.
+  return innerSafe.replace(/'/g, "'\\''");
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   return command
     .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
+    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${shellEscapeForHookCommand(sourceRoot)}/`);
 }
 
 /** Recursively rewrite every `command` string found under `value` in place. */
@@ -892,16 +908,13 @@ const GLOBAL_RUNTIME_VENDOR_DIRS = ["build", "context", "kits", "packaging", "sc
 function vendorClaudeCodeGlobalRuntime(dest: string, bundle: string): void {
   const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-claude-runtime-"));
   try {
+    // No existence guard: a bundle missing any vendored directory is a build defect, and silently
+    // vendoring less than intended would bake hook commands pointing at an incomplete runtime --
+    // the failure class the fail-loud ordering exists to prevent. cpSync throws on a missing source.
     for (const entry of GLOBAL_RUNTIME_VENDOR_DIRS) {
-      const source = path.join(bundle, entry);
-      if (!fs.existsSync(source)) continue;
-      fs.cpSync(source, path.join(overlay, ".flow-agents", "runtime", entry), { recursive: true });
+      fs.cpSync(path.join(bundle, entry), path.join(overlay, ".flow-agents", "runtime", entry), { recursive: true });
     }
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-    const metadata = JSON.stringify({ runtime: "claude-code", package_version: pkgJson["version"] ?? "0.0.0" });
-    const installer = path.join(root, "scripts", "install-owned-files.js");
-    const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
-    if (result.status !== 0) throw new Error(result.stderr.trim() || `claude-code global runtime vendoring failed with exit code ${result.status ?? "unknown"}`);
+    runOwnedFilesInstaller(overlay, dest, { runtime: "claude-code" }, "claude-code global runtime vendoring");
   } finally {
     fs.rmSync(overlay, { recursive: true, force: true });
   }
@@ -944,6 +957,15 @@ function installOpenCodeOverlay(overlay: string, dest: string, metadata: string,
   }
   const result = spawnSync(process.execPath, installerArgs, { encoding: "utf8" });
   if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+}
+
+/** Install a staged overlay through the ownership-manifest-tracked installer. Throws on failure. */
+function runOwnedFilesInstaller(overlay: string, dest: string, metadataFields: Record<string, unknown>, label: string): void {
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+  const metadata = JSON.stringify({ ...metadataFields, package_version: pkgJson["version"] ?? "0.0.0" });
+  const installer = path.join(root, "scripts", "install-owned-files.js");
+  const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `${label} failed with exit code ${result.status ?? "unknown"}`);
 }
 
 async function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[], trustedSymlinkRoot?: string): Promise<number> {

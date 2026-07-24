@@ -12,6 +12,9 @@
 #        simulated npx-cache directory is deleted.
 #   AC5: a simulated vendoring failure (poisoned destination) exits non-zero with an
 #        actionable message and leaves settings.json byte-identical to its pre-run content.
+#   SEC: a destination path containing shell metacharacters must not inject shell into the
+#        persisted hook commands, and must still resolve (a real home dir may contain an
+#        apostrophe, e.g. /Users/o'brien) -- review finding, kontourai/flow-agents#945.
 #
 # AC2 (zero _npx occurrences), AC3 (idempotent re-run), and AC4 (version stamp) are
 # covered by Scenario 5 in evals/integration/test_install_merge.sh, which already
@@ -195,6 +198,72 @@ if [[ "$PRE_HASH" == "$POST_HASH" ]]; then
   _pass "AC5: settings.json is byte-identical to its pre-run content (not modified by the failed install)"
 else
   _fail "AC5: settings.json was modified despite the vendoring failure"
+fi
+
+
+# ---------------------------------------------------------------------------
+# SEC: shell-metacharacter destination must not become command injection.
+#
+# The emitted hook command is `bash -lc '... node "<root>/scripts/..." ...'` -- the
+# substituted root sits inside double quotes nested in an outer single-quoted argument.
+# An unescaped apostrophe in the destination terminates that single-quoted string and
+# injects arbitrary shell that Claude Code would then execute on EVERY hook event.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- SEC: metacharacter destination does not inject shell into hook commands ---"
+
+INJECT_ROOT="$TMPDIR_EVAL/inject"
+INJECT_MARKER="$INJECT_ROOT/INJECTED"
+# A destination that closes the single quote, runs a command, and reopens it.
+INJECT_DEST="$INJECT_ROOT/o'\''brien; touch $INJECT_MARKER; echo '\''x"
+mkdir -p "$INJECT_DEST"
+
+if FLOW_AGENTS_USER_CLAUDE_SETTINGS="$INJECT_DEST/settings.json" \
+   node "$ROOT_DIR/build/src/cli.js" init --runtime claude-code --global --yes \
+   --dest "$INJECT_DEST" > "$TMPDIR_EVAL/inject-init.log" 2>&1; then
+  _pass "SEC: install succeeds with a metacharacter destination"
+else
+  _fail "SEC: install failed outright for a metacharacter destination"
+  tail -5 "$TMPDIR_EVAL/inject-init.log"
+fi
+
+# Execute every persisted FA command exactly as a shell would; the marker must never appear.
+INJECT_SETTINGS="$INJECT_DEST/settings.json" node - "$TMPDIR_EVAL/inject-cmds.txt" <<'NODE'
+const fs = require("fs");
+const settings = JSON.parse(fs.readFileSync(process.env.INJECT_SETTINGS, "utf8"));
+const commands = [];
+for (const groups of Object.values(settings.hooks ?? {})) {
+  for (const group of groups) for (const hook of group.hooks ?? []) if (hook.command) commands.push(hook.command);
+}
+if (settings.statusLine?.command) commands.push(settings.statusLine.command);
+fs.writeFileSync(process.argv[2], commands.join("\n") + "\n");
+NODE
+
+INJECT_EXEC_FAILURES=0
+while IFS= read -r command; do
+  [[ -z "$command" ]] && continue
+  printf '{"hook_event_name":"SessionStart"}' | sh -c "$command" >/dev/null 2>&1 || INJECT_EXEC_FAILURES=$((INJECT_EXEC_FAILURES + 1))
+done < "$TMPDIR_EVAL/inject-cmds.txt"
+
+if [[ -e "$INJECT_MARKER" ]]; then
+  _fail "SEC: INJECTION -- executing the persisted hook commands ran attacker-supplied shell"
+else
+  _pass "SEC: executing every persisted hook command ran no injected shell"
+fi
+
+# Neutralizing the metacharacters is not enough: the escaped path must still resolve,
+# or a legitimate apostrophe home directory would silently break every hook.
+if grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err" 2>/dev/null; then
+  _fail "SEC: escaped path did not resolve (hooks broken for apostrophe home directories)"
+else
+  FIRST_INJECT_CMD="$(head -1 "$TMPDIR_EVAL/inject-cmds.txt")"
+  if printf '{"hook_event_name":"SessionStart"}' | sh -c "$FIRST_INJECT_CMD" 2>"$TMPDIR_EVAL/inject-run.err" >/dev/null \
+     && ! grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err"; then
+    _pass "SEC: the escaped destination still resolves and the hook runs"
+  else
+    _fail "SEC: escaped destination did not resolve; hook could not load its runtime"
+    head -3 "$TMPDIR_EVAL/inject-run.err"
+  fi
 fi
 
 echo ""

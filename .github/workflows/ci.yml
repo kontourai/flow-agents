@@ -613,6 +613,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check gate-review-inquiry-records-integration
 
+      - name: Global install npx durability integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check global-install-npx-durability-integration
+
       - name: Install merge integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check install-merge-integration
