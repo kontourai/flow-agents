@@ -35,6 +35,7 @@ import {
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 
 type AnyObj = Record<string, any>;
 
@@ -1362,7 +1363,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
-    const critMeta: AnyObj = {
+    const reconstructedMetadata = c._source_claim_metadata
+      && typeof c._source_claim_metadata === "object"
+      && !Array.isArray(c._source_claim_metadata)
+      ? { ...c._source_claim_metadata }
+      : null;
+    const critMeta: AnyObj = reconstructedMetadata ?? {
       origin: "critique",
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
@@ -1389,7 +1395,14 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimIdSalt = critiqueIdentityVersion === 2
       ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
       : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
+    // Existing critique claims are reconstructed from trust.bundle before a
+    // compose-safe rebuild. Preserve their physical claim identity exactly:
+    // an externally resolved critique acquires supersession metadata without
+    // changing its claim id, and recomputing the historical salt here would
+    // make an unrelated gate-claim write drift the resolved critique.
+    const claimId = typeof c.claim_id === "string" && c.claim_id.length > 0
+      ? c.claim_id
+      : generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
     // A critique claim's physical id changes when it becomes history because its supersession
     // metadata is part of the claim identity. Preserve an immutable logical record id so an
     // authenticated resolver can refer to the original review without relying on a mutable
@@ -3568,7 +3581,7 @@ export function externalCritiqueAuthorityForGate(dir: string, bundle: AnyObj): {
     const completion = verifyLifecycleAuthorityCompletion(JSON.parse(bytes.toString("utf8")));
     return {
       events,
-      completionVerified: ["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action))
+      completionVerified: ["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(String(completion.action))
         && completion.run_id === path.basename(dir)
         && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events }),
     };
@@ -3865,11 +3878,13 @@ function requireStampedClaim(claim: AnyObj, dir: string): string {
 }
 
 function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
-  const bundleFile = path.join(dir, "trust.bundle");
-  if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
-    die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
-  }
-  return loadJson(bundleFile);
+  return withFlowSessionRecoveryFenceRead(dir, () => {
+    const bundleFile = path.join(dir, "trust.bundle");
+    if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
+      die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
+    }
+    return loadJson(bundleFile);
+  });
 }
 
 function checksFromBundle(dir: string): AnyObj[] {
@@ -4126,8 +4141,9 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
   const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && claimOrigin(c) === "critique");
   return critiqueClaims.map((c: AnyObj) => {
     const md = (c.metadata && typeof c.metadata === "object") ? c.metadata as AnyObj : {};
-    return {
+    const critique = {
       id: String(c.subjectId || "").split("/").pop() || c.id,
+      claim_id: c.id,
       verdict: c.value ?? "not_verified",
       summary: c.fieldOrBehavior || "",
       findings: Array.isArray(md.findings) ? md.findings : [],
@@ -4150,6 +4166,17 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
         ? { critique_resolution: md.critique_resolution }
         : {}),
     };
+    // Compose-safe writes may update an unrelated gate claim. Retain the
+    // original metadata insertion order privately so rebuilding that untouched
+    // critique is byte-stable even when an external resolution appended
+    // supersession metadata in a different order.
+    Object.defineProperty(critique, "_source_claim_metadata", {
+      value: md,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    return critique;
   });
 }
 

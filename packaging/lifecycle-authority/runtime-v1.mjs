@@ -143,6 +143,110 @@ export function critiqueResolutionEdgeProjectionSummary(claims) {
   };
 }
 
+function gateExpectation(claim) {
+  return record(claim?.metadata?.gate_claim) && typeof claim.metadata.gate_claim.expectation_id === "string"
+    ? claim.metadata.gate_claim.expectation_id
+    : null;
+}
+
+function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {
+  if (!record(currentBundle) || !record(candidateBundle) || !Array.isArray(currentBundle.claims) || !Array.isArray(candidateBundle.claims)) {
+    throw new Error("verification evidence reseal requires Trust Bundles with claims");
+  }
+  if (authorization.claim_delta !== "replace"
+      || !Number.isSafeInteger(authorization.predecessor_claim_index)
+      || !Number.isSafeInteger(authorization.current_claim_index)
+      || authorization.predecessor_claim_index !== authorization.current_claim_index
+      || authorization.predecessor_claim_index < 0
+      || currentBundle.claims.length !== candidateBundle.claims.length) {
+    throw new Error("verification evidence reseal authorization claim delta is invalid");
+  }
+  const index = authorization.predecessor_claim_index;
+  const predecessor = currentBundle.claims[index];
+  const current = candidateBundle.claims[index];
+  const requirements = Array.isArray(flow.requirements) ? flow.requirements : [];
+  const targetRequirements = requirements.filter((requirement) => record(requirement) && requirement.id === authorization.target_expectation_id);
+  if (!predecessor || !current
+      || targetRequirements.length !== 1
+      || gateExpectation(predecessor) !== authorization.target_expectation_id
+      || gateExpectation(current) !== authorization.target_expectation_id
+      || currentBundle.claims.filter((claim) => gateExpectation(claim) === authorization.target_expectation_id).length !== 1
+      || candidateBundle.claims.filter((claim) => gateExpectation(claim) === authorization.target_expectation_id).length !== 1) {
+    throw new Error("verification evidence reseal does not target exactly one authorized verify expectation");
+  }
+  const targetRequirement = targetRequirements[0];
+  const bundleClaim = targetRequirement.bundle_claim;
+  if (!record(bundleClaim) || typeof bundleClaim.claimType !== "string" || typeof bundleClaim.subjectType !== "string") {
+    throw new Error("verification evidence reseal target has no canonical current gate-claim requirement");
+  }
+  for (const [label, claim] of [["predecessor", predecessor], ["replacement", current]]) {
+    const gateClaim = claim?.metadata?.gate_claim;
+    if (!record(gateClaim)
+        || gateClaim.expectation_id !== targetRequirement.id
+        || gateClaim.step_id !== flow.step_id
+        || gateClaim.claim_type !== bundleClaim.claimType
+        || gateClaim.subject_type !== bundleClaim.subjectType) {
+      throw new Error(`verification evidence reseal ${label} gate_claim metadata does not bind the canonical current ${flow.gate_id} requirement`);
+    }
+  }
+  const claimDigest = (claim) => crypto.createHash("sha256").update(JSON.stringify(claim)).digest("hex");
+  if (predecessor.id !== authorization.predecessor_claim_id
+      || predecessor.status !== authorization.predecessor_claim_status
+      || claimDigest(predecessor) !== authorization.predecessor_claim_sha256
+      || current.id !== authorization.current_claim_id
+      || current.status !== authorization.current_claim_status
+      || claimDigest(current) !== authorization.current_claim_sha256) {
+    throw new Error("verification evidence reseal claim identity, status, or digest does not match the authorized delta");
+  }
+  currentBundle.claims.forEach((claim, claimIndex) => {
+    if (claimIndex !== index && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
+      throw new Error("verification evidence reseal changed the complete ordered claim set outside the authorized expectation");
+    }
+  });
+}
+
+/**
+ * Pure package-side policy for the privileged evidence reseal. Filesystem,
+ * signature, replay, Flow attachment, and completion concerns remain in the
+ * coordinator; this transition accepts only the exact authorized bytes and a
+ * gate-claim-only Trust Bundle change.
+ */
+export function resealVerificationEvidenceTransition(input) {
+  const {
+    current_bundle: currentBundle,
+    candidate_bundle: candidateBundle,
+    resolution_events: resolutionEvents,
+    authorization,
+    current_bundle_bytes: currentBundleBytes,
+    candidate_bundle_bytes: candidateBundleBytes,
+    ledger_bytes: ledgerBytes,
+    flow,
+  } = input ?? {};
+  if (!record(authorization) || authorization.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
+  if (!Buffer.isBuffer(currentBundleBytes) || !Buffer.isBuffer(candidateBundleBytes) || !Buffer.isBuffer(ledgerBytes)) throw new Error("verification evidence reseal requires exact byte preimages");
+  if (!record(flow) || flow.definition_id !== "builder.build" || flow.step_id !== "verify"
+      || typeof flow.gate_id !== "string" || !Array.isArray(flow.requirements)
+      || authorization.flow_definition_id !== flow.definition_id || authorization.flow_step_id !== flow.step_id
+      || authorization.flow_gate_id !== flow.gate_id) {
+    throw new Error("verification evidence reseal is authorized only for the builder.build verify gate");
+  }
+  const currentCritique = critiqueHistoryProjectionSummary(currentBundle?.claims);
+  const candidateCritique = critiqueHistoryProjectionSummary(candidateBundle?.claims);
+  if (canonical(currentCritique.projection) !== canonical(candidateCritique.projection)) {
+    throw new Error("verification evidence reseal candidate changed the byte-identical critique projection");
+  }
+  assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow);
+  if (crypto.createHash("sha256").update(currentBundleBytes).digest("hex") !== authorization.preimage_bundle_sha256) throw new Error("verification evidence reseal current bundle preimage changed");
+  if (crypto.createHash("sha256").update(candidateBundleBytes).digest("hex") !== authorization.candidate_bundle_sha256) throw new Error("verification evidence reseal candidate bundle preimage changed");
+  if (crypto.createHash("sha256").update(ledgerBytes).digest("hex") !== authorization.preimage_ledger_sha256) throw new Error("verification evidence reseal resolution ledger preimage changed");
+  if (!Array.isArray(resolutionEvents)
+      || authorization.preimage_ledger_length !== resolutionEvents.length
+      || authorization.preimage_ledger_tail_hash !== (resolutionEvents.at(-1)?.event_hash ?? "0".repeat(64))) {
+    throw new Error("verification evidence reseal resolution ledger identity changed");
+  }
+  return { bundle: structuredClone(candidateBundle), resolution_events: structuredClone(resolutionEvents) };
+}
+
 export function assertAppendOnlyCritiqueHistory(historicalClaims, currentClaims) {
   const historical = critiqueHistoryProjectionSummary(historicalClaims);
   const current = critiqueHistoryProjectionSummary(currentClaims);

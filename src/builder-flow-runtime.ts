@@ -18,7 +18,7 @@ import {
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
@@ -1202,8 +1202,7 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
   assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
   const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
-  const expectedCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events });
-  if (!["resolve-critique", "repair-critique-resolution-history"].includes(String(completion.action)) || completion.run_id !== path.basename(sessionDir) || completion.result_core_sha256 !== expectedCore) {
+  if (!lifecycleAuthorityCompletionBindsExactState(completion, path.basename(sessionDir), bundle, events)) {
     throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
   }
   return { events, verified: true };

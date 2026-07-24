@@ -107,7 +107,98 @@ export interface CritiqueResolutionHistoryRepairAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
-type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization;
+export interface VerificationEvidenceResealAuthorization {
+  schema_version: "1.0";
+  operation: "reseal-verification-evidence";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  preimage_bundle_sha256: string;
+  candidate_bundle_sha256: string;
+  candidate_transaction_id: string;
+  preimage_ledger_sha256: string;
+  preimage_ledger_length: number;
+  preimage_ledger_tail_hash: string;
+  current_completion_sha256: string;
+  current_completion_request_sha256: string;
+  current_completion_result_core_sha256: string;
+  flow_definition_id: "builder.build";
+  flow_step_id: "verify";
+  flow_gate_id: string;
+  flow_run_head: string;
+  flow_manifest_sha256: string;
+  critique_projection_sha256: string;
+  target_expectation_id: string;
+  predecessor_claim_id: string;
+  predecessor_claim_status: string;
+  predecessor_claim_sha256: string;
+  predecessor_claim_index: number;
+  current_claim_id: string;
+  current_claim_status: string;
+  current_claim_sha256: string;
+  current_claim_index: number;
+  claim_delta: "replace";
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization | VerificationEvidenceResealAuthorization;
+
+const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject",
+  "preimage_bundle_sha256", "candidate_bundle_sha256", "candidate_transaction_id",
+  "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash",
+  "current_completion_sha256", "current_completion_request_sha256", "current_completion_result_core_sha256",
+  "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
+  "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
+  "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
+  "nonce", "expires_at", "requested_at", "signature",
+] as const;
+
+export function verificationEvidenceResealAuthorizationPayload(value: Omit<VerificationEvidenceResealAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedVerificationEvidenceResealAuthorization(
+  fields: Omit<VerificationEvidenceResealAuthorization, "schema_version" | "operation" | "signature">,
+): { unsigned: Omit<VerificationEvidenceResealAuthorization, "signature">; signingPayload: string } {
+  const unsigned = { schema_version: "1.0", operation: "reseal-verification-evidence", ...fields } as const;
+  return { unsigned, signingPayload: verificationEvidenceResealAuthorizationPayload(unsigned) };
+}
+
+export function validateVerificationEvidenceResealAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): VerificationEvidenceResealAuthorization {
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS].sort())) {
+    throw new Error("verification evidence reseal authorization contains unexpected or missing fields");
+  }
+  if (value.schema_version !== "1.0" || value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
+  if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("verification evidence reseal authorization does not bind the canonical project, run, and subject");
+  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("verification evidence reseal authorization must bind the builder.build verify gate");
+  if (value.claim_delta !== "replace") throw new Error("verification evidence reseal authorization claim delta is invalid");
+  for (const field of VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`verification evidence reseal authorization ${field} must be a SHA-256 digest`);
+  }
+  if (!/^[a-f0-9]{32}$/.test(String(value.candidate_transaction_id))) throw new Error("verification evidence reseal candidate transaction identity is invalid");
+  if (!Number.isSafeInteger(value.preimage_ledger_length) || Number(value.preimage_ledger_length) < 0) throw new Error("verification evidence reseal ledger length is invalid");
+  for (const field of ["predecessor_claim_index", "current_claim_index"]) {
+    if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`verification evidence reseal authorization ${field} is invalid`);
+  }
+  for (const field of ["flow_gate_id", "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "current_claim_id", "current_claim_status"]) {
+    boundedText(value[field], `authorization.${field}`, 4096);
+  }
+  for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`verification evidence reseal authorization ${field} does not match the current preimage`);
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt || (now > expiresAt && !expected.allowExpired) || requestedAt > now + 5 * 60_000) throw new Error("verification evidence reseal authorization time window is invalid");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as VerificationEvidenceResealAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, verificationEvidenceResealAuthorizationPayload);
+  return authorization;
+}
 
 export function critiqueResolutionAuthorizationPayload(value: Omit<CritiqueResolutionAuthorization, "signature">): string {
   return JSON.stringify(value);

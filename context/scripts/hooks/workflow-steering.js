@@ -23,6 +23,7 @@ const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpen
 const { readOwnCurrentPointer } = require('./lib/current-pointer');
 const { readKitManifests, workflowTriggersFor } = require('./lib/kit-catalog');
 const { canonicalFlowState } = require('./stop-goal-fit');
+const { withFlowRecoveryFenceRead } = require('./lib/flow-recovery-fence');
 
 const STEERING = {
   'tool-planner': [
@@ -701,7 +702,7 @@ function supersessionSteering(root, current) {
   }
 }
 
-function run(rawInput) {
+function run(rawInput, _options = {}, fencedRunId = null) {
   try {
     const input = JSON.parse(rawInput);
     const event = input.hook_event_name || '';
@@ -709,6 +710,16 @@ function run(rawInput) {
     const toolInput = input.tool_input || {};
     const root = findRepoRoot(input.cwd || process.cwd());
     const current = latestWorkflowState(root);
+    if (current && fencedRunId === null) {
+      const selectedRunId = path.basename(path.dirname(current.file));
+      try {
+        return withFlowRecoveryFenceRead(root, selectedRunId, () => run(rawInput, {}, selectedRunId));
+      } catch (error) {
+        return `${rawInput}\n\n---\nWORKFLOW RECOVERY ACTIVE: ${safeStateText(error && error.message || error)}. Canonical state is unavailable until recovery completes.\n---`;
+      }
+    }
+    if (!current && fencedRunId !== null) throw new Error("workflow session selection disappeared during fenced read");
+    if (current && fencedRunId !== path.basename(path.dirname(current.file))) throw new Error("workflow session selection changed during fenced read");
     const guidance = current ? canonicalGuidance(root, current) : { kind: 'legacy' };
     const hints = [];
     let shouldAppendWorkflowContext = false;

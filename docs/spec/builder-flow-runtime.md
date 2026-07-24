@@ -428,6 +428,59 @@ non-root-owned components, and every symlink on non-Darwin hosts fail closed. Th
 not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
 every component.
 
+### Atomic verification-evidence reseal
+
+After a signed critique resolution or history repair, the exact-current lifecycle completion
+includes the full Trust Bundle plus external resolution ledger. Final verification evidence cannot
+use the ordinary package transaction because changing only `trust.bundle` would make that
+completion stale. The public runtime therefore exposes two separate operations:
+`reseal-verification-evidence-request` stages the normal writer-produced candidate exactly once and
+emits an unsigned authorization; `reseal-verification-evidence` accepts only a signed authorization
+and delegates to the fixed root-owned coordinator action.
+
+The authorization binds the raw current and candidate bundle digests, retained writer transaction
+identity, raw ledger digest/length/tail, raw and core current-completion identity, `builder.build`
+`verify` step and `verify-gate` identity, Flow run head and raw manifest digest, critique projection digest, project/run/subject,
+nonce, request time, and expiry. It also binds the exact target verify expectation and the
+predecessor/current claim id, status, raw-JSON digest, ordered index, and `replace` delta. The
+coordinator derives the candidate path from the signed transaction id; the protocol has no
+caller-selected candidate path.
+
+The unprivileged mutation worker reopens and validates every exact preimage. Its pure runtime
+transition requires a byte-semantically identical critique projection and complete ordered claim
+set except for the one authorized in-place target replacement. Unrelated verify claims cannot be
+modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
+`builder.build` verify gate. The protected policy derives the exact current gate requirements from
+the canonical Flow Definition, requires the target expectation exactly once there, and validates
+both predecessor and replacement `gate_claim` stamps against that requirement's expectation,
+step, claim type, and subject type. Inside Flow's native run-mutation lock, the coordinator
+revalidates the signed Flow head and exact old completion before capturing a closed transaction
+plan over exactly six fixed artifact identities: session bundle, Flow manifest, Flow state,
+request-keyed stored attachment, JSON report, and Markdown report. The root-authenticated signed
+plan contains no artifact paths and binds request/authorization/key/nonce, reducer identity,
+result core, and each artifact's exact pre/post presence, mode, size, and digest.
+
+The worker writes fixed old/new sibling stages, fsyncs and rereads them, then activates Flow's
+provider-neutral recovery fence before publishing the six enumerated postimages. Root durably
+records nonce and completion, issues the immutable full-bundle-plus-ledger evidence-core
+completion, and installs that exact receipt while the fence remains active. Finalization uses
+Flow's recovery-only native lock, verifies the exact postimages and receipt, then opens the fence.
+Flow's native writer assigns the active fence a unique generation and durably publishes it;
+the dedicated finalizer requires that exact generation before reopening. Readers bind the
+generation, exact fence fingerprint, and run-directory identity across the full supported read,
+and reject symlinked fixed Flow ancestry. The installed closure must expose the mutation lock,
+recovery lock, active writer, and generation-bound finalizer before root creates a nonce or the
+worker creates a plan or stage.
+Later legitimate Flow state/report transitions remain valid because the durable receipt binds the
+immutable evidence core rather than treating mutable state/report bytes as perpetual current
+state. Recovery accepts only an exact all-old or all-new generation; mixed or unknown generations
+are quarantined with the fence left active. Active legacy recursive reseal journals require
+offline quarantine regardless of their old request binding and are never auto-restored. Cleanup
+removes fixed stages before the signed plan; an open fence plus a retained plan is a valid
+cleanup-replay state, not a permanent rejection.
+Candidate, bundle, ledger, completion, Flow, signature, expiry, nonce, or claim-scope drift fails
+closed.
+
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
 a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
@@ -526,7 +579,16 @@ and prepared recovery. An exact completed request replays without rewriting the
 newer receipt; a prepared request resumes only after the same two root checks
 and transaction recovery. Session and canonical Flow artifacts are journaled as
 one transaction, so a Flow or publication fault restores both snapshots and
-does not append an event or attach a receipt. Operators first run the read-only
+does not append an event or attach a receipt. Before any recovery or rollback
+write, the coordinator validates both complete snapshot sets: every entry has
+the exact snapshot shape, a unique canonical contained relative POSIX path, a
+safe regular-file mode, and canonical base64 bytes. Flow's `.mutation.lock` is
+live coordination rather than transaction payload. NFC normalization followed
+by locale-independent ASCII case-folding defines protected and duplicate path
+identity, but an earlier UTF-16 code-unit check rejects every non-ASCII path
+before normalization, identity, or filesystem access. Case aliases fail closed
+while only the exact spelling is excluded; recovery never deletes or restores its tickets.
+Operators first run the read-only
 request command, sign its exact payload outside the worktree, invoke the
 installed helper once, and retain the resulting root-signed completion as the
 current receipt; no agent or package caller can substitute a durable anchor or

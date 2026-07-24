@@ -8,9 +8,11 @@ import { pathToFileURL } from "node:url";
 import {
   assertAppendOnlyCritiqueHistory,
   coordinatorRuntimeSha256,
+  critiqueHistoryProjectionSummary,
   critiqueResolutionEdgeProjectionSummary,
   critiqueResolutionHistoryBridgeDigest,
   repairCritiqueResolutionHistoryTransition,
+  resealVerificationEvidenceTransition,
   resolveCritiqueTransition,
   selectUniqueHistoricalLedgerPrefix,
   validateResolutionEventLedger,
@@ -32,6 +34,7 @@ const ACTION_FIELDS = {
   archive: ["action", "project_root", "session_dir", "authorization_file"],
   "resolve-critique": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
+  "reseal-verification-evidence": ["action", "project_root", "session_dir", "authorization_file"],
 };
 const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash",
@@ -47,6 +50,16 @@ const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
   "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
   "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
   "historical_bridge_sha256", "preserved_resolution_sha256", "missing_resolution_event_id", "missing_authorization_sha256", "reason_code",
+  "nonce", "expires_at", "requested_at", "signature",
+];
+const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject",
+  "preimage_bundle_sha256", "candidate_bundle_sha256", "candidate_transaction_id",
+  "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash",
+  "current_completion_sha256", "current_completion_request_sha256", "current_completion_result_core_sha256",
+  "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
+  "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
+  "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
   "nonce", "expires_at", "requested_at", "signature",
 ];
 
@@ -118,9 +131,14 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   return authorization;
 }
 function assertPrivilegedAuthorizationShape(authorization) {
-  if (authorization.operation !== "repair-critique-resolution-history") return authorization;
-  exact(authorization, HISTORY_REPAIR_AUTHORIZATION_FIELDS, "privileged history repair authorization");
-  exact(authorization.signature, ["algorithm", "key_id", "value"], "privileged history repair authorization signature");
+  const fields = authorization.operation === "repair-critique-resolution-history"
+    ? HISTORY_REPAIR_AUTHORIZATION_FIELDS
+    : authorization.operation === "reseal-verification-evidence"
+      ? VERIFICATION_RESEAL_AUTHORIZATION_FIELDS
+      : null;
+  if (!fields) return authorization;
+  exact(authorization, fields, `privileged ${authorization.operation} authorization`);
+  exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   return authorization;
 }
 function verifyAuthorization(file, options = {}) {
@@ -137,26 +155,105 @@ function atomicWrite(file, bytes, mode = 0o600) {
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
 }
 function transactionJournal(paths) { return path.join(paths.sessionDir, ".lifecycle-authority.transaction.json"); }
-export function snapshotTree(root, relative = "") {
-  const target = path.join(root, relative); const stat = fs.lstatSync(target);
+const FLOW_MUTATION_LOCK_PATH = ".mutation.lock";
+const FLOW_TRANSACTION_EXCLUDED_PATHS = [FLOW_MUTATION_LOCK_PATH];
+export const VERIFICATION_RESEAL_TRANSACTION_PROTOCOL = "flow-agents.verification-reseal-transaction.v1";
+export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
+  "session-trust-bundle",
+  "flow-manifest",
+  "flow-state",
+  "flow-attachment",
+  "flow-report-json",
+  "flow-report-markdown",
+]);
+const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
+const FLOW_RECOVERY_FENCE_FILE = "recovery-fence.json";
+const FLOW_RECOVERY_FENCE_PROTOCOL = "flow.run-recovery-fence.v1";
+function transactionPathIsExcluded(relative, excludedPaths) {
+  return excludedPaths.some((excluded) => relative === excluded || relative.startsWith(`${excluded}/`));
+}
+function transactionNamespaceIdentity(relative) {
+  return relative.normalize("NFC").replace(/[A-Z]/g, (character) => String.fromCharCode(character.charCodeAt(0) + 0x20));
+}
+function canonicalTransactionSnapshotPath(root, relative, label) {
+  if (typeof relative !== "string" || relative.length === 0 || relative.includes("\0") || relative.includes("\\")) {
+    throw new Error(`${label} path must be a nonempty canonical relative POSIX path`);
+  }
+  for (let index = 0; index < relative.length; index += 1) {
+    if (relative.charCodeAt(index) > 0x7f) throw new Error(`${label} path must contain only ASCII code units`);
+  }
+  if (path.posix.isAbsolute(relative) || path.win32.parse(relative).root !== "") {
+    throw new Error(`${label} path must remain relative to its transaction root`);
+  }
+  const segments = relative.split("/");
+  const firstIdentity = transactionNamespaceIdentity(segments[0]);
+  if (firstIdentity === FLOW_MUTATION_LOCK_PATH && segments[0] !== FLOW_MUTATION_LOCK_PATH) {
+    throw new Error(`${label} aliases the protected ${FLOW_MUTATION_LOCK_PATH} namespace`);
+  }
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..") || path.posix.normalize(relative) !== relative) {
+    throw new Error(`${label} path is not canonical`);
+  }
+  const absoluteRoot = path.resolve(root);
+  const resolved = path.resolve(absoluteRoot, ...segments);
+  const withinRoot = path.relative(absoluteRoot, resolved);
+  if (withinRoot === "" || withinRoot === ".." || withinRoot.startsWith(`..${path.sep}`) || path.isAbsolute(withinRoot)) {
+    throw new Error(`${label} path escapes its transaction root`);
+  }
+  return { relative, identity: transactionNamespaceIdentity(relative) };
+}
+function validateTransactionSnapshot(root, snapshot, label) {
+  if (!Array.isArray(snapshot)) throw new Error(`${label} must be an array`);
+  const seen = new Set();
+  return snapshot.map((entry, index) => {
+    const entryLabel = `${label} entry ${index}`;
+    if (!record(entry) || canonicalJson(Object.keys(entry).sort()) !== canonicalJson(["bytes", "mode", "path"])) {
+      throw new Error(`${entryLabel} must contain exactly path, bytes, and mode`);
+    }
+    const { relative, identity } = canonicalTransactionSnapshotPath(root, entry.path, entryLabel);
+    if (seen.has(identity)) throw new Error(`${label} contains duplicate path identity ${relative}`);
+    seen.add(identity);
+    if (!Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 0o777
+        || (entry.mode & 0o400) === 0 || (entry.mode & 0o133) !== 0) {
+      throw new Error(`${entryLabel} mode is not a safe regular-file mode`);
+    }
+    if (typeof entry.bytes !== "string") throw new Error(`${entryLabel} bytes must be canonical base64`);
+    const bytes = Buffer.from(entry.bytes, "base64");
+    if (bytes.toString("base64") !== entry.bytes) throw new Error(`${entryLabel} bytes must be canonical base64`);
+    return { path: relative, bytes: entry.bytes, mode: entry.mode };
+  });
+}
+function validateTransactionJournalSnapshots(paths, journal) {
+  if (!record(journal)) throw new Error("lifecycle transaction journal is invalid");
+  const flowRoot = canonicalFlowPaths(paths).root;
+  const session = validateTransactionSnapshot(paths.sessionDir, journal.session, "lifecycle transaction session snapshot");
+  const flow = validateTransactionSnapshot(flowRoot, journal.flow, "lifecycle transaction Flow snapshot");
+  return { session, flow };
+}
+export function snapshotTree(root, relative = "", excludedPaths = []) {
+  if (transactionPathIsExcluded(relative, excludedPaths)) return [];
+  const target = relative === "" ? root : path.join(root, ...relative.split("/")); const stat = fs.lstatSync(target);
   if (stat.isSymbolicLink()) throw new Error("lifecycle transaction refuses symlinked artifact paths");
   if (stat.isFile()) return [{ path: relative, bytes: fs.readFileSync(target).toString("base64"), mode: stat.mode & 0o777 }];
   if (!stat.isDirectory()) throw new Error("lifecycle transaction requires regular artifact paths");
-  return fs.readdirSync(target).flatMap((entry) => entry === ".lifecycle-authority.transaction.json" ? [] : snapshotTree(root, path.join(relative, entry)));
+  return fs.readdirSync(target).flatMap((entry) => entry === ".lifecycle-authority.transaction.json"
+    ? []
+    : snapshotTree(root, relative === "" ? entry : path.posix.join(relative, entry), excludedPaths));
 }
-export function restoreTree(root, snapshot) {
-  const original = new Map(snapshot.map((entry) => [entry.path, entry]));
-  const current = snapshotTree(root);
-  for (const entry of current.filter((entry) => !original.has(entry.path))) fs.unlinkSync(path.join(root, entry.path));
-  for (const entry of snapshot) atomicWrite(path.join(root, entry.path), Buffer.from(entry.bytes, "base64"), entry.mode);
+export function restoreTree(root, snapshot, excludedPaths = []) {
+  const validated = validateTransactionSnapshot(root, snapshot, "lifecycle transaction restore snapshot");
+  const restorable = validated.filter((entry) => !transactionPathIsExcluded(entry.path, excludedPaths));
+  const original = new Map(restorable.map((entry) => [entry.path, entry]));
+  const current = snapshotTree(root, "", excludedPaths);
+  for (const entry of current.filter((entry) => !original.has(entry.path))) fs.unlinkSync(path.join(root, ...entry.path.split("/")));
+  for (const entry of restorable) atomicWrite(path.join(root, ...entry.path.split("/")), Buffer.from(entry.bytes, "base64"), entry.mode);
 }
 export function recoverTransaction(paths, expectedBinding = null) {
   const file = transactionJournal(paths); if (!fs.existsSync(file)) return false;
   const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
   if (journal.status !== "prepared") return false;
   if (expectedBinding !== null && canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) return false;
-  if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
-  restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+  const snapshots = validateTransactionJournalSnapshots(paths, journal);
+  restoreTree(paths.sessionDir, snapshots.session); restoreTree(canonicalFlowPaths(paths).root, snapshots.flow, FLOW_TRANSACTION_EXCLUDED_PATHS);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
   return true;
 }
@@ -165,8 +262,8 @@ export function rollbackCommittedTransaction(paths, expectedBinding) {
   const journal = protectedJson(file, "lifecycle transaction journal", 64 * 1024 * 1024);
   if (journal.status !== "committed") return false;
   if (canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) return false;
-  if (!Array.isArray(journal.session) || !Array.isArray(journal.flow)) throw new Error("lifecycle transaction journal is invalid");
-  restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+  const snapshots = validateTransactionJournalSnapshots(paths, journal);
+  restoreTree(paths.sessionDir, snapshots.session); restoreTree(canonicalFlowPaths(paths).root, snapshots.flow, FLOW_TRANSACTION_EXCLUDED_PATHS);
   atomicWrite(file, `${JSON.stringify({ ...journal, status: "rolled_back", recovered_at: new Date().toISOString() })}\n`);
   return true;
 }
@@ -200,14 +297,17 @@ function recoverPreparedTransactionForEntry(paths, expectedBinding) {
 }
 export async function inProjectTransaction(paths, binding, action) {
   recoverPreparedTransactionForEntry(paths, binding);
-  const journal = { schema_version: PROTOCOL_VERSION, status: "prepared", binding, created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root) };
+  const captured = { schema_version: PROTOCOL_VERSION, status: "prepared", binding, created_at: new Date().toISOString(), session: snapshotTree(paths.sessionDir), flow: snapshotTree(canonicalFlowPaths(paths).root, "", FLOW_TRANSACTION_EXCLUDED_PATHS) };
+  const snapshots = validateTransactionJournalSnapshots(paths, captured);
+  const journal = { ...captured, ...snapshots };
   atomicWrite(transactionJournal(paths), `${JSON.stringify(journal)}\n`);
   try {
     const result = await action();
     atomicWrite(transactionJournal(paths), `${JSON.stringify({ ...journal, status: "committed", committed_at: new Date().toISOString() })}\n`);
     return result;
   } catch (error) {
-    restoreTree(paths.sessionDir, journal.session); restoreTree(canonicalFlowPaths(paths).root, journal.flow);
+    const snapshots = validateTransactionJournalSnapshots(paths, journal);
+    restoreTree(paths.sessionDir, snapshots.session); restoreTree(canonicalFlowPaths(paths).root, snapshots.flow, FLOW_TRANSACTION_EXCLUDED_PATHS);
     atomicWrite(transactionJournal(paths), `${JSON.stringify({ ...journal, status: "rolled_back", rolled_back_at: new Date().toISOString() })}\n`);
     throw error;
   }
@@ -268,7 +368,7 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   exact(completion, fields, label);
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
@@ -307,14 +407,48 @@ async function loadPinnedFlowReducer() {
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
+  const runStoreEntry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "runtime", "flow-run-store.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
+  protectedRegularFile(runStoreEntry, "pinned Flow run mutation store", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES"]) {
+  const runStore = await import(pathToFileURL(runStoreEntry).href);
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
   exactObject(identity, pin.reducer, "installed Flow reducer");
-  return { flow, pin, artifact_sha256: sha256File(entry, "pinned Flow reducer artifact") };
+  if (typeof runStore.withRunMutationLock !== "function") throw new Error("pinned Flow run store does not export withRunMutationLock");
+  return {
+    flow,
+    withRunMutationLock: runStore.withRunMutationLock,
+    withRunRecoveryLock: runStore.withRunRecoveryLock,
+    writeRunRecoveryFence: runStore.writeRunRecoveryFence,
+    finalizeRunRecoveryFence: runStore.finalizeRunRecoveryFence,
+    pin,
+    artifact_sha256: sha256File(entry, "pinned Flow reducer artifact"),
+  };
+}
+export function assertVerificationResealFlowCapabilities(runStore) {
+  for (const name of ["withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+    if (typeof runStore?.[name] !== "function") throw new Error(`canonical Flow verification reseal capability ${name} is unavailable`);
+  }
+  return true;
+}
+async function preflightVerificationResealFlowCapabilities() {
+  const runStore = await loadPinnedFlowReducer();
+  assertVerificationResealFlowCapabilities(runStore);
+  return { available: true };
+}
+
+export async function withCanonicalFlowRunMutationLock(paths, operation, injectedLock = null) {
+  const withRunMutationLock = injectedLock ?? (await loadPinnedFlowReducer()).withRunMutationLock;
+  if (typeof withRunMutationLock !== "function") throw new Error("canonical Flow run mutation lock is unavailable");
+  return withRunMutationLock(paths.runId, paths.projectRoot, operation);
+}
+export async function withCanonicalFlowRunRecoveryLock(paths, recoveryId, operation, injectedLock = null) {
+  const withRunRecoveryLock = injectedLock ?? (await loadPinnedFlowReducer()).withRunRecoveryLock;
+  if (typeof withRunRecoveryLock !== "function") throw new Error("canonical Flow run recovery lock is unavailable");
+  return withRunRecoveryLock(paths.runId, recoveryId, paths.projectRoot, operation);
 }
 function canonicalFlowPaths(paths) {
   const root = path.join(paths.projectRoot, ".kontourai", "flow", "runs", paths.runId);
@@ -328,6 +462,187 @@ function canonicalFlowPaths(paths) {
     reportJson: path.join(root, "report.json"),
     reportMarkdown: path.join(root, "report.md")
   };
+}
+function verificationResealPlanFile(paths) {
+  return path.join(paths.sessionDir, VERIFICATION_RESEAL_PLAN_FILE);
+}
+export function verificationResealArtifactFiles(paths, requestSha256) {
+  if (!/^[a-f0-9]{64}$/.test(String(requestSha256))) throw new Error("verification reseal request identity is invalid");
+  const files = canonicalFlowPaths(paths);
+  return new Map([
+    ["session-trust-bundle", path.join(paths.sessionDir, "trust.bundle")],
+    ["flow-manifest", files.manifest],
+    ["flow-state", files.state],
+    ["flow-attachment", path.join(files.root, "evidence", `lifecycle-authority:${requestSha256}.json`)],
+    ["flow-report-json", files.reportJson],
+    ["flow-report-markdown", files.reportMarkdown],
+  ]);
+}
+function verificationResealStageFile(file, image) {
+  if (!["old", "new"].includes(image)) throw new Error("verification reseal stage image is invalid");
+  return `${file}.verification-reseal-${image}`;
+}
+function verificationResealFenceFile(paths) {
+  return path.join(canonicalFlowPaths(paths).root, FLOW_RECOVERY_FENCE_FILE);
+}
+function exactArtifactDescriptor(bytes, mode) {
+  if (bytes === null) return { presence: "absent", mode: null, size: 0, sha256: null };
+  return { presence: "present", mode, size: bytes.length, sha256: sha256(bytes) };
+}
+function readVerificationResealArtifact(file, label) {
+  try {
+    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > MAX_CANONICAL_FLOW_MANIFEST_BYTES || (stat.mode & 0o022) !== 0) {
+        throw new Error(`${label} must be a protected regular file`);
+      }
+      const bytes = fs.readFileSync(descriptor);
+      return { bytes, descriptor: exactArtifactDescriptor(bytes, stat.mode & 0o777) };
+    } finally { fs.closeSync(descriptor); }
+  } catch (error) {
+    if (error?.code === "ENOENT") return { bytes: null, descriptor: exactArtifactDescriptor(null, null) };
+    throw error;
+  }
+}
+function assertVerificationResealDescriptor(value, label) {
+  exact(value, ["presence", "mode", "size", "sha256"], label);
+  if (value.presence === "absent") {
+    if (value.mode !== null || value.size !== 0 || value.sha256 !== null) throw new Error(`${label} absent descriptor is invalid`);
+  } else if (value.presence === "present") {
+    if (!Number.isInteger(value.mode) || value.mode < 0 || value.mode > 0o777
+        || !Number.isSafeInteger(value.size) || value.size < 0
+        || !/^[a-f0-9]{64}$/.test(String(value.sha256))) throw new Error(`${label} present descriptor is invalid`);
+  } else throw new Error(`${label} presence is invalid`);
+  return value;
+}
+export function validateVerificationResealPlan(plan) {
+  exact(plan, [
+    "schema_version", "kind", "recovery_id", "run_id", "request_sha256", "authorization_sha256",
+    "authorization_key_id", "authorization_nonce", "reducer", "result_core_sha256", "artifacts",
+  ], "verification reseal transaction plan");
+  if (plan.schema_version !== PROTOCOL_VERSION || plan.kind !== VERIFICATION_RESEAL_TRANSACTION_PROTOCOL
+      || !/^[a-f0-9]{64}$/.test(String(plan.recovery_id)) || typeof plan.run_id !== "string" || !plan.run_id
+      || !/^[a-f0-9]{64}$/.test(String(plan.request_sha256))
+      || !/^[a-f0-9]{64}$/.test(String(plan.authorization_sha256))
+      || typeof plan.authorization_key_id !== "string" || !plan.authorization_key_id
+      || typeof plan.authorization_nonce !== "string" || !plan.authorization_nonce
+      || !record(plan.reducer) || !/^[a-f0-9]{64}$/.test(String(plan.result_core_sha256))
+      || !Array.isArray(plan.artifacts) || plan.artifacts.length !== VERIFICATION_RESEAL_ARTIFACT_IDS.length) {
+    throw new Error("verification reseal transaction plan identity is invalid");
+  }
+  const ids = plan.artifacts.map((artifact) => artifact?.id);
+  if (canonicalJson(ids) !== canonicalJson(VERIFICATION_RESEAL_ARTIFACT_IDS)) {
+    throw new Error("verification reseal transaction plan must enumerate exactly the fixed six artifact ids");
+  }
+  for (const artifact of plan.artifacts) {
+    exact(artifact, ["id", "pre", "post"], `verification reseal artifact ${artifact?.id}`);
+    assertVerificationResealDescriptor(artifact.pre, `verification reseal artifact ${artifact.id} preimage`);
+    assertVerificationResealDescriptor(artifact.post, `verification reseal artifact ${artifact.id} postimage`);
+  }
+  return plan;
+}
+function assertVerificationResealPlanBinding(plan, paths, binding) {
+  validateVerificationResealPlan(plan);
+  if (plan.run_id !== paths.runId || plan.request_sha256 !== binding.request_sha256
+      || plan.authorization_sha256 !== binding.authorization_sha256) {
+    throw new Error("verification reseal transaction plan does not bind this exact operation");
+  }
+  return plan;
+}
+function inspectVerificationResealFence(paths) {
+  const file = verificationResealFenceFile(paths);
+  if (!fs.existsSync(file)) return { status: "open", absent: true };
+  const fence = protectedJson(file, "Flow recovery fence", 64 * 1024);
+  exact(fence, ["protocol", "run_id", "recovery_id", "status", "updated_at", "generation"], "Flow recovery fence");
+  if (fence.protocol !== FLOW_RECOVERY_FENCE_PROTOCOL || fence.run_id !== paths.runId
+      || !/^[a-f0-9]{64}$/.test(String(fence.recovery_id))
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.generation))
+      || !["active", "open"].includes(fence.status)
+      || typeof fence.updated_at !== "string" || !Number.isFinite(Date.parse(fence.updated_at))) {
+    throw new Error("Flow recovery fence is malformed or unsupported");
+  }
+  return fence;
+}
+async function writeVerificationResealFence(paths, recoveryId, status) {
+  if (!/^[a-f0-9]{64}$/.test(String(recoveryId)) || status !== "active") {
+    throw new Error("Flow recovery fence update is invalid");
+  }
+  const { writeRunRecoveryFence } = await loadPinnedFlowReducer();
+  if (typeof writeRunRecoveryFence !== "function") throw new Error("canonical Flow recovery fence writer is unavailable");
+  await writeRunRecoveryFence(paths.runId, {
+    protocol: FLOW_RECOVERY_FENCE_PROTOCOL,
+    run_id: paths.runId,
+    recovery_id: recoveryId,
+    status,
+    updated_at: new Date().toISOString(),
+  }, paths.projectRoot);
+}
+async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration) {
+  if (!/^[a-f0-9]{64}$/.test(String(recoveryId))
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(expectedGeneration))) {
+    throw new Error("Flow recovery fence finalization is invalid");
+  }
+  const { finalizeRunRecoveryFence } = await loadPinnedFlowReducer();
+  if (typeof finalizeRunRecoveryFence !== "function") throw new Error("canonical Flow recovery fence finalizer is unavailable");
+  await finalizeRunRecoveryFence(paths.runId, {
+    recovery_id: recoveryId,
+    expected_generation: expectedGeneration,
+    updated_at: new Date().toISOString(),
+  }, paths.projectRoot);
+}
+function stageVerificationResealImage(file, bytes, mode, image) {
+  const stage = verificationResealStageFile(file, image);
+  if (bytes === null) {
+    if (fs.existsSync(stage)) fs.unlinkSync(stage);
+    return;
+  }
+  atomicWrite(stage, bytes, mode);
+  const reread = readVerificationResealArtifact(stage, `verification reseal ${image} stage`);
+  if (!reread.bytes?.equals(bytes) || reread.descriptor.mode !== mode) throw new Error(`verification reseal ${image} stage reread changed`);
+}
+function readSignedVerificationResealPlan(paths) {
+  const capability = protectedJson(verificationResealPlanFile(paths), "verification reseal signed plan", 1024 * 1024);
+  const value = verifiedCapability(capability, "reseal-plan-capability");
+  if (!record(value.plan)) throw new Error("verification reseal signed plan payload is invalid");
+  return { capability, plan: validateVerificationResealPlan(value.plan) };
+}
+export function classifyVerificationResealArtifacts(paths, plan) {
+  const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+  const states = [];
+  for (const artifact of plan.artifacts) {
+    const actual = readVerificationResealArtifact(files.get(artifact.id), `verification reseal artifact ${artifact.id}`).descriptor;
+    const pre = canonicalJson(actual) === canonicalJson(artifact.pre);
+    const post = canonicalJson(actual) === canonicalJson(artifact.post);
+    states.push(pre && post ? "both" : pre ? "pre" : post ? "post" : "unknown");
+  }
+  if (states.every((state) => state === "pre" || state === "both")) return "old";
+  if (states.every((state) => state === "post" || state === "both")) return "new";
+  return "unknown";
+}
+export function rejectActiveLegacyResealJournal(paths, _binding) {
+  const file = transactionJournal(paths);
+  if (!fs.existsSync(file)) return;
+  const bytes = protectedRegularFile(file, "legacy lifecycle transaction journal", 64 * 1024 * 1024);
+  const journal = protectedJson(file, "legacy lifecycle transaction journal", 64 * 1024 * 1024);
+  if (["prepared", "committed"].includes(journal.status)) {
+    const quarantine = `${file}.quarantine-legacy-${sha256(bytes)}`;
+    if (fs.existsSync(quarantine)) throw new Error("active legacy recursive reseal transaction quarantine target already exists");
+    fs.renameSync(file, quarantine);
+    throw new Error("active legacy recursive reseal transaction requires offline quarantine; automatic tree restore is forbidden");
+  }
+}
+function quarantineVerificationResealTransaction(paths, plan) {
+  const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+  for (const file of [verificationResealPlanFile(paths), ...[...files.values()].flatMap((artifact) => [
+    verificationResealStageFile(artifact, "old"),
+    verificationResealStageFile(artifact, "new"),
+  ])]) {
+    if (!fs.existsSync(file)) continue;
+    const quarantine = `${file}.quarantine-${plan.recovery_id}`;
+    if (fs.existsSync(quarantine)) throw new Error("verification reseal quarantine target already exists");
+    fs.renameSync(file, quarantine);
+  }
 }
 function historicalAttachment(paths, authorization, completion, { expectedSupersededBy = null } = {}) {
   const files = canonicalFlowPaths(paths);
@@ -405,7 +720,13 @@ function openGateId(definition, state) {
   if (matches.length !== 1) throw new Error("canonical Flow run must have exactly one current gate for lifecycle trust synchronization");
   return matches[0];
 }
-async function synchronizeCanonicalFlow(paths, bundle, envelope) {
+function currentGatePolicy(definition, state) {
+  const gateId = openGateId(definition, state);
+  const gate = definition.gates?.[gateId];
+  if (!record(gate) || !Array.isArray(gate.expects)) throw new Error("canonical Flow current gate has no protected expectation requirements");
+  return { gate_id: gateId, requirements: structuredClone(gate.expects) };
+}
+async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null) {
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
@@ -417,7 +738,16 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   if (definition.id !== "builder.build" || state.definition_id !== "builder.build" || state.current_step !== "verify") {
     throw new Error("critique resolution is authorized only for the canonical builder.build verify step");
   }
+  const flowPreimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
+  if (expectedPreimage !== null && (
+    definition.id !== expectedPreimage.definition_id
+    || state.current_step !== expectedPreimage.step_id
+    || state.subject !== expectedPreimage.subject
+    || flowPreimage.run_head !== expectedPreimage.run_head
+    || flowPreimage.manifest_sha256 !== expectedPreimage.manifest_sha256
+  )) throw new Error("canonical Flow preimage no longer matches the signed lifecycle authorization");
   const gateId = openGateId(definition, state);
+  if (expectedPreimage !== null && expectedPreimage.gate_id !== gateId) throw new Error("canonical Flow gate no longer matches the signed lifecycle authorization");
   const attachmentId = `lifecycle-authority:${envelope.request_sha256}`;
   const supersede = (Array.isArray(manifest.evidence) ? manifest.evidence : [])
     .filter((entry) => record(entry) && entry.gate_id === gateId && entry.kind === "trust.bundle" && typeof entry.superseded_by !== "string")
@@ -432,17 +762,19 @@ async function synchronizeCanonicalFlow(paths, bundle, envelope) {
   });
   exactObject(reduced.identity, pin.reducer, "Flow reducer result");
   const evidenceFile = path.join(files.root, storedPath);
-  fs.mkdirSync(path.dirname(evidenceFile), { recursive: true, mode: 0o700 });
   if (!fs.readFileSync(files.definition).equals(definitionBytes) || !fs.readFileSync(files.state).equals(stateBytes) || !fs.readFileSync(files.manifest).equals(manifestBytes)) throw new Error("canonical Flow preimage changed during lifecycle trust synchronization");
-  atomicWrite(evidenceFile, bundleBytes, 0o644);
   const postimages = [{ file: evidenceFile, bytes: bundleBytes, label: "canonical Flow stored trust bundle", max_bytes: 4 * 1024 * 1024 }];
   for (const artifact of reduced.write.artifacts) {
     const destination = path.join(files.root, artifact.path);
     const bytes = Buffer.from(typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`);
-    atomicWrite(destination, bytes, 0o644);
     postimages.push({ file: destination, bytes, label: artifact.path === "evidence/manifest.json" ? "canonical Flow evidence manifest" : "canonical Flow reducer artifact", max_bytes: artifact.path === "evidence/manifest.json" ? MAX_CANONICAL_FLOW_MANIFEST_BYTES : 16 * 1024 * 1024 });
   }
-  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, postimages };
+  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, flow_preimage: flowPreimage, postimages };
+}
+async function synchronizeCanonicalFlow(paths, bundle, envelope, expectedPreimage = null) {
+  const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage);
+  for (const postimage of prepared.postimages) atomicWrite(postimage.file, postimage.bytes, 0o644);
+  return prepared;
 }
 function assertCanonicalFlowPostimages(synchronized) {
   if (!record(synchronized) || !Array.isArray(synchronized.postimages) || synchronized.postimages.length === 0) throw new Error("canonical Flow synchronization postimages are missing");
@@ -547,8 +879,278 @@ async function withDurableLock(requestSha256, callback) {
 function publicBridge(bridge) {
   return { digest: bridge.digest, completion_sha256: bridge.completion_sha256, durable_operation_id: bridge.durable_operation_id, durable_key_id: bridge.durable_key_id, durable_nonce: bridge.durable_nonce };
 }
+async function assertVerificationResealCurrentPreimages({ paths, authorization, bundleFile, beforeBytes, candidateFile, candidateBytes, completionBytes, ledger, files }) {
+  if (!protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024).equals(beforeBytes)
+      || !protectedRegularFile(candidateFile, "verification evidence candidate", 4 * 1024 * 1024).equals(candidateBytes)) {
+    throw new Error("verification evidence reseal bundle or candidate changed during preparation");
+  }
+  assertResolutionEventLedgerPreimage(paths, ledger);
+  const currentCompletionBytes = protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024);
+  if (!currentCompletionBytes.equals(completionBytes)) throw new Error("verification evidence reseal current completion changed during preparation");
+  const currentCompletion = assertCurrentLifecycleCompletion(paths, JSON.parse(currentCompletionBytes.toString("utf8")), JSON.parse(beforeBytes.toString("utf8")), ledger.events);
+  if (sha256(currentCompletionBytes) !== authorization.current_completion_sha256
+      || currentCompletion.request_sha256 !== authorization.current_completion_request_sha256
+      || currentCompletion.result_core_sha256 !== authorization.current_completion_result_core_sha256) {
+    throw new Error("verification evidence reseal current completion no longer matches the signed authorization");
+  }
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+  const gatePolicy = currentGatePolicy(definition, state);
+  const { flow } = await loadPinnedFlowReducer();
+  const flowPreimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
+  if (authorization.subject !== sessionSubject(paths) || authorization.subject !== state.subject
+      || definition.id !== authorization.flow_definition_id || state.current_step !== authorization.flow_step_id
+      || gatePolicy.gate_id !== authorization.flow_gate_id
+      || flowPreimage.run_head !== authorization.flow_run_head || flowPreimage.manifest_sha256 !== authorization.flow_manifest_sha256) {
+    throw new Error("verification evidence reseal canonical Flow preimage no longer matches the signed authorization");
+  }
+  return { ...flowPreimage, gate_policy: gatePolicy };
+}
+
+function assertVerificationResealFinalPublicationBoundary({ paths, authorization, bundleFile, beforeBytes, candidateFile, candidateBytes, completionBytes, ledger, synchronized }) {
+  if (!protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024).equals(beforeBytes)
+      || !protectedRegularFile(candidateFile, "verification evidence candidate", 4 * 1024 * 1024).equals(candidateBytes)) {
+    throw new Error("verification evidence reseal bundle or candidate changed at final publication");
+  }
+  const currentCompletionBytes = protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024);
+  if (!currentCompletionBytes.equals(completionBytes)) throw new Error("verification evidence reseal current completion changed at final publication");
+  const currentCompletion = assertCurrentLifecycleCompletion(paths, JSON.parse(currentCompletionBytes.toString("utf8")), JSON.parse(beforeBytes.toString("utf8")), ledger.events);
+  if (sha256(currentCompletionBytes) !== authorization.current_completion_sha256
+      || currentCompletion.request_sha256 !== authorization.current_completion_request_sha256
+      || currentCompletion.result_core_sha256 !== authorization.current_completion_result_core_sha256) {
+    throw new Error("verification evidence reseal final publication completion is stale");
+  }
+  if (!record(synchronized?.flow_preimage)
+      || synchronized.flow_preimage.run_head !== authorization.flow_run_head
+      || synchronized.flow_preimage.manifest_sha256 !== authorization.flow_manifest_sha256) {
+    throw new Error("verification evidence reseal final publication does not retain the signed Flow preimage");
+  }
+  assertCanonicalFlowPostimages(synchronized);
+  assertResolutionEventLedgerPreimage(paths, ledger);
+}
+async function prepareVerificationResealTransaction(envelope, paths, authorization) {
+  const binding = { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) };
+  rejectActiveLegacyResealJournal(paths, binding);
+  await preflightVerificationResealFlowCapabilities();
+  return withCanonicalFlowRunMutationLock(paths, async () => {
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status !== "open") throw new Error("verification reseal cannot capture artifacts while the Flow recovery fence is active");
+    if (fs.existsSync(verificationResealPlanFile(paths))) throw new Error("verification reseal found an existing signed plan; recovery is required");
+    const bundleFile = path.join(paths.sessionDir, "trust.bundle");
+    const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+    const before = JSON.parse(beforeBytes.toString("utf8"));
+    const ledger = loadResolutionEventLedger(paths, before, authorization, envelope.action);
+    const candidateFile = path.join(paths.sessionDir, `.workflow-evidence-transaction-${authorization.candidate_transaction_id}`, "trust.bundle.candidate");
+    if (!within(candidateFile, paths.sessionDir) || path.dirname(path.dirname(candidateFile)) !== paths.sessionDir) throw new Error("verification evidence candidate path is invalid");
+    const candidateBytes = protectedRegularFile(candidateFile, "verification evidence candidate", 4 * 1024 * 1024);
+    const candidate = JSON.parse(candidateBytes.toString("utf8"));
+    const completionBytes = protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "current lifecycle completion", 256 * 1024);
+    const currentCompletion = assertCurrentLifecycleCompletion(paths, JSON.parse(completionBytes.toString("utf8")), before, ledger.events);
+    if (sha256(completionBytes) !== authorization.current_completion_sha256
+        || currentCompletion.request_sha256 !== authorization.current_completion_request_sha256
+        || currentCompletion.result_core_sha256 !== authorization.current_completion_result_core_sha256) {
+      throw new Error("verification evidence reseal authorization does not bind the exact current completion");
+    }
+    const files = canonicalFlowPaths(paths);
+    const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+    const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+    const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+    const gatePolicy = currentGatePolicy(definition, state);
+    const { flow } = await loadPinnedFlowReducer();
+    if (authorization.subject !== sessionSubject(paths) || authorization.subject !== state.subject
+        || definition.id !== authorization.flow_definition_id || state.current_step !== authorization.flow_step_id
+        || gatePolicy.gate_id !== authorization.flow_gate_id
+        || flow.flowRunHead(state) !== authorization.flow_run_head || sha256(manifestBytes) !== authorization.flow_manifest_sha256) {
+      throw new Error("verification evidence reseal authorization does not bind the exact canonical Flow preimage");
+    }
+    if (critiqueHistoryProjectionSummary(before.claims).digest !== authorization.critique_projection_sha256) throw new Error("verification evidence reseal authorization critique projection is stale");
+    const lockedPreimage = await assertVerificationResealCurrentPreimages({
+      paths, authorization, bundleFile, beforeBytes, candidateFile, candidateBytes, completionBytes, ledger, files,
+    });
+    const reduced = resealVerificationEvidenceTransition({
+      current_bundle: before, candidate_bundle: candidate, resolution_events: ledger.events, authorization,
+      current_bundle_bytes: beforeBytes, candidate_bundle_bytes: candidateBytes, ledger_bytes: ledger.bytes,
+      flow: { definition_id: definition.id, step_id: state.current_step, ...lockedPreimage.gate_policy },
+    });
+    const resultCoreSha256 = lifecycleAuthorityResultDigest(reduced.bundle, reduced.resolution_events);
+    const synchronized = await prepareCanonicalFlowSynchronization(paths, reduced.bundle, envelope, {
+      definition_id: authorization.flow_definition_id,
+      step_id: authorization.flow_step_id,
+      gate_id: authorization.flow_gate_id,
+      subject: authorization.subject,
+      run_head: authorization.flow_run_head,
+      manifest_sha256: authorization.flow_manifest_sha256,
+    });
+    const artifactFiles = verificationResealArtifactFiles(paths, envelope.request_sha256);
+    const postimageByFile = new Map([
+      [bundleFile, candidateBytes],
+      ...synchronized.postimages.map((postimage) => [postimage.file, postimage.bytes]),
+    ]);
+    if (postimageByFile.size !== VERIFICATION_RESEAL_ARTIFACT_IDS.length
+        || [...artifactFiles.values()].some((file) => !postimageByFile.has(file))) {
+      throw new Error("verification reseal reducer did not produce exactly the fixed six artifacts");
+    }
+    const artifacts = [];
+    for (const id of VERIFICATION_RESEAL_ARTIFACT_IDS) {
+      const file = artifactFiles.get(id);
+      const preimage = readVerificationResealArtifact(file, `verification reseal artifact ${id}`);
+      const postBytes = postimageByFile.get(file);
+      const post = exactArtifactDescriptor(postBytes, 0o644);
+      stageVerificationResealImage(file, preimage.bytes, preimage.descriptor.mode, "old");
+      stageVerificationResealImage(file, postBytes, post.mode, "new");
+      artifacts.push({ id, pre: preimage.descriptor, post });
+    }
+    const planCore = {
+      schema_version: PROTOCOL_VERSION,
+      kind: VERIFICATION_RESEAL_TRANSACTION_PROTOCOL,
+      run_id: paths.runId,
+      request_sha256: envelope.request_sha256,
+      authorization_sha256: binding.authorization_sha256,
+      authorization_key_id: authorization.signature.key_id,
+      authorization_nonce: authorization.nonce,
+      reducer: synchronized.reducer,
+      result_core_sha256: resultCoreSha256,
+      artifacts,
+    };
+    const plan = validateVerificationResealPlan({ ...planCore, recovery_id: sha256(planCore) });
+    return { run_id: paths.runId, plan };
+  });
+}
+function assertVerificationResealStages(paths, plan) {
+  const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+  for (const artifact of plan.artifacts) {
+    const file = files.get(artifact.id);
+    for (const [image, expected] of [["old", artifact.pre], ["new", artifact.post]]) {
+      const actual = readVerificationResealArtifact(verificationResealStageFile(file, image), `verification reseal ${image} stage`).descriptor;
+      if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error(`verification reseal ${image} stage for ${artifact.id} changed`);
+    }
+  }
+}
+async function publishVerificationResealTransaction(paths, capability, binding) {
+  const value = verifiedCapability(capability, "reseal-plan-capability");
+  if (!record(value.plan)) throw new Error("verification reseal plan capability payload is invalid");
+  const plan = assertVerificationResealPlanBinding(value.plan, paths, binding);
+  const observedFence = inspectVerificationResealFence(paths);
+  const withLock = observedFence.status === "active"
+    ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
+    : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
+  return withLock(async () => {
+    rejectActiveLegacyResealJournal(paths, binding);
+    const planFile = verificationResealPlanFile(paths);
+    if (fs.existsSync(planFile)) {
+      const current = protectedJson(planFile, "verification reseal signed plan", 1024 * 1024);
+      if (canonicalJson(current) !== canonicalJson(capability)) throw new Error("verification reseal signed plan changed");
+    } else atomicWrite(planFile, `${JSON.stringify(capability, null, 2)}\n`, 0o644);
+    assertVerificationResealStages(paths, plan);
+    const classification = classifyVerificationResealArtifacts(paths, plan);
+    if (classification === "unknown") {
+      const fence = inspectVerificationResealFence(paths);
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
+      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      quarantineVerificationResealTransaction(paths, plan);
+      throw new Error("verification reseal artifacts are mixed or unknown and were quarantined");
+    }
+    if (classification === "old") {
+      const fence = inspectVerificationResealFence(paths);
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
+      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+      for (const artifact of plan.artifacts) {
+        const file = files.get(artifact.id);
+        const bytes = readVerificationResealArtifact(verificationResealStageFile(file, "new"), `verification reseal new stage ${artifact.id}`).bytes;
+        if (artifact.post.presence === "present") atomicWrite(file, bytes, artifact.post.mode);
+        else if (fs.existsSync(file)) fs.unlinkSync(file);
+      }
+    }
+    if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal publication did not install the exact postimages");
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal publication lost its active Flow recovery fence");
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id };
+  });
+}
+async function recoverVerificationResealTransaction(paths, binding) {
+  const observedFence = inspectVerificationResealFence(paths);
+  const withLock = observedFence.status === "active"
+    ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
+    : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
+  return withLock(async () => {
+    rejectActiveLegacyResealJournal(paths, binding);
+    if (!fs.existsSync(verificationResealPlanFile(paths))) {
+      const fence = inspectVerificationResealFence(paths);
+      if (fence.status === "active") throw new Error("active Flow recovery fence has no signed verification reseal plan");
+      return { run_id: paths.runId, recovered: false, state: "none" };
+    }
+    const { capability, plan } = readSignedVerificationResealPlan(paths);
+    assertVerificationResealPlanBinding(plan, paths, binding);
+    const classification = classifyVerificationResealArtifacts(paths, plan);
+    if (classification === "unknown") {
+      const fence = inspectVerificationResealFence(paths);
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
+      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      quarantineVerificationResealTransaction(paths, plan);
+      throw new Error("verification reseal recovery found mixed or unknown artifacts and quarantined them");
+    }
+    if (classification === "new") {
+      const fence = inspectVerificationResealFence(paths);
+      if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("published verification reseal generation is missing its active recovery fence");
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+    }
+    return { run_id: paths.runId, recovered: true, state: "old", capability };
+  });
+}
+async function finalizeVerificationResealTransaction(paths, completion) {
+  const observedFence = inspectVerificationResealFence(paths);
+  if (observedFence.status !== "active") {
+    if (fs.existsSync(verificationResealPlanFile(paths))) {
+      const { plan } = readSignedVerificationResealPlan(paths);
+      if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+        throw new Error("verification reseal cleanup replay does not bind the signed plan result");
+      }
+      const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
+      if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal cleanup replay receipt is not exact");
+      if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cleanup replay does not retain exact postimages");
+      cleanupVerificationResealTransaction(paths, plan);
+      return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+    }
+    return { run_id: paths.runId, finalized: false };
+  }
+  const finalized = await withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, async () => {
+    const { plan } = readSignedVerificationResealPlan(paths);
+    if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+      throw new Error("verification reseal durable completion does not bind the signed plan result");
+    }
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal exact completion receipt is not installed");
+    if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cannot finalize without exact postimages");
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id
+        || fence.generation !== observedFence.generation) {
+      throw new Error("verification reseal cannot finalize without its exact active Flow recovery fence generation");
+    }
+    return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
+  });
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  cleanupVerificationResealTransaction(paths, finalized.plan);
+  return finalized.result;
+}
+export function cleanupVerificationResealTransaction(paths, plan, hooks = {}) {
+  const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+  const stages = [...files.values()].flatMap((artifact) => [
+    verificationResealStageFile(artifact, "old"),
+    verificationResealStageFile(artifact, "new"),
+  ]);
+  for (const file of stages) {
+    hooks.before_unlink?.(file);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
+  const planFile = verificationResealPlanFile(paths);
+  hooks.before_unlink?.(planFile);
+  if (fs.existsSync(planFile)) fs.unlinkSync(planFile);
+}
 async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null) {
     if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
+    if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
     if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
@@ -660,7 +1262,8 @@ async function processRootOperation(envelope) {
       const prior = durableJson(completionFile, "completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
       reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
-      if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
     const transactionBinding = { request_sha256: envelope.request_sha256, authorization_sha256: authorizationSha256 };
@@ -684,6 +1287,15 @@ async function processRootOperation(envelope) {
         assertLiveAssignmentHolder(canonicalMutationPaths(envelope.request), authorization);
       }
       if (envelope.action === "repair-critique-resolution-history") verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+      if (envelope.action === "reseal-verification-evidence") {
+        const preflight = childInvocation({
+          kind: "preflight-reseal",
+          capability: signedCapability("preflight-reseal-capability", { request: envelope.request }),
+        }, caller);
+        if (!record(preflight) || preflight.run_id !== identity.runId || preflight.available !== true) {
+          throw new Error("unprivileged verification reseal capability preflight returned an invalid response");
+        }
+      }
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
@@ -696,7 +1308,33 @@ async function processRootOperation(envelope) {
       if (canonicalJson(secondBridge) !== canonicalJson(verifiedBridge)) throw new Error("history repair bridge changed between root verification passes");
       verifiedBridge = secondBridge;
     }
-    const mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
+    let mutation;
+    if (envelope.action === "reseal-verification-evidence") {
+      let recovery = null;
+      if (resumePrepared) {
+        recovery = childInvocation({ kind: "recover-reseal", capability: signedCapability("recover-reseal-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
+        if (!record(recovery) || recovery.run_id !== identity.runId || !["none", "old", "new"].includes(recovery.state)) {
+          throw new Error("unprivileged verification reseal recovery returned an invalid response");
+        }
+      }
+      if (recovery?.state === "new") mutation = recovery;
+      else {
+        let planCapability = recovery?.state === "old" ? recovery.capability : null;
+        if (planCapability === null) {
+          const preparedPlan = childInvocation({ kind: "prepare-reseal", capability: signedCapability("prepare-reseal-capability", { envelope, authorization }) }, caller);
+          if (!record(preparedPlan) || preparedPlan.run_id !== identity.runId || !record(preparedPlan.plan)) throw new Error("unprivileged verification reseal preparation returned an invalid plan");
+          const plan = validateVerificationResealPlan(preparedPlan.plan);
+          if (plan.request_sha256 !== envelope.request_sha256 || plan.authorization_sha256 !== authorizationSha256
+              || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
+            throw new Error("verification reseal plan does not bind the root-authenticated operation");
+          }
+          planCapability = signedCapability("reseal-plan-capability", { request: envelope.request, plan });
+        }
+        mutation = childInvocation({ kind: "publish-reseal", capability: planCapability }, caller);
+      }
+    } else {
+      mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
+    }
     if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
     const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
@@ -704,7 +1342,8 @@ async function processRootOperation(envelope) {
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.
-    if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
   });
 }
@@ -746,6 +1385,46 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {
     const payload = JSON.parse(input);
     if (!record(payload) || typeof payload.kind !== "string") throw new Error("mutation worker request is invalid");
+    if (payload.kind === "prepare-reseal") {
+      const value = verifiedCapability(payload.capability, "prepare-reseal-capability");
+      if (!record(value.envelope) || !record(value.authorization)) throw new Error("verification reseal preparation request is invalid");
+      const envelope = validateEnvelope(value.envelope);
+      if (envelope.action !== "reseal-verification-evidence" || value.authorization.operation !== envelope.action) throw new Error("verification reseal preparation operation is invalid");
+      const paths = canonicalMutationPaths(envelope.request);
+      return prepareVerificationResealTransaction(envelope, paths, value.authorization);
+    }
+    if (payload.kind === "preflight-reseal") {
+      const value = verifiedCapability(payload.capability, "preflight-reseal-capability");
+      const paths = canonicalMutationPaths(value.request);
+      rejectActiveLegacyResealJournal(paths, null);
+      await preflightVerificationResealFlowCapabilities();
+      return { run_id: paths.runId, available: true };
+    }
+    if (payload.kind === "publish-reseal") {
+      const value = verifiedCapability(payload.capability, "reseal-plan-capability");
+      if (!record(value.request) || !record(value.plan)) throw new Error("verification reseal publication request is invalid");
+      const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.plan.request_sha256, request: value.request });
+      if (envelope.action !== "reseal-verification-evidence") throw new Error("verification reseal publication operation is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      return publishVerificationResealTransaction(paths, payload.capability, {
+        request_sha256: value.plan.request_sha256,
+        authorization_sha256: value.plan.authorization_sha256,
+      });
+    }
+    if (payload.kind === "recover-reseal") {
+      const value = verifiedCapability(payload.capability, "recover-reseal-capability");
+      if (!record(value.request) || !record(value.binding)) throw new Error("verification reseal recovery request is invalid");
+      exact(value.binding, ["request_sha256", "authorization_sha256"], "verification reseal recovery binding");
+      const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
+      if (envelope.action !== "reseal-verification-evidence") throw new Error("verification reseal recovery operation is invalid");
+      return recoverVerificationResealTransaction(canonicalMutationPaths(value.request), value.binding);
+    }
+    if (payload.kind === "finalize-reseal") {
+      const value = verifiedCapability(payload.capability, "finalize-reseal-capability");
+      if (!record(value.request) || !record(value.completion)) throw new Error("verification reseal finalization request is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      return finalizeVerificationResealTransaction(paths, assertCurrentLifecycleCompletionIdentity(paths, value.completion));
+    }
     if (payload.kind === "rollback") {
       const value = verifiedCapability(payload.capability, "rollback-capability");
       if (!record(value.request) || !record(value.binding)) throw new Error("mutation worker rollback request is invalid");
@@ -753,7 +1432,9 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
       if (value.binding.request_sha256 !== sha256(envelope.request) || !/^[a-f0-9]{64}$/.test(String(value.binding.authorization_sha256))) throw new Error("mutation worker rollback binding is invalid");
       const paths = canonicalMutationPaths(value.request);
-      return { run_id: paths.runId, rolled_back: recoverMatchingTransaction(paths, value.binding) };
+      if (value.request.action === "reseal-verification-evidence") throw new Error("verification reseal rejects legacy recursive rollback");
+      const rolledBack = recoverMatchingTransaction(paths, value.binding);
+      return { run_id: paths.runId, rolled_back: rolledBack };
     }
     if (payload.kind === "receipt") {
       const value = verifiedCapability(payload.capability, "receipt-capability");

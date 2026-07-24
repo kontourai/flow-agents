@@ -10,18 +10,19 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, verifyHistoricalLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { assertAppendOnlyCritiqueHistory, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
+import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
+import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -30,7 +31,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -39,6 +40,7 @@ Public workflow verbs:
   start               Start or resume a workflow for a Work Item.
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
+  reseal-verification-evidence  Atomically publish a signed staged verification-evidence candidate.
   critique            Record review critique directly into the current trust bundle.
   resolve-critique    Resolve a repaired historical critique through a later review record.
   repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
@@ -72,6 +74,8 @@ export async function main(argv: string[]): Promise<number> {
   const sessionDir = resolveSessionDir(parsed.flags);
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "reseal-verification-evidence-request") return resealVerificationEvidenceRequest(sessionDir, argv.slice(1));
+  if (verb === "reseal-verification-evidence") return resealVerificationEvidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
@@ -584,6 +588,163 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   return 0;
 }
 
+async function resealVerificationEvidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow reseal-verification-evidence");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!authorizationFile) throw new Error("workflow reseal-verification-evidence requires a signed --authorization-file <path>");
+  const canonicalSessionDir = validateCanonicalSessionDir(sessionDir);
+  const projectRoot = path.dirname(path.dirname(path.dirname(canonicalSessionDir)));
+  const report = invokeExternalLifecycleAuthority({
+    action: "reseal-verification-evidence",
+    project_root: projectRoot,
+    session_dir: canonicalSessionDir,
+    authorization_file: path.resolve(authorizationFile),
+  });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Verification evidence reseal was already applied." : "Resealed verification evidence atomically.");
+  return 0;
+}
+
+async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  const flags = new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]);
+  assertOnlyFlags(parsed.flags, flags, "workflow reseal-verification-evidence-request");
+  const expectation = flagString(parsed.flags, "expectation");
+  const requestedStatus = flagString(parsed.flags, "status");
+  if (!expectation || !requestedStatus || !flagString(parsed.flags, "summary")) {
+    throw new Error("workflow reseal-verification-evidence-request requires --expectation, --status, and --summary");
+  }
+  const commands = flagList(parsed.flags, "command");
+  if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) throw new Error("workflow reseal-verification-evidence-request --command requires a shell command value");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]));
+  const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const repaired = await recoverBuilderFlowSession({ sessionDir });
+    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("verification evidence reseal is allowed only for the canonical builder.build verify gate");
+    const currentGates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
+    if (currentGates.length !== 1 || typeof currentGates[0]?.id !== "string") {
+      throw new Error("verification evidence reseal requires exactly one canonical current verify gate");
+    }
+    const currentGate = currentGates[0]!;
+    const currentRequirements = Array.isArray(currentGate.expects) ? currentGate.expects as JsonRecord[] : [];
+    const targetRequirements = currentRequirements.filter((requirement) => requirement.id === expectation);
+    if (targetRequirements.length !== 1) {
+      throw new Error("verification evidence reseal target must occur exactly once in the canonical current verify gate");
+    }
+    const targetRequirement = targetRequirements[0]!;
+    const targetBundleClaim = targetRequirement.bundle_claim as JsonRecord | undefined;
+    if (typeof targetBundleClaim?.claimType !== "string" || typeof targetBundleClaim.subjectType !== "string") {
+      throw new Error("verification evidence reseal target must declare canonical gate-claim metadata");
+    }
+    const operation = builderOperationForExpectation(repaired.run.definitionId, expectation);
+    if (operation) throw new Error(`verification evidence reseal cannot satisfy operation-bound expectation ${expectation}`);
+    assertExecuteFailureRouteBeforeMutation(repaired.run.definition as JsonRecord, repaired.run.state.current_step, requestedStatus, flagString(parsed.flags, "route-reason"));
+    assertRunnableEvidenceCommands(commands, repaired.projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
+    const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const bundleBytes = readProtectedRegularFileBytes(bundleFile, "verification evidence reseal current trust bundle", 4 * 1024 * 1024);
+    if (!bundleBytes) throw new Error("verification evidence reseal requires a current trust.bundle");
+    const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    const ledgerBytes = readProtectedRegularFileBytes(ledgerFile, "verification evidence reseal resolution ledger", 4 * 1024 * 1024, true) ?? Buffer.alloc(0);
+    const events = ledgerBytes.length === 0 ? [] : ((JSON.parse(ledgerBytes.toString("utf8")) as JsonRecord).events as JsonRecord[]);
+    if (!Array.isArray(events)) throw new Error("verification evidence reseal resolution ledger is invalid");
+    const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "verification evidence reseal current completion", 256 * 1024);
+    if (!completionBytes) throw new Error("verification evidence reseal requires a current lifecycle completion");
+    const completion = verifyLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+    if (!lifecycleAuthorityCompletionBindsExactState(completion, slug, bundle, events)) throw new Error("verification evidence reseal current completion does not bind the exact bundle and resolution ledger");
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+    const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "verification evidence reseal Flow manifest", 16 * 1024 * 1024);
+    if (!manifestBytes) throw new Error("verification evidence reseal canonical Flow manifest is missing");
+    const staged = await stageWorkflowEvidenceCandidate(sessionDir, [
+      "record-gate-claim", sessionDir, ...forwarded, "--actor", caller.actorKey, "--flow-run-head", caller.expectedRunHead,
+    ]);
+    if (staged.bytes.length === 0) throw new Error("verification evidence reseal writer produced no candidate bytes");
+    if (!fs.readFileSync(bundleFile).equals(bundleBytes)
+        || !fs.readFileSync(path.join(flowRoot, "evidence", "manifest.json")).equals(manifestBytes)
+        || !(readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "verification evidence reseal current completion", 256 * 1024)?.equals(completionBytes))) {
+      throw new Error("verification evidence reseal preimage changed while staging the candidate");
+    }
+    const candidateBundle = JSON.parse(staged.bytes.toString("utf8")) as JsonRecord;
+    const currentClaims = Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [];
+    const candidateClaims = Array.isArray(candidateBundle.claims) ? candidateBundle.claims as JsonRecord[] : [];
+    const claimExpectation = (claim: JsonRecord): string | null => {
+      const metadata = claim.metadata as JsonRecord | undefined;
+      const gateClaim = metadata?.gate_claim as JsonRecord | undefined;
+      return typeof gateClaim?.expectation_id === "string" ? gateClaim.expectation_id : null;
+    };
+    const predecessorMatches = currentClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
+    const currentMatches = candidateClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
+    if (predecessorMatches.length !== 1 || currentMatches.length !== 1
+        || currentClaims.length !== candidateClaims.length
+        || predecessorMatches[0]!.index !== currentMatches[0]!.index) {
+      throw new Error("verification evidence reseal requires exactly one in-place target expectation claim replacement");
+    }
+    const predecessorClaim = predecessorMatches[0]!;
+    const currentClaim = currentMatches[0]!;
+    currentClaims.forEach((claim, index) => {
+      if (index !== predecessorClaim.index && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
+        throw new Error("verification evidence reseal writer changed the ordered claim set outside the target expectation");
+      }
+    });
+    for (const [label, claim] of [["predecessor", predecessorClaim.claim], ["current", currentClaim.claim]] as const) {
+      if (typeof claim.id !== "string" || !claim.id || typeof claim.status !== "string" || !claim.status) {
+        throw new Error(`verification evidence reseal ${label} claim identity or status is invalid`);
+      }
+      const metadata = claim.metadata as JsonRecord | undefined;
+      const gateClaim = metadata?.gate_claim as JsonRecord | undefined;
+      if (gateClaim?.expectation_id !== targetRequirement.id
+          || gateClaim?.step_id !== repaired.run.state.current_step
+          || gateClaim?.claim_type !== targetBundleClaim.claimType
+          || gateClaim?.subject_type !== targetBundleClaim.subjectType) {
+        throw new Error(`verification evidence reseal ${label} claim does not bind the canonical current verify gate requirement`);
+      }
+    }
+    const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+    if (!subject || subject !== repaired.run.state.subject) throw new Error("verification evidence reseal requires one matching canonical subject");
+    const now = new Date();
+    return buildUnsignedVerificationEvidenceResealAuthorization({
+      project_root: projectRoot,
+      run_id: slug,
+      subject,
+      preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+      candidate_bundle_sha256: staged.digest,
+      candidate_transaction_id: staged.transaction_id,
+      preimage_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"),
+      preimage_ledger_length: events.length,
+      preimage_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
+      current_completion_sha256: createHash("sha256").update(completionBytes).digest("hex"),
+      current_completion_request_sha256: String(completion.request_sha256),
+      current_completion_result_core_sha256: String(completion.result_core_sha256),
+      flow_definition_id: "builder.build",
+      flow_step_id: "verify",
+      flow_gate_id: currentGate.id as string,
+      flow_run_head: caller.expectedRunHead,
+      flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+      critique_projection_sha256: String(critiqueHistoryProjectionSummary(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []).digest),
+      target_expectation_id: expectation,
+      predecessor_claim_id: String(predecessorClaim.claim.id),
+      predecessor_claim_status: String(predecessorClaim.claim.status),
+      predecessor_claim_sha256: createHash("sha256").update(JSON.stringify(predecessorClaim.claim)).digest("hex"),
+      predecessor_claim_index: predecessorClaim.index,
+      current_claim_id: String(currentClaim.claim.id),
+      current_claim_status: String(currentClaim.claim.status),
+      current_claim_sha256: createHash("sha256").update(JSON.stringify(currentClaim.claim)).digest("hex"),
+      current_claim_index: currentClaim.index,
+      claim_delta: "replace",
+      nonce: `verification-reseal-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+    });
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
 type CommandObservationReport = { ordinal: number; observation_id: string; exit_code: number; output_sha256: string; outcome: "pass" | "fail" };
 type EvidenceReceipt = {
   runId: string; subject: string | null; gateId: string; stepId: string | null; expectedRunHead: string;
@@ -1039,7 +1200,7 @@ async function runEvidenceTransaction(input: {
 
 async function canonicalManifestStillUnchanged(projectRoot: string, slug: string, beforeEvidence: readonly JsonRecord[]): Promise<boolean> {
   try {
-    const raw = await loadRun(slug, projectRoot);
+    const raw = await withFlowRunRecoveryFenceReadAsync(projectRoot, slug, () => loadRun(slug, projectRoot));
     return isDeepStrictEqual(manifestEvidenceIdentity(raw.manifest as JsonRecord), beforeEvidence);
   } catch { return false; }
 }
@@ -1229,7 +1390,7 @@ async function canonicalEvidenceAttachment(projectRoot: string, slug: string, re
     // receipt classifier, but no new entry permits the transaction-owned bundle
     // to be restored safely.
     try {
-      const raw = await loadRun(slug, projectRoot);
+      const raw = await withFlowRunRecoveryFenceReadAsync(projectRoot, slug, () => loadRun(slug, projectRoot));
       return classifyCanonicalEvidenceAttachment(receipt, { runId: slug, state: raw.state as JsonRecord, manifest: raw.manifest as JsonRecord }, beforeEvidence);
     } catch {
       return "unknown";
@@ -1931,11 +2092,14 @@ function isSafeSlug(value: string): boolean {
 }
 
 function readBoundSession(sessionDir: string): { sidecar: JsonRecord; slug: string; projectRoot: string } {
-  const slug = path.basename(sessionDir);
+  const resolvedSessionDir = path.resolve(sessionDir);
+  const slug = path.basename(resolvedSessionDir);
   if (!isSafeSlug(slug)) throw new Error("workflow session basename must be a safe task slug");
-  const sidecar = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  const projectRoot = path.dirname(path.dirname(path.dirname(resolvedSessionDir)));
+  assertFlowRunRecoveryFenceOpen(projectRoot, slug);
+  const sidecar = readJsonFile(path.join(resolvedSessionDir, "state.json"), "workflow state");
   if (sidecar.task_slug !== slug) throw new Error("workflow state task_slug must exactly match the safe session basename");
-  return { sidecar, slug, projectRoot: path.dirname(path.dirname(path.dirname(sessionDir))) };
+  return { sidecar, slug, projectRoot };
 }
 
 function readAssignment(sessionDir: string, slug: string): JsonRecord {

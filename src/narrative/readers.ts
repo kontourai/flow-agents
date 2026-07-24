@@ -5,6 +5,10 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { assertPathContained } from "../lib/fs.js";
 import type { UnavailableReason } from "./integrity.js";
+import {
+  withNarrativeFlowRunRecoveryFenceRead,
+  withNarrativeFlowSessionRecoveryFenceRead,
+} from "./recovery-fence.js";
 
 interface CommandLogChainPrimitives {
   CHAIN_GENESIS: string;
@@ -263,19 +267,21 @@ export function readTrustCandidate(input: {
   id: string;
   kind: "claim" | "evidence";
 }): ReadCandidate<Record<string, unknown>> {
-  const file = path.join(input.sessionDir, "trust.bundle");
-  assertSafePathBelowRoot(input.sessionDir, file, "trust bundle");
-  const rawBundle = readRegularFileBytes(file, "trust bundle");
-  if (sha8(rawBundle) !== input.bundleSha8) return readerError("corrupt", "trust bundle", "trust bundle hash pin does not match");
-  const bundle = parseObject(rawBundle, "trust bundle");
-  const collectionName = input.kind === "claim" ? "claims" : "evidence";
-  const collection = bundle[collectionName];
-  if (!Array.isArray(collection)) return readerError("corrupt", "trust bundle", `trust bundle ${collectionName} is malformed`);
-  const records = collection.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object" && !Array.isArray(entry) && entry["id"] === input.id);
-  if (records.length === 0) return readerError("not_captured", `trust ${input.kind}`, `trust ${input.kind} was not captured`);
-  if (records.length !== 1) return readerError("corrupt", `trust ${input.kind}`, `trust ${input.kind} id is not unique`);
-  const record = records[0];
-  return { file, raw: Buffer.from(JSON.stringify(record)), record };
+  return withNarrativeFlowSessionRecoveryFenceRead(input.sessionDir, () => {
+    const file = path.join(input.sessionDir, "trust.bundle");
+    assertSafePathBelowRoot(input.sessionDir, file, "trust bundle");
+    const rawBundle = readRegularFileBytes(file, "trust bundle");
+    if (sha8(rawBundle) !== input.bundleSha8) return readerError("corrupt", "trust bundle", "trust bundle hash pin does not match");
+    const bundle = parseObject(rawBundle, "trust bundle");
+    const collectionName = input.kind === "claim" ? "claims" : "evidence";
+    const collection = bundle[collectionName];
+    if (!Array.isArray(collection)) return readerError("corrupt", "trust bundle", `trust bundle ${collectionName} is malformed`);
+    const records = collection.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object" && !Array.isArray(entry) && entry["id"] === input.id);
+    if (records.length === 0) return readerError("not_captured", `trust ${input.kind}`, `trust ${input.kind} was not captured`);
+    if (records.length !== 1) return readerError("corrupt", `trust ${input.kind}`, `trust ${input.kind} id is not unique`);
+    const record = records[0];
+    return { file, raw: Buffer.from(JSON.stringify(record)), record };
+  });
 }
 
 export function readTrustClaimCandidate(input: Omit<Parameters<typeof readTrustCandidate>[0], "kind">): ReadCandidate<Record<string, unknown>> {
@@ -297,18 +303,24 @@ function readFlowState(flowRoot: string, runId: string): { file: string; raw: Bu
 }
 
 export function readFlowStateCandidate(input: { flowRoot: string; runId: string; sha8: string }): ReadCandidate<Record<string, unknown>> {
-  const { file, raw, state } = readFlowState(input.flowRoot, input.runId);
-  if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow run state", "flow state hash pin does not match");
-  return { file, raw, record: state };
+  const projectRoot = path.dirname(path.dirname(path.resolve(input.flowRoot)));
+  return withNarrativeFlowRunRecoveryFenceRead(projectRoot, input.runId, () => {
+    const { file, raw, state } = readFlowState(input.flowRoot, input.runId);
+    if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow run state", "flow state hash pin does not match");
+    return { file, raw, record: state };
+  });
 }
 
 export function readFlowReportCandidate(input: { flowRoot: string; runId: string; sha8: string }): ReadCandidate<Record<string, unknown>> {
-  if (!input.runId || input.runId.includes("/") || input.runId.includes("\\")) return readerError("unauthorized", "flow report", "flow run id is invalid");
-  const file = path.join(input.flowRoot, "runs", input.runId, "report.json");
-  assertSafePathBelowRoot(input.flowRoot, file, "flow run");
-  const raw = readRegularFileBytes(file, "flow report");
-  if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow report", "flow report hash pin does not match");
-  return { file, raw, record: parseObject(raw, "flow report") };
+  const projectRoot = path.dirname(path.dirname(path.resolve(input.flowRoot)));
+  return withNarrativeFlowRunRecoveryFenceRead(projectRoot, input.runId, () => {
+    if (!input.runId || input.runId.includes("/") || input.runId.includes("\\")) return readerError("unauthorized", "flow report", "flow run id is invalid");
+    const file = path.join(input.flowRoot, "runs", input.runId, "report.json");
+    assertSafePathBelowRoot(input.flowRoot, file, "flow run");
+    const raw = readRegularFileBytes(file, "flow report");
+    if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow report", "flow report hash pin does not match");
+    return { file, raw, record: parseObject(raw, "flow report") };
+  });
 }
 
 interface SurfaceModule {
@@ -353,6 +365,7 @@ export function readSurfaceExplanationCandidate(input: {
   bundleSha8: string;
   claimId: string;
 }): ReadCandidate<Record<string, unknown>> {
+  return withNarrativeFlowSessionRecoveryFenceRead(input.sessionDir, () => {
   const file = path.join(input.sessionDir, "trust.bundle");
   assertSafePathBelowRoot(input.sessionDir, file, "trust bundle");
   const rawBundle = readRegularFileBytes(file, "trust bundle");
@@ -390,17 +403,21 @@ export function readSurfaceExplanationCandidate(input: {
   const record = explanation as Record<string, unknown>;
   const raw = Buffer.from(stableStringify(record));
   return { file, raw, record, originPackage: { name: "@kontourai/surface", version: surface.version } };
+  });
 }
 
 export function readFlowTransitionCandidate(input: { flowRoot: string; runId: string; index: number; sha8: string }): ReadCandidate<Record<string, unknown>> {
-  const { file, state } = readFlowState(input.flowRoot, input.runId);
-  const transitions = state["transitions"];
-  if (!Array.isArray(transitions)) return readerError("corrupt", "flow transition", "flow transitions are malformed");
-  const record = transitions[input.index];
-  if (!record || typeof record !== "object" || Array.isArray(record)) return readerError("not_captured", "flow transition", "flow transition was not captured");
-  const raw = Buffer.from(JSON.stringify(record));
-  if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow transition", "flow transition hash pin does not match");
-  return { file, raw, record: record as Record<string, unknown>, lineIndex: input.index };
+  const projectRoot = path.dirname(path.dirname(path.resolve(input.flowRoot)));
+  return withNarrativeFlowRunRecoveryFenceRead(projectRoot, input.runId, () => {
+    const { file, state } = readFlowState(input.flowRoot, input.runId);
+    const transitions = state["transitions"];
+    if (!Array.isArray(transitions)) return readerError("corrupt", "flow transition", "flow transitions are malformed");
+    const record = transitions[input.index];
+    if (!record || typeof record !== "object" || Array.isArray(record)) return readerError("not_captured", "flow transition", "flow transition was not captured");
+    const raw = Buffer.from(JSON.stringify(record));
+    if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow transition", "flow transition hash pin does not match");
+    return { file, raw, record: record as Record<string, unknown>, lineIndex: input.index };
+  });
 }
 
 export function readTranscriptCandidate(input: { absolutePath: string; byteStart: number; byteEnd: number }): Buffer {

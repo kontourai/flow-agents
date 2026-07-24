@@ -43,6 +43,7 @@ const {
   resolveSharedRepoRoot,
   warnIfFailingOpenInsideGitTree,
 } = require('./lib/local-artifact-paths');
+const { withFlowRecoveryFenceReadAsync } = require('./lib/flow-recovery-fence');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
@@ -2161,7 +2162,7 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
-async function analyze(root, now = Date.now()) {
+async function analyze(root, now = Date.now(), fencedRunId = null) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
   const activeTurnScope = validatedActiveTurnScope(root);
@@ -2246,6 +2247,21 @@ async function analyze(root, now = Date.now()) {
 
   const latest = artifacts[0];
   const latestArtifactDir = path.dirname(latest.file);
+  const selectedRunId = path.basename(latestArtifactDir);
+  if (fencedRunId === null) {
+    try {
+      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId));
+    } catch (error) {
+      return {
+        warnings: [`workflow recovery fence: ${String(error && error.message || error)}. Canonical workflow artifacts are unavailable until recovery completes.`],
+        blocking: true,
+        activeFlowRun: true,
+        latestArtifactDir,
+        gatePrefix: '[stop-gate]',
+      };
+    }
+  }
+  if (fencedRunId !== selectedRunId) throw new Error("workflow session selection changed during fenced read");
   const warnings = [];
   const relPath = relative(root, latest.file);
   const status = latest.status || 'unknown';

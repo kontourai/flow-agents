@@ -39,6 +39,19 @@ test("strict lifecycle consumers reject a historical core and accept only the ne
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(postRepairCompletion, "run-1", bundle, postRepairEvents), true);
   assert.equal(lifecycleAuthorityCompletionBindsExactState({ ...postRepairCompletion, run_id: "other" }, "run-1", bundle, postRepairEvents), false);
+  const resealedCompletion = {
+    ...postRepairCompletion,
+    action: "reseal-verification-evidence",
+  };
+  assert.equal(lifecycleAuthorityCompletionBindsExactState(resealedCompletion, "run-1", bundle, postRepairEvents), true);
+  assert.equal(
+    lifecycleAuthorityCompletionBindsExactState(
+      { ...resealedCompletion, result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: historicalEvents }) },
+      "run-1", bundle, postRepairEvents,
+    ),
+    false,
+    "reseal completion must retain full bundle plus unchanged ledger exactness",
+  );
 });
 
 function protectedDirectory() {
@@ -330,7 +343,7 @@ test("lifecycle authority response rejects extra fields and malformed results", 
 });
 
 test("lifecycle authority response accepts completed replays only with an authenticated immutable applied completion", () => withCompletionVerificationKey(() => {
-  for (const replayAction of ["resolve-critique", "repair-critique-resolution-history", "cancel", "archive"]) {
+  for (const replayAction of ["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "cancel", "archive"]) {
     const appliedCompletion = signedCompletion({ action: replayAction });
     const replay = {
       schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
@@ -391,6 +404,11 @@ test("Builder, sidecar/final-gate, and artifact validation retain the strict ver
   }
   const workflowSource = fs.readFileSync(new URL("../../src/cli/workflow.ts", import.meta.url), "utf8");
   assert.match(workflowSource, /verifyHistoricalLifecycleAuthorityCompletion/, "the public history-repair discovery path explicitly selects historical authentication");
+  for (const consumer of ["../../src/builder-flow-runtime.ts", "../../src/cli/validate-workflow-artifacts.ts"]) {
+    const source = fs.readFileSync(new URL(consumer, import.meta.url), "utf8");
+    assert.match(source, /lifecycleAuthorityCompletionBindsExactState/, `${consumer} must accept exact reseal completions through the shared full-state predicate`);
+    assert.doesNotMatch(source, /\["resolve-critique", "repair-critique-resolution-history"\]\.includes/, `${consumer} must not retain the pre-reseal action allowlist`);
+  }
 });
 
 test("lifecycle authority replay response keeps action request run core and signature bindings fail-closed", () => withCompletionVerificationKey(() => {

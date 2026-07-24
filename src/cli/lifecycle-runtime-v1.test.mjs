@@ -113,6 +113,208 @@ test("runtime v1 rejects incomplete repair coverage and same-reviewer resolution
   assert.throws(() => resolveCritiqueTransition({ bundle: same, resolution_events: [], authorization: { ...authorization, expected_resolver: "reviewer-a" }, prior_record_id: "prior", resolving_record_id: "resolving" }), /distinct/);
 });
 
+test("runtime v1 reseals only verification evidence while preserving critique and ledger exactly", () => {
+  assert.equal(
+    typeof lifecycleRuntime.resealVerificationEvidenceTransition,
+    "function",
+    "the privileged reseal must use a distinct pure transition",
+  );
+  const currentBundle = {
+    schema_version: "1.0",
+    claims: [
+      {
+        id: "claim-review", value: "pass", status: "verified",
+        metadata: {
+          origin: "critique", critique_record_id: "review", critique_record_hash: "a".repeat(64),
+          critique_sequence: 1, critique_predecessor_hash: "0".repeat(64), reviewer: "reviewer-a",
+          workflow_subject_ref: "work-item:ledger-test", lanes: [], findings: [], review_target: { artifacts: [] },
+        },
+      },
+      { id: "gate-claim-old", value: "fail", status: "disputed", metadata: { gate_claim: { expectation_id: "tests-evidence", claim_type: "builder.verify.tests", subject_type: "flow-step", step_id: "verify" } } },
+    ],
+  };
+  const candidateBundle = structuredClone(currentBundle);
+  candidateBundle.claims[1] = { id: "gate-claim-old", value: "pass", status: "verified", metadata: { gate_claim: { expectation_id: "tests-evidence", claim_type: "builder.verify.tests", subject_type: "flow-step", step_id: "verify" } } };
+  const flowPolicy = {
+    definition_id: "builder.build",
+    step_id: "verify",
+    gate_id: "verify-gate",
+    requirements: [
+      { id: "clean-critique", bundle_claim: { claimType: "workflow.critique.review", subjectType: "workflow-critique" } },
+      { id: "tests-evidence", bundle_claim: { claimType: "builder.verify.tests", subjectType: "flow-step" } },
+    ],
+  };
+  const ledger = [{ event_id: "event-1", event_hash: "b".repeat(64) }];
+  const authorization = {
+    operation: "reseal-verification-evidence",
+    run_id: "run-1",
+    subject: "work-item:ledger-test",
+    candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(candidateBundle))),
+    preimage_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(currentBundle))),
+    preimage_ledger_sha256: rawSha256(Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger }))),
+    preimage_ledger_length: 1,
+    preimage_ledger_tail_hash: ledger[0].event_hash,
+    flow_definition_id: "builder.build",
+    flow_step_id: "verify",
+    flow_gate_id: "verify-gate",
+    target_expectation_id: "tests-evidence",
+    predecessor_claim_id: currentBundle.claims[1].id,
+    predecessor_claim_status: currentBundle.claims[1].status,
+    predecessor_claim_sha256: rawSha256(Buffer.from(JSON.stringify(currentBundle.claims[1]))),
+    predecessor_claim_index: 1,
+    current_claim_id: candidateBundle.claims[1].id,
+    current_claim_status: candidateBundle.claims[1].status,
+    current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(candidateBundle.claims[1]))),
+    current_claim_index: 1,
+    claim_delta: "replace",
+  };
+  const next = lifecycleRuntime.resealVerificationEvidenceTransition({
+    current_bundle: currentBundle,
+    candidate_bundle: candidateBundle,
+    resolution_events: ledger,
+    authorization,
+    current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+    candidate_bundle_bytes: Buffer.from(JSON.stringify(candidateBundle)),
+    ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+    flow: flowPolicy,
+  });
+  assert.deepEqual(next.bundle, candidateBundle);
+  assert.deepEqual(next.resolution_events, ledger);
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: ledger, authorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(candidateBundle)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: { ...flowPolicy, requirements: [...flowPolicy.requirements, flowPolicy.requirements[1]] },
+    }),
+    /target exactly one authorized verify expectation/i,
+    "the protected current gate must contain the target requirement exactly once",
+  );
+  const wrongStepCandidate = structuredClone(candidateBundle);
+  wrongStepCandidate.claims[1].metadata.gate_claim.step_id = "plan";
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: wrongStepCandidate, resolution_events: ledger,
+      authorization: {
+        ...authorization,
+        candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(wrongStepCandidate))),
+        current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(wrongStepCandidate.claims[1]))),
+      },
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(wrongStepCandidate)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /replacement gate_claim metadata does not bind the canonical current verify-gate requirement/i,
+  );
+
+  const critiqueTamper = structuredClone(candidateBundle);
+  critiqueTamper.claims[0].metadata.reviewer = "attacker";
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: critiqueTamper, resolution_events: ledger, authorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(critiqueTamper)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /critique projection|verification claims/i,
+  );
+  const unrelatedClaimTamper = structuredClone(candidateBundle);
+  unrelatedClaimTamper.claims.push({ id: "forged", value: "pass", status: "verified", metadata: { origin: "release" } });
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: unrelatedClaimTamper, resolution_events: ledger, authorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(unrelatedClaimTamper)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /ordered claim set|claim delta/i,
+  );
+  const unrelatedGateTamper = structuredClone(candidateBundle);
+  unrelatedGateTamper.claims.unshift({ id: "other-gate", value: "pass", status: "verified", metadata: { gate_claim: { expectation_id: "policy-compliance", step_id: "verify" } } });
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: unrelatedGateTamper, resolution_events: ledger,
+      authorization: { ...authorization, candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(unrelatedGateTamper))) },
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(unrelatedGateTamper)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /ordered claim set|target expectation|claim delta/i,
+  );
+  const reordered = structuredClone(candidateBundle);
+  reordered.claims.reverse();
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: reordered, resolution_events: ledger,
+      authorization: { ...authorization, candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(reordered))) },
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(reordered)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /ordered claim set|claim index|claim delta|target exactly one|target.*expectation/i,
+  );
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: [...ledger, { event_hash: "c".repeat(64) }], authorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(candidateBundle)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: [...ledger, { event_hash: "c".repeat(64) }] })),
+      flow: flowPolicy,
+    }),
+    /ledger preimage|ledger identity/i,
+  );
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: ledger, authorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(currentBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(candidateBundle)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: { ...flowPolicy, step_id: "release" },
+    }),
+    /builder.build verify gate/i,
+  );
+  const planTargetBundle = structuredClone(currentBundle);
+  planTargetBundle.claims[1] = {
+    id: "plan-claim-old", value: "fail", status: "disputed",
+    metadata: { gate_claim: { expectation_id: "implementation-plan", claim_type: "builder.plan.implementation", subject_type: "artifact", step_id: "plan" } },
+  };
+  const planCandidateBundle = structuredClone(planTargetBundle);
+  planCandidateBundle.claims[1] = {
+    id: "plan-claim-old", value: "pass", status: "verified",
+    metadata: { gate_claim: { expectation_id: "implementation-plan", claim_type: "builder.plan.implementation", subject_type: "artifact", step_id: "plan" } },
+  };
+  const planAuthorization = {
+    ...authorization,
+    target_expectation_id: "implementation-plan",
+    predecessor_claim_id: "plan-claim-old",
+    predecessor_claim_status: "disputed",
+    predecessor_claim_sha256: rawSha256(Buffer.from(JSON.stringify(planTargetBundle.claims[1]))),
+    current_claim_id: "plan-claim-old",
+    current_claim_status: "verified",
+    current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(planCandidateBundle.claims[1]))),
+    preimage_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(planTargetBundle))),
+    candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(planCandidateBundle))),
+  };
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: planTargetBundle, candidate_bundle: planCandidateBundle, resolution_events: ledger,
+      authorization: planAuthorization,
+      current_bundle_bytes: Buffer.from(JSON.stringify(planTargetBundle)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(planCandidateBundle)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /target exactly one authorized verify expectation|canonical current/i,
+    "a plan-gate implementation-plan claim cannot be targeted while the protected run is at verify",
+  );
+});
+
 test("runtime v1 repairs only an already-superseded edge with a separately signed history-repair event", () => {
   const repairCritiqueResolutionHistoryTransition = lifecycleRuntime.repairCritiqueResolutionHistoryTransition;
   assert.equal(

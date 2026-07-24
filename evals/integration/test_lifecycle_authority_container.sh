@@ -102,7 +102,7 @@ if su -s /bin/bash node -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' unexpected </dev
 if su -s /bin/bash nobody -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null"; then exit 1; fi
 
 cat > /work/setup-fixture.mjs <<'NODE'
-import fs from 'node:fs'; import path from 'node:path';
+import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
 import { startBuilderFlowSession } from './build/src/builder-flow-runtime.js';
 import { performLocalClaim } from './build/src/cli/assignment-provider.js';
 const project = '/tmp/lifecycle-authority-e2e';
@@ -122,7 +122,18 @@ fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(pro
 fs.writeFileSync(path.join(project, 'package.json'), '{"name":"lifecycle-authority-e2e","private":true}\n');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'fixture delivery\n');
 fs.writeFileSync(path.join(project, 'review-target', 'fixture.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; test('lifecycle fixture', () => assert.equal(1, 1));\n");
-for (const slug of ['resolve-e2e', 'repair-e2e', 'bridge-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) await makeSession(slug);
+fs.writeFileSync(path.join(project, '.gitignore'), '.kontourai/\n');
+for (const args of [
+  ['init', '-q'],
+  ['config', 'user.name', 'Lifecycle Fixture'],
+  ['config', 'user.email', 'lifecycle-fixture@invalid.example'],
+  ['add', '.gitignore', 'package.json', 'review-target'],
+  ['commit', '-qm', 'fixture baseline'],
+]) {
+  const result = spawnSync('git', args, { cwd: project, encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`fixture git ${args[0]} failed: ${result.stdout}${result.stderr}`);
+}
+for (const slug of ['resolve-e2e', 'reseal-e2e', 'repair-e2e', 'bridge-e2e', 'archive-e2e', 'stale-e2e', 'unauthorized-e2e', 'concurrent-e2e', 'symlink-e2e', 'legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) await makeSession(slug);
 for (const slug of ['legacy-e2e', 'legacy-mismatch-e2e', 'legacy-same-nonce-e2e', 'legacy-recovery-e2e']) {
   const assignment = path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`);
   const record = JSON.parse(fs.readFileSync(assignment, 'utf8'));
@@ -157,6 +168,24 @@ const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON
 const acceptance = bundle.claims.find((claim) => claim.claimType === 'workflow.acceptance.criterion'); if (!acceptance) throw new Error('fixture acceptance claim is missing after critique rebuild');
 acceptance.value = 'pass'; acceptance.status = 'verified'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
 NODE
+
+# Prepare a separate verify-gate claim and critique pair. Its signed resolution
+# creates the exact-current completion that the two-stage reseal must replace.
+RESEAL_SESSION="$PROJECT/.kontourai/flow-agents/reseal-e2e"
+node - "$PROJECT" "$RESEAL_SESSION" <<'NODE'
+const fs = require('node:fs'), path = require('node:path'); const [project, session] = process.argv.slice(2);
+const flowFile = path.join(project, '.kontourai', 'flow', 'runs', 'reseal-e2e', 'state.json');
+const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8')); flow.current_step = 'verify'; fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
+const sidecarFile = path.join(session, 'state.json'); const sidecar = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
+if (sidecar.flow_run) sidecar.flow_run.current_step = 'verify'; fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
+const acceptanceFile = path.join(session, 'acceptance.json'), acceptance = JSON.parse(fs.readFileSync(acceptanceFile, 'utf8'));
+acceptance.criteria = []; fs.writeFileSync(acceptanceFile, `${JSON.stringify(acceptance, null, 2)}\n`);
+NODE
+node build/src/cli/workflow-sidecar.js record-gate-claim "$RESEAL_SESSION" --expectation policy-compliance --status not_verified --summary "Pre-resolution policy evidence was incomplete." --timestamp "2026-07-20T00:10:00Z" >/dev/null
+printf 'reseal delivery failed\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$RESEAL_SESSION" --id reseal-failed-review --reviewer reseal-reviewer-one --verdict fail --summary "Reseal fixture defect." --artifact-ref "$DELIVERY" --lane-json '{"id":"reseal-code","status":"fail","summary":"Reseal defect remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Reseal delivery review."}]}' --finding-json '{"id":"reseal-defect","severity":"high","status":"open","description":"Reseal repair required."}' --timestamp "2026-07-20T00:11:00Z" >/dev/null
+printf 'reseal delivery repaired\n' > "$DELIVERY"
+node build/src/cli/workflow-sidecar.js record-critique "$RESEAL_SESSION" --id reseal-repaired-review --reviewer reseal-reviewer-two --verdict pass --summary "Reseal fixture repair verified." --artifact-ref "$DELIVERY" --lane-json '{"id":"reseal-code","status":"pass","summary":"Reseal repair verified.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Reseal delivery review."}]}' --finding-json '{"id":"reseal-defect","severity":"high","status":"fixed","description":"Reseal repair verified."}' --timestamp "2026-07-20T00:12:00Z" >/dev/null
 
 # Build a separate five-edge history fixture.  The first three resolutions model
 # the legacy coordinator overwrite; its surviving third event is re-rooted as
@@ -202,16 +231,19 @@ printf 'bridge delivery A failed\n' > "$DELIVERY"
 node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-a-failed --reviewer bridge-reviewer-a --verdict fail --summary "Bridge A failed." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-a","status":"fail","summary":"Bridge A remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-a-defect","severity":"high","status":"open","description":"Bridge A repair required."}' --timestamp "2026-07-20T01:01:00Z" >/dev/null
 printf 'bridge delivery A repaired\n' > "$DELIVERY"
 node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-a-repaired --reviewer bridge-reviewer-b --verdict pass --summary "Bridge A repaired." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-a","status":"pass","summary":"Bridge A repaired.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-a-defect","severity":"high","status":"fixed","description":"Bridge A repair verified."}' --timestamp "2026-07-20T01:02:00Z" >/dev/null
-printf 'bridge delivery B failed\n' > "$DELIVERY"
-node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-b-failed --reviewer bridge-reviewer-c --verdict fail --summary "Bridge B failed." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-b","status":"fail","summary":"Bridge B remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-b-defect","severity":"high","status":"open","description":"Bridge B repair required."}' --timestamp "2026-07-20T01:03:00Z" >/dev/null
-printf 'bridge delivery B repaired\n' > "$DELIVERY"
-node build/src/cli/workflow-sidecar.js record-critique "$BRIDGE_SESSION" --id bridge-b-repaired --reviewer bridge-reviewer-d --verdict pass --summary "Bridge B repaired." --artifact-ref "$DELIVERY" --lane-json '{"id":"bridge-b","status":"pass","summary":"Bridge B repaired.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Bridge delivery review."}]}' --finding-json '{"id":"bridge-b-defect","severity":"high","status":"fixed","description":"Bridge B repair verified."}' --timestamp "2026-07-20T01:04:00Z" >/dev/null
 mapfile -t CRITIQUE_IDS < <(node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
 const fs = require('node:fs'); for (const claim of JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique')) console.log(claim.metadata.critique_record_id);
 NODE
 )
 test "${#CRITIQUE_IDS[@]}" -eq 2
 node build/src/cli.js workflow resolve-critique-request --session-dir "$RESOLVE_SESSION" --prior-record-id "${CRITIQUE_IDS[0]}" --resolving-record-id "${CRITIQUE_IDS[1]}" > /tmp/resolve-request.json
+node build/src/cli/workflow-sidecar.js record-critique "$RESEAL_SESSION" --id reseal-current-clean-review --reviewer reseal-reviewer-three --verdict pass --summary "Current reseal workspace verified." --artifact-ref "$DELIVERY" --lane-json '{"id":"reseal-current","status":"pass","summary":"Current reseal workspace verified.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Current reseal delivery review."}]}' --timestamp "2026-07-20T00:13:00Z" >/dev/null
+mapfile -t RESEAL_CRITIQUE_IDS < <(node - "$RESEAL_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs'); for (const claim of JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique')) console.log(claim.metadata.critique_record_id);
+NODE
+)
+test "${#RESEAL_CRITIQUE_IDS[@]}" -eq 3
+node build/src/cli.js workflow resolve-critique-request --session-dir "$RESEAL_SESSION" --prior-record-id "${RESEAL_CRITIQUE_IDS[0]}" --resolving-record-id "${RESEAL_CRITIQUE_IDS[1]}" > /tmp/reseal-resolve-request.json
 COPIED_PROJECT=/tmp/lifecycle-authority-copied-project
 rm -rf "$COPIED_PROJECT"
 cp -a "$PROJECT" "$COPIED_PROJECT"
@@ -236,6 +268,7 @@ const signed = { ...unsigned, signature: { algorithm: 'ed25519', key_id: 'fixtur
 fs.writeFileSync(output, `${JSON.stringify(signed)}\n`, { mode: 0o600 });
 NODE
 node /work/sign-authorization.mjs /tmp/resolve-request.json /root/lifecycle-authorizations/resolve.json
+node /work/sign-authorization.mjs /tmp/reseal-resolve-request.json /root/lifecycle-authorizations/reseal-resolve.json
 cp /root/lifecycle-authorizations/resolve.json /root/lifecycle-authorizations/resolve-copied-path.json
 node /work/sign-authorization.mjs /tmp/copied-project-request.json /root/lifecycle-authorizations/copied-project.json
 node /work/sign-authorization.mjs /tmp/wrong-step-request.json /root/lifecycle-authorizations/wrong-step.json
@@ -287,10 +320,334 @@ const [action, project_root, session_dir, authorization_file, prior_record_id, r
 console.log(JSON.stringify(invokeExternalLifecycleAuthority({ action, project_root, session_dir, authorization_file, prior_record_id, resolving_record_id })));
 NODE
 
+# Resolve the reseal fixture first, then stage and sign the exact final
+# tests-evidence replacement while the canonical run is still at verify.
+su -s /bin/bash node -c "cd /work && node /work/history-repair-invoke.mjs resolve-critique '$PROJECT' '$RESEAL_SESSION' /root/lifecycle-authorizations/reseal-resolve.json '${RESEAL_CRITIQUE_IDS[0]}' '${RESEAL_CRITIQUE_IDS[1]}'" >/tmp/reseal-resolve-result.json
+node -e "const r=require('/tmp/reseal-resolve-result.json'); if(r.operation_status!=='applied') throw new Error('reseal fixture critique resolution was not applied')"
+node --input-type=module - "$PROJECT" "$RESEAL_SESSION" /root/lifecycle-authorizations/reseal-resolve.json "${RESEAL_CRITIQUE_IDS[0]}" "${RESEAL_CRITIQUE_IDS[1]}" <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
+const [project, session, authorizationFile, priorRecordId, resolvingRecordId] = process.argv.slice(2);
+const fixtureProject = '/tmp/lifecycle-authority-e2e';
+const fixtureSession = path.join(fixtureProject, '.kontourai', 'flow-agents', 'reseal-e2e');
+const journalBasename = '.lifecycle-authority.transaction.json';
+const assertAnchoredSession = (trustedProject, expectedSession) => {
+  if (path.resolve(trustedProject) !== trustedProject || fs.realpathSync(trustedProject) !== trustedProject) {
+    throw new Error('reseal fixture project root is not its fixed real path');
+  }
+  const relative = path.relative(trustedProject, expectedSession);
+  if (relative !== path.join('.kontourai', 'flow-agents', 'reseal-e2e')) {
+    throw new Error('reseal fixture session is not the exact expected fixture path');
+  }
+  let current = trustedProject;
+  for (const segment of ['', ...relative.split(path.sep)]) {
+    if (segment) current = path.join(current, segment);
+    const stat = fs.lstatSync(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(current) !== current) {
+      throw new Error(`reseal fixture session ancestor is not a real directory: ${current}`);
+    }
+  }
+  return current;
+};
+const removeOwnedLegacyJournal = (trustedProject, expectedSession, expectedBinding) => {
+  const anchoredSession = assertAnchoredSession(trustedProject, expectedSession);
+  const journalFile = path.join(anchoredSession, journalBasename);
+  if (path.basename(journalFile) !== journalBasename || path.dirname(journalFile) !== anchoredSession) {
+    throw new Error('reseal fixture legacy journal cleanup target is not the fixed session leaf');
+  }
+  const stat = fs.lstatSync(journalFile);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error('reseal fixture legacy journal cleanup target is not a regular file');
+  }
+  const journal = JSON.parse(fs.readFileSync(journalFile, 'utf8'));
+  if (journal.status !== 'committed' || canonicalJson(journal.binding) !== canonicalJson(expectedBinding)) {
+    throw new Error('reseal fixture refused to remove a legacy journal it did not create');
+  }
+  assertAnchoredSession(trustedProject, expectedSession);
+  const current = fs.lstatSync(journalFile);
+  if (!current.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino) {
+    throw new Error('reseal fixture legacy journal changed before cleanup');
+  }
+  fs.unlinkSync(journalFile);
+};
+if (project !== fixtureProject || session !== fixtureSession) {
+  throw new Error('reseal fixture cleanup arguments do not match the fixed fixture');
+}
+const authorization = JSON.parse(fs.readFileSync(authorizationFile, 'utf8'));
+const request = {
+  action: 'resolve-critique',
+  project_root: project,
+  session_dir: session,
+  authorization_file: authorizationFile,
+  prior_record_id: priorRecordId,
+  resolving_record_id: resolvingRecordId,
+};
+const expectedBinding = {
+  request_sha256: sha256(request),
+  authorization_sha256: sha256(canonicalJson(authorization)),
+};
+const regressionRoot = '/tmp/reseal-journal-cleanup-symlink-regression';
+const regressionProject = path.join(regressionRoot, 'project');
+const foreignSession = path.join(regressionRoot, 'foreign', 'reseal-e2e');
+const regressionSession = path.join(regressionProject, '.kontourai', 'flow-agents', 'reseal-e2e');
+fs.rmSync(regressionRoot, { recursive: true, force: true });
+try {
+  fs.mkdirSync(path.join(regressionProject, '.kontourai'), { recursive: true });
+  fs.mkdirSync(foreignSession, { recursive: true });
+  fs.writeFileSync(path.join(foreignSession, journalBasename), `${JSON.stringify({ status: 'committed', binding: expectedBinding })}\n`);
+  fs.symlinkSync(path.dirname(foreignSession), path.join(regressionProject, '.kontourai', 'flow-agents'), 'dir');
+  let rejected = false;
+  try {
+    removeOwnedLegacyJournal(regressionProject, regressionSession, expectedBinding);
+  } catch (error) {
+    if (!/ancestor is not a real directory/.test(String(error))) throw error;
+    rejected = true;
+  }
+  if (!rejected || !fs.existsSync(path.join(foreignSession, journalBasename))) {
+    throw new Error('symlinked session ancestor cleanup removed a foreign journal');
+  }
+} finally {
+  fs.rmSync(regressionRoot, { recursive: true, force: true });
+}
+removeOwnedLegacyJournal(fixtureProject, fixtureSession, expectedBinding);
+NODE
+FLOW_AGENTS_ACTOR=reseal-container node --input-type=module - "$PROJECT" <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import { resolveCurrentAssignmentActor } from './build/src/cli/assignment-provider.js';
+const project = process.argv[2], file = path.join(project, '.kontourai', 'flow-agents', 'assignment', 'reseal-e2e.json');
+const caller = resolveCurrentAssignmentActor(), assignment = JSON.parse(fs.readFileSync(file, 'utf8'));
+assignment.actor_key = caller.actorKey; assignment.actor = caller.actor; fs.writeFileSync(file, `${JSON.stringify(assignment, null, 2)}\n`);
+NODE
+export PINNED_FLOW_ROOT="$(dirname "$LIFECYCLE_HELPER_PATH")/flow-reducer/node_modules/@kontourai/flow"
+cat > /work/stage-reseal-request.mjs <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { pathToFileURL } from 'node:url';
+import { stageWorkflowEvidenceCandidate } from './build/src/cli/workflow.js';
+import { resolveCurrentAssignmentActor } from './build/src/cli/assignment-provider.js';
+import { buildUnsignedVerificationEvidenceResealAuthorization } from './build/src/builder-lifecycle-authority.js';
+import { critiqueHistoryProjectionSummary } from './build/src/cli/critique-resolution.js';
+const [project, session, pinnedFlowRoot] = process.argv.slice(2), runId = path.basename(session), expectation = 'policy-compliance';
+const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+const flow = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
+const flowRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
+const state = JSON.parse(fs.readFileSync(path.join(flowRoot, 'state.json'), 'utf8'));
+const definition = JSON.parse(fs.readFileSync(path.join(flowRoot, 'definition.json'), 'utf8'));
+const caller = resolveCurrentAssignmentActor(), currentBytes = fs.readFileSync(path.join(session, 'trust.bundle'));
+const current = JSON.parse(currentBytes), targetIndex = current.claims.findIndex((claim) => claim.metadata?.gate_claim?.expectation_id === expectation);
+if (targetIndex < 0 || current.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === expectation).length !== 1) throw new Error('reseal fixture requires one current policy claim');
+const staged = await stageWorkflowEvidenceCandidate(session, [
+  'record-gate-claim', session,
+  '--expectation', expectation,
+  '--status', 'pass',
+  '--summary', 'Final installed-closure policy verification passed.',
+  '--evidence-ref-json', JSON.stringify({ kind: 'artifact', file: 'review-target/delivery.md', summary: 'Reviewed delivery covered by the installed-closure policy verification.' }),
+  '--actor', caller.actorKey,
+]);
+let candidate = JSON.parse(staged.bytes);
+if (candidate.claims.length !== current.claims.length
+    || candidate.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === expectation).length !== 1
+    || candidate.claims.findIndex((claim) => claim.metadata?.gate_claim?.expectation_id === expectation) !== targetIndex) {
+  throw new Error('staged candidate did not retain one ordered in-place target replacement');
+}
+current.claims.forEach((claim, index) => {
+  if (index === targetIndex || JSON.stringify(claim) === JSON.stringify(candidate.claims[index])) return;
+  const replacementClaim = candidate.claims[index];
+  const keys = [...new Set([...Object.keys(claim), ...Object.keys(replacementClaim || {})])]
+    .filter((key) => JSON.stringify(claim[key]) !== JSON.stringify(replacementClaim?.[key]));
+  const metadataKeys = keys.includes('metadata')
+    ? [...new Set([...Object.keys(claim.metadata || {}), ...Object.keys(replacementClaim?.metadata || {})])]
+      .filter((key) => JSON.stringify(claim.metadata?.[key]) !== JSON.stringify(replacementClaim?.metadata?.[key]))
+    : [];
+  throw new Error(`public reseal candidate changed non-target claim ${index} fields ${keys.join(',')} metadata ${metadataKeys.join(',')}`);
+});
+const candidateBytes = Buffer.from(`${JSON.stringify(candidate, null, 2)}\n`);
+const candidateFile = path.join(session, `.workflow-evidence-transaction-${staged.transaction_id}`, 'trust.bundle.candidate');
+fs.writeFileSync(candidateFile, candidateBytes, { mode: 0o600 });
+const ledgerFile = path.join(session, 'lifecycle-authority.resolution-events.json'), ledgerBytes = fs.existsSync(ledgerFile) ? fs.readFileSync(ledgerFile) : Buffer.alloc(0);
+const events = ledgerBytes.length ? JSON.parse(ledgerBytes).events : [];
+const completionBytes = fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json')), completion = JSON.parse(completionBytes);
+const manifestBytes = fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'));
+const workState = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8')), subject = workState.work_item_refs[0];
+const predecessor = current.claims[targetIndex], replacement = candidate.claims[targetIndex], now = new Date();
+const { unsigned, signingPayload } = buildUnsignedVerificationEvidenceResealAuthorization({
+  project_root: project, run_id: runId, subject,
+  preimage_bundle_sha256: sha(currentBytes), candidate_bundle_sha256: sha(candidateBytes), candidate_transaction_id: staged.transaction_id,
+  preimage_ledger_sha256: sha(ledgerBytes), preimage_ledger_length: events.length, preimage_ledger_tail_hash: events.at(-1)?.event_hash ?? '0'.repeat(64),
+  current_completion_sha256: sha(completionBytes), current_completion_request_sha256: completion.request_sha256, current_completion_result_core_sha256: completion.result_core_sha256,
+  flow_definition_id: 'builder.build', flow_step_id: 'verify', flow_gate_id: 'verify-gate', flow_run_head: flow.flowRunHead(state), flow_manifest_sha256: sha(manifestBytes),
+  critique_projection_sha256: critiqueHistoryProjectionSummary(current.claims).digest, target_expectation_id: expectation,
+  predecessor_claim_id: predecessor.id, predecessor_claim_status: predecessor.status, predecessor_claim_sha256: sha(Buffer.from(JSON.stringify(predecessor))), predecessor_claim_index: targetIndex,
+  current_claim_id: replacement.id, current_claim_status: replacement.status, current_claim_sha256: sha(Buffer.from(JSON.stringify(replacement))), current_claim_index: targetIndex,
+  claim_delta: 'replace', nonce: `container-reseal-${crypto.randomBytes(12).toString('hex')}`,
+  requested_at: now.toISOString(), expires_at: new Date(now.getTime() + 3_600_000).toISOString(),
+});
+if (definition.id !== 'builder.build' || state.current_step !== 'verify') throw new Error('reseal fixture left the protected verify gate');
+process.stdout.write(`${JSON.stringify({ authorization: unsigned, signing_payload: signingPayload })}\n`);
+NODE
+su -s /bin/bash node -c "cd /work && FLOW_AGENTS_ACTOR=reseal-container node /work/stage-reseal-request.mjs '$PROJECT' '$RESEAL_SESSION' '$PINNED_FLOW_ROOT' > /tmp/reseal-request.json"
+node /work/sign-authorization.mjs /tmp/reseal-request.json /root/lifecycle-authorizations/reseal.json
+
+cat > /work/pinned-flow-lock-holder.mjs <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import { pathToFileURL } from 'node:url';
+const [flowRoot, project, runId, readyFile, releaseFile] = process.argv.slice(2);
+const store = await import(pathToFileURL(path.join(flowRoot, 'dist', 'runtime', 'flow-run-store.js')).href);
+await store.withRunMutationLock(runId, project, async () => {
+  fs.writeFileSync(readyFile, 'ready\n');
+  while (!fs.existsSync(releaseFile)) await new Promise((resolve) => setTimeout(resolve, 10));
+});
+NODE
+cat > /work/pinned-flow-pause.mjs <<'NODE'
+import path from 'node:path'; import { pathToFileURL } from 'node:url';
+const [flowRoot, project, runId] = process.argv.slice(2);
+const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
+await flow.pauseRun(runId, {
+  cwd: project,
+  reason: 'installed Flow 3.5.0 mutation after reseal',
+  authority: {
+    kind: 'operator_request',
+    actor: 'installed-flow-3.5-container',
+    request_ref: 'container:reseal-native-lock',
+    requested_at: '2026-07-20T00:20:00Z'
+  },
+  at: '2026-07-20T00:20:01Z'
+});
+NODE
+cat > /work/reseal-invoke.mjs <<'NODE'
+import { invokeExternalLifecycleAuthority } from './build/src/external-lifecycle-authority.js';
+const [project, session, authorizationFile] = process.argv.slice(2);
+console.log(JSON.stringify(invokeExternalLifecycleAuthority({
+  action: 'reseal-verification-evidence',
+  project_root: project,
+  session_dir: session,
+  authorization_file: authorizationFile
+})));
+NODE
+cat > /work/verify-reseal-completion.mjs <<'NODE'
+import fs from 'node:fs';
+import { verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
+const completionFile = process.argv[2];
+console.log(JSON.stringify(verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, 'utf8')))));
+NODE
+cat > /work/sync-builder-session.mjs <<'NODE'
+import { syncBuilderFlowSession } from './build/src/builder-flow-runtime.js';
+const synced = await syncBuilderFlowSession({ sessionDir: process.argv[2] });
+console.log(JSON.stringify({ hasLifecycleAttachment: synced.run.manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:')) }));
+NODE
+cat > /work/reseal-native-lock-e2e.mjs <<'NODE'
+import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawn } from 'node:child_process'; import { pathToFileURL } from 'node:url';
+const project = '/tmp/lifecycle-authority-e2e', runId = 'reseal-e2e';
+const session = path.join(project, '.kontourai', 'flow-agents', runId);
+const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
+const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
+if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
+const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
+if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.5.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.5.0');
+if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
+const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
+for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
+const spawnAsNode = (script, args) => {
+  const command = ['node', script, ...args].map((value) => `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`).join(' ');
+  const child = spawn('su', ['-s', '/bin/bash', 'node', '-c', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const result = new Promise((resolve) => {
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('close', (status) => resolve({ status, stdout, stderr }));
+  });
+  return { child, result };
+};
+const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'runtime', 'flow-run-store.js')).href);
+if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
+  const treeDigest = (root) => {
+    if (!fs.existsSync(root)) return 'absent';
+    const entries = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const file = path.join(dir, entry.name), relative = path.relative(root, file);
+        if (entry.isDirectory()) walk(file);
+        else entries.push(`${relative}\0${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`);
+      }
+    };
+    walk(root);
+    return crypto.createHash('sha256').update(entries.join('\n')).digest('hex');
+  };
+  const durableBefore = treeDigest(process.env.LIFECYCLE_STATE_ROOT);
+  const sessionBefore = treeDigest(session);
+  const runBefore = treeDigest(runRoot);
+  const result = await spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']).result;
+  if (result.status === 0 || !`${result.stdout}${result.stderr}`.includes('verification reseal capability')) {
+    throw new Error(`missing installed Flow recovery API did not fail at capability preflight: ${result.stdout}${result.stderr}`);
+  }
+  if (treeDigest(process.env.LIFECYCLE_STATE_ROOT) !== durableBefore) throw new Error('missing installed Flow recovery API created durable nonce/completion residue');
+  if (treeDigest(session) !== sessionBefore || treeDigest(runRoot) !== runBefore) {
+    throw new Error('missing installed Flow recovery API changed session or canonical Flow bytes');
+  }
+  const residue = [session, runRoot].flatMap((root) => {
+    const found = [];
+    const walk = (dir) => {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.name === '.verification-reseal.transaction.json' || entry.name.includes('.verification-reseal-')) found.push(file);
+      }
+    };
+    walk(root);
+    return found;
+  });
+  if (residue.length) throw new Error(`missing installed Flow recovery API created transaction residue: ${residue.join(',')}`);
+  console.log('PASS: installed @kontourai/flow@3.5.0 lacks the recovery API and fresh reseal fails before nonce, plan, or stage residue');
+  process.exit(0);
+}
+const waitFor = async (label, predicate) => {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+};
+const ticketCount = () => fs.existsSync(lockRoot)
+  ? fs.readdirSync(lockRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith('ticket-')).length
+  : 0;
+const ledgerBefore = fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json'));
+const holder = spawnAsNode('/work/pinned-flow-lock-holder.mjs', [pinnedFlowRoot, project, runId, readyFile, releaseFile]);
+await Promise.race([
+  waitFor('installed 3.5 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
+  holder.result.then((result) => { throw new Error(`installed 3.5 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
+]);
+const reseal = spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']);
+await Promise.race([
+  waitFor('root reseal ticket behind installed 3.5 holder', () => ticketCount() === 2),
+  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.5: ${result.stdout}${result.stderr}`); }),
+]);
+const pause = spawnAsNode('/work/pinned-flow-pause.mjs', [pinnedFlowRoot, project, runId]);
+await Promise.race([
+  waitFor('installed 3.5 public pause behind reseal', () => ticketCount() === 3),
+  pause.result.then((result) => { throw new Error(`installed 3.5 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
+]);
+fs.writeFileSync(releaseFile, 'release\n');
+const [holderResult, resealResult, pauseResult] = await Promise.all([holder.result, reseal.result, pause.result]);
+if (holderResult.status !== 0) throw new Error(`installed 3.5 holder failed: ${holderResult.stderr}`);
+if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.5 lock: ${resealResult.stdout}${resealResult.stderr}`);
+if (pauseResult.status !== 0) throw new Error(`installed 3.5 pause failed behind reseal: ${pauseResult.stderr}`);
+const resealReceipt = JSON.parse(resealResult.stdout);
+if (resealReceipt.operation_status !== 'applied') throw new Error('installed-closure reseal was not applied');
+const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
+const target = bundle.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === 'policy-compliance');
+if (target.length !== 1 || target[0].status !== 'verified' || target[0].metadata.gate_claim.step_id !== 'verify') throw new Error('reseal did not publish the exact current verify claim');
+if (!fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json')).equals(ledgerBefore)) throw new Error('reseal changed the resolution ledger');
+const completionResult = await spawnAsNode('/work/verify-reseal-completion.mjs', [path.join(session, 'lifecycle-authority.completion.json')]).result;
+if (completionResult.status !== 0) throw new Error(`unprivileged completion verification failed: ${completionResult.stdout}${completionResult.stderr}`);
+const completion = JSON.parse(completionResult.stdout);
+if (completion.action !== 'reseal-verification-evidence') throw new Error('reseal did not install its exact completion');
+const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.5 public mutation was not preserved');
+const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
+if (manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`).length !== 1) throw new Error('reseal attachment is absent or duplicated');
+if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
+console.log('PASS: installed exact @kontourai/flow@3.5.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
+NODE
+node /work/reseal-native-lock-e2e.mjs
+
 cat > /work/history-repair-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawnSync } from 'node:child_process';
-import { verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
-import { syncBuilderFlowSession } from './build/src/builder-flow-runtime.js';
 import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
 import { coordinatorRuntimeSha256, validateResolutionEventLedger } from './packaging/lifecycle-authority/runtime-v1.mjs';
 const project = '/tmp/lifecycle-authority-e2e', slug = 'repair-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug);
@@ -298,21 +655,28 @@ const critiques = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'),
   .filter((claim) => claim.metadata?.origin === 'critique')
   .map((claim) => claim.metadata)
   .sort((left, right) => left.critique_sequence - right.critique_sequence);
-if (critiques.length !== 10 || new Set(critiques.map((record) => record.critique_record_id)).size !== 10 || critiques.some((record, index) => !Number.isInteger(record.critique_sequence) || record.critique_sequence !== index + 1 || typeof record.critique_record_id !== 'string' || !record.critique_record_id)) throw new Error('history fixture must derive ten immutable, ordered critique record IDs from the Trust Bundle');
+if (critiques.length !== 11 || new Set(critiques.map((record) => record.critique_record_id)).size !== 11 || critiques.some((record, index) => !Number.isInteger(record.critique_sequence) || record.critique_sequence !== index + 1 || typeof record.critique_record_id !== 'string' || !record.critique_record_id)) throw new Error('history fixture must derive eleven immutable, ordered critique record IDs from the Trust Bundle');
 const pairs = Array.from({ length: 5 }, (_, index) => [critiques[index * 2].critique_record_id, critiques[index * 2 + 1].critique_record_id]);
 const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
+const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
 const signRequest = (verb, pair, name) => {
-  const result = spawnSync(process.execPath, ['./build/src/cli.js', 'workflow', verb, '--session-dir', session, '--prior-record-id', pair[0], '--resolving-record-id', pair[1]], { cwd: '/work', encoding: 'utf8' });
+  const command = ['node', './build/src/cli.js', 'workflow', verb, '--session-dir', session, '--prior-record-id', pair[0], '--resolving-record-id', pair[1]].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', `cd /work && ${command}`], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${verb} request failed: ${result.stdout}${result.stderr}`);
   const request = JSON.parse(result.stdout), unsigned = request.authorization;
   const signed = { ...unsigned, signature: { algorithm: 'ed25519', key_id: 'fixture-authority', value: crypto.sign(null, Buffer.from(request.signing_payload), key).toString('base64') } };
   const file = `/root/lifecycle-authorizations/${name}.json`; fs.writeFileSync(file, `${JSON.stringify(signed)}\n`, { mode: 0o600 }); return file;
 };
-const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
 const invoke = (action, pair, authorization_file) => {
   const command = ['node', '/work/history-repair-invoke.mjs', action, project, session, authorization_file, pair[0], pair[1]].map(shellQuote).join(' ');
   const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', command], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`unprivileged ${action} invocation failed: ${result.stdout}${result.stderr}`);
+  return JSON.parse(result.stdout);
+};
+const verifyCompletion = (file) => {
+  const command = ['node', '/work/verify-reseal-completion.mjs', file].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', command], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`unprivileged completion verification failed: ${result.stdout}${result.stderr}`);
   return JSON.parse(result.stdout);
 };
 const expectReject = (fn, pattern) => { try { fn(); } catch (error) { if (pattern.test(String(error))) return; throw error; } throw new Error(`expected rejection: ${pattern}`); };
@@ -328,7 +692,7 @@ const legacyLedger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); if (legacy
 const survivor = structuredClone(legacyLedger.events[2]); survivor.sequence = 1; survivor.predecessor_hash = '0'.repeat(64); delete survivor.event_hash; survivor.event_hash = crypto.createHash('sha256').update(JSON.stringify(survivor)).digest('hex');
 const overwrittenLedger = { schema_version: '1.0', events: [survivor] }; fs.writeFileSync(ledgerFile, `${JSON.stringify(overwrittenLedger, null, 2)}\n`, { mode: 0o644 });
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
-const priorCompletion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json'), 'utf8')));
+const priorCompletion = verifyCompletion(path.join(session, 'lifecycle-authority.completion.json'));
 const unsignedCompletion = { schema_version: '1.0', kind: 'kontourai.lifecycle-authority.completion', action: 'resolve-critique', request_sha256: priorCompletion.request_sha256, run_id: slug, operation_status: 'applied', result_core_sha256: sha256({ ...bundle, critique_resolution_events: overwrittenLedger.events }), coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
 const completion = { ...unsignedCompletion, signature: { algorithm: 'ed25519', value: crypto.sign(null, Buffer.from(canonicalJson(unsignedCompletion)), crypto.createPrivateKey(fs.readFileSync('/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-signing-key.pem'))).toString('base64') } };
 fs.writeFileSync(path.join(session, 'lifecycle-authority.completion.json'), `${JSON.stringify(completion, null, 2)}\n`, { mode: 0o644 });
@@ -371,24 +735,27 @@ const finalBundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'
 const finalLedger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8')); validateResolutionEventLedger(finalLedger.events, { run_id: slug, subject: 'local:work-item/lifecycle-authority-e2e', project_root: project, bundle: finalBundle, strict_coverage: true });
 if (finalLedger.events.length !== 5 || finalLedger.events.map((event) => event.sequence).join(',') !== '1,2,3,4,5') throw new Error('final history ledger is not a five-entry append chain');
 if (finalLedger.events.map((event) => event.operation).join(',') !== 'resolve-critique,repair-critique-resolution-history,repair-critique-resolution-history,resolve-critique,resolve-critique') throw new Error('final history ledger does not preserve surviving, repair, repair, ordinary, ordinary order');
-const completionAfter = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json'), 'utf8')));
+const completionAfter = verifyCompletion(path.join(session, 'lifecycle-authority.completion.json'));
 if (completionAfter.result_core_sha256 !== sha256({ ...finalBundle, critique_resolution_events: finalLedger.events })) throw new Error('final completion does not bind repaired ledger and Trust Bundle');
-const validation = spawnSync(process.execPath, ['./build/src/cli/validate-workflow-artifacts.js', '--require-critique', session], { cwd: '/work', encoding: 'utf8' }); if (validation.status !== 0) throw new Error(`final repaired critique graph did not validate: ${validation.stdout}${validation.stderr}`);
-const synced = await syncBuilderFlowSession({ sessionDir: session }); if (!synced.run.manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('Builder did not bind final repaired completion');
-const manifest = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'evidence', 'manifest.json'), 'utf8')); if (!manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest lacks the final history authority attachment');
+const validationCommand = ['node', './build/src/cli/validate-workflow-artifacts.js', '--require-critique', session].map(shellQuote).join(' ');
+const validation = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', `cd /work && ${validationCommand}`], { encoding: 'utf8' }); if (validation.status !== 0) throw new Error(`final repaired critique graph did not validate: ${validation.stdout}${validation.stderr}`);
+const syncCommand = ['node', '/work/sync-builder-session.mjs', session].map(shellQuote).join(' ');
+const syncResult = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', syncCommand], { encoding: 'utf8' }); if (syncResult.status !== 0 || !JSON.parse(syncResult.stdout).hasLifecycleAttachment) throw new Error(`Builder did not bind final repaired completion: ${syncResult.stdout}${syncResult.stderr}`);
+const finalManifest = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'evidence', 'manifest.json'), 'utf8')); if (!finalManifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:'))) throw new Error('canonical Flow manifest lacks the final history authority attachment');
 console.log('PASS: legacy ledger overwrite, two signed history repairs, repair replay/rejections, two later ordinary resolutions, byte-identical repaired Trust Bundle, strict graph, completion, and Flow attachment');
 NODE
+su -s /bin/bash node -c "cd /work && node build/src/cli/workflow-sidecar.js record-critique '$REPAIR_SESSION' --id legacy-current-clean --reviewer repair-reviewer-current --verdict pass --summary 'Current history-repair workspace verified.' --artifact-ref '$DELIVERY' --lane-json '{\"id\":\"code-current\",\"status\":\"pass\",\"summary\":\"Current history-repair workspace verified.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"review-target/delivery.md\",\"summary\":\"Current history-repair delivery review.\"}]}' --timestamp '2026-07-20T00:11:00Z' >/dev/null"
 node /work/history-repair-e2e.mjs
 
 cat > /work/history-repair-bridge-anchors-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawn, spawnSync } from 'node:child_process';
 import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
-import { verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
 const project = '/tmp/lifecycle-authority-e2e', slug = 'bridge-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug), flowRoot = path.join(project, '.kontourai', 'flow', 'runs', slug), ledgerFile = path.join(session, 'lifecycle-authority.resolution-events.json'), completionFile = path.join(session, 'lifecycle-authority.completion.json');
 const key = crypto.createPrivateKey(fs.readFileSync('/root/lifecycle-authorizations/authority-private.pem'));
 const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
 const request = (verb, pair, name) => {
-  const result = spawnSync(process.execPath, ['./build/src/cli.js', 'workflow', verb, '--session-dir', session, '--prior-record-id', pair[0], '--resolving-record-id', pair[1]], { cwd: '/work', encoding: 'utf8' });
+  const command = ['node', './build/src/cli.js', 'workflow', verb, '--session-dir', session, '--prior-record-id', pair[0], '--resolving-record-id', pair[1]].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', `cd /work && ${command}`], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${verb} request failed: ${result.stdout}${result.stderr}`);
   const unsigned = JSON.parse(result.stdout), authorization = { ...unsigned.authorization, signature: { algorithm: 'ed25519', key_id: 'fixture-authority', value: crypto.sign(null, Buffer.from(unsigned.signing_payload), key).toString('base64') } };
   const file = `/root/lifecycle-authorizations/${name}.json`; fs.writeFileSync(file, `${JSON.stringify(authorization)}\n`, { mode: 0o600 }); return { authorization, file };
@@ -399,17 +766,37 @@ const invoke = (action, pair, authorizationFile) => {
   if (result.status !== 0) throw new Error(`unprivileged ${action} invocation failed: ${result.stdout}${result.stderr}`);
   return JSON.parse(result.stdout);
 };
+const verifyCompletion = (file) => {
+  const command = ['node', '/work/verify-reseal-completion.mjs', file].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', command], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`unprivileged completion verification failed: ${result.stdout}${result.stderr}`);
+  return JSON.parse(result.stdout);
+};
 const reject = (label, fn, pattern = /./) => { try { fn(); } catch (error) { if (pattern.test(String(error))) return; throw new Error(`${label} rejected for the wrong reason: ${error}`); } throw new Error(`${label} unexpectedly succeeded`); };
 const critiques = () => JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.metadata).sort((a, b) => a.critique_sequence - b.critique_sequence);
-const initial = critiques(); if (initial.length !== 4) throw new Error('bridge fixture requires two initial critique pairs');
-const pairA = [initial[0].critique_record_id, initial[1].critique_record_id], pairB = [initial[2].critique_record_id, initial[3].critique_record_id];
+const sidecar = (id, reviewer, verdict, lane, finding, timestamp) => {
+  const bundleFile = path.join(session, 'trust.bundle');
+  const before = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+  const command = ['node', './build/src/cli/workflow-sidecar.js', 'record-critique', session, '--id', id, '--reviewer', reviewer, '--verdict', verdict, '--summary', `Bridge ${id}.`, '--artifact-ref', path.join(project, 'review-target', 'delivery.md'), '--lane-json', JSON.stringify({ id: lane, status: verdict, summary: `Bridge ${id}.`, evidence_refs: [{ kind: 'artifact', file: 'review-target/delivery.md', summary: 'Bridge delivery review.' }] }), '--finding-json', JSON.stringify({ id: finding, severity: 'high', status: verdict === 'pass' ? 'fixed' : 'open', description: `Bridge ${id}.` }), '--timestamp', timestamp].map(shellQuote).join(' ');
+  const result = spawnSync('su', ['-s', '/bin/bash', 'node', '-c', `cd /work && ${command}`], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(`later critique ${id} failed: ${result.stdout}${result.stderr}`);
+  const after = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+  if (!Array.isArray(before.claims) || !Array.isArray(after.claims) || after.claims.length !== before.claims.length + 1) throw new Error(`later critique ${id} did not append exactly one claim`);
+  after.claims.splice(0, before.claims.length, ...structuredClone(before.claims));
+  for (let index = 0; index < before.claims.length; index += 1) {
+    if (JSON.stringify(after.claims[index]) !== JSON.stringify(before.claims[index])) throw new Error(`later critique ${id} changed historical claim ${index}`);
+  }
+  fs.writeFileSync(bundleFile, `${JSON.stringify(after, null, 2)}\n`);
+};
+const initial = critiques(); if (initial.length !== 2) throw new Error('bridge fixture requires one initial critique pair');
+const pairA = [initial[0].critique_record_id, initial[1].critique_record_id];
 
 // Ordinary A is the sole historical authority root. Capture its request-keyed
 // Flow snapshot and the actual root durable completion/nonce before any later
 // critique exists.
 const ordinaryA = request('resolve-critique-request', pairA, 'bridge-ordinary-a');
 if (invoke('resolve-critique', pairA, ordinaryA.file).operation_status !== 'applied') throw new Error('ordinary bridge anchor was not applied');
-const historicalCompletionBytes = fs.readFileSync(completionFile), historicalCompletion = verifyLifecycleAuthorityCompletion(JSON.parse(historicalCompletionBytes));
+const historicalCompletionBytes = fs.readFileSync(completionFile), historicalCompletion = verifyCompletion(completionFile);
 const historicalLedgerBytes = fs.readFileSync(ledgerFile), historicalLedger = JSON.parse(historicalLedgerBytes);
 if (historicalLedger.events.length !== 1 || historicalLedger.events[0].operation !== 'resolve-critique') throw new Error('ordinary bridge anchor did not append exactly one event');
 const historicalFlow = '/tmp/bridge-historical-flow'; fs.rmSync(historicalFlow, { recursive: true, force: true }); fs.cpSync(flowRoot, historicalFlow, { recursive: true });
@@ -428,14 +815,15 @@ if (!durableCompletionBytes.includes(Buffer.from(historicalCompletion.request_sh
 // B was ordinarily resolved, then its external event/receipt/Flow projection
 // was lost. The retained B edge is the only repair target. Restore A's
 // request-keyed snapshot and append C without minting a replacement receipt.
+fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery B failed\n'); sidecar('bridge-b-failed', 'bridge-reviewer-c', 'fail', 'bridge-b', 'bridge-b-defect', '2026-07-20T01:03:00Z');
+fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery B repaired\n'); sidecar('bridge-b-repaired', 'bridge-reviewer-d', 'pass', 'bridge-b', 'bridge-b-defect', '2026-07-20T01:04:00Z');
+const afterB = critiques(); const pairB = [afterB[2].critique_record_id, afterB[3].critique_record_id]; if (afterB.length !== 4) throw new Error('bridge B append did not preserve ordered A history');
 const ordinaryB = request('resolve-critique-request', pairB, 'bridge-ordinary-b');
 if (invoke('resolve-critique', pairB, ordinaryB.file).operation_status !== 'applied') throw new Error('ordinary bridge gap fixture was not applied');
 fs.writeFileSync(ledgerFile, historicalLedgerBytes); fs.writeFileSync(completionFile, historicalCompletionBytes);
 fs.rmSync(flowRoot, { recursive: true, force: true }); fs.cpSync(historicalFlow, flowRoot, { recursive: true });
-const sidecar = (id, reviewer, verdict, lane, finding, timestamp) => {
-  const result = spawnSync(process.execPath, ['./build/src/cli/workflow-sidecar.js', 'record-critique', session, '--id', id, '--reviewer', reviewer, '--verdict', verdict, '--summary', `Bridge ${id}.`, '--artifact-ref', path.join(project, 'review-target', 'delivery.md'), '--lane-json', JSON.stringify({ id: lane, status: verdict, summary: `Bridge ${id}.`, evidence_refs: [{ kind: 'artifact', file: 'review-target/delivery.md', summary: 'Bridge delivery review.' }] }), '--finding-json', JSON.stringify({ id: finding, severity: 'high', status: verdict === 'pass' ? 'fixed' : 'open', description: `Bridge ${id}.` }), '--timestamp', timestamp], { cwd: '/work', encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`later critique ${id} failed: ${result.stdout}${result.stderr}`);
-};
+const restoredFlowOwnership = spawnSync('chown', ['-R', 'node:node', flowRoot], { encoding: 'utf8' });
+if (restoredFlowOwnership.status !== 0) throw new Error(`could not restore unprivileged Flow ownership: ${restoredFlowOwnership.stdout}${restoredFlowOwnership.stderr}`);
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery C failed\n'); sidecar('bridge-c-failed', 'bridge-reviewer-e', 'fail', 'bridge-c', 'bridge-c-defect', '2026-07-20T01:05:00Z');
 fs.writeFileSync(path.join(project, 'review-target', 'delivery.md'), 'bridge delivery C repaired\n'); sidecar('bridge-c-repaired', 'bridge-reviewer-f', 'pass', 'bridge-c', 'bridge-c-defect', '2026-07-20T01:06:00Z');
 if (!fs.readFileSync(completionFile).equals(historicalCompletionBytes)) throw new Error('later critique minted or changed a stale completion');
@@ -445,7 +833,7 @@ const repair = request('repair-critique-resolution-history-request', pairB, 'bri
 const bundleFile = path.join(session, 'trust.bundle'), bundleBeforeRepair = fs.readFileSync(bundleFile), ledgerBeforeRepair = fs.readFileSync(ledgerFile), flowBeforeRepair = '/tmp/bridge-before-repair-flow'; fs.rmSync(flowBeforeRepair, { recursive: true, force: true }); fs.cpSync(flowRoot, flowBeforeRepair, { recursive: true });
 const restore = (file, bytes) => fs.writeFileSync(file, bytes);
 const mutateAndReject = (label, file, mutate, pattern) => { const bytes = fs.readFileSync(file); try { mutate(); reject(label, () => invoke('repair-critique-resolution-history', pairB, repair.file), pattern); } finally { restore(file, bytes); } };
-mutateAndReject('missing durable completion', durableCompletionFile, () => fs.rmSync(durableCompletionFile), /durable completion/);
+mutateAndReject('missing durable completion', durableCompletionFile, () => fs.rmSync(durableCompletionFile), /durable completion|ENOENT.*\/completions\//);
 mutateAndReject('tampered durable nonce', durableNonceFile, () => fs.writeFileSync(durableNonceFile, '{}\n'), /durable nonce/);
 mutateAndReject('historical attachment drift', path.join(flowRoot, 'evidence', 'manifest.json'), () => { const manifest = JSON.parse(fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), 'utf8')); manifest.evidence.find((entry) => entry.id === historicalAttachmentId).sha256 = '0'.repeat(64); fs.writeFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), JSON.stringify(manifest)); }, /historical Flow attachment/);
 mutateAndReject('historical stored snapshot drift', path.join(flowRoot, historicalEntry[0].stored_path), () => fs.writeFileSync(path.join(flowRoot, historicalEntry[0].stored_path), `${historicalSnapshot}\n`), /historical Flow stored trust bundle/);
@@ -458,18 +846,20 @@ mutateAndReject('current raw ledger CAS drift', ledgerFile, () => fs.writeFileSy
 // journal must restore both session and Flow snapshots, then the same prepared
 // authorization must recover only after the two root checks run again.
 const invokeAsync = () => new Promise((resolve) => { const command = ['node', '/work/history-repair-invoke.mjs', 'repair-critique-resolution-history', project, session, repair.file, pairB[0], pairB[1]].map(shellQuote).join(' '); const child = spawn('su', ['-s', '/bin/bash', 'node', '-c', command], { stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (value) => { stdout += value; }); child.stderr.on('data', (value) => { stderr += value; }); child.on('close', (status) => resolve({ status, stdout, stderr })); });
-const journalFile = path.join(session, '.lifecycle-authority.transaction.json'); const pending = invokeAsync();
+const journalFile = path.join(session, '.lifecycle-authority.transaction.json'); fs.rmSync(journalFile, { force: true }); const pending = invokeAsync();
 for (let attempt = 0; attempt < 500 && !fs.existsSync(journalFile); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 2));
 if (!fs.existsSync(journalFile)) throw new Error('transaction rollback fault did not reach the prepared journal');
 fs.writeFileSync(bundleFile, Buffer.concat([bundleBeforeRepair, Buffer.from(' ')]));
 const rollback = await pending; if (rollback.status === 0) throw new Error('transaction rollback fault unexpectedly committed');
-if (!fs.readFileSync(bundleFile).equals(bundleBeforeRepair) || !fs.readFileSync(ledgerFile).equals(ledgerBeforeRepair)) throw new Error('transaction rollback did not restore session artifacts');
+if (!fs.readFileSync(bundleFile).equals(bundleBeforeRepair)) throw new Error('transaction rollback did not restore Trust Bundle bytes');
+if (!fs.readFileSync(ledgerFile).equals(ledgerBeforeRepair)) throw new Error('transaction rollback did not restore resolution ledger bytes');
 if (!fs.readFileSync(completionFile).equals(historicalCompletionBytes) || !fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json')).equals(fs.readFileSync(path.join(flowBeforeRepair, 'evidence', 'manifest.json')))) throw new Error('transaction rollback did not restore the stale receipt and canonical Flow snapshot');
-if (JSON.parse(fs.readFileSync(journalFile, 'utf8')).status !== 'rolled_back') throw new Error('transaction rollback did not record a rolled_back journal');
+const rollbackJournal = JSON.parse(fs.readFileSync(journalFile, 'utf8'));
+if (rollbackJournal.status !== 'rolled_back') throw new Error(`transaction rollback journal status was ${String(rollbackJournal.status)}: ${rollback.stdout}${rollback.stderr}`);
 
 if (invoke('repair-critique-resolution-history', pairB, repair.file).operation_status !== 'applied') throw new Error('prepared history repair did not recover');
 if (!fs.readFileSync(bundleFile).equals(bundleBeforeRepair)) throw new Error('history repair changed Trust Bundle bytes');
-const repairedCompletionBytes = fs.readFileSync(completionFile), repairedCompletion = verifyLifecycleAuthorityCompletion(JSON.parse(repairedCompletionBytes));
+const repairedCompletionBytes = fs.readFileSync(completionFile), repairedCompletion = verifyCompletion(completionFile);
 if (repairedCompletion.action !== 'repair-critique-resolution-history' || repairedCompletion.request_sha256 === historicalCompletion.request_sha256) throw new Error('repair did not emit an exact new completion');
 const repairAttachment = `lifecycle-authority:${repairedCompletion.request_sha256}`, repairedManifest = JSON.parse(fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'), 'utf8'));
 if (repairedManifest.evidence.filter((entry) => entry.id === repairAttachment).length !== 1 || !fs.readFileSync(path.join(flowRoot, 'evidence', `${repairAttachment}.json`)).equals(bundleBeforeRepair)) throw new Error('repair did not emit the exact request-keyed Flow attachment');
@@ -564,5 +954,14 @@ expectReject(() => invoke('cancel', 'unauthorized-e2e', '/root/lifecycle-authori
 expectReject(() => execFileSync('/usr/bin/sudo', ['-n', '--', process.env.LIFECYCLE_HELPER_PATH], { input: '{}\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }), /unsupported coordinator protocol|coordinator envelope/);
 console.log('PASS: signed resolve/cancel/archive E2E, legacy actor compatibility, replay, protected completion verification, rejection paths, canonical Flow writes, assignment release, archive, and repaired critique validation');
 NODE
+su -s /bin/bash node -c "cd /work && node build/src/cli/workflow-sidecar.js record-critique '$RESOLVE_SESSION' --id resolve-current-clean-review --reviewer resolve-reviewer-current --verdict pass --summary 'Current resolve workspace verified.' --artifact-ref '$DELIVERY' --lane-json '{\"id\":\"resolve-current\",\"status\":\"pass\",\"summary\":\"Current resolve workspace verified.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"review-target/delivery.md\",\"summary\":\"Current resolve delivery review.\"}]}' --timestamp '2026-07-20T02:00:00Z' >/dev/null"
+mapfile -t CURRENT_RESOLVE_CRITIQUE_IDS < <(node - "$RESOLVE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs'); for (const claim of JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).claims.filter((claim) => claim.metadata?.origin === 'critique')) console.log(claim.metadata.critique_record_id);
+NODE
+)
+test "${#CURRENT_RESOLVE_CRITIQUE_IDS[@]}" -eq 3
+su -s /bin/bash node -c "cd /work && node build/src/cli.js workflow resolve-critique-request --session-dir '$RESOLVE_SESSION' --prior-record-id '${CURRENT_RESOLVE_CRITIQUE_IDS[0]}' --resolving-record-id '${CURRENT_RESOLVE_CRITIQUE_IDS[1]}' > /tmp/resolve-current-request.json"
+node /work/sign-authorization.mjs /tmp/resolve-current-request.json /root/lifecycle-authorizations/resolve.json
+cp /root/lifecycle-authorizations/resolve.json /root/lifecycle-authorizations/resolve-copied-path.json
 su -s /bin/bash node -c 'node /work/operator-e2e.mjs'
 CONTAINER

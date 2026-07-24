@@ -2675,6 +2675,35 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
   assert.equal(unsigned.assignment_actor.human, "operator");
 });
 
+test("verification evidence reseal authorization binds every atomic preimage", () => {
+  const fields = {
+    project_root: "/tmp/reseal-project", run_id: "run-1", subject: SUBJECT,
+    preimage_bundle_sha256: "1".repeat(64), candidate_bundle_sha256: "2".repeat(64),
+    candidate_transaction_id: "3".repeat(32),
+    preimage_ledger_sha256: "4".repeat(64), preimage_ledger_length: 5, preimage_ledger_tail_hash: "5".repeat(64),
+    current_completion_sha256: "6".repeat(64), current_completion_request_sha256: "7".repeat(64), current_completion_result_core_sha256: "8".repeat(64),
+    flow_definition_id: "builder.build", flow_step_id: "verify", flow_gate_id: "verify-gate", flow_run_head: "9".repeat(64), flow_manifest_sha256: "a".repeat(64),
+    critique_projection_sha256: "b".repeat(64), target_expectation_id: "tests-evidence",
+    predecessor_claim_id: "gate-tests", predecessor_claim_status: "disputed", predecessor_claim_sha256: "c".repeat(64), predecessor_claim_index: 4,
+    current_claim_id: "gate-tests", current_claim_status: "verified", current_claim_sha256: "d".repeat(64), current_claim_index: 4,
+    claim_delta: "replace", nonce: "reseal-once",
+    requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  const built = builderLifecycleAuthority.buildUnsignedVerificationEvidenceResealAuthorization(fields);
+  assert.equal(built.unsigned.operation, "reseal-verification-evidence");
+  assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
+  assert.equal(built.unsigned.candidate_transaction_id, fields.candidate_transaction_id);
+  assert.equal(built.unsigned.preimage_ledger_length, 5);
+  const malformed = { ...built.unsigned, signature: { algorithm: "ed25519", key_id: "operator", value: "AA==" } };
+  delete malformed.flow_manifest_sha256;
+  assert.throws(
+    () => builderLifecycleAuthority.validateVerificationEvidenceResealAuthorization(malformed, {
+      projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
+    }),
+    /unexpected or missing fields/i,
+  );
+});
+
 test("history-repair authorization is a distinct signed request bound to the exact missing authority edge", () => {
   const buildUnsignedCritiqueResolutionHistoryRepairAuthorization = builderLifecycleAuthority.buildUnsignedCritiqueResolutionHistoryRepairAuthorization;
   const critiqueResolutionHistoryRepairAuthorizationPayload = builderLifecycleAuthority.critiqueResolutionHistoryRepairAuthorizationPayload;
@@ -4333,6 +4362,31 @@ test("upgrade rebuild preserves legacy critique identity until a versioned new r
   assert.notEqual(newReview.claims[0].id, beforeUpgrade.claims[0].id);
   assert.equal(rebuiltAfterUpgrade.claims[0].metadata.identity_version, undefined);
   assert.equal(newReview.claims[0].metadata.identity_version, 2);
+});
+
+test("resolved critique rebuild preserves the coordinator-issued physical claim id", async () => {
+  const historical = {
+    id: "resolved-review",
+    claim_id: "claim:coordinator-preserved",
+    critique_record_id: `critique:${"a".repeat(64)}`,
+    critique_record_hash: "a".repeat(64),
+    critique_sequence: 1,
+    critique_predecessor_hash: "0".repeat(64),
+    reviewer: "reviewer-a",
+    reviewed_at: "2026-07-01T00:00:00Z",
+    identity_version: 2,
+    verdict: "fail",
+    summary: "Resolved historical review",
+    findings: [{ id: "F-1", status: "open" }],
+    lanes: [{ id: "code", status: "fail" }],
+    review_target: { artifacts: [] },
+    artifact_refs: [],
+    superseded_by: `critique:${"b".repeat(64)}`,
+  };
+  const rebuilt = await buildTrustBundle("resolved-fixture", "2026-07-12T00:00:00Z", [], [], [historical]);
+  assert.equal(rebuilt.claims[0].id, historical.claim_id);
+  assert.equal(rebuilt.claims[0].metadata.critique_record_id, historical.critique_record_id);
+  assert.equal(rebuilt.claims[0].metadata.superseded_by, historical.superseded_by);
 });
 
 test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {

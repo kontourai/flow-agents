@@ -6,11 +6,12 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 // #783: the mini JSON-Schema validator (validateSchemaValue) and its Issue type moved to a
 // shared lib so workflow-sidecar.ts's `fixture write --from-json` validates against the SAME
 // schema-matching logic this file uses -- see src/lib/mini-json-schema.ts's header comment.
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
+import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceRead } from "../flow-recovery-fence.js";
 
 // Resolve bundled JSON Schemas relative to this compiled script's own package
 // location (build/src/cli/validate-workflow-artifacts.js -> ../../../schemas), NOT
@@ -390,6 +391,14 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     }
   }
   for (const [dir, payloads] of byDir) {
+    const projectRoot = projectRootForSession(dir);
+    if (projectRoot) {
+      try { assertFlowRunRecoveryFenceOpen(projectRoot, path.basename(dir)); }
+      catch (error) {
+        issues.push({ path: dir, message: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+    }
     const slugs = new Set([...payloads.values()].map((p: any) => p.task_slug).filter(Boolean));
     if (slugs.size > 1) issues.push({ path: dir, message: "sidecar task_slug mismatch" });
     const evidence = payloads.get("evidence.json");
@@ -401,6 +410,14 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       ...inputs.filter((p) => fs.existsSync(p) && fs.statSync(p).isDirectory()).map((p) => path.resolve(p)),
     ]);
     for (const dir of dirs) {
+      const projectRoot = projectRootForSession(dir);
+      if (projectRoot) {
+        try { assertFlowRunRecoveryFenceOpen(projectRoot, path.basename(dir)); }
+        catch (error) {
+          issues.push({ path: dir, message: error instanceof Error ? error.message : String(error) });
+          continue;
+        }
+      }
       const deliver = markdown.find((p) => path.dirname(p) === dir && p.includes("deliver") && !p.includes("plan") && !p.includes("review"));
       const delivered = deliver ? /status:\s*(delivered|accepted|archived)/i.test(readText(deliver)) : true;
       // ADR 0010 Phase 4b: trust.bundle is the primary artifact at the delivered phase.
@@ -445,9 +462,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
               const completion = readProtectedLifecycleAuthorityJson(completionPath, "lifecycle authority completion", 256 * 1024);
               const verified = verifyLifecycleAuthorityCompletion(completion);
               externalCompletionVerified = ledgerAvailable
-                && ["resolve-critique", "repair-critique-resolution-history"].includes(String(verified.action))
-                && verified.run_id === path.basename(dir)
-                && verified.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundleValue, critique_resolution_events: resolutionEvents });
+                && lifecycleAuthorityCompletionBindsExactState(verified, path.basename(dir), bundleValue, resolutionEvents);
             } catch {
               // The explicit issue below keeps missing/invalid authority evidence distinct from a graph failure.
             }
@@ -497,7 +512,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
   return issues;
 }
 
-function main(): number {
+function main(fenced = false): number {
   const args = process.argv.slice(2);
   const requireSidecars = args.includes("--require-sidecars");
   const requireCritique = args.includes("--require-critique");
@@ -506,6 +521,32 @@ function main(): number {
   if (!pathsIn.length) {
     console.error("usage: validate-workflow-artifacts [--require-sidecars] [--require-critique] [--skip-markdown-validation] paths...");
     return 2;
+  }
+  if (!fenced) {
+    const directSessionDirs = pathsIn.flatMap((candidate) => {
+      const resolved = path.resolve(candidate);
+      const marker = `${path.sep}.kontourai${path.sep}flow-agents${path.sep}`;
+      const index = resolved.lastIndexOf(marker);
+      if (index < 0) return [];
+      const suffix = resolved.slice(index + marker.length);
+      const slug = suffix.split(path.sep)[0];
+      return slug ? [resolved.slice(0, index + marker.length + slug.length)] : [];
+    });
+    const sessions = [...new Set([...sidecarPaths(pathsIn).map((file) => path.dirname(file)), ...directSessionDirs]
+      .map((dir) => ({ dir, projectRoot: projectRootForSession(dir) }))
+      .filter((entry): entry is { dir: string; projectRoot: string } => typeof entry.projectRoot === "string")
+      .map((entry) => `${entry.projectRoot}\u0000${path.basename(entry.dir)}`))];
+    const runFenced = (index: number): number => {
+      if (index >= sessions.length) return main(true);
+      const [projectRoot, runId] = sessions[index].split("\u0000");
+      return withFlowRunRecoveryFenceRead(projectRoot, runId, () => runFenced(index + 1));
+    };
+    try {
+      return runFenced(0);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
   }
   const markdown = artifactPaths(pathsIn);
   const sidecars = sidecarPaths(pathsIn);

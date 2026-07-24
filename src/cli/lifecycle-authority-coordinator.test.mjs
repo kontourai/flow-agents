@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { VERIFICATION_RESEAL_ARTIFACT_IDS, assertVerificationResealFlowCapabilities, canonicalJson, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, sha256, snapshotTree, validateEnvelope, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { loadRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
+import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
 const COORDINATOR = path.resolve("packaging/lifecycle-authority/coordinator.mjs");
 const RUNTIME = path.resolve("packaging/lifecycle-authority/runtime-v1.mjs");
@@ -138,6 +142,444 @@ function explicitSecondTransition(fixture, resolutionEvents) {
     resolving_record_id: fixture.resolvingRecordId,
   });
 }
+
+test("coordinator exposes a distinct exact reseal-verification-evidence action", () => {
+  const request = {
+    action: "reseal-verification-evidence",
+    project_root: "/project",
+    session_dir: "/project/.kontourai/flow-agents/run-1",
+    authorization_file: "/outside/authorization.json",
+  };
+  const envelope = { schema_version: "1.0", action: request.action, request_sha256: sha256(request), request };
+  assert.deepEqual(validateEnvelope(envelope), envelope);
+  assert.throws(
+    () => validateEnvelope({ ...envelope, request: { ...request, candidate_file: "/attacker/chosen" }, request_sha256: sha256({ ...request, candidate_file: "/attacker/chosen" }) }),
+    /unexpected or missing fields/i,
+    "candidate location is derived only from the signed transaction identity",
+  );
+  assert.equal(typeof canonicalJson(envelope), "string");
+});
+
+test("reseal uses Flow's native mutation lock to serialize a legitimate concurrent lifecycle write", async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-reseal-native-flow-lock-"));
+  const runId = "run-1";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  const bundleFile = path.join(sessionDir, "trust.bundle");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(bundleFile, '{"claims":[{"id":"before"}]}\n');
+  try {
+    await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+      cwd: projectRoot,
+      runId,
+      params: { subject: "work-item:native-lock-race" },
+    });
+    let releaseTransaction;
+    let transactionEntered;
+    const entered = new Promise((resolve) => { transactionEntered = resolve; });
+    const release = new Promise((resolve) => { releaseTransaction = resolve; });
+    const transaction = withCanonicalFlowRunMutationLock(
+      { projectRoot, sessionDir, runId },
+      () => inProjectTransaction(
+        { projectRoot, sessionDir, runId },
+        { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) },
+        async () => {
+          transactionEntered();
+          await release;
+          fs.writeFileSync(bundleFile, '{"claims":[{"id":"resealed"}]}\n');
+        },
+      ),
+      withRunMutationLock,
+    );
+    await entered;
+
+    const flowModule = pathToFileURL(path.resolve("node_modules/@kontourai/flow/dist/index.js")).href;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", `
+      import { pauseRun } from ${JSON.stringify(flowModule)};
+      await pauseRun(${JSON.stringify(runId)}, {
+        cwd: ${JSON.stringify(projectRoot)},
+        reason: "legitimate concurrent lifecycle write",
+        authority: {
+          kind: "operator_request",
+          actor: "native-lock-test",
+          request_ref: "test:native-lock",
+          requested_at: "2026-07-23T18:00:00.000Z"
+        },
+        at: "2026-07-23T18:00:01.000Z"
+      });
+    `], { stdio: ["ignore", "pipe", "pipe"] });
+    let childExited = false;
+    child.once("exit", () => { childExited = true; });
+    const childResultPromise = new Promise((resolve) => {
+      let stderr = "";
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.once("close", (code) => resolve({ code, stderr }));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(childExited, false, "public pause must wait behind the coordinator's native Flow ticket");
+
+    releaseTransaction();
+    await transaction;
+    const childResult = await childResultPromise;
+    assert.deepEqual(childResult, { code: 0, stderr: "" });
+    assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"resealed"}]}\n');
+    const run = await loadRun(runId, projectRoot);
+    assert.equal(run.state.status, "paused");
+    assert.equal(run.state.lifecycle.at(-1)?.authority?.request_ref, "test:native-lock", "the legitimate foreign Flow write must be preserved");
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+for (const journalStatus of ["prepared", "committed"]) {
+  test(`${journalStatus} recovery rejects malformed snapshot entries before any write and preserves the active Flow lock`, async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lifecycle-reseal-${journalStatus}-malformed-recovery-`));
+    const runId = "run-1";
+    const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const journalFile = path.join(sessionDir, ".lifecycle-authority.transaction.json");
+    const outsideFile = path.join(projectRoot, "outside-sentinel");
+    const binding = { request_sha256: "7".repeat(64), authorization_sha256: "8".repeat(64) };
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(bundleFile, '{"claims":[{"id":"snapshot-baseline"}]}\n');
+    fs.writeFileSync(outsideFile, "outside remains unchanged\n");
+    try {
+      await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+        cwd: projectRoot,
+        runId,
+        params: { subject: `work-item:${journalStatus}-malformed-recovery` },
+      });
+      const sessionSnapshot = snapshotTree(sessionDir);
+      const flowSnapshot = snapshotTree(flowRoot);
+      fs.writeFileSync(bundleFile, '{"claims":[{"id":"current-must-survive"}]}\n');
+
+      const invalidCases = [
+        ["case-folded protected lock alias", (journal) => journal.flow.push({ path: ".MUTATION.LOCK/owner.json", bytes: "YQ==", mode: 0o600 })],
+        ["Unicode-normalized protected lock alias", (journal) => journal.flow.push({ path: ".mutation.loc\u212A/owner.json", bytes: "YQ==", mode: 0o600 })],
+        ["aliased lock path", (journal) => journal.flow.push({ path: ".mutation.lock/../state.json", bytes: "YQ==", mode: 0o600 })],
+        ["outside traversal", (journal) => journal.session.push({ path: "../../../outside-sentinel", bytes: "YQ==", mode: 0o600 })],
+        ["absolute path", (journal) => journal.flow.push({ path: outsideFile, bytes: "YQ==", mode: 0o600 })],
+        ["backslash platform alias", (journal) => journal.flow.push({ path: ".mutation.lock\\owner.json", bytes: "YQ==", mode: 0o600 })],
+        ["drive-relative platform alias", (journal) => journal.flow.push({ path: "C:outside", bytes: "YQ==", mode: 0o600 })],
+        ["dot segment", (journal) => journal.flow.push({ path: "evidence/./manifest.json", bytes: "YQ==", mode: 0o600 })],
+        ["empty segment", (journal) => journal.flow.push({ path: "evidence//manifest.json", bytes: "YQ==", mode: 0o600 })],
+        ["empty path", (journal) => journal.flow.push({ path: "", bytes: "YQ==", mode: 0o600 })],
+        ["duplicate canonical path", (journal) => journal.flow.push(structuredClone(journal.flow[0]))],
+        ["case-folded duplicate identity", (journal) => journal.flow.push(
+          { path: "Case-Sensitive.json", bytes: "YQ==", mode: 0o600 },
+          { path: "case-sensitive.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["Unicode-normalized duplicate identity", (journal) => journal.flow.push(
+          { path: "evidence/ArtifactK.json", bytes: "YQ==", mode: 0o600 },
+          { path: "evidence/Artifact\u212A.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["non-ASCII case variants", (journal) => journal.flow.push(
+          { path: "\u00c5.json", bytes: "YQ==", mode: 0o600 },
+          { path: "\u00e5.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["composed and decomposed case variants", (journal) => journal.flow.push(
+          { path: "\u00c5.json", bytes: "YQ==", mode: 0o600 },
+          { path: "a\u030a.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["distinct lone surrogates", (journal) => journal.flow.push(
+          { path: "surrogate-\ud800.json", bytes: "YQ==", mode: 0o600 },
+          { path: "surrogate-\ud801.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["lone surrogate and replacement collision", (journal) => journal.flow.push(
+          { path: "collision-\ud800.json", bytes: "YQ==", mode: 0o600 },
+          { path: "collision-\ufffd.json", bytes: "Yg==", mode: 0o600 },
+        )],
+        ["extra entry field", (journal) => journal.flow.push({ path: "extra.json", bytes: "YQ==", mode: 0o600, unexpected: true })],
+        ["unsafe mode", (journal) => journal.flow.push({ path: "unsafe-mode.json", bytes: "YQ==", mode: 0o100644 })],
+        ["noncanonical base64", (journal) => journal.flow.push({ path: "noncanonical-base64.json", bytes: "YQ", mode: 0o600 })],
+      ];
+
+      await withCanonicalFlowRunMutationLock(
+        { projectRoot, sessionDir, runId },
+        async () => {
+          const lockRoot = path.join(flowRoot, ".mutation.lock");
+          const tickets = fs.readdirSync(lockRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith("ticket-"));
+          assert.equal(tickets.length, 1);
+          const currentTicket = path.join(lockRoot, tickets[0].name);
+          const ownerFile = path.join(currentTicket, "owner.json");
+          const ownerBytes = fs.readFileSync(ownerFile);
+          const caseAlias = path.join(flowRoot, ".MUTATION.LOCK");
+          const lockStat = fs.statSync(lockRoot);
+          const aliasStat = fs.existsSync(caseAlias) ? fs.statSync(caseAlias) : null;
+          const caseInsensitiveDarwinProbe = process.platform === "darwin"
+            && aliasStat !== null
+            && aliasStat.dev === lockStat.dev
+            && aliasStat.ino === lockStat.ino;
+
+          for (const [label, mutate] of invalidCases) {
+            const journal = {
+              schema_version: "1.0",
+              status: journalStatus,
+              binding,
+              created_at: "2026-07-23T19:00:00.000Z",
+              session: structuredClone(sessionSnapshot),
+              flow: structuredClone(flowSnapshot),
+            };
+            mutate(journal);
+            fs.writeFileSync(journalFile, `${JSON.stringify(journal)}\n`);
+            const journalBytes = fs.readFileSync(journalFile);
+            const sessionBefore = canonicalJson(snapshotTree(sessionDir));
+            const flowBefore = canonicalJson(snapshotTree(flowRoot, "", [".mutation.lock"]));
+            const outsideBefore = fs.readFileSync(outsideFile);
+
+            assert.throws(
+              () => recoverMatchingTransaction({ projectRoot, sessionDir, runId }, binding),
+              /lifecycle transaction .*snapshot/i,
+              label,
+            );
+            assert.equal(canonicalJson(snapshotTree(sessionDir)), sessionBefore, `${label} changed the session tree`);
+            assert.equal(canonicalJson(snapshotTree(flowRoot, "", [".mutation.lock"])), flowBefore, `${label} changed the Flow tree`);
+            assert.equal(fs.readFileSync(outsideFile).equals(outsideBefore), true, `${label} wrote outside the transaction root`);
+            assert.equal(fs.readFileSync(journalFile).equals(journalBytes), true, `${label} rewrote the invalid journal`);
+            assert.equal(fs.existsSync(currentTicket), true, `${label} removed the active Flow ticket`);
+            assert.equal(fs.readFileSync(ownerFile).equals(ownerBytes), true, `${label} changed the active Flow ticket owner bytes`);
+          }
+          if (caseInsensitiveDarwinProbe) {
+            assert.deepEqual(
+              { dev: aliasStat.dev, ino: aliasStat.ino },
+              { dev: lockStat.dev, ino: lockStat.ino },
+              "Darwin probe must exercise the actual case-insensitive lock inode",
+            );
+          }
+          if (process.platform === "linux") {
+            assert.equal(invalidCases.some(([label]) => label === "case-folded protected lock alias"), true, "Linux must exercise deterministic protected-alias rejection");
+          }
+        },
+        withRunMutationLock,
+      );
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const journalStatus of ["prepared", "committed"]) {
+  test(`${journalStatus} recovery preserves the live Flow mutation ticket and a waiting public mutation`, async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lifecycle-reseal-${journalStatus}-native-recovery-`));
+    const runId = "run-1";
+    const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const journalFile = path.join(sessionDir, ".lifecycle-authority.transaction.json");
+    const binding = { request_sha256: "c".repeat(64), authorization_sha256: "d".repeat(64) };
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(bundleFile, '{"claims":[{"id":"baseline"}]}\n');
+    try {
+      await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+        cwd: projectRoot,
+        runId,
+        params: { subject: `work-item:${journalStatus}-native-recovery` },
+      });
+      const legacyObsoleteTicket = path.join(".mutation.lock", "ticket-obsolete", "owner.json");
+      const journal = {
+        schema_version: "1.0",
+        status: journalStatus,
+        binding,
+        created_at: "2026-07-23T18:00:00.000Z",
+        session: snapshotTree(sessionDir),
+        flow: [
+          ...snapshotTree(flowRoot),
+          { path: legacyObsoleteTicket, bytes: Buffer.from('{"token":"obsolete"}\n').toString("base64"), mode: 0o600 },
+        ],
+      };
+      fs.writeFileSync(journalFile, `${JSON.stringify(journal)}\n`);
+
+      let childResultPromise;
+      await withCanonicalFlowRunMutationLock(
+        { projectRoot, sessionDir, runId },
+        async () => {
+          const lockRoot = path.join(flowRoot, ".mutation.lock");
+          const currentTickets = fs.readdirSync(lockRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && entry.name.startsWith("ticket-"))
+            .map((entry) => entry.name);
+          assert.equal(currentTickets.length, 1, "recovery must run under one live native Flow ticket");
+          const currentTicket = path.join(lockRoot, currentTickets[0]);
+
+          const flowModule = pathToFileURL(path.resolve("node_modules/@kontourai/flow/dist/index.js")).href;
+          const child = spawn(process.execPath, ["--input-type=module", "-e", `
+            import { pauseRun } from ${JSON.stringify(flowModule)};
+            for (let attempt = 0;; attempt += 1) {
+              try {
+                await pauseRun(${JSON.stringify(runId)}, {
+                  cwd: ${JSON.stringify(projectRoot)},
+                  reason: ${JSON.stringify(`${journalStatus} recovery waiter`)},
+                  authority: {
+                    kind: "operator_request",
+                    actor: "native-recovery-test",
+                    request_ref: ${JSON.stringify(`test:native-recovery:${journalStatus}`)},
+                    requested_at: "2026-07-23T18:00:00.000Z"
+                  },
+                  at: "2026-07-23T18:00:02.000Z"
+                });
+                break;
+              } catch (error) {
+                if (error?.code !== "flow.run_mutation.lock.owner_unreadable" || attempt >= 20) throw error;
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            }
+          `], { stdio: ["ignore", "pipe", "pipe"] });
+          let childExited = false;
+          child.once("exit", () => { childExited = true; });
+          childResultPromise = new Promise((resolve) => {
+            let stderr = "";
+            child.stderr.on("data", (chunk) => { stderr += chunk; });
+            child.once("close", (code) => resolve({ code, stderr }));
+          });
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          assert.equal(childExited, false, "public pause must wait for recovery to release the native ticket");
+
+          fs.writeFileSync(bundleFile, '{"claims":[{"id":"interrupted"}]}\n');
+          assert.equal(recoverMatchingTransaction({ projectRoot, sessionDir, runId }, binding), true);
+          assert.equal(fs.existsSync(currentTicket), true, "current recovery ticket must remain intact");
+          assert.equal(fs.existsSync(path.join(flowRoot, legacyObsoleteTicket)), false, "obsolete journal ticket must never be restored");
+          assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"baseline"}]}\n');
+          assert.equal(JSON.parse(fs.readFileSync(journalFile, "utf8")).status, "rolled_back");
+        },
+        withRunMutationLock,
+      );
+
+      assert.deepEqual(await childResultPromise, { code: 0, stderr: "" });
+      const run = await loadRun(runId, projectRoot);
+      assert.equal(run.state.status, "paused");
+      assert.equal(run.state.lifecycle.at(-1)?.authority?.request_ref, `test:native-recovery:${journalStatus}`, "the waiting foreign Flow mutation must be preserved");
+      assert.equal(fs.existsSync(path.join(flowRoot, ".mutation.lock", "ticket-obsolete")), false);
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("reseal plan is closed over exactly six fixed artifact identities and no journal paths", () => {
+  const present = { presence: "present", mode: 0o644, size: 7, sha256: "a".repeat(64) };
+  const absent = { presence: "absent", mode: null, size: 0, sha256: null };
+  const plan = {
+    schema_version: "1.0",
+    kind: "flow-agents.verification-reseal-transaction.v1",
+    recovery_id: "1".repeat(64),
+    run_id: "run-1",
+    request_sha256: "2".repeat(64),
+    authorization_sha256: "3".repeat(64),
+    authorization_key_id: "operator",
+    authorization_nonce: "nonce",
+    reducer: { package: "@kontourai/flow", version: "test" },
+    result_core_sha256: "4".repeat(64),
+    artifacts: VERIFICATION_RESEAL_ARTIFACT_IDS.map((id) => ({ id, pre: id === "flow-attachment" ? absent : present, post: present })),
+  };
+  assert.deepEqual(validateVerificationResealPlan(plan), plan);
+  assert.deepEqual(plan.artifacts.map(({ id }) => id), [
+    "session-trust-bundle", "flow-manifest", "flow-state", "flow-attachment", "flow-report-json", "flow-report-markdown",
+  ]);
+  assert.equal(JSON.stringify(plan).includes("path"), false, "signed plan artifact entries must not contain caller-selected paths");
+  assert.throws(
+    () => validateVerificationResealPlan({ ...plan, artifacts: [...plan.artifacts, { id: "journal", pre: absent, post: absent }] }),
+    /exactly the fixed six artifact ids|identity is invalid/i,
+  );
+
+  const source = fs.readFileSync(COORDINATOR, "utf8");
+  const resealBranch = source.slice(source.indexOf("async function prepareVerificationResealTransaction"), source.indexOf("async function executeMutation"));
+  assert.doesNotMatch(resealBranch, /\binProjectTransaction\s*\(/, "reseal must never use the recursive tree transaction");
+  const fenceWriter = source.slice(source.indexOf("async function writeVerificationResealFence"), source.indexOf("function stageVerificationResealImage"));
+  assert.match(fenceWriter, /\bwriteRunRecoveryFence\s*\(/, "reseal must use Flow's native generated-fence writer");
+  assert.match(fenceWriter, /\bfinalizeRunRecoveryFence\s*\(/, "reseal must use Flow's generation-bound native fence finalizer");
+  assert.doesNotMatch(fenceWriter, /\batomicWrite\s*\(/, "reseal must not locally synthesize a Flow recovery fence");
+  assert.throws(
+    () => assertVerificationResealFlowCapabilities({ withRunMutationLock() {} }),
+    /withRunRecoveryLock is unavailable/,
+  );
+  assert.equal(assertVerificationResealFlowCapabilities({
+    withRunMutationLock() {}, withRunRecoveryLock() {}, writeRunRecoveryFence() {}, finalizeRunRecoveryFence() {},
+  }), true);
+  const rootOperation = source.slice(source.indexOf("async function processRootOperation"), source.indexOf("function response"));
+  assert.ok(
+    rootOperation.indexOf('"preflight-reseal"') < rootOperation.indexOf("atomicWrite(nonceFile"),
+    "fresh reseal must preflight the exact installed Flow API before creating durable nonce state",
+  );
+});
+
+test("reseal recovery classifies only exact all-old or all-new generations and rejects active legacy tree journals", () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-reseal-generation-"));
+  const runId = "run-1";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  const paths = { projectRoot, sessionDir, runId };
+  const requestSha256 = "2".repeat(64);
+  const artifactFiles = verificationResealArtifactFiles(paths, requestSha256);
+  for (const file of artifactFiles.values()) fs.mkdirSync(path.dirname(file), { recursive: true });
+  const artifacts = VERIFICATION_RESEAL_ARTIFACT_IDS.map((id, index) => {
+    const preBytes = Buffer.from(`old-${id}\n`);
+    const postBytes = Buffer.from(`new-${id}\n`);
+    return {
+      id,
+      pre: { presence: "present", mode: 0o644, size: preBytes.length, sha256: rawSha256(preBytes) },
+      post: { presence: "present", mode: 0o644, size: postBytes.length, sha256: rawSha256(postBytes) },
+      preBytes,
+      postBytes,
+      index,
+    };
+  });
+  const plan = validateVerificationResealPlan({
+    schema_version: "1.0", kind: "flow-agents.verification-reseal-transaction.v1",
+    recovery_id: "1".repeat(64), run_id: runId, request_sha256: requestSha256,
+    authorization_sha256: "3".repeat(64), authorization_key_id: "operator", authorization_nonce: "nonce",
+    reducer: { package: "@kontourai/flow" }, result_core_sha256: "4".repeat(64),
+    artifacts: artifacts.map(({ id, pre, post }) => ({ id, pre, post })),
+  });
+  try {
+    for (const artifact of artifacts) fs.writeFileSync(artifactFiles.get(artifact.id), artifact.preBytes, { mode: 0o644 });
+    assert.equal(classifyVerificationResealArtifacts(paths, plan), "old");
+    for (const artifact of artifacts) fs.writeFileSync(artifactFiles.get(artifact.id), artifact.postBytes, { mode: 0o644 });
+    assert.equal(classifyVerificationResealArtifacts(paths, plan), "new");
+    fs.writeFileSync(artifactFiles.get(artifacts[0].id), artifacts[0].preBytes, { mode: 0o644 });
+    assert.equal(classifyVerificationResealArtifacts(paths, plan), "unknown");
+
+    const binding = { request_sha256: requestSha256, authorization_sha256: "3".repeat(64) };
+    const journalFile = path.join(sessionDir, ".lifecycle-authority.transaction.json");
+    fs.writeFileSync(journalFile, `${JSON.stringify({
+      schema_version: "1.0", status: "prepared",
+      binding: { request_sha256: "9".repeat(64), authorization_sha256: "8".repeat(64) },
+      created_at: "2026-07-23T00:00:00.000Z", session: [], flow: [],
+    })}\n`, { mode: 0o600 });
+    assert.throws(() => rejectActiveLegacyResealJournal(paths, binding), /offline quarantine.*forbidden/i);
+    assert.equal(fs.existsSync(journalFile), false);
+    assert.equal(fs.readdirSync(sessionDir).some((name) => name.startsWith(".lifecycle-authority.transaction.json.quarantine-legacy-")), true);
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("reseal cleanup removes stages before the signed plan and safely resumes after a cleanup crash", () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-reseal-cleanup-"));
+  const runId = "run-cleanup";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  const paths = { projectRoot, sessionDir, runId };
+  const plan = { request_sha256: "6".repeat(64) };
+  try {
+    const files = verificationResealArtifactFiles(paths, plan.request_sha256);
+    const stages = [...files.values()].flatMap((file) => [`${file}.verification-reseal-old`, `${file}.verification-reseal-new`]);
+    for (const file of stages) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "stage\n");
+    }
+    const planFile = path.join(sessionDir, ".verification-reseal.transaction.json");
+    fs.writeFileSync(planFile, "{}\n");
+    assert.throws(
+      () => cleanupVerificationResealTransaction(paths, plan, {
+        before_unlink(file) { if (file === planFile) throw new Error("injected cleanup crash"); },
+      }),
+      /injected cleanup crash/,
+    );
+    assert.equal(stages.some((file) => fs.existsSync(file)), false);
+    assert.equal(fs.existsSync(planFile), true, "signed plan remains the cleanup recovery marker");
+    cleanupVerificationResealTransaction(paths, plan);
+    assert.equal(fs.existsSync(planFile), false);
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
 
 test("canonical Flow manifest declares and uses the isolated 16 MiB capacity", () => {
   const source = fs.readFileSync(COORDINATOR, "utf8");
@@ -363,14 +805,14 @@ test("committed recovery replaces only an authenticated stale receipt with an ex
       const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z", ...overrides };
       return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), privateKey).toString("base64") } };
     };
-    const exactCandidate = signedCompletion("b".repeat(64), exactCore);
+    const exactCandidate = signedCompletion("b".repeat(64), exactCore, "reseal-verification-evidence");
     const staleHistorical = signedCompletion("c".repeat(64), "d".repeat(64));
     const receiptFile = path.join(sessionDir, "lifecycle-authority.completion.json");
     fs.writeFileSync(receiptFile, `${JSON.stringify(staleHistorical)}\n`, { mode: 0o600 });
     assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "replaced" });
     assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), exactCandidate, "a signed stale receipt is replaced after committed recovery");
 
-    const newer = signedCompletion("e".repeat(64), exactCore);
+    const newer = signedCompletion("e".repeat(64), exactCore, "reseal-verification-evidence");
     fs.writeFileSync(receiptFile, `${JSON.stringify(newer)}\n`, { mode: 0o600 });
     const newerBytes = fs.readFileSync(receiptFile);
     assert.deepEqual(loaded.installCompletionReceipt({ sessionDir, runId: "run-replay" }, exactCandidate), { run_id: "run-replay", receipt: "preserved" });

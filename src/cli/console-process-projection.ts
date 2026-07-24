@@ -151,6 +151,8 @@ function joinCritiqueState(artifactRoot: string, sources: WorkflowProcessSource[
     try {
       rawCritiques = critiquesFromBundle(sessionDir) as BundleCritique[];
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/recovery fence|fenced for recovery/i.test(message)) throw error;
       warnings.push(`${source.slug}: trust.bundle could not be read (${error instanceof Error ? error.message : String(error)}) -- projecting this session without the critique/review_pending refinement`);
       return source;
     }

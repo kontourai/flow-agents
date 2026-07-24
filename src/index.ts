@@ -256,6 +256,16 @@ export {
   resolveBuilderBuildFlowDefinitionPath,
   startBuilderBuildRun,
 } from "./builder-flow-run-adapter.js";
+export {
+  FLOW_RUN_RECOVERY_FENCE_FILE,
+  FLOW_RUN_RECOVERY_FENCE_PROTOCOL,
+  assertFlowRunRecoveryFenceOpen,
+  assertFlowSessionRecoveryFenceOpen,
+  canonicalProjectRootForFlowAgentsSession,
+  withFlowRunRecoveryFenceRead,
+  withFlowRunRecoveryFenceReadAsync,
+  withFlowSessionRecoveryFenceRead,
+} from "./flow-recovery-fence.js";
 export type {
   BuilderBuildRunResult,
   BuilderBuildRunIdentityMismatch,

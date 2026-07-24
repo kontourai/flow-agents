@@ -91,6 +91,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/continuation-turn-authority.js", { category: "shared hook library", requiredNeedles: ["issueActiveTurnAuthority", "validateActiveTurnAuthority", "validateSignedActiveTurnAssignmentAuthority"] }],
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/declared-artifact-roots.js", { category: "shared hook library", requiredNeedles: ["isCandidateWithinDeclaredRoots", "FAIL-CLOSED"] }],
+  ["scripts/hooks/lib/flow-recovery-fence.js", { category: "shared hook library", requiredNeedles: ["assertFlowRecoveryFenceOpen", "flow.run-recovery-fence.v1"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
   ["scripts/hooks/lib/read-only-grammar.js", { category: "shared hook library", requiredNeedles: ["isProvablyReadOnlyCommand", "fail closed"] }],
   ["scripts/hooks/lib/kit-catalog.js", { category: "shared hook library", requiredNeedles: ["readKitManifests", "workflowTriggersFor"] }],

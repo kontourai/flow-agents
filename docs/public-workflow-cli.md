@@ -133,8 +133,68 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
+When a current root-signed lifecycle completion already binds a Trust Bundle and its external
+resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
+Use the two-stage reseal only for the final `builder.build` verify evidence after critique
+resolution:
+
+```bash
+flow_agents workflow reseal-verification-evidence-request \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation tests-evidence \
+  --status pass \
+  --command "npm test" \
+  --summary "Final verification passed after the resolved review." \
+  --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Final substantive verification command."}' \
+  --criterion-json '{"id":"<criterion-id>","status":"pass","evidence_refs":[{"kind":"command","excerpt":"npm test","summary":"Final verification command for this criterion."}]}' \
+  > reseal-request.json
+
+# Sign reseal-request.json.authorization using the configured lifecycle operator key,
+# write the signature block into a protected file outside the project, then:
+flow_agents workflow reseal-verification-evidence \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/reseal-authorization.json
+```
+
+The request executes the existing evidence writer once into a retained transaction candidate; it
+does not attach or publish that candidate. Its unsigned authorization binds the current raw bundle,
+candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
+raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
+expiry. It also binds the exact target verify expectation and the predecessor/current claim
+id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
+requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
+that does not match the current expectation's step, claim type, and subject type. It acquires
+Flow's native run-mutation lock before capturing a closed transaction plan over exactly six
+artifact identities: session bundle, Flow manifest, Flow state, request-keyed stored attachment,
+JSON report, and Markdown report. The root-signed plan contains no artifact paths; it binds the
+request, authorization key and nonce, pinned reducer identity, result core, and exact pre/post
+presence, mode, size, and digest for each fixed identity. Old and new images are durably staged
+in fixed siblings and reread before publication. It permits
+replacement of only that one ordered target claim; every other claim, including other verify-gate
+claims, must remain byte-identical and in the same order. It requires a byte-identical critique
+projection, attaches the candidate to the `builder.build` verify gate, commits the exact candidate
+bytes without appending a sixth ledger event, and installs a new root-signed exact-current
+completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
+remains active through durable root completion and exact receipt installation; all canonical
+readers and ordinary Flow mutations fail closed while active. Flow's native writer assigns a
+unique generation and durably publishes it; the dedicated finalizer requires that exact
+generation before reopening. Consumers bind the generation, file bytes, and run-directory
+identity across their complete supported reads and reject symlinked fixed Flow ancestry.
+Before root records a nonce or any plan/stage exists, the helper preflights the installed
+mutation lock, recovery lock, active writer, and generation-bound finalizer APIs. Recovery
+accepts only an exact
+all-old or all-new generation. Mixed, malformed, or unknown generations are quarantined with the
+fence left active for offline recovery. An active legacy recursive reseal journal is never
+auto-restored.
+After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
+removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
+Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
+nonce/completion and transaction recovery make an exact completed retry a replay.
+
 The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, `archive`,
-`resolve-critique`, and `repair-critique-resolution-history`. Pause,
+`resolve-critique`, `repair-critique-resolution-history`, and
+`reseal-verification-evidence`. Pause,
 resume, and release require the current assignment actor and an explicit reason. `critique`
 records the `clean-critique` claim but does not independently attach it to Flow or advance a gate. Cancel and
 archive require a signed user/operator authorization file. Flow owns the canonical run
