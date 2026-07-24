@@ -59,6 +59,16 @@ Flow-persisted envelope; only a genuinely absent legacy parameter projects an
 explicit `incomplete` result. A persisted envelope cannot be downgraded to that
 legacy marker.
 
+Installed runtime telemetry resolves that binding through the same canonical
+actor identity and the actor's own `current/<actor>.json` generation. It never
+falls back to shared `current.json`, a newest-run scan, or a task-slug join.
+The adapter validates the task projection with this contract, requires the
+pointer generation to equal `correlation_id`, verifies the Flow run and actor
+identities, and rechecks the pointer after reading state. A valid event embeds
+the exact persisted envelope unchanged. An event before activation, after
+retirement, during a binding change, or against malformed/tampered state emits
+an explicit content-free `incomplete` correlation instead.
+
 `reconstructRun` rebuilds a run account from identity-bearing facts only. A
 complete account contains runtime session and turn facts, tool results, Flow
 gates and route-backs, delegations, trust references, economics, and a terminal

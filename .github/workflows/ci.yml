@@ -445,6 +445,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-task-slug-integration
 
+      - name: Installed runtime correlation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check installed-runtime-correlation-integration
+
       - name: Economics record integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration

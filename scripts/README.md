@@ -58,6 +58,7 @@ renamed, or changes category, update the table and the validator together.
 | `opencode-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures opencode plugin telemetry and fails open. |
 | `pi-hook-adapter.js` | runtime adapter | `evals/integration/test_bundle_install.sh` | Translates pi extension events into the shared hook runner contract. |
 | `pi-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures pi extension telemetry and fails open. |
+| `../telemetry/run-correlation-binding.js` | shared telemetry adapter | `src/cli/telemetry-run-binding.test.mjs`, `evals/integration/test_installed_runtime_correlation.sh` | Resolves only the authenticated runtime actor's Builder binding and projects its validated run-correlation envelope into telemetry. |
 | `post-edit-accumulator.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Tracks edited files across a turn for later quality hooks. |
 | `quality-gate.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Runs configured quality checks as hook policy. |
 | `report-only-guard.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Protects report-only specialist roles from production edits. |

@@ -797,6 +797,33 @@ test("production Builder start mints and reuses one actor-bound run correlation"
   assert.deepEqual(retried.run.correlation, started.run.correlation);
   assert.deepEqual(retried.projection.run_correlation, correlation);
 
+  const sequentialSlug = "correlated-production-start-sequential";
+  const sequential = {
+    projectRoot: first.projectRoot,
+    artifactRoot: first.artifactRoot,
+    sessionDir: path.join(first.artifactRoot, sequentialSlug),
+    slug: sequentialSlug,
+  };
+  writeJson(path.join(sequential.sessionDir, "state.json"), {
+    schema_version: "1.0",
+    task_slug: sequential.slug,
+    status: "planned",
+    phase: "planning",
+    updated_at: NOW,
+    work_item_refs: [SUBJECT],
+    next_action: { status: "continue", summary: "Start sequential Builder run." },
+  });
+  claimAmbientSessionAssignment(sequential);
+  const sequentialStarted = await startClaimedBuilderFlowSession({ sessionDir: sequential.sessionDir });
+  const sequentialBinding = currentPointer.readOwnCurrentPointer(first.artifactRoot, firstOwner.actorKey).payload;
+  assert.equal(sequentialBinding.artifact_dir, sequential.slug);
+  assert.equal(
+    sequentialBinding.binding_id,
+    sequentialStarted.run.correlation.envelope.correlation_id,
+  );
+  assert.notEqual(sequentialBinding.binding_id, correlation.correlation_id);
+  assert.deepEqual(readJson(otherActorFile), otherActorPointer);
+
   const second = makeSession("correlated-production-start-second");
   claimAmbientSessionAssignment(second);
   const concurrent = await startClaimedBuilderFlowSession({ sessionDir: second.sessionDir });

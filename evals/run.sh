@@ -189,6 +189,10 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_telemetry_sanitize_usage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_task_slug.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_installed_runtime_correlation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1

@@ -184,20 +184,8 @@ build_base_event() {
 
 add_hook_context() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input task_slug
+  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input
   cwd=$(echo "$stdin_json" | jq -r '.cwd // ""')
-  # Work-item attribution: stamp the active Builder run's slug (from the same
-  # current.json .active_slug the economics relay reads) so tool/turn events can
-  # be grouped per work item downstream. Absent for non-Builder sessions — never
-  # fabricated. Only the slug string is stored; no prompt/args/file content.
-  task_slug=""
-  if [[ -n "$cwd" ]]; then
-    if [[ -f "$cwd/.kontourai/flow-agents/current.json" ]]; then
-      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.kontourai/flow-agents/current.json" 2>/dev/null)
-    elif [[ -f "$cwd/.flow-agents/current.json" ]]; then
-      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.flow-agents/current.json" 2>/dev/null)
-    fi
-  fi
   runtime_session_id=$(echo "$stdin_json" | jq -r '.session_id // ""')
   runtime_turn_id=$(echo "$stdin_json" | jq -r '.turn_id // ""')
   transcript_path=$(echo "$stdin_json" | jq -r '.transcript_path // ""')
@@ -222,7 +210,6 @@ add_hook_context() {
     --arg source "$source" \
     --arg stop_hook_active "$stop_hook_active" \
     --arg last_assistant_message "$last_assistant_message" \
-    --arg task_slug "$task_slug" \
     --argjson raw "$raw_hook_input" \
     '. + {
       hook: {
@@ -236,8 +223,27 @@ add_hook_context() {
         last_assistant_message: $last_assistant_message,
         raw_input: $raw
       }
-    }
-    + (if $task_slug == "" then {} else {task_slug: $task_slug} end)'
+    }'
+}
+
+add_run_correlation() {
+  local event="$1" stdin_json="$2" fragment
+  fragment=$(printf '%s' "$stdin_json" | node "${TELEMETRY_DIR}/run-correlation-binding.js" 2>/dev/null) || fragment=""
+  if ! printf '%s' "$fragment" | jq -e '
+    type == "object"
+    and (.run_correlation | type == "object")
+    and (
+      (.run_correlation.status == "incomplete" and (.run_correlation.reason | type == "string"))
+      or (
+        .run_correlation.schema_version == "1.0"
+        and (.run_correlation.correlation_id | type == "string")
+        and (.run_correlation.identities | type == "object")
+      )
+    )
+  ' >/dev/null 2>&1; then
+    fragment='{"run_correlation":{"status":"incomplete","reason":"the telemetry correlation adapter is unavailable"}}'
+  fi
+  printf '%s' "$event" | jq -c --argjson fragment "$fragment" '. + $fragment'
 }
 
 add_runtime_context() {
@@ -963,6 +969,7 @@ main() {
   local event
   event=$(build_base_event "$session_id" "$(schema_event_type "$event_type")" "$agent_name")
   event=$(add_hook_context "$event" "$event_type" "$stdin_json")
+  event=$(add_run_correlation "$event" "$stdin_json")
   event=$(add_runtime_context "$event" "$event_type" "$stdin_json")
   event=$(add_event_specific_data "$event" "$event_type" "$agent_name" "$stdin_json")
 
