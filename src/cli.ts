@@ -12,6 +12,7 @@ import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
+import { main as providerBootstrap } from "./cli/provider-bootstrap.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
 import { main as workItemMutationProvider } from "./cli/work-item-mutation-provider.js";
@@ -50,6 +51,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["narrative-sources", narrativeSources],
   ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
+  ["provider-bootstrap", providerBootstrap],
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
   ["work-item-mutation-provider", workItemMutationProvider],

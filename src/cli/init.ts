@@ -14,6 +14,7 @@ import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
+import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -38,6 +39,11 @@ type InitOptions = {
   // "(auto-detected)" annotation. headlessOptions() itself never sets this
   // (untouched) -- main() merges it onto the headless result separately.
   runtimeAutoDetected?: boolean;
+  configureProviders?: boolean;
+  providerScope?: ProviderScope;
+  providerRepoPath?: string;
+  providerProjectNumber?: number;
+  providerOnline?: boolean;
 };
 
 const runtimeBundles: Record<Runtime, string> = {
@@ -124,8 +130,26 @@ Options:
   --console-tenant ID
   --activate-kits
   --activate-kit KIT_ID   Activate one catalog kit by id. Repeat for multiple kits.
+  --configure-providers   Configure backlog, assignment, and change providers together.
+  --provider-scope project|global
+  --provider-repo-path PATH
+  --provider-project NUMBER
+  --online               Verify GitHub auth/project and create the claim label if missing.
   --yes, --headless
 `);
+}
+
+function parseProviderScope(value: string | undefined): ProviderScope {
+  if (value === undefined || value === "project") return "project";
+  if (value === "global") return "global";
+  throw new Error(`unknown provider scope '${value}'; expected project or global`);
+}
+
+function parseProviderProject(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new Error("--provider-project must be a positive integer");
+  return number;
 }
 
 function catalogKitIds(): string[] {
@@ -472,6 +496,27 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
         activeKitIds.push(...answer.split(",").map((id) => id.trim()).filter((id) => available.includes(id)));
       }
     }
+    const configureProvidersFlag = flagBool(args.flags, "configure-providers");
+    const configureProvidersAnswer = configureProvidersFlag
+      ? "y"
+      : await rl.question("Configure GitHub backlog, assignment, and change providers? [Y/n]: ");
+    const configureProviders = configureProvidersFlag || !["n", "no"].includes(configureProvidersAnswer.trim().toLowerCase());
+    const providerScopeAnswer = flagString(args.flags, "provider-scope")
+      ?? (configureProviders ? (await rl.question("Provider settings scope [project/global] [project]: ")).trim() : undefined);
+    const providerScope = configureProviders ? parseProviderScope(providerScopeAnswer || "project") : undefined;
+    const providerOnlineFlag = flagBool(args.flags, "online");
+    const providerOnlineAnswer = configureProviders && !providerOnlineFlag
+      ? await rl.question("Verify github.com state and create the configured claim label if missing? [y/N]: ")
+      : "";
+    const providerOnline = configureProviders
+      && (providerOnlineFlag || ["y", "yes"].includes(providerOnlineAnswer.trim().toLowerCase()));
+    const providerProjectFlag = flagString(args.flags, "provider-project");
+    const providerProjectAnswer = configureProviders && providerProjectFlag === undefined
+      ? await rl.question(`GitHub Project number${providerOnline ? " (blank to discover)" : ""}: `)
+      : providerProjectFlag;
+    if (configureProviders && !providerOnline && !(providerProjectAnswer?.trim())) {
+      throw new Error("offline provider setup requires a GitHub Project number");
+    }
     return {
       runtime,
       runtimeAutoDetected,
@@ -485,6 +530,11 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       telemetrySinks,
       activateKits: activeKitIds.length > 0,
       activeKitIds,
+      configureProviders,
+      providerScope,
+      providerRepoPath: flagString(args.flags, "provider-repo-path"),
+      providerProjectNumber: parseProviderProject(providerProjectAnswer?.trim() || undefined),
+      providerOnline,
     };
   } finally {
     rl.close();
@@ -507,7 +557,30 @@ function headlessOptions(argv: string[]): InitOptions {
     telemetrySinks: telemetrySinksFromFlags(args.flags),
     activateKits: selectedKitIdsFromFlags(args.flags).length > 0,
     activeKitIds: selectedKitIdsFromFlags(args.flags),
+    configureProviders: flagBool(args.flags, "configure-providers"),
+    providerScope: flagBool(args.flags, "configure-providers") ? parseProviderScope(flagString(args.flags, "provider-scope")) : undefined,
+    providerRepoPath: flagString(args.flags, "provider-repo-path"),
+    providerProjectNumber: parseProviderProject(flagString(args.flags, "provider-project")),
+    providerOnline: flagBool(args.flags, "online"),
   };
+}
+
+function configureWorkflowProviders(options: InitOptions): number {
+  if (!options.configureProviders) return 0;
+  const repoPath = path.resolve(options.providerRepoPath ?? (options.global ? process.cwd() : options.dest));
+  const result = bootstrapProviders({
+    scope: options.providerScope ?? "project",
+    repoPath,
+    projectSettingsRoot: options.providerScope === "project"
+      ? path.join(options.global ? repoPath : options.dest, "context", "settings")
+      : undefined,
+    projectNumber: options.providerProjectNumber,
+    online: options.providerOnline,
+  });
+  console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
+  for (const file of result.files) console.log(`  ${file}`);
+  if (result.offlineRemediation) console.warn(result.offlineRemediation);
+  return 0;
 }
 
 export function ensureBundle(runtime: Runtime): string {
@@ -922,7 +995,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
             "(drift detection will report unbaselined until the next successful --global sync)."
         );
       }
-      return 0;
+      return configureWorkflowProviders(options);
     }
     // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
     // Global path: ~/.config/opencode/opencode.json (honor XDG_CONFIG_HOME).
@@ -980,7 +1053,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
       console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
       console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
-      return 0;
+      return configureWorkflowProviders(options);
     }
     // --global for codex: run install-codex-home.sh to install into the Codex home.
     // Defaults to CODEX_HOME or ~/.codex. --dest remains an explicit override.
@@ -1004,7 +1077,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const installed = result.status ?? 1;
       if (installed !== 0) return installed;
       writeInstallRecord(options.dest, "codex", true, options.activeKitIds ?? []);
-      return await activateKits(options);
+      const activated = await activateKits(options);
+      return activated === 0 ? configureWorkflowProviders(options) : activated;
     }
     // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
     if (options.global && options.runtime === "pi") {
@@ -1023,7 +1097,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // identically whether main() reached here via headlessOptions() or
     // interactiveOptions() -- never changes `activated`'s exit code.
     await printPostInstallSummary(options);
-    return activated;
+    return activated === 0 ? configureWorkflowProviders(options) : activated;
   } catch (error) {
     console.error(`flow-agents init: ${(error as Error).message}`);
     return 2;

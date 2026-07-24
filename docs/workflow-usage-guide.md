@@ -120,6 +120,36 @@ Expected artifact:
 
 When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In this repository, the optional GitHub adapter resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for that configured provider path.
 
+### Configure the provider set
+
+Provider bindings are consumer-owned configuration and are not copied from the
+Flow Agents source repository into universal bundles. Configure the three
+workflow legs together during installation:
+
+```bash
+flow-agents init --runtime codex --dest . \
+  --configure-providers --online --yes
+```
+
+This detects the GitHub repository from its `origin`, verifies `gh` auth,
+selects the sole accessible GitHub Project (or validates
+`--provider-project NUMBER`), creates the `agent:claimed` label when missing,
+schema-validates all three documents before atomically replacing each file:
+
+- `context/settings/backlog-provider-settings.json`
+- `context/settings/assignment-provider-settings.json`
+- `context/settings/change-provider-settings.json`
+
+For a headless offline setup, omit `--online` and provide
+`--provider-project NUMBER`. The command does not pretend remote state was
+verified; it prints the exact `gh` checks to run. `--provider-scope global`
+instead merges a repository-specific entry into each settings file under
+`~/.config/flow-agents`, preserving entries for other repositories. The same
+operation is available independently as `flow-agents provider-bootstrap`.
+Existing `project.paths` entries remain consumer-owned; resolution chooses the
+longest matching repository-relative path prefix and otherwise uses the
+repository-root entry.
+
 ### Assignment ownership: the third provider leg
 
 Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership represented by the configured provider. For example, the optional GitHub adapter can use an issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment; tracker-less repos and evals can use an equivalent local JSON record. Join it against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.

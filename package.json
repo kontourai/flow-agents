@@ -126,6 +126,7 @@
     "assignment-provider": "npm run build --silent && node build/src/cli.js assignment-provider",
     "effective-assignment-provider-settings": "npm run build --silent && node build/src/cli.js effective-assignment-provider-settings",
     "effective-change-provider-settings": "npm run build --silent && node build/src/cli.js effective-change-provider-settings",
+    "provider-bootstrap": "npm run build --silent && node build/src/cli.js provider-bootstrap",
     "pull-work-provider": "npm run build --silent && node build/src/cli.js pull-work-provider",
     "publish-change": "npm run build --silent && node build/src/cli.js publish-change",
     "promote-workflow-artifact": "npm run build --silent && node build/src/cli.js promote-workflow-artifact",
