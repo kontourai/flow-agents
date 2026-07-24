@@ -60,6 +60,35 @@ test("state replacement preserves a newer value when its expected snapshot is st
   }
 });
 
+test("state replacement rejects an oversized existing destination before reading it", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-bounded-"));
+  try {
+    const file = path.join(workspace, "state.json");
+    fs.writeFileSync(file, "");
+    fs.truncateSync(file, 16 * 1024 * 1024 + 1);
+    const { writeStateJson } = await import(helperUrl);
+    assert.throws(() => writeStateJson(file, { status: "planned" }), /bounded regular file/);
+    assert.equal(fs.statSync(file).size, 16 * 1024 * 1024 + 1);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("state replacement rejects an oversized new payload before creating a file", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-new-bounded-"));
+  try {
+    const file = path.join(workspace, "state.json");
+    const { writeStateJson } = await import(helperUrl);
+    assert.throws(
+      () => writeStateJson(file, { payload: "x".repeat(16 * 1024 * 1024) }),
+      /exceeds its byte limit/,
+    );
+    assert.equal(fs.existsSync(file), false);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("sidecar writes and Builder compare-and-swap serialize across processes", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-race-"));
   try {

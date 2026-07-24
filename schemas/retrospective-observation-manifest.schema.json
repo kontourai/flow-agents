@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/retrospective-observation-manifest/1.0.json",
+  "title": "Flow Agents retrospective observation input manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "correlation_id", "sources"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$"
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime_events": { "$ref": "#/$defs/source" },
+        "builder_state": { "$ref": "#/$defs/source" },
+        "trust_bundle": { "$ref": "#/$defs/source" },
+        "flow_state": { "$ref": "#/$defs/source" },
+        "flow_evidence_manifest": { "$ref": "#/$defs/source" },
+        "economics": { "$ref": "#/$defs/source" },
+        "terminal_outcome": { "$ref": "#/$defs/source" }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "file"],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$"
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.?(?:[/\\\\]|$))[^\\u0000]+$",
+          "description": "Path relative to the caller-configured record root. Absolute paths, empty segments, dot segments, traversal, and symbolic links are rejected by the runtime."
+        }
+      }
+    }
+  }
+}

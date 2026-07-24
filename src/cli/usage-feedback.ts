@@ -6,6 +6,13 @@ import * as path from "node:path";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { readRunCorrelation } from "../run-correlation.js";
+import {
+  assertPinnedDirectoryChain,
+  capturePinnedDirectoryChain,
+  compileRetrospectiveObservation,
+  readRetrospectiveObservationManifest,
+} from "../retrospective-observation.js";
+import { writeStateJson } from "../lib/state-file-lock.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
 
@@ -176,6 +183,39 @@ function writeJsonlUpsert(file: string, rows: Record<string, unknown>[], key: st
   const existing = new Map(strictJsonlRows(file).map((row) => [String(row[key]), row]));
   for (const row of rows) existing.set(String(row[key]), row);
   fs.writeFileSync(file, Array.from(existing.values()).map((row) => JSON.stringify(row)).join("\n") + (existing.size ? "\n" : ""), "utf8");
+}
+
+function compileObservation(argv: string[]): number {
+  const { flags } = parseArgs(argv);
+  const manifestFile = flagString(flags, "manifest");
+  if (!manifestFile) throw new Error("--manifest is required");
+  const recordRoot = flagString(flags, "record-root");
+  if (!recordRoot) throw new Error("--record-root is required");
+  const manifest = readRetrospectiveObservationManifest(manifestFile);
+  const observation = compileRetrospectiveObservation(manifest, recordRoot);
+  const outputDir = path.resolve(
+    flagString(flags, "output-dir")
+      ?? path.join(flowAgentsArtifactRoot(), "feedback"),
+  );
+  const observationsDir = path.join(outputDir, "observations");
+  ensureSafeDir(observationsDir);
+  const resolvedObservationsDir = fs.realpathSync(observationsDir);
+  const outputDirectoryChain = capturePinnedDirectoryChain(resolvedObservationsDir);
+  const outputFile = path.join(
+    resolvedObservationsDir,
+    `${observation.observation_id.slice("observation:".length)}.json`,
+  );
+  assertPinnedDirectoryChain(outputDirectoryChain);
+  writeStateJson(outputFile, observation as unknown as Record<string, unknown>);
+  assertPinnedDirectoryChain(outputDirectoryChain);
+  if (!flagBool(flags, "quiet")) {
+    console.log(JSON.stringify({
+      observation_id: observation.observation_id,
+      completeness: observation.completeness.status,
+      output_file: path.basename(outputFile),
+    }));
+  }
+  return 0;
 }
 
 function recordOutcome(argv: string[]): number {
@@ -619,9 +659,10 @@ function globalDashboard(argv: string[]): number {
 }
 
 export function main(argv = process.argv.slice(2)): number {
+  const [command, ...rest] = argv;
   try {
-    const [command, ...rest] = argv;
     if (command === "record-outcome") return recordOutcome(rest);
+    if (command === "compile-observation") return compileObservation(rest);
     if (command === "import-codex") return importTelemetry(rest, "codex");
     if (command === "import-telemetry") return importTelemetry(rest);
     if (command === "sync-artifacts") return syncArtifacts(rest);
@@ -633,6 +674,10 @@ export function main(argv = process.argv.slice(2)): number {
     console.error("usage-feedback command required");
     return 2;
   } catch (error) {
+    if (command === "compile-observation") {
+      console.error(`compile-observation failed (${parseErrorClass(error)})`);
+      return 1;
+    }
     console.error((error as Error).message);
     return 1;
   }
