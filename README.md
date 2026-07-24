@@ -93,6 +93,21 @@ npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --y
 npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 ```
 
+To establish the repository's backlog, assignment, and change-provider bindings
+as one coherent setup step, add provider configuration:
+
+```bash
+npx @kontourai/flow-agents init --runtime codex --dest . \
+  --configure-providers --online --yes
+```
+
+Interactive init offers the same setup. Headless/offline setup must name the
+GitHub Project explicitly with `--provider-project NUMBER`; it writes the
+settings and prints exact `gh` authentication and label verification commands.
+Use `--provider-scope global` to add a repository-specific entry under
+`~/.config/flow-agents` instead of writing project-local settings. Universal
+bundles intentionally contain no repository-specific provider defaults.
+
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
 
 OpenCode also supports a global install. Flow Agents merges `opencode.json`, installs its plugin and agents, and exposes core skills plus only the selected kits (including their transitive kit dependencies) under OpenCode's global config root:

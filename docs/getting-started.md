@@ -22,6 +22,13 @@ npx @kontourai/flow-agents init --runtime codex       --dest . --yes
 npx @kontourai/flow-agents init --runtime opencode    --dest . --yes
 ```
 
+To configure provider-backed Builder work at the same time, add
+`--configure-providers --online`. This detects the repository, verifies GitHub
+CLI access, and writes coherent backlog, assignment, and change-provider
+settings. For non-interactive offline setup, provide
+`--provider-project NUMBER`; remote state remains explicitly unverified until
+you run the printed `gh` checks.
+
 The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. The Builder Kit installs automatically. Your agent reads those files at startup; no plugin registry required.
 
 For a normal Codex global install, target the Codex home instead of a project workspace:

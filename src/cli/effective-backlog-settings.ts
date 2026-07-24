@@ -58,13 +58,34 @@ function merge(base: unknown, override: unknown): Record<string, unknown> | null
   return out;
 }
 
-function findProject(settings: Record<string, unknown> | null, repo: { owner: string; name: string }): Record<string, unknown> | null {
+function findProject(settings: Record<string, unknown> | null, repo: { owner: string; name: string }, repoPath: string): Record<string, unknown> | null {
   const projects = settings?.projects;
   if (!Array.isArray(projects)) return null;
-  return (projects.find((project) => {
+  const root = gitRoot(repoPath);
+  const current = (() => { try { return fs.realpathSync(repoPath); } catch { return path.resolve(repoPath); } })();
+  let best: { project: Record<string, unknown>; score: number } | null = null;
+  for (const candidate of projects) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const project = candidate as Record<string, unknown>;
     const projectRepo = (((project as Record<string, unknown>).project as Record<string, unknown> | undefined)?.repo ?? {}) as Record<string, unknown>;
-    return projectRepo.owner === repo.owner && projectRepo.name === repo.name;
-  }) as Record<string, unknown> | undefined) ?? null;
+    if (projectRepo.owner !== repo.owner || projectRepo.name !== repo.name) continue;
+    const paths = ((project.project as Record<string, unknown> | undefined)?.paths);
+    if (!Array.isArray(paths) || paths.length === 0) {
+      if (!best) best = { project, score: 0 };
+      continue;
+    }
+    if (!root) continue;
+    for (const configured of paths) {
+      if (typeof configured !== "string" || !configured.trim() || path.isAbsolute(configured)) continue;
+      const target = path.resolve(root, configured);
+      const relative = path.relative(root, target);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+      if (current !== target && !current.startsWith(`${target}${path.sep}`)) continue;
+      const score = target.length + 1;
+      if (!best || score > best.score) best = { project, score };
+    }
+  }
+  return best?.project ?? null;
 }
 
 function workspaceRepos(settings: Record<string, unknown> | null): string[] {
@@ -140,9 +161,11 @@ function effective(repoPath: string, projectSettings: string, globalSettings: st
   const repo = currentRepo(repoPath);
   const projectDoc = loadSettings(projectSettings);
   if (!repo) return [{ status: "ask_user", reason: "could_not_identify_current_repo", message: "Ask the user which backlog WorkItemProvider and BoardProvider to use for this workspace.", resolution: { project_settings_path: projectSettings, global_settings_path: globalSettings } }, 2];
-  const effectiveSettings = merge(merge(merge(globalDoc?.defaults, findProject(globalDoc, repo)), projectDoc?.defaults), findProject(projectDoc, repo));
+  const globalProject = findProject(globalDoc, repo, repoPath);
+  const projectProject = findProject(projectDoc, repo, repoPath);
+  const effectiveSettings = merge(merge(merge(globalDoc?.defaults, globalProject), projectDoc?.defaults), projectProject);
   if (!effectiveSettings) return [{ status: "ask_user", reason: "no_backlog_provider_settings", message: "Ask the user which backlog WorkItemProvider and BoardProvider to use before selecting work.", current_repo: repo, resolution: { project_settings_path: projectSettings, global_settings_path: globalSettings, checked: ["project", "global"] } }, 2];
-  return [{ status: "configured", scope: "repo", current_repo: repo, source: findProject(projectDoc, repo) || projectDoc?.defaults ? "project" : "global", precedence: ["project.projects match", "project.defaults", "global.projects match", "global.defaults"], settings: effectiveSettings }, 0];
+  return [{ status: "configured", scope: "repo", current_repo: repo, source: projectProject || projectDoc?.defaults ? "project" : "global", precedence: ["project.projects path match", "project.defaults", "global.projects path match", "global.defaults"], settings: effectiveSettings }, 0];
 }
 
 export function main(argv = process.argv.slice(2)): number {
