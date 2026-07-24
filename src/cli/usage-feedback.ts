@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as os from "node:os";
@@ -6,6 +7,22 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
+
+interface JsonlDiagnostic {
+  source: string;
+  line: number;
+  content_sha256: string;
+  error: string;
+}
+
+interface JsonlReadResult {
+  rows: Record<string, unknown>[];
+  diagnostics: JsonlDiagnostic[];
+  total_records: number;
+  valid_records: number;
+}
+
+type JsonlReadPolicy = "strict" | "quarantine";
 
 function telemetryDir(flags: Record<string, string | boolean | string[]>): string {
   const explicit = flagString(flags, "telemetry-dir") ?? process.env.TELEMETRY_DATA_DIR;
@@ -38,13 +55,60 @@ function appendJsonl(file: string, record: unknown): void {
   fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
 }
 
-function readJsonl(file: string): Record<string, unknown>[] {
-  if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+function telemetrySourceId(dir: string): string {
+  const resolved = path.resolve(dir);
+  if (path.basename(resolved) === "telemetry" && path.basename(path.dirname(resolved)) === ".kontourai") {
+    return path.basename(path.dirname(path.dirname(resolved)));
+  }
+  return path.basename(resolved);
+}
+
+function parseErrorClass(error: unknown): string {
+  return error instanceof Error ? error.name : "UnknownParseError";
+}
+
+function readJsonl(file: string, policy: JsonlReadPolicy = "strict", sourceId = path.basename(path.dirname(file))): JsonlReadResult {
+  if (!fs.existsSync(file)) return { rows: [], diagnostics: [], total_records: 0, valid_records: 0 };
+  const rows: Record<string, unknown>[] = [];
+  const diagnostics: JsonlDiagnostic[] = [];
+  const source = `${sourceId}/${path.basename(file)}`;
+  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  let totalRecords = 0;
+  for (const [index, line] of lines.entries()) {
+    if (!line) continue;
+    totalRecords += 1;
+    try {
+      rows.push(JSON.parse(line) as Record<string, unknown>);
+    } catch (error) {
+      const diagnostic = {
+        source,
+        line: index + 1,
+        content_sha256: createHash("sha256").update(line).digest("hex"),
+        error: parseErrorClass(error),
+      };
+      if (policy === "strict") {
+        throw new Error(`malformed JSONL record at ${source}:${diagnostic.line} (${diagnostic.error})`);
+      }
+      diagnostics.push(diagnostic);
+    }
+  }
+  return { rows, diagnostics, total_records: totalRecords, valid_records: rows.length };
+}
+
+function strictJsonlRows(file: string): Record<string, unknown>[] {
+  return readJsonl(file, "strict").rows;
+}
+
+function warnQuarantined(diagnostics: JsonlDiagnostic[]): void {
+  const bySource = new Map<string, number>();
+  for (const diagnostic of diagnostics) bySource.set(diagnostic.source, (bySource.get(diagnostic.source) ?? 0) + 1);
+  for (const [source, count] of bySource) {
+    console.error(`usage-feedback: quarantined ${count} malformed record(s) from ${source}; result is partial`);
+  }
 }
 
 function writeJsonlUpsert(file: string, rows: Record<string, unknown>[], key: string): void {
-  const existing = new Map(readJsonl(file).map((row) => [String(row[key]), row]));
+  const existing = new Map(strictJsonlRows(file).map((row) => [String(row[key]), row]));
   for (const row of rows) existing.set(String(row[key]), row);
   fs.writeFileSync(file, Array.from(existing.values()).map((row) => JSON.stringify(row)).join("\n") + (existing.size ? "\n" : ""), "utf8");
 }
@@ -119,7 +183,10 @@ function importTelemetry(argv: string[], defaultRuntime?: string): number {
   ensureSafeDir(dir);
   const inputDir = flagString(flags, "input-telemetry-dir");
   const fallbackSource = inputDir ? path.basename(path.resolve(inputDir)) : "flow-agents";
-  writeJsonlUpsert(path.join(dir, "normalized-sessions.jsonl"), normalize(readJsonl(input), runtime, flags, fallbackSource), "session_id");
+  const sourceId = inputDir ? path.basename(path.resolve(inputDir)) : path.basename(path.dirname(input));
+  const source = readJsonl(input, "quarantine", sourceId);
+  warnQuarantined(source.diagnostics);
+  writeJsonlUpsert(path.join(dir, "normalized-sessions.jsonl"), normalize(source.rows, runtime, flags, fallbackSource), "session_id");
   return 0;
 }
 
@@ -152,22 +219,35 @@ function syncArtifacts(argv: string[]): number {
   return 0;
 }
 
-function rows(dir: string): { sessions: Record<string, unknown>[]; outcomes: Record<string, unknown>[] } {
+function rows(dir: string): {
+  sessions: Record<string, unknown>[];
+  outcomes: Record<string, unknown>[];
+  reads: JsonlReadResult[];
+} {
   const full = fs.existsSync(path.join(dir, "full.jsonl")) ? path.join(dir, "full.jsonl") : path.join(dir, "sample-full.jsonl");
   const outcomes = fs.existsSync(path.join(dir, "outcomes.jsonl")) ? path.join(dir, "outcomes.jsonl") : path.join(dir, "sample-outcomes.jsonl");
+  const sourceId = telemetrySourceId(dir);
+  const normalized = readJsonl(path.join(dir, "normalized-sessions.jsonl"), "quarantine", sourceId);
+  const sessions = readJsonl(path.join(dir, "sessions.jsonl"), "quarantine", sourceId);
+  const raw = readJsonl(full, "quarantine", sourceId);
+  const outcomeRows = readJsonl(outcomes, "quarantine", sourceId);
   return {
     sessions: [
-      ...readJsonl(path.join(dir, "normalized-sessions.jsonl")),
-      ...readJsonl(path.join(dir, "sessions.jsonl")),
-      ...normalize(readJsonl(full), "codex", {}, path.basename(path.resolve(dir))),
+      ...normalized.rows,
+      ...sessions.rows,
+      ...normalize(raw.rows, "codex", {}, path.basename(path.resolve(dir))),
     ],
-    outcomes: readJsonl(outcomes),
+    outcomes: outcomeRows.rows,
+    reads: [normalized, sessions, raw, outcomeRows],
   };
 }
 
 function reportData(dirs: string[], groupBy?: string): Record<string, unknown> {
-  const sessions = dirs.flatMap((dir) => rows(dir).sessions);
-  const outcomes = dirs.flatMap((dir) => rows(dir).outcomes);
+  const inputs = dirs.map((dir) => rows(dir));
+  const sessions = inputs.flatMap((input) => input.sessions);
+  const outcomes = inputs.flatMap((input) => input.outcomes);
+  const reads = inputs.flatMap((input) => input.reads).filter((read) => read.total_records > 0);
+  const diagnostics = reads.flatMap((read) => read.diagnostics);
   const outcomesBySession = new Map<string, Record<string, unknown>[]>();
   for (const outcome of outcomes) {
     const key = String(outcome.session_id ?? "unknown");
@@ -197,6 +277,13 @@ function reportData(dirs: string[], groupBy?: string): Record<string, unknown> {
   const avgTools = sessions.length ? sessions.reduce((total, session) => total + Number(session.tool_invocations ?? 0), 0) / sessions.length : null;
   const reworkCount = outcomes.filter((outcome) => outcome.rework_required).length;
   return {
+    measurement: {
+      partial: diagnostics.length > 0,
+      total_records: reads.reduce((total, read) => total + read.total_records, 0),
+      valid_records: reads.reduce((total, read) => total + read.valid_records, 0),
+      malformed_records: diagnostics.length,
+      diagnostics,
+    },
     summary: {
       sessions: sessions.length,
       sessions_with_outcomes: sessionIdsWithOutcomes.size,
@@ -267,10 +354,18 @@ function fmtNum(value: unknown): string {
 }
 
 function markdownReport(data: Record<string, unknown>, groupBy?: string): string {
+  const measurement = data.measurement as Record<string, unknown>;
   const summary = data.summary as Record<string, unknown>;
   const groups = data.groups as Record<string, unknown>[];
   const lines = [
     "# Agent Usage Feedback Report",
+    "",
+    "## Measurement State",
+    "",
+    `- Partial: ${measurement.partial}`,
+    `- Input records: ${measurement.total_records}`,
+    `- Valid records: ${measurement.valid_records}`,
+    `- Malformed records quarantined: ${measurement.malformed_records}`,
     "",
     "## Summary",
     "",
@@ -296,6 +391,7 @@ function report(argv: string[]): number {
   if (dirs.length === 0) dirs.push(telemetryDataDir());
   dirs.forEach(ensureSafeDir);
   const data = reportData(dirs, flagString(flags, "group-by"));
+  warnQuarantined((data.measurement as { diagnostics: JsonlDiagnostic[] }).diagnostics);
   const format = flagString(flags, "format", "markdown");
   const out = reportPath(flagString(flags, "output"), dirs[0], flagBool(flags, "force"));
   let body: string;
@@ -312,7 +408,7 @@ function dashboard(argv: string[]): number {
   syncArtifacts(argv);
   const dir = telemetryDir(flags);
   const out = reportPath(flagString(flags, "output", "dashboard.html"), dir, flagBool(flags, "force"))!;
-  const outcomes = readJsonl(path.join(dir, "outcomes.jsonl"));
+  const outcomes = strictJsonlRows(path.join(dir, "outcomes.jsonl"));
   fs.writeFileSync(out, html(outcomes.map((o) => String(o.task_slug)).join("\n")), "utf8");
   if (!flagBool(flags, "quiet")) console.log(`dashboard written to ${out}`);
   return 0;

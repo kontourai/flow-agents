@@ -196,6 +196,35 @@ else
   _fail "raw telemetry source fallback failed: $(cat "$TMPDIR_EVAL/report-raw.err" 2>/dev/null)"
 fi
 
+tmp_malformed="$TMPDIR_EVAL/malformed-source"
+mkdir -p "$tmp_malformed"
+cat > "$tmp_malformed/full.jsonl" <<'JSONL'
+{"session_id":"valid-before","event_type":"turn.user","timestamp":"2026-05-04T12:00:00Z"}
+{"session_id":"secret-session","payload":"DO_NOT_ECHO"
+{"session_id":"valid-after","event_type":"session.end","timestamp":"2026-05-04T12:01:00Z"}
+JSONL
+malformed_report="$TMPDIR_EVAL/malformed-report.json"
+if flow_agents_node "$USAGE_FEEDBACK" report \
+  --telemetry-dir "$tmp_malformed" \
+  --format json >"$malformed_report" 2>"$TMPDIR_EVAL/malformed-report.err" && \
+   jq -e '.measurement.partial == true and
+   .measurement.total_records == 3 and
+   .measurement.valid_records == 2 and
+   .measurement.malformed_records == 1 and
+   (.measurement.diagnostics | length) == 1 and
+   .measurement.diagnostics[0].source == "malformed-source/full.jsonl" and
+   .measurement.diagnostics[0].line == 2 and
+   .measurement.diagnostics[0].error == "SyntaxError" and
+   (.measurement.diagnostics[0].content_sha256 | test("^[a-f0-9]{64}$")) and
+   .summary.sessions == 2' "$malformed_report" >/dev/null 2>&1 && \
+   grep -q 'quarantined 1 malformed record(s) from malformed-source/full.jsonl' "$TMPDIR_EVAL/malformed-report.err" && \
+   ! grep -q 'DO_NOT_ECHO' "$malformed_report" "$TMPDIR_EVAL/malformed-report.err" && \
+   ! grep -q "$TMPDIR_EVAL" "$malformed_report" "$TMPDIR_EVAL/malformed-report.err"; then
+  _pass "report quarantines malformed source records with content-free partial-data diagnostics"
+else
+  _fail "malformed source quarantine failed: $(cat "$TMPDIR_EVAL/malformed-report.err" 2>/dev/null)"
+fi
+
 tmp_escape="$TMPDIR_EVAL/escape-source"
 mkdir -p "$tmp_escape"
 cat > "$tmp_escape/normalized-sessions.jsonl" <<'JSONL'
