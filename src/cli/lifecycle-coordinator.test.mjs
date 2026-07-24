@@ -62,6 +62,32 @@ test("transaction snapshot restores an interrupted unprivileged artifact update"
     assert.equal(fs.existsSync(path.join(root, "new.json")), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test("transaction snapshots preserve Flow's published lock and pending-ticket namespaces", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-flow-lock-namespace-"));
+  const pendingName = "..mutation.lock.pending-12345678-1234-4123-8123-123456789abc";
+  try {
+    fs.mkdirSync(path.join(root, ".mutation.lock"));
+    fs.writeFileSync(path.join(root, ".mutation.lock", "owner.json"), "published lock\n");
+    fs.mkdirSync(path.join(root, pendingName));
+    fs.writeFileSync(path.join(root, pendingName, "owner.json"), "pending ticket\n");
+    fs.writeFileSync(path.join(root, "state.json"), "before\n");
+    const before = snapshotTree(root, "", [".mutation.lock"]);
+    assert.deepEqual(before.map((entry) => entry.path), ["state.json"]);
+    fs.writeFileSync(path.join(root, "state.json"), "partial\n");
+    restoreTree(root, before, [".mutation.lock"]);
+    assert.equal(fs.readFileSync(path.join(root, ".mutation.lock", "owner.json"), "utf8"), "published lock\n");
+    assert.equal(fs.readFileSync(path.join(root, pendingName, "owner.json"), "utf8"), "pending ticket\n");
+    assert.equal(fs.readFileSync(path.join(root, "state.json"), "utf8"), "before\n");
+    assert.throws(
+      () => restoreTree(root, [{
+        path: "..MUTATION.lock.pending-12345678-1234-4123-8123-123456789abc/owner.json",
+        bytes: Buffer.from("alias\n").toString("base64"),
+        mode: 0o600,
+      }], [".mutation.lock"]),
+      /aliases the protected Flow mutation namespace/,
+    );
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test("prepared root retry rolls a committed child transaction back to its signed preimage", () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-committed-retry-"));
   try {

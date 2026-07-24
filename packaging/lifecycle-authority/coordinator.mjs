@@ -157,6 +157,8 @@ function atomicWrite(file, bytes, mode = 0o600) {
 }
 function transactionJournal(paths) { return path.join(paths.sessionDir, ".lifecycle-authority.transaction.json"); }
 const FLOW_MUTATION_LOCK_PATH = ".mutation.lock";
+const FLOW_MUTATION_PENDING_PATH_PREFIX = `.${FLOW_MUTATION_LOCK_PATH}.pending-`;
+const FLOW_MUTATION_TICKET_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FLOW_TRANSACTION_EXCLUDED_PATHS = [FLOW_MUTATION_LOCK_PATH];
 export const VERIFICATION_RESEAL_TRANSACTION_PROTOCOL = "flow-agents.verification-reseal-transaction.v1";
 export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
@@ -170,7 +172,14 @@ export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
 const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
 const FLOW_RECOVERY_FENCE_FILE = "recovery-fence.json";
 const FLOW_RECOVERY_FENCE_PROTOCOL = "flow.run-recovery-fence.v1";
+function flowMutationPendingPathName(name) {
+  return name.startsWith(FLOW_MUTATION_PENDING_PATH_PREFIX)
+    && FLOW_MUTATION_TICKET_TOKEN.test(name.slice(FLOW_MUTATION_PENDING_PATH_PREFIX.length));
+}
 function transactionPathIsExcluded(relative, excludedPaths) {
+  const first = relative.split("/")[0];
+  if (excludedPaths.includes(FLOW_MUTATION_LOCK_PATH)
+      && (first === FLOW_MUTATION_LOCK_PATH || flowMutationPendingPathName(first))) return true;
   return excludedPaths.some((excluded) => relative === excluded || relative.startsWith(`${excluded}/`));
 }
 function transactionNamespaceIdentity(relative) {
@@ -188,8 +197,9 @@ function canonicalTransactionSnapshotPath(root, relative, label) {
   }
   const segments = relative.split("/");
   const firstIdentity = transactionNamespaceIdentity(segments[0]);
-  if (firstIdentity === FLOW_MUTATION_LOCK_PATH && segments[0] !== FLOW_MUTATION_LOCK_PATH) {
-    throw new Error(`${label} aliases the protected ${FLOW_MUTATION_LOCK_PATH} namespace`);
+  if ((firstIdentity === FLOW_MUTATION_LOCK_PATH && segments[0] !== FLOW_MUTATION_LOCK_PATH)
+      || (flowMutationPendingPathName(firstIdentity) && !flowMutationPendingPathName(segments[0]))) {
+    throw new Error(`${label} aliases the protected Flow mutation namespace`);
   }
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..") || path.posix.normalize(relative) !== relative) {
     throw new Error(`${label} path is not canonical`);
