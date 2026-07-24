@@ -197,6 +197,13 @@ const MAX_SIDECAR_BYTES = 1024 * 1024;
 /**
  * Workflow status -> Console process status mapping table (issue #778).
  *
+ * `Object.freeze`d (issue #933): this table, `mapWorkflowStatusToConsoleProcessStatus`,
+ * and `deriveConsoleProcessBlockedReason` below are re-exported verbatim under the
+ * package's stable `./console-contract` subpath (src/console-contract.ts) so downstream
+ * consumers (e.g. station's console board) import the real contract instead of
+ * hand-mirroring it -- freezing prevents a consumer from silently mutating the
+ * table it imported.
+ *
  * Grounding for each entry:
  * - `new` -> `not_started`: direct semantic match, no work has begun.
  * - `planning`/`planned`/`in_progress`/`verifying` -> `running`: all four are
@@ -236,7 +243,7 @@ const MAX_SIDECAR_BYTES = 1024 * 1024;
  * `status` alone -- critique.json is retired and is never read (review
  * finding, issue #778).
  */
-export const WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS: Readonly<Record<WorkflowTaskStatus, ConsoleProcessStatus>> = {
+export const WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS: Readonly<Record<WorkflowTaskStatus, ConsoleProcessStatus>> = Object.freeze({
   new: "not_started",
   planning: "running",
   planned: "running",
@@ -251,7 +258,7 @@ export const WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS: Readonly<Record<Workflow
   canceled: "cancelled",
   accepted: "completed",
   archived: "completed",
-};
+});
 
 /**
  * Pure review_pending signal (issue #778 review finding 1): given the LIVE
