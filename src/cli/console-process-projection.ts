@@ -52,6 +52,7 @@ function printHelp(): void {
   console.log("  --scope-kind <kind>     Projection scope kind (default: repo)");
   console.log("  --producer <id>         Projection producer id (default: flow-agents-process)");
   console.log("  --generated-at <ISO>    Override generated timestamp for deterministic output");
+  console.log("  --skip-invalid          Warn and skip a workflow whose state.json/handoff.json sidecars fail to parse or validate, instead of aborting the whole projection (default: throw; the trust-projection sibling always applies this behavior)");
   console.log("  --dry-run               Do not write a projection file");
   console.log("  --json                  Print stable JSON summary");
   console.log("  --help                  Show this help");
@@ -177,7 +178,12 @@ export function main(argv = process.argv.slice(2)): number {
       id: requireSafeSegment(flagString(flags, "scope", defaultScopeId()) ?? defaultScopeId(), "--scope"),
     };
     const dryRun = flagBool(flags, "dry-run");
-    const read = readWorkflowProcessSources(artifactRoot);
+    // Issue #918: default preserves the CLI's long-standing "throw" contract; --skip-invalid
+    // opts into the library's "warn" mode (already the trust-projection sibling's unconditional
+    // behavior) so one malformed legacy state.json/handoff.json never zeroes the whole repo's
+    // projection.
+    const skipInvalid = flagBool(flags, "skip-invalid");
+    const read = readWorkflowProcessSources(artifactRoot, { onWorkflowError: skipInvalid ? "warn" : "throw" });
     const critiqueJoin = joinCritiqueState(artifactRoot, read.sources);
     const warnings = [...read.warnings, ...critiqueJoin.warnings];
     const projection = buildWorkflowProcessProjection(critiqueJoin.sources, {

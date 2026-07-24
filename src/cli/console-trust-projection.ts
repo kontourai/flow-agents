@@ -38,6 +38,7 @@ function printHelp(): void {
   console.log("  --scope-kind <kind>     Projection scope kind (default: repo)");
   console.log("  --producer <id>         Projection producer id (default: flow-agents-trust)");
   console.log("  --generated-at <ISO>    Override generated timestamp for deterministic output");
+  console.log("  --skip-invalid          No-op, accepted for flag-surface consistency with console-process-projection: trust projection already unconditionally warns and skips an invalid workflow sidecar or trust.bundle (issue #891 finding 2); this flag cannot change that default");
   console.log("  --dry-run               Do not write a projection file");
   console.log("  --json                  Print stable JSON summary (file output only)");
   console.log("  --help                  Show this help");
@@ -124,6 +125,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       id: requireSafeSegment(flagString(flags, "scope", defaultScopeId()) ?? defaultScopeId(), "--scope"),
     };
     const generatedAt = projectionTimestamp(flagString(flags, "generated-at"));
+    // Issue #918: accepted (parsed, never rejected) for flag-surface consistency with
+    // console-process-projection's --skip-invalid. readWorkflowTrustSources already always
+    // warns and skips an invalid workflow sidecar internally (#891 finding 2) -- that default
+    // does not change based on this flag's presence or value.
+    flagBool(flags, "skip-invalid");
     const read = await readWorkflowTrustSources(artifactRoot, { generatedAt });
     const projection = buildWorkflowTrustProjection(read.sources, {
       scope,
