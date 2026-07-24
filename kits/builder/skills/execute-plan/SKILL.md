@@ -11,7 +11,7 @@ Implement an approved plan while preserving scope, traceability, and recovery co
 
 - **Role:** canonical Builder build-step producer and standalone execution primitive.
 - **Binding:** `builder.build` step `execute`.
-- **Produces:** the active session execution report (`<slug>--deliver.md`), `state.json`, the wave manifest (`waves.json`) for delegated waves, and `implementation-scope` for an active matching run.
+- **Produces:** the active session execution report (`<slug>--deliver.md`), the wave manifest (`waves.json`) for delegated waves, and `implementation-scope` for an active matching run.
 - **Standalone no-run behavior:** execute the supplied plan and return execution evidence. Do not start a Builder run, record Builder evidence, or imply that an inactive Builder flow advanced.
 
 ## Model Routing
@@ -37,10 +37,11 @@ Use `RepositoryAdapter` for repository, target revision, worktree, and changed-f
 4. Run safe independent tasks concurrently and dependent tasks in order. Between waves, reconcile results against the wave manifest — never collect from memory or prose. Every declared worker must land exactly one terminal status record (`completed`, `failed`, or `blocked`). Record each declared worker that has no terminal record as `not_reported` — never silently absorb a missing worker — then record the wave's `reconciliation` with an explicit "N of M reported" summary naming the `not_reported` workers (for example "2 of 3 reported; worker-3 not_reported"). Treat the wave as complete only when N equals M; an incomplete wave is visible data that routes to re-dispatch, a blocker, or an explicit accepted gap. After reconciliation, resolve conflicts and update the execution record with completed work, remaining work, changed files, and supported acceptance criteria.
 5. For UI tasks, include the applicable frontend design guidance in the worker instruction.
 6. When implementation completes, record scope integrity: changed files, accepted deviations, task-to-criterion traceability, evidence, and outstanding gaps. Hand off to report-only review and verification; do not treat implementation as verification.
-7. Reconcile the execution report and `state.json` with the active session artifact directory.
+7. Reconcile the execution report with the active session artifact directory.
    Any missing, stale, or unwritable durable record is a blocker or
    `NOT_VERIFIED` gap, not a reason to substitute chat prose. Publish only
-   structured, resolving evidence references through the public CLI.
+   structured evidence references through the public CLI. Workflow and continuation state
+   are control-plane records; do not write them directly.
 
 ## Execution Record
 
@@ -61,8 +62,7 @@ flow-agents workflow status --session-dir <session-dir>
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation implementation-scope --status pass \
   --summary "Implementation stayed within recorded scope; changed files and supported acceptance criteria are documented." \
-  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/<slug>--deliver.md","summary":"Execution report with changed scope and acceptance mapping."}' \
-  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/state.json","summary":"Current execution state and canonical next action."}'
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/<slug>--deliver.md","summary":"Execution report with changed scope and acceptance mapping."}'
 ```
 
 Use `fail` or `not_verified` when scope integrity is unresolved. A successful

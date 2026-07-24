@@ -94,7 +94,7 @@ export async function runReviewedGroundingReference(options = {}) {
 
 async function pinnedRevisions() {
   const manifest = JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8"));
-  const dependencies = manifest.devDependencies ?? {};
+  const dependencies = { ...(manifest.devDependencies ?? {}), ...(manifest.dependencies ?? {}) };
   return { traverse: dependencies["@kontourai/traverse"], survey: dependencies["@kontourai/survey"],
     lookout: dependencies["@kontourai/lookout"], surface: dependencies["@kontourai/surface"] };
 }

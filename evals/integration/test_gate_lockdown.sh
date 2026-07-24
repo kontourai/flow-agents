@@ -476,11 +476,11 @@ echo "--- AC1.22: CLI sidecar uses fs for state/trust files (not Write/Edit tool
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const okState = /writeJson\(path\.join\(dir,\s*['\"]state\.json['\"]\)/.test(src);
+const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(src);
 const okBundle = /writeTrustBundleAtomically\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
-const okWriteJson = /function writeJson.*fs\.writeFileSync/.test(src);
+const okWriteJson = /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(src);
 const okAtomicBundleWriter = /function writeTrustBundleAtomically[\s\S]*fs\.writeFileSync\(descriptor,[\s\S]*fs\.renameSync\(temporary, file\)/.test(src);
-if (!okState) { console.error('ERROR: writeJson(state.json) not found'); process.exit(1); }
+if (!okState) { console.error('ERROR: locked state.json writer route not found'); process.exit(1); }
 if (!okBundle) { console.error('ERROR: writeTrustBundleAtomically(trust.bundle) not found'); process.exit(1); }
 if (!okWriteJson) { console.error('ERROR: writeJson not using fs.writeFileSync'); process.exit(1); }
 if (!okAtomicBundleWriter) { console.error('ERROR: atomic trust bundle writer does not use fs.writeFileSync->fs.renameSync'); process.exit(1); }
@@ -889,6 +889,9 @@ cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO_DIR/lib/"
 # the isolated gate crashes on MODULE_NOT_FOUND before it ever reaches the surface-unavailable
 # fail-closed path this section is testing.
 cp "$ROOT/scripts/hooks/lib/runnable-command.js" "$ISO_DIR/lib/"
+# #756: the Stop hook now requires the fail-closed Flow recovery-fence reader.
+# Mirror it so this fixture reaches the intended Surface-unavailable boundary.
+cp "$ROOT/scripts/hooks/lib/flow-recovery-fence.js" "$ISO_DIR/lib/"
 printf '# Repo\n' > "$ISO_DIR/repo/AGENTS.md"
 # Non-terminal session (execution phase, in_progress status)
 printf '%s' '{"schema_version":"1.0","task_slug":"surftest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
@@ -940,6 +943,7 @@ cp "$ROOT/scripts/hooks/lib/actor-identity.js" "$ISO2_DIR/lib/"
 cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO2_DIR/lib/"
 # #412: see the ISO_DIR mirror above — same requirement applies to this second isolated copy.
 cp "$ROOT/scripts/hooks/lib/runnable-command.js" "$ISO2_DIR/lib/"
+cp "$ROOT/scripts/hooks/lib/flow-recovery-fence.js" "$ISO2_DIR/lib/"
 printf '# Repo\n' > "$ISO2_DIR/repo/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"lowtest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
   > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/state.json"

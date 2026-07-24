@@ -1,5 +1,69 @@
 # Changelog
 
+## [5.2.0](https://github.com/kontourai/flow-agents/compare/v5.1.0...v5.2.0) (2026-07-23)
+
+
+### Features
+
+* expose host actor workflow binding ([#863](https://github.com/kontourai/flow-agents/issues/863)) ([cd7f357](https://github.com/kontourai/flow-agents/commit/cd7f35777944d8d8419a8e436e0a1b988ed09be9))
+
+## [5.1.0](https://github.com/kontourai/flow-agents/compare/v5.0.0...v5.1.0) (2026-07-23)
+
+
+### Features
+
+* dogfood portable host integration contracts ([a958b46](https://github.com/kontourai/flow-agents/commit/a958b46eaa63190fa59a2e1868f20afd41f1a791))
+* dogfood portable host integration contracts ([#861](https://github.com/kontourai/flow-agents/issues/861)) ([8b993a6](https://github.com/kontourai/flow-agents/commit/8b993a6e076f212dec2093b9ff3daed9dbcd4968))
+
+
+### Fixes
+
+* **ci:** execute host conformance drift check ([870d25c](https://github.com/kontourai/flow-agents/commit/870d25c21af1feea39e95d588af209f9ed31bf40))
+
+## [5.0.0](https://github.com/kontourai/flow-agents/compare/v4.8.0...v5.0.0) (2026-07-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* delegate canonical review projection to Survey ([#859](https://github.com/kontourai/flow-agents/issues/859))
+* Survey review-session resolvers now provide projectionSource and workflowSubjectRef instead of a caller-built surveyInput.
+
+### Features
+
+* delegate canonical review projection to Survey ([d707b9e](https://github.com/kontourai/flow-agents/commit/d707b9e7fd6ef2c5b6d242f636e33aec6ffef3c1))
+* delegate canonical review projection to Survey ([#859](https://github.com/kontourai/flow-agents/issues/859)) ([28ddc75](https://github.com/kontourai/flow-agents/commit/28ddc75c08e3eefbe928c8a0f08d27b06049d819))
+
+## [4.8.0](https://github.com/kontourai/flow-agents/compare/v4.7.0...v4.8.0) (2026-07-23)
+
+
+### Features
+
+* add survey flow gate adapter ([04c4128](https://github.com/kontourai/flow-agents/commit/04c41287e744b4822d04d307a224b8765d3361de))
+* add survey flow gate adapter ([#856](https://github.com/kontourai/flow-agents/issues/856)) ([310b240](https://github.com/kontourai/flow-agents/commit/310b24032a8101b1501cb5bfa5f83c52d0a37664))
+* bridge blocked gates to survey review work ([c30073c](https://github.com/kontourai/flow-agents/commit/c30073c06980a7c2cf9a7da3adaa75f87544ae2d))
+* bridge blocked gates to survey review work ([#857](https://github.com/kontourai/flow-agents/issues/857)) ([7806259](https://github.com/kontourai/flow-agents/commit/7806259a6134f2b6545b882c0519981bd88a5b91))
+
+
+### Fixes
+
+* bind survey review projection authority ([cfc10eb](https://github.com/kontourai/flow-agents/commit/cfc10ebd69a2172a622c1ae45e0c9fd203427ef8))
+* **contracts:** disambiguate work-item drift vocabularies instead of retiring one ([#818](https://github.com/kontourai/flow-agents/issues/818)) ([#853](https://github.com/kontourai/flow-agents/issues/853)) ([5e0d48f](https://github.com/kontourai/flow-agents/commit/5e0d48fa5011d1c95f739e32d886e9e4c1d8e38e))
+* retain runtime dependency revision evidence ([ecd1d65](https://github.com/kontourai/flow-agents/commit/ecd1d65befb4b4f536b500bcd3d0e452302cda3f))
+
+## [4.7.0](https://github.com/kontourai/flow-agents/compare/v4.6.2...v4.7.0) (2026-07-22)
+
+
+### Features
+
+* add portable utterance runtime profiles ([#850](https://github.com/kontourai/flow-agents/issues/850)) ([fb16cb5](https://github.com/kontourai/flow-agents/commit/fb16cb5b5a67455b90692f426e3306af87eab6b4))
+* route utterance extraction through dispatch ([#848](https://github.com/kontourai/flow-agents/issues/848)) ([0761fd5](https://github.com/kontourai/flow-agents/commit/0761fd5c09430828c6894ecc7ea6d5d018dc22c3))
+
+
+### Fixes
+
+* **builder:** allow execute-to-plan correction for plan_gap ([#837](https://github.com/kontourai/flow-agents/issues/837)) ([07e65ae](https://github.com/kontourai/flow-agents/commit/07e65ae3fbc82d0b57defeecbadce71adafc3849))
+* **builder:** ship standalone Flow validation ([efee110](https://github.com/kontourai/flow-agents/commit/efee110de5afce69b7bdd484aee3b9ed653b9914))
+
 ## [4.6.2](https://github.com/kontourai/flow-agents/compare/v4.6.1...v4.6.2) (2026-07-22)
 
 

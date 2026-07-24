@@ -36,9 +36,9 @@ test("reference coordinator pins the published Flow reducer identity rather than
   const pin = JSON.parse(fs.readFileSync(new URL("../../packaging/lifecycle-authority/flow-reducer-v1.json", import.meta.url), "utf8"));
   assert.deepEqual(pin, {
     package: "@kontourai/flow",
-    package_version: "3.5.0",
-    release_commit: "871ed9c",
-    closure_sha256: "e2ed60d81adfb57acc2e774a50a9a24d4163327f9ee2d07397d63191826c7562",
+    package_version: "3.8.1",
+    release_commit: "1942c79",
+    closure_sha256: "c6ccb6c2c814812b9a52617c99e8c6a1fe16cbe8b5406b68bfb6cd1da7858f74",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
       version: "1.0.0",

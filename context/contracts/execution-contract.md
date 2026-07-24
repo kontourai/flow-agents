@@ -20,7 +20,7 @@ Execution turns an approved plan artifact into code and local evidence while pre
 - Work with existing user or agent changes; do not revert unrelated work.
 - Follow local project patterns and use the smallest implementation that satisfies the plan.
 - Update the session or worker task artifact with modified files and progress. Modified files are required execution evidence for conflict detection, verification scope, and optional governance providers.
-- Prefer `npm run workflow:sidecar -- advance-state` when available to update `state.json` and `handoff.json` at phase boundaries.
+- Update workflow-owned state only through the active public workflow interface. Direct state writes are allowed only when the current action explicitly declares that artifact writable.
 - Run relevant validation for the files changed.
 - If instructions are insufficient, another in-progress task blocks the work, the required sandbox mode is stronger than planned, or approval is missing, stop and report the blocker rather than guessing.
 

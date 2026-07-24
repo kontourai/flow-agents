@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import {
@@ -403,27 +404,23 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.5.0" || pin.release_commit !== "871ed9c" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.8.1" || pin.release_commit !== "1942c79" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
-  const runStoreEntry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "runtime", "flow-run-store.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
-  protectedRegularFile(runStoreEntry, "pinned Flow run mutation store", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  const runStore = await import(pathToFileURL(runStoreEntry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
   exactObject(identity, pin.reducer, "installed Flow reducer");
-  if (typeof runStore.withRunMutationLock !== "function") throw new Error("pinned Flow run store does not export withRunMutationLock");
   return {
     flow,
-    withRunMutationLock: runStore.withRunMutationLock,
-    withRunRecoveryLock: runStore.withRunRecoveryLock,
-    writeRunRecoveryFence: runStore.writeRunRecoveryFence,
-    finalizeRunRecoveryFence: runStore.finalizeRunRecoveryFence,
+    withRunMutationLock: flow.withRunMutationLock,
+    withRunRecoveryLock: flow.withRunRecoveryLock,
+    writeRunRecoveryFence: flow.writeRunRecoveryFence,
+    finalizeRunRecoveryFence: flow.finalizeRunRecoveryFence,
     pin,
     artifact_sha256: sha256File(entry, "pinned Flow reducer artifact"),
   };
@@ -929,11 +926,11 @@ function assertVerificationResealFinalPublicationBoundary({ paths, authorization
   assertCanonicalFlowPostimages(synchronized);
   assertResolutionEventLedgerPreimage(paths, ledger);
 }
-async function prepareVerificationResealTransaction(envelope, paths, authorization) {
+async function prepareVerificationResealTransaction(envelope, paths, authorization, { lockHeld = false } = {}) {
   const binding = { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) };
   rejectActiveLegacyResealJournal(paths, binding);
   await preflightVerificationResealFlowCapabilities();
-  return withCanonicalFlowRunMutationLock(paths, async () => {
+  const prepare = async () => {
     const fence = inspectVerificationResealFence(paths);
     if (fence.status !== "open") throw new Error("verification reseal cannot capture artifacts while the Flow recovery fence is active");
     if (fs.existsSync(verificationResealPlanFile(paths))) throw new Error("verification reseal found an existing signed plan; recovery is required");
@@ -1015,7 +1012,8 @@ async function prepareVerificationResealTransaction(envelope, paths, authorizati
     };
     const plan = validateVerificationResealPlan({ ...planCore, recovery_id: sha256(planCore) });
     return { run_id: paths.runId, plan };
-  });
+  };
+  return lockHeld ? prepare() : withCanonicalFlowRunMutationLock(paths, prepare);
 }
 function assertVerificationResealStages(paths, plan) {
   const files = verificationResealArtifactFiles(paths, plan.request_sha256);
@@ -1027,7 +1025,7 @@ function assertVerificationResealStages(paths, plan) {
     }
   }
 }
-async function publishVerificationResealTransaction(paths, capability, binding) {
+async function publishVerificationResealTransaction(paths, capability, binding, { lockHeld = false } = {}) {
   const value = verifiedCapability(capability, "reseal-plan-capability");
   if (!record(value.plan)) throw new Error("verification reseal plan capability payload is invalid");
   const plan = assertVerificationResealPlanBinding(value.plan, paths, binding);
@@ -1035,7 +1033,7 @@ async function publishVerificationResealTransaction(paths, capability, binding) 
   const withLock = observedFence.status === "active"
     ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
     : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
-  return withLock(async () => {
+  const publish = async () => {
     rejectActiveLegacyResealJournal(paths, binding);
     const planFile = verificationResealPlanFile(paths);
     if (fs.existsSync(planFile)) {
@@ -1067,7 +1065,8 @@ async function publishVerificationResealTransaction(paths, capability, binding) 
     const fence = inspectVerificationResealFence(paths);
     if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal publication lost its active Flow recovery fence");
     return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id };
-  });
+  };
+  return lockHeld ? publish() : withLock(publish);
 }
 async function recoverVerificationResealTransaction(paths, binding) {
   const observedFence = inspectVerificationResealFence(paths);
@@ -1244,6 +1243,65 @@ function childInvocation(payload, identity) {
   const line = String(result.stdout).trim(); if (!line || line.includes("\n")) throw new Error("unprivileged lifecycle mutation worker returned an invalid response");
   return JSON.parse(line);
 }
+async function interactiveResealInvocation(payload, identity, signPlan) {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: {
+      PATH: "/usr/bin:/bin",
+      LANG: "C",
+      LC_ALL: "C",
+      FLOW_AGENTS_LIFECYCLE_MUTATION_WORKER: "1",
+      FLOW_AGENTS_LIFECYCLE_INTERACTIVE_RESEAL: "1",
+    },
+    uid: identity.uid,
+    gid: identity.gid,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+    if (Buffer.byteLength(stderr) > 512 * 1024) child.kill("SIGKILL");
+  });
+  const exited = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolve({ status, signal }));
+  });
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
+  const nextLine = async (label) => {
+    let timer;
+    try {
+      const result = await Promise.race([
+        lines.next(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`unprivileged lifecycle ${label} timed out`)), 30_000);
+        }),
+      ]);
+      if (result.done || typeof result.value !== "string" || !result.value) {
+        throw new Error(`unprivileged lifecycle ${label} returned no response`);
+      }
+      return JSON.parse(result.value);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  try {
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+    const preparedPlan = await nextLine("reseal preparation");
+    const planCapability = signPlan(preparedPlan);
+    child.stdin.end(`${JSON.stringify({ kind: "publish-reseal", capability: planCapability })}\n`);
+    const mutation = await nextLine("reseal publication");
+    const extra = await lines.next();
+    if (!extra.done) throw new Error("unprivileged lifecycle interactive worker returned extra output");
+    const outcome = await exited;
+    if (outcome.status !== 0) throw new Error(String(stderr || `unprivileged lifecycle interactive worker exited ${outcome.status ?? outcome.signal}`).trim());
+    return mutation;
+  } catch (error) {
+    child.kill("SIGKILL");
+    await exited.catch(() => undefined);
+    if (stderr) throw new Error(stderr.trim(), { cause: error });
+    throw error;
+  }
+}
 async function processRootOperation(envelope) {
   const authorizationPath = path.resolve(envelope.request.authorization_file);
   // Authenticate and bind before consulting durable state. Expiry is a live
@@ -1321,16 +1379,21 @@ async function processRootOperation(envelope) {
       else {
         let planCapability = recovery?.state === "old" ? recovery.capability : null;
         if (planCapability === null) {
-          const preparedPlan = childInvocation({ kind: "prepare-reseal", capability: signedCapability("prepare-reseal-capability", { envelope, authorization }) }, caller);
-          if (!record(preparedPlan) || preparedPlan.run_id !== identity.runId || !record(preparedPlan.plan)) throw new Error("unprivileged verification reseal preparation returned an invalid plan");
-          const plan = validateVerificationResealPlan(preparedPlan.plan);
-          if (plan.request_sha256 !== envelope.request_sha256 || plan.authorization_sha256 !== authorizationSha256
-              || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
-            throw new Error("verification reseal plan does not bind the root-authenticated operation");
-          }
-          planCapability = signedCapability("reseal-plan-capability", { request: envelope.request, plan });
+          mutation = await interactiveResealInvocation({
+            kind: "prepare-publish-reseal",
+            capability: signedCapability("prepare-reseal-capability", { envelope, authorization }),
+          }, caller, (preparedPlan) => {
+            if (!record(preparedPlan) || preparedPlan.run_id !== identity.runId || !record(preparedPlan.plan)) throw new Error("unprivileged verification reseal preparation returned an invalid plan");
+            const plan = validateVerificationResealPlan(preparedPlan.plan);
+            if (plan.request_sha256 !== envelope.request_sha256 || plan.authorization_sha256 !== authorizationSha256
+                || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
+              throw new Error("verification reseal plan does not bind the root-authenticated operation");
+            }
+            return signedCapability("reseal-plan-capability", { request: envelope.request, plan });
+          });
+        } else {
+          mutation = childInvocation({ kind: "publish-reseal", capability: planCapability }, caller);
         }
-        mutation = childInvocation({ kind: "publish-reseal", capability: planCapability }, caller);
       }
     } else {
       mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
@@ -1380,6 +1443,38 @@ function installCompletionReceipt(paths, candidate) {
   const exactCurrentCandidate = assertCurrentLifecycleCompletion(paths, verifiedCandidate, bundle, events);
   atomicWrite(receiptFile, `${JSON.stringify(exactCurrentCandidate, null, 2)}\n`, 0o644);
   return { run_id: paths.runId, receipt: "written" };
+}
+async function interactiveResealWorker() {
+  if (!CHILD_MODE || process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_RESEAL !== "1") {
+    throw new Error("interactive verification reseal worker is unavailable");
+  }
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })[Symbol.asyncIterator]();
+  const first = await lines.next();
+  if (first.done || typeof first.value !== "string" || !first.value) throw new Error("interactive verification reseal worker requires one preparation request");
+  const payload = JSON.parse(first.value);
+  if (!record(payload) || payload.kind !== "prepare-publish-reseal") throw new Error("interactive verification reseal worker request is invalid");
+  const value = verifiedCapability(payload.capability, "prepare-reseal-capability");
+  if (!record(value.envelope) || !record(value.authorization)) throw new Error("verification reseal preparation request is invalid");
+  const envelope = validateEnvelope(value.envelope);
+  if (envelope.action !== "reseal-verification-evidence" || value.authorization.operation !== envelope.action) throw new Error("verification reseal preparation operation is invalid");
+  const paths = canonicalMutationPaths(envelope.request);
+  return withCanonicalFlowRunMutationLock(paths, async () => {
+    const prepared = await prepareVerificationResealTransaction(envelope, paths, value.authorization, { lockHeld: true });
+    process.stdout.write(`${JSON.stringify(prepared)}\n`);
+    const second = await lines.next();
+    if (second.done || typeof second.value !== "string" || !second.value) throw new Error("interactive verification reseal worker requires one signed publication request");
+    const publication = JSON.parse(second.value);
+    if (!record(publication) || publication.kind !== "publish-reseal" || !record(publication.capability)) {
+      throw new Error("interactive verification reseal publication request is invalid");
+    }
+    const extra = await lines.next();
+    if (!extra.done) throw new Error("interactive verification reseal worker received extra input");
+    const mutation = await publishVerificationResealTransaction(paths, publication.capability, {
+      request_sha256: prepared.plan.request_sha256,
+      authorization_sha256: prepared.plan.authorization_sha256,
+    }, { lockHeld: true });
+    process.stdout.write(`${JSON.stringify(mutation)}\n`);
+  });
 }
 export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {
@@ -1464,6 +1559,9 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
   return response(envelope, await processRootOperation(envelope));
 }
 if (path.resolve(process.argv[1] ?? "") === path.resolve(fileURLToPath(import.meta.url))) {
-  try { process.stdout.write(`${JSON.stringify(await main())}\n`); }
+  try {
+    if (process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_RESEAL === "1") await interactiveResealWorker();
+    else process.stdout.write(`${JSON.stringify(await main())}\n`);
+  }
   catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; }
 }

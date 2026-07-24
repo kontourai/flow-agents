@@ -7,6 +7,7 @@ import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
+import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
@@ -37,6 +38,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["capability-matrix", capabilityMatrix],
   ["console-learning-projection", consoleLearningProjection],
   ["console-process-projection", consoleProcessProjection],
+  ["console-trust-projection", consoleTrustProjection],
   ["context-map", contextMap],
   ["assignment-provider", assignmentProvider],
   ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
@@ -69,6 +71,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-capability-matrix", "capability-matrix"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-console-process-projection", "console-process-projection"],
+  ["flow-agents-console-trust-projection", "console-trust-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-assignment-provider", "assignment-provider"],
   ["flow-agents-effective-assignment-provider-settings", "effective-assignment-provider-settings"],

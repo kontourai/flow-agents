@@ -270,6 +270,21 @@ test("Builder action validation rejects expectation omissions, unsafe artifacts,
     action.expectation_bindings[0].operation = "publish-chagne";
   });
   assert.match(typo, /canonical public operation catalog/);
+
+  const controlState = await errorsFor("workflow-control-state", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.step_id === "execute");
+    action.artifacts.push("state.json");
+    action.artifact_bindings.push({ artifact: "state.json", expectation_ids: [] });
+    const role = manifest.skill_roles.find((entry) => entry.skill_id === "builder.execute-plan");
+    role.artifacts.push("state.json");
+  });
+  assert.match(controlState, /cannot own workflow control artifact 'state\.json'/);
+
+  const mismatchedOwnership = await errorsFor("skill-action-artifact-mismatch", (manifest) => {
+    const role = manifest.skill_roles.find((entry) => entry.skill_id === "builder.execute-plan");
+    role.artifacts.push("undeclared-execution-note.md");
+  });
+  assert.match(mismatchedOwnership, /artifacts must be a subset of its gate-action artifacts/);
 });
 
 test("artifact progress enforces deduplicated count and aggregate read budgets", (t) => {

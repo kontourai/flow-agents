@@ -23,6 +23,7 @@ import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, c
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
+import { canonicalGateProjection } from "../canonical-gate-projection.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -31,7 +32,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -51,6 +52,7 @@ Public workflow verbs:
   release             Release the current assignment without canceling the run.
   cancel              Cancel through a signed user/operator authorization record.
   archive             Archive a terminal session through a signed authorization record.
+  reclaim             Remove a clean linked worktree after learning and confirmed merge.
   doctor              Report CLI, install, Kit, Flow, and artifact compatibility.
 
 Use the isolated exact-package command emitted by workflow status and doctor in automation.`);
@@ -280,7 +282,7 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
   let evidenceSigner: EvidenceSigner | null = null;
   let observedAdapterTurns: Array<Record<string, unknown>> = [];
-  const result = await withContinuationDriverLock(sessionDir, async (lock) => {
+  const driven = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
     const continuationStore = createFileContinuationStore(sessionDir);
@@ -323,8 +325,10 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
     if (evidenceSigningKeyFile) observedAdapterTurns = attestationTurns(continuationStore.acceptedTurns());
-    return outcome;
+    const finalSession = await inspectBuilderFlowSession({ sessionDir });
+    return { outcome, canonicalGateProjection: canonicalGateProjection(finalSession.run) };
   });
+  const result = { ...driven.outcome, canonical_gate_projection: driven.canonicalGateProjection };
   const output = evidenceSigner
     ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
     : result;
@@ -1133,6 +1137,9 @@ async function runEvidenceTransaction(input: {
           expectedRunHead: input.expectedRunHead,
           stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
         });
+        if (synchronized.attached) {
+          receipt = { ...receipt, expectationIds: [...(synchronized.attachmentExpectationIds ?? [])] };
+        }
         const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
         await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
         assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);

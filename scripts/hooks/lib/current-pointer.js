@@ -83,6 +83,251 @@ const { sanitizeSegment, isUnresolvedActor } = require('./actor-identity.js');
 // sanitized prefix.
 const PER_ACTOR_PREFIX_LEN = 40;
 const PER_ACTOR_HASH_LEN = 16;
+const POINTER_LOCK_WAIT_MS = 30_000;
+const POINTER_LOCK_STALE_MS = 5 * 60_000;
+const heldPointerParentIdentities = new Map();
+
+function sleepSync(ms) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
+}
+
+function readLockOwner(file) {
+  try {
+    const owner = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return owner && typeof owner.token === 'string' && owner.token ? owner : null;
+  } catch {
+    return null;
+  }
+}
+
+function sameIdentity(left, right) {
+  return left && right && left.dev === right.dev && left.ino === right.ino;
+}
+
+function removeOwnEmptyPointerLock(lockDir, identity) {
+  try {
+    const current = fs.lstatSync(lockDir);
+    if (!current.isSymbolicLink() && current.isDirectory() && sameIdentity(current, identity)) {
+      fs.rmdirSync(lockDir);
+    }
+  } catch (error) {
+    if (!error || !['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  }
+}
+
+/**
+ * Serialize every mutation of one actor's pointer. A contender may wait for a
+ * live owner, but stale or malformed residue requires explicit cleanup because
+ * portable filesystem APIs cannot safely replace an unknown lock owner.
+ */
+function createPointerLock(lockDir, ownerFile, token) {
+  fs.mkdirSync(lockDir);
+  let lockIdentity = null;
+  let ownerIdentity = null;
+  try {
+    lockIdentity = fs.lstatSync(lockDir);
+    fs.writeFileSync(
+      ownerFile,
+      `${JSON.stringify({ token, pid: process.pid, acquired_at: new Date().toISOString() })}\n`,
+      { flag: 'wx', mode: 0o600 },
+    );
+    ownerIdentity = fs.lstatSync(ownerFile);
+    return {
+      lockDir,
+      ownerFile,
+      token,
+      lockIdentity,
+      ownerIdentity,
+    };
+  } catch (error) {
+    if (lockIdentity && ownerIdentity) {
+      releasePointerLock({ lockDir, ownerFile, token, lockIdentity, ownerIdentity });
+    } else if (lockIdentity) {
+      removeOwnEmptyPointerLock(lockDir, lockIdentity);
+    }
+    throw error;
+  }
+}
+
+function assertLivePointerLock(lockDir, ownerFile) {
+  const owner = readLockOwner(ownerFile);
+  const target = owner ? ownerFile : lockDir;
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink() || !(owner ? stat.isFile() : stat.isDirectory())) {
+    throw new Error(`actor current-pointer lock has an unsafe owner: ${lockDir}`);
+  }
+  if (Date.now() - stat.mtimeMs > POINTER_LOCK_STALE_MS) {
+    throw new Error(`actor current-pointer lock is stale or malformed and requires explicit operator cleanup: ${lockDir}`);
+  }
+}
+
+function acquirePointerLock(file) {
+  const lockDir = `${file}.lockdir`;
+  const ownerFile = path.join(lockDir, 'owner.json');
+  const token = crypto.randomBytes(16).toString('hex');
+  const deadline = Date.now() + POINTER_LOCK_WAIT_MS;
+  while (true) {
+    try {
+      return createPointerLock(lockDir, ownerFile, token);
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') {
+        throw new Error(`failed to acquire actor current-pointer lock: ${lockDir}: ${error?.message || String(error)}`);
+      }
+      try {
+        assertLivePointerLock(lockDir, ownerFile);
+      } catch (statError) {
+        if (statError && statError.code === 'ENOENT') continue;
+        throw statError;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for actor current-pointer lock: ${lockDir}`);
+      }
+      sleepSync(20);
+    }
+  }
+}
+
+function assertPointerLockOwned(lockParent, parentIdentity, lock) {
+  const currentParent = fs.lstatSync(lockParent);
+  const currentLock = fs.lstatSync(lock.lockDir);
+  const currentOwner = fs.lstatSync(lock.ownerFile);
+  if (!sameIdentity(currentParent, parentIdentity)
+      || currentParent.isSymbolicLink() || !currentParent.isDirectory()
+      || currentLock.isSymbolicLink()
+      || !currentLock.isDirectory()
+      || !sameIdentity(currentLock, lock.lockIdentity)
+      || currentOwner.isSymbolicLink()
+      || !currentOwner.isFile()
+      || !sameIdentity(currentOwner, lock.ownerIdentity)
+      || readLockOwner(lock.ownerFile)?.token !== lock.token) {
+    throw new Error(`actor current-pointer lock detached from its protected parent: ${lock.lockDir}`);
+  }
+}
+
+function releasePointerLock(lock) {
+  try {
+    const currentLock = fs.lstatSync(lock.lockDir);
+    const currentOwner = fs.lstatSync(lock.ownerFile);
+    if (sameIdentity(currentLock, lock.lockIdentity)
+      && sameIdentity(currentOwner, lock.ownerIdentity)
+      && readLockOwner(lock.ownerFile)?.token === lock.token) {
+      fs.unlinkSync(lock.ownerFile);
+      fs.rmdirSync(lock.lockDir);
+    }
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+  }
+}
+
+function withPointerFileLock(file, body) {
+  const lockParent = path.resolve(path.dirname(`${file}.lockdir`));
+  fs.mkdirSync(lockParent, { recursive: true });
+  const parentIdentity = fs.lstatSync(lockParent);
+  if (parentIdentity.isSymbolicLink() || !parentIdentity.isDirectory()) {
+    throw new Error(`actor current-pointer lock parent must be a real directory: ${lockParent}`);
+  }
+  const lock = acquirePointerLock(file);
+  try {
+    assertPointerLockOwned(lockParent, parentIdentity, lock);
+    heldPointerParentIdentities.set(lockParent, parentIdentity);
+    try {
+      return body();
+    } finally {
+      heldPointerParentIdentities.delete(lockParent);
+    }
+  } finally {
+    releasePointerLock(lock);
+  }
+}
+
+function withPointerFileLocks(files, body, index = 0) {
+  const ordered = [...new Set(files)].sort();
+  if (index >= ordered.length) return body();
+  return withPointerFileLock(
+    ordered[index],
+    () => withPointerFileLocks(ordered, body, index + 1),
+  );
+}
+
+function actorMutationLockFile(flowAgentsDir) {
+  return path.join(path.resolve(flowAgentsDir), 'current', '.actor-pointers');
+}
+
+function withPointerLock(flowAgentsDir, actorKey, body) {
+  const actorRoot = ensureSafeCurrentDirectory(flowAgentsDir);
+  const file = perActorCurrentFile(flowAgentsDir, actorKey);
+  if (path.dirname(path.resolve(file)) !== actorRoot) {
+    throw new Error(`actor-scoped current pointer must remain inside ${actorRoot}`);
+  }
+  return withPointerFileLock(actorMutationLockFile(flowAgentsDir), () => {
+    if (ensureSafeCurrentDirectory(flowAgentsDir) !== actorRoot) {
+      throw new Error(`actor current-pointer directory changed while locked: ${actorRoot}`);
+    }
+    return body();
+  });
+}
+
+function assertHeldPointerParent(file) {
+  const parent = path.resolve(path.dirname(file));
+  const expected = heldPointerParentIdentities.get(parent);
+  if (!expected) return;
+  const current = fs.lstatSync(parent);
+  if (current.isSymbolicLink()
+    || !current.isDirectory()
+    || !sameIdentity(current, expected)) {
+    throw new Error(`current pointer parent changed while its mutation lock was held: ${parent}`);
+  }
+}
+
+function atomicWriteRaw(file, content) {
+  const parent = path.dirname(file);
+  assertHeldPointerParent(file);
+  const parentBefore = fs.lstatSync(parent);
+  if (parentBefore.isSymbolicLink() || !parentBefore.isDirectory()) {
+    throw new Error(`current pointer parent must be a real directory: ${parent}`);
+  }
+  const assertParentUnchanged = () => {
+    assertHeldPointerParent(file);
+    const current = fs.lstatSync(parent);
+    if (current.isSymbolicLink()
+      || !current.isDirectory()
+      || current.dev !== parentBefore.dev
+      || current.ino !== parentBefore.ino) {
+      throw new Error(`current pointer parent changed during write: ${parent}`);
+    }
+  };
+  const temporary = `${file}.tmp-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
+  assertParentUnchanged();
+  const descriptor = fs.openSync(
+    temporary,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    fs.writeFileSync(descriptor, content);
+    fs.closeSync(descriptor);
+    assertParentUnchanged();
+    fs.renameSync(temporary, file);
+    assertParentUnchanged();
+  } finally {
+    try { fs.closeSync(descriptor); } catch { /* already closed after a successful write */ }
+    try { fs.unlinkSync(temporary); } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+function atomicWriteJson(file, payload) {
+  atomicWriteRaw(file, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function resolvedPointer(payload, file, source) {
+  if (payload?.binding_status === 'retired') {
+    return { payload: null, source: 'none', file };
+  }
+  return { payload, source, file };
+}
 
 /**
  * Best-effort tolerant JSON read: missing file or corrupt/unparseable content are BOTH treated
@@ -94,12 +339,113 @@ const PER_ACTOR_HASH_LEN = 16;
  * @param {string} file
  * @returns {object|null}
  */
-function readJsonFileTolerant(file) {
+function readJsonFileState(file) {
+  let descriptor;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile()) return { status: 'invalid', payload: null };
+    const payload = JSON.parse(fs.readFileSync(descriptor, 'utf8'));
+    const current = fs.lstatSync(file);
+    if (current.isSymbolicLink()
+      || !current.isFile()
+      || current.dev !== opened.dev
+      || current.ino !== opened.ino) {
+      return { status: 'invalid', payload: null };
+    }
+    return { status: 'valid', payload };
+  } catch (error) {
+    return error && error.code === 'ENOENT'
+      ? { status: 'missing', payload: null }
+      : { status: 'invalid', payload: null };
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function readRawPointerState(file) {
+  let descriptor;
+  try {
+    assertHeldPointerParent(file);
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile()) return { status: 'invalid', raw: null };
+    const raw = fs.readFileSync(descriptor, 'utf8');
+    const current = fs.lstatSync(file);
+    assertHeldPointerParent(file);
+    if (current.isSymbolicLink()
+      || !current.isFile()
+      || !sameIdentity(current, opened)) {
+      return { status: 'invalid', raw: null };
+    }
+    return { status: 'valid', raw };
+  } catch (error) {
+    return error && error.code === 'ENOENT'
+      ? { status: 'missing', raw: null }
+      : { status: 'invalid', raw: null, error };
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function ensureSafeCurrentDirectory(flowAgentsDir) {
+  const root = path.resolve(flowAgentsDir);
+  const actorRoot = path.join(root, 'current');
+  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(actorRoot, { recursive: true });
+  const stat = fs.lstatSync(actorRoot);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`actor current-pointer directory must be a real directory: ${actorRoot}`);
+  }
+  const realRoot = fs.realpathSync(root);
+  const realActorRoot = fs.realpathSync(actorRoot);
+  const relative = path.relative(realRoot, realActorRoot);
+  if (relative !== 'current' || path.isAbsolute(relative)) {
+    throw new Error(`actor current-pointer directory must remain inside its artifact root: ${actorRoot}`);
+  }
+  return actorRoot;
+}
+
+function safeCurrentDirectoryForRead(flowAgentsDir) {
+  const root = path.resolve(flowAgentsDir);
+  const actorRoot = path.join(root, 'current');
+  try {
+    const stat = fs.lstatSync(actorRoot);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+    const realRoot = fs.realpathSync(root);
+    const realActorRoot = fs.realpathSync(actorRoot);
+    return path.relative(realRoot, realActorRoot) === 'current' ? actorRoot : null;
+  } catch (error) {
+    return error && error.code === 'ENOENT' ? undefined : null;
+  }
+}
+
+function actorDirectoryIdentityForRead(flowAgentsDir) {
+  const actorRoot = safeCurrentDirectoryForRead(flowAgentsDir);
+  if (actorRoot === null || actorRoot === undefined) return actorRoot;
+  try {
+    const stat = fs.lstatSync(actorRoot);
+    return { path: actorRoot, dev: stat.dev, ino: stat.ino };
   } catch {
     return null;
   }
+}
+
+function readActorJsonFileState(file, identity) {
+  if (!identity) return { status: 'missing', payload: null };
+  const result = readJsonFileState(file);
+  try {
+    const current = fs.lstatSync(identity.path);
+    if (current.isSymbolicLink()
+      || !current.isDirectory()
+      || current.dev !== identity.dev
+      || current.ino !== identity.ino) {
+      return { status: 'invalid', payload: null };
+    }
+  } catch {
+    return { status: 'invalid', payload: null };
+  }
+  return result;
 }
 
 /**
@@ -146,9 +492,10 @@ function legacyPerActorCurrentFile(flowAgentsDir, actorKey) {
  *
  * A missing/corrupt per-actor file is tolerated as absent (falls through to the legacy branch,
  * never throws) — same best-effort tolerance the existing `readJsonFile`-style readers already
- * apply to `current.json` today. This fallback must be EXACTLY equivalent to today's plain
- * `current.json` read for every caller that has no actorKey (or an unresolved one) — that is
- * what makes this a compat shim rather than a behavior change.
+ * apply to `current.json` today. A parsed retirement marker is different: it is authoritative
+ * absence for that actor and suppresses every fallback, so an ended binding cannot be revived by
+ * stale compatibility state. For callers with no actorKey (or an unresolved one), fallback
+ * remains equivalent to the original plain `current.json` read.
  *
  * @param {string} flowAgentsDir
  * @param {string} [actorKey]
@@ -158,18 +505,25 @@ function readCurrentPointer(flowAgentsDir, actorKey) {
   const key = actorKey == null ? '' : String(actorKey);
   if (key && !isUnresolvedActor(key)) {
     const perActorFile = perActorCurrentFile(flowAgentsDir, key);
-    const perActorPayload = readJsonFileTolerant(perActorFile);
-    if (perActorPayload !== null) return { payload: perActorPayload, source: 'per-actor', file: perActorFile };
+    const actorIdentity = actorDirectoryIdentityForRead(flowAgentsDir);
+    if (actorIdentity === null) {
+      return { payload: null, source: 'none', file: perActorFile };
+    }
+    const perActor = readActorJsonFileState(perActorFile, actorIdentity);
+    if (perActor.status === 'valid') return resolvedPointer(perActor.payload, perActorFile, 'per-actor');
+    if (perActor.status === 'invalid') return { payload: null, source: 'none', file: perActorFile };
     // #440 fix-wave 2: the new collision-resistant file doesn't exist/parse — fall back to the
     // pre-fix-wave-2 legacy per-actor filename (transition window only; see module header).
     const legacyPerActorFile = legacyPerActorCurrentFile(flowAgentsDir, key);
-    const legacyPerActorPayload = readJsonFileTolerant(legacyPerActorFile);
-    if (legacyPerActorPayload !== null) return { payload: legacyPerActorPayload, source: 'per-actor', file: legacyPerActorFile };
+    const legacyPerActor = readActorJsonFileState(legacyPerActorFile, actorIdentity);
+    if (legacyPerActor.status === 'valid') return resolvedPointer(legacyPerActor.payload, legacyPerActorFile, 'per-actor');
+    if (legacyPerActor.status === 'invalid') return { payload: null, source: 'none', file: legacyPerActorFile };
   }
 
   const legacyFile = path.join(flowAgentsDir, 'current.json');
-  const legacyPayload = readJsonFileTolerant(legacyFile);
-  if (legacyPayload !== null) return { payload: legacyPayload, source: 'legacy', file: legacyFile };
+  const legacy = readJsonFileState(legacyFile);
+  if (legacy.status === 'valid') return resolvedPointer(legacy.payload, legacyFile, 'legacy');
+  if (legacy.status === 'invalid') return { payload: null, source: 'none', file: legacyFile };
 
   return { payload: null, source: 'none', file: null };
 }
@@ -191,15 +545,21 @@ function readOwnCurrentPointer(flowAgentsDir, actorKey) {
     return readCurrentPointer(flowAgentsDir, actorKey);
   }
   const perActorFile = perActorCurrentFile(flowAgentsDir, key);
-  const perActorPayload = readJsonFileTolerant(perActorFile);
-  if (perActorPayload !== null) return { payload: perActorPayload, source: 'per-actor', file: perActorFile };
+  const actorIdentity = actorDirectoryIdentityForRead(flowAgentsDir);
+  if (actorIdentity === null) {
+    return { payload: null, source: 'none', file: perActorFile };
+  }
+  const perActor = readActorJsonFileState(perActorFile, actorIdentity);
+  if (perActor.status === 'valid') return resolvedPointer(perActor.payload, perActorFile, 'per-actor');
+  if (perActor.status === 'invalid') return { payload: null, source: 'none', file: perActorFile };
   // #440 fix-wave 2: the new collision-resistant file doesn't exist/parse — fall back to the
   // pre-fix-wave-2 legacy per-actor filename (transition window only; see module header). This
   // is still THIS actor's own read (never the shared legacy current.json, never a global scan) —
   // D1 is unaffected, only the per-actor filename resolution gained a second name to try.
   const legacyPerActorFile = legacyPerActorCurrentFile(flowAgentsDir, key);
-  const legacyPerActorPayload = readJsonFileTolerant(legacyPerActorFile);
-  if (legacyPerActorPayload !== null) return { payload: legacyPerActorPayload, source: 'per-actor', file: legacyPerActorFile };
+  const legacyPerActor = readActorJsonFileState(legacyPerActorFile, actorIdentity);
+  if (legacyPerActor.status === 'valid') return resolvedPointer(legacyPerActor.payload, legacyPerActorFile, 'per-actor');
+  if (legacyPerActor.status === 'invalid') return { payload: null, source: 'none', file: legacyPerActorFile };
   return { payload: null, source: 'none', file: null };
 }
 
@@ -216,10 +576,322 @@ function readOwnCurrentPointer(flowAgentsDir, actorKey) {
  * @param {object} payload
  * @returns {void}
  */
-function writePerActorCurrent(flowAgentsDir, actorKey, payload) {
-  const file = perActorCurrentFile(flowAgentsDir, actorKey);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
+function rollbackValidatedPointer(file, beforeRaw, writtenRaw, error) {
+  if (assertRegularPointerOrMissing(file) !== writtenRaw) {
+    throw new Error(`current pointer changed before validation rollback: ${file}`, { cause: error });
+  }
+  if (beforeRaw === null) fs.unlinkSync(file);
+  else atomicWriteRaw(file, beforeRaw);
+  throw error;
 }
 
-module.exports = { perActorCurrentFile, legacyPerActorCurrentFile, readCurrentPointer, readOwnCurrentPointer, writePerActorCurrent };
+function writePerActorCurrent(flowAgentsDir, actorKey, payload, validate) {
+  const file = perActorCurrentFile(flowAgentsDir, actorKey);
+  withPointerLock(flowAgentsDir, actorKey, () => {
+    const beforeRaw = assertRegularPointerOrMissing(file);
+    const writtenRaw = `${JSON.stringify(payload, null, 2)}\n`;
+    if (typeof validate === 'function') validate();
+    atomicWriteRaw(file, writtenRaw);
+    try {
+      if (typeof validate === 'function') validate();
+    } catch (error) {
+      rollbackValidatedPointer(file, beforeRaw, writtenRaw, error);
+    }
+  });
+}
+
+/**
+ * Supersede this actor's exact task binding without deleting a newer binding
+ * written concurrently for another task.
+ *
+ * @param {string} flowAgentsDir
+ * @param {string} actorKey
+ * @param {string} artifactDir
+ * @param {string} reason
+ * @param {string} updatedAt
+ * @returns {"retired"|"not-bound"|"changed"}
+ */
+function retireOwnCurrentPointer(flowAgentsDir, actorKey, artifactDir, bindingId, reason, updatedAt, validate) {
+  return withPointerLock(flowAgentsDir, actorKey, () => {
+    if (typeof validate === 'function') validate();
+    const own = readOwnCurrentPointer(flowAgentsDir, actorKey);
+    if (!own.file || !own.payload || own.payload.artifact_dir !== artifactDir) return 'not-bound';
+    if (own.payload.binding_id !== bindingId) return 'changed';
+    const raw = assertRegularPointerOrMissing(own.file);
+    if (raw === null) return 'changed';
+    const payload = JSON.parse(raw);
+    if (!payload || payload.artifact_dir !== artifactDir || payload.binding_id !== bindingId) return 'changed';
+    const retiredPayload = {
+      ...payload,
+      updated_at: updatedAt,
+      binding_status: 'retired',
+      binding_reason: reason,
+    };
+    const writtenRaw = `${JSON.stringify(retiredPayload, null, 2)}\n`;
+    atomicWriteRaw(own.file, writtenRaw);
+    try {
+      if (typeof validate === 'function') validate();
+    } catch (error) {
+      rollbackValidatedPointer(own.file, raw, writtenRaw, error);
+    }
+    return 'retired';
+  });
+}
+
+/**
+ * Compare-and-replace an exact actor pointer under the same lock used by binds
+ * and retirement. This supports projection transactions that discover pointer
+ * files by directory scan and therefore do not possess the original actor key.
+ *
+ * @param {string} flowAgentsDir
+ * @param {string} file
+ * @param {string} expectedRaw
+ * @param {object} payload
+ * @returns {"updated"|"changed"}
+ */
+function replacePerActorCurrentIfUnchanged(flowAgentsDir, file, expectedRaw, payload) {
+  const actorRoot = ensureSafeCurrentDirectory(flowAgentsDir);
+  const resolvedFile = path.resolve(file);
+  if (path.dirname(resolvedFile) !== actorRoot || !path.basename(resolvedFile).endsWith('.json')) {
+    throw new Error(`actor-scoped current pointer must be a JSON file directly inside ${actorRoot}`);
+  }
+  return withPointerFileLock(actorMutationLockFile(flowAgentsDir), () => {
+    if (ensureSafeCurrentDirectory(flowAgentsDir) !== actorRoot) {
+      throw new Error(`actor current-pointer directory changed while locked: ${actorRoot}`);
+    }
+    if (assertRegularPointerOrMissing(resolvedFile) !== expectedRaw) return 'changed';
+    atomicWriteJson(resolvedFile, payload);
+    return 'updated';
+  });
+}
+
+function assertRegularPointerOrMissing(file) {
+  const result = readRawPointerState(file);
+  if (result.status === 'missing') return null;
+  if (result.status === 'valid') return result.raw;
+  throw result.error ?? new Error(`current pointer must be a stable regular file: ${file}`);
+}
+
+function applyRawPointerWrites(writes) {
+  const committed = [];
+  try {
+    for (const write of writes) {
+      atomicWriteRaw(write.file, write.nextRaw);
+      committed.push(write);
+    }
+  } catch (error) {
+    for (const write of committed.reverse()) {
+      if (write.expectedRaw === null) {
+        try { fs.unlinkSync(write.file); } catch (rollbackError) {
+          if (!rollbackError || rollbackError.code !== 'ENOENT') throw rollbackError;
+        }
+      } else {
+        atomicWriteRaw(write.file, write.expectedRaw);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Atomically publish the shared and actor-scoped views used at session start.
+ * Both locks remain held through validation, commit, and any rollback.
+ */
+function publishCurrentPointers(flowAgentsDir, actorKey, payload) {
+  const root = path.resolve(flowAgentsDir);
+  fs.mkdirSync(root, { recursive: true });
+  const globalFile = path.join(root, 'current.json');
+  if (!actorKey || isUnresolvedActor(String(actorKey))) {
+    return withPointerFileLock(globalFile, () => {
+      const expectedRaw = assertRegularPointerOrMissing(globalFile);
+      applyRawPointerWrites([{
+        file: globalFile,
+        expectedRaw,
+        nextRaw: `${JSON.stringify(payload, null, 2)}\n`,
+      }]);
+    });
+  }
+
+  const actorRoot = ensureSafeCurrentDirectory(root);
+  const actorFile = perActorCurrentFile(root, String(actorKey));
+  if (path.dirname(path.resolve(actorFile)) !== actorRoot) {
+    throw new Error(`actor-scoped current pointer must remain inside ${actorRoot}`);
+  }
+  return withPointerFileLocks([globalFile, actorMutationLockFile(root)], () => {
+    if (ensureSafeCurrentDirectory(root) !== actorRoot) {
+      throw new Error(`actor current-pointer directory changed while locked: ${actorRoot}`);
+    }
+    const globalRaw = assertRegularPointerOrMissing(globalFile);
+    const actorRaw = assertRegularPointerOrMissing(actorFile);
+    const nextRaw = `${JSON.stringify(payload, null, 2)}\n`;
+    applyRawPointerWrites([
+      { file: globalFile, expectedRaw: globalRaw, nextRaw },
+      { file: actorFile, expectedRaw: actorRaw, nextRaw },
+    ]);
+  });
+}
+
+/**
+ * Compare and replace all existing Builder pointer projections as one locked
+ * transaction. No write occurs unless every expected snapshot still matches.
+ */
+function normalizePointerReplacements(root, replacements) {
+  const actorRoot = path.join(root, 'current');
+  return replacements.map((replacement) => {
+    const file = path.resolve(replacement.file);
+    const isGlobal = file === path.join(root, 'current.json');
+    const isActor = path.dirname(file) === actorRoot && path.basename(file).endsWith('.json');
+    if (!isGlobal && !isActor) {
+      throw new Error(`current pointer replacement is outside the artifact root: ${file}`);
+    }
+    return {
+      file,
+      expectedRaw: replacement.expectedRaw,
+      nextRaw: `${JSON.stringify(replacement.payload, null, 2)}\n`,
+      isActor,
+    };
+  });
+}
+
+function actorEntriesUnderLock(root) {
+  const actorRoot = path.join(root, 'current');
+  if (safeCurrentDirectoryForRead(root) !== actorRoot) return null;
+  return fs.readdirSync(actorRoot)
+    .filter((entry) => entry !== '.actor-pointers.lockdir')
+    .sort();
+}
+
+function actorDirectorySnapshotMatches(root, expectedEntries) {
+  const currentEntries = actorEntriesUnderLock(root);
+  if (expectedEntries === null) {
+    if (currentEntries === null) {
+      throw new Error(`actor current-pointer directory changed while locked: ${path.join(root, 'current')}`);
+    }
+    return currentEntries.length === 0;
+  }
+  if (currentEntries === null) {
+    throw new Error(`actor current-pointer directory changed while locked: ${path.join(root, 'current')}`);
+  }
+  return JSON.stringify(currentEntries) === JSON.stringify(expectedEntries);
+}
+
+function pointerSnapshotsMatch(root, normalized, options) {
+  if (Object.hasOwn(options, 'expectedGlobalRaw')
+    && assertRegularPointerOrMissing(path.join(root, 'current.json')) !== options.expectedGlobalRaw) {
+    return false;
+  }
+  if (Object.hasOwn(options, 'expectedActorEntries')
+    && !actorDirectorySnapshotMatches(root, options.expectedActorEntries)) {
+    return false;
+  }
+  if (!Object.hasOwn(options, 'expectedActorEntries')
+    && normalized.some((replacement) => replacement.isActor)
+    && safeCurrentDirectoryForRead(root) !== path.join(root, 'current')) {
+    throw new Error(`actor current-pointer directory changed while locked: ${path.join(root, 'current')}`);
+  }
+  return normalized.every(
+    (replacement) => assertRegularPointerOrMissing(replacement.file) === replacement.expectedRaw,
+  );
+}
+
+function pointerTransactionLockFiles(root, normalized, options) {
+  const validatesActorDirectory = Object.hasOwn(options, 'expectedActorEntries');
+  const validatesGlobalPointer = Object.hasOwn(options, 'expectedGlobalRaw');
+  return [
+    ...(normalized.some((replacement) => !replacement.isActor) || validatesGlobalPointer
+      ? [path.join(root, 'current.json')]
+      : []),
+    ...(normalized.some((replacement) => replacement.isActor) || validatesActorDirectory
+      ? [actorMutationLockFile(root)]
+      : []),
+  ];
+}
+
+function replaceCurrentPointersIfUnchanged(
+  flowAgentsDir,
+  replacements,
+  options = {},
+  commit,
+) {
+  if (typeof options === 'function') {
+    commit = options;
+    options = {};
+  }
+  const root = path.resolve(flowAgentsDir);
+  const normalized = normalizePointerReplacements(root, replacements);
+  const validatesActorDirectory = Object.hasOwn(options, 'expectedActorEntries');
+  if (normalized.some((replacement) => replacement.isActor)
+    || (validatesActorDirectory && options.expectedActorEntries !== null)) {
+    ensureSafeCurrentDirectory(root);
+  }
+  return withPointerFileLocks(pointerTransactionLockFiles(root, normalized, options), () => {
+    if (!pointerSnapshotsMatch(root, normalized, options)) return 'changed';
+    if (typeof commit === 'function') commit();
+    applyRawPointerWrites(normalized);
+    return 'updated';
+  });
+}
+
+/**
+ * Apply a binding-preserving update to the shared and actor-scoped projections.
+ * Reads happen only after both mutation locks are held, and a concurrent rebind
+ * therefore wins without being overwritten by stale agent metadata.
+ */
+function updateCurrentPointersForBinding(flowAgentsDir, actorKey, artifactDir, update, stage) {
+  const root = path.resolve(flowAgentsDir);
+  const globalFile = path.join(root, 'current.json');
+  const resolvedActor = actorKey && !isUnresolvedActor(String(actorKey))
+    ? String(actorKey)
+    : null;
+  const lockFiles = [globalFile];
+  if (resolvedActor) {
+    ensureSafeCurrentDirectory(root);
+    lockFiles.push(actorMutationLockFile(root));
+  }
+  return withPointerFileLocks(lockFiles, () => {
+    const writes = [];
+    const globalRaw = assertRegularPointerOrMissing(globalFile);
+    if (globalRaw !== null) {
+      const globalPayload = JSON.parse(globalRaw);
+      if (globalPayload?.artifact_dir === artifactDir) {
+        writes.push({
+          file: globalFile,
+          expectedRaw: globalRaw,
+          nextRaw: `${JSON.stringify(update(globalPayload), null, 2)}\n`,
+        });
+      }
+    }
+    if (resolvedActor) {
+      const own = readOwnCurrentPointer(root, resolvedActor);
+      if (own.payload?.artifact_dir === artifactDir) {
+        const canonicalFile = perActorCurrentFile(root, resolvedActor);
+        writes.push({
+          file: canonicalFile,
+          expectedRaw: assertRegularPointerOrMissing(canonicalFile),
+          nextRaw: `${JSON.stringify(update(own.payload), null, 2)}\n`,
+        });
+      }
+    }
+    const staged = typeof stage === 'function' ? stage() : null;
+    try {
+      applyRawPointerWrites(writes);
+    } catch (error) {
+      staged?.rollback?.();
+      throw error;
+    }
+    return writes.length;
+  });
+}
+
+module.exports = {
+  perActorCurrentFile,
+  legacyPerActorCurrentFile,
+  readCurrentPointer,
+  readOwnCurrentPointer,
+  writePerActorCurrent,
+  retireOwnCurrentPointer,
+  replacePerActorCurrentIfUnchanged,
+  publishCurrentPointers,
+  replaceCurrentPointersIfUnchanged,
+  updateCurrentPointersForBinding,
+};

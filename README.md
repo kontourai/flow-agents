@@ -95,6 +95,14 @@ npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
 
+OpenCode also supports a global install. Flow Agents merges `opencode.json`, installs its plugin and agents, and exposes core skills plus only the selected kits (including their transitive kit dependencies) under OpenCode's global config root:
+
+```bash
+npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+```
+
+The default root is `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`. Managed support files and their content manifest live under `.flow-agents/`; unrelated user config, plugins, agents, and skills are preserved. Versions that produced only an install stamp did not complete a usable global OpenCode installation. Re-run the command above after upgrading; no legacy compatibility layer is required.
+
 Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, Codex's preferred `CODEX_THREAD_ID`, the backward-compatible `CODEX_SESSION_ID`, or `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time. Codex thread identifiers are never written into actor keys verbatim; Flow Agents derives a stable, domain-separated opaque token instead.
 
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
@@ -228,6 +236,39 @@ bash evals/ci/run-baseline.sh --lane runtime-and-kit
 ```
 
 `setup:repo-hooks` is a repo Git hook for local developer checks, not a Flow Agents runtime hook — runtime hooks live under `scripts/hooks/`; see [docs/developer-hook-setup.md](docs/developer-hook-setup.md) for the boundary.
+
+## Human-review gate integration
+
+Library hosts can compose Flow gates with Survey review sessions without adding
+a new gate kind or trusting browser-authored decisions. Use
+`discoverSurveyGateReviewWork` to read explicitly classified missing review
+expectations from an exact, persisted Flow Run head. A producer then creates the
+canonical candidate-bearing `ReviewItem`; `bindSurveyGateReviewItem` validates
+its claim targets and adds immutable workflow correlation, while
+`publishSurveyGateReviewWork` publishes it through a host-owned queue.
+
+After the server-owned review session is complete,
+`continuePausedFlowGateFromSurvey` resolves the opaque session reference,
+derives the canonical outcome, asks Survey to project the complete reviewed
+trust input from its authoritative `ReviewItem`s and results, and delegates the
+atomic attach/evaluate/resume transaction to Flow. Candidate construction,
+queue persistence, review authority, and lifecycle authority remain separate
+capabilities.
+
+## Portable host integration
+
+Flow Agents consumes `@kontourai/conduit` for the host-facing lifecycle and
+portable-asset boundary. Application policy still runs in Flow Agents; its
+model-visible context and deny outcomes are projected unchanged through a
+configured host adapter. Skills, agents, hooks, prompts, commands, and context
+assets use Conduit installation receipts, while Flow definitions, kits, gates,
+sidecars, and evidence remain Flow Agents contracts.
+
+`npm run host-conformance` executes Conduit's external probe against one local
+harness binding and one in-process framework binding, then generates the
+[host integration matrix](docs/specs/host-integration-conformance.md) and its
+machine-readable report. These are adapter-contract results; an actual
+deployment records separate host-bound evidence before runtime selection.
 
 ## Repository layout
 

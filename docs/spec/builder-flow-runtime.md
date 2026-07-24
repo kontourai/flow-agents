@@ -363,7 +363,10 @@ fresh context changes only transcript routing, never the Flow contract, gate
 requirements, or evidence authority. When `workflow drive` produces its optional
 signed request/result attestation, the exact request object (including the
 envelope and context strategy) is included in the signed payload without
-transformation.
+transformation. The final drive result also projects the synchronized Flow gate
+outcomes and accepted exceptions as `canonical_gate_projection`. The projection
+is captured under the continuation lock, stays out of adapter requests, and is
+authenticated only when the signed attestation covers the final outcome.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may
@@ -396,7 +399,8 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact `@kontourai/flow` 3.5.0 package (once published) and its runtime dependencies
+The script stages the exact published `@kontourai/flow` 3.8.1 package and the transitive runtime
+dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
 pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not
@@ -609,6 +613,8 @@ flow-agents builder-run cancel-request --session-dir <dir> [--out <file>] [--rea
 flow-agents builder-run cancel --session-dir <dir> --authorization-file <record.json>
 flow-agents builder-run release-assignment --session-dir <dir> --reason <text>
 flow-agents builder-run archive --session-dir <dir> --authorization-file <record.json>
+flow-agents builder-run reclaim --session-dir <dir>
+flow-agents workflow reclaim --session-dir <dir>
 ```
 
 Pause and resume verify the live assignment actor under the assignment lock, and preserve the
@@ -617,7 +623,17 @@ change the Flow run. Cancellation changes Flow first and then idempotently relea
 assignment while holding the same lock inside the external helper; a successfully consumed
 cancellation nonce cannot be replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
-operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
+operations deletes a branch or worktree; cleanup requires the separate
+provider-aware `builder-run reclaim` action. Reclaim is valid only after accepted
+Builder learning evidence and a fresh authenticated merged observation for the
+exact worktree head. It refuses primary checkouts, dirty or unregistered
+worktrees, stale/mismatched provider identity, and unmerged changes; it uses
+non-forced `git worktree remove`, retains the branch, prunes worktree metadata,
+and writes a content-free receipt outside the removed worktree. Learning review
+is a required closeout stage even when its evidence-backed result is that no new
+lesson or follow-up exists. Reclaim is downstream of that durable result because
+it removes the workspace containing the learning inputs; read-only closeout
+preflight may overlap, but destructive removal cannot.
 
 `cancel-request` is a **read-only convenience** that removes the friction of hand-assembling a
 cancellation record: it mints the *unsigned* authorization for the run (correct `run_id`,

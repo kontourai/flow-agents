@@ -653,7 +653,7 @@ rm -rf "$CHAIN_WS/.kontourai/telemetry" "$CHAIN_WS/.telemetry" "$TMPDIR_EVAL/.ko
 
 if (cd "$CHAIN_WS" && node --input-type=module -e "
 const mod = await import('./.opencode/plugins/flow-agents.js');
-const hooks = await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: process.cwd(), worktree: process.cwd() });
+const hooks = await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: '$TMPDIR_EVAL', worktree: process.cwd() });
 await hooks['session.created']({}, {});
 await hooks['tool.execute.before']({ tool: 'edit', sessionID: 's1', callID: 'c1' }, { args: { filePath: 'README.md' } });
 " 2>/dev/null); then
@@ -674,6 +674,26 @@ if [[ -s "$CHAIN_WS/.kontourai/telemetry/full.jsonl" ]] && node -e "
   _pass "opencode plugin: handlers persisted telemetry events in workspace .kontourai/telemetry/"
 else
   _fail "opencode plugin: no telemetry events persisted in workspace .kontourai/telemetry/"
+fi
+
+if [[ -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$TMPDIR_EVAL/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$CHAIN_WS/.telemetry/opencode-plugin.loaded" ]]; then
+  _pass "opencode plugin: active worktree owns runtime state when project directory differs"
+else
+  _fail "opencode plugin: runtime state did not stay in the active worktree"
+fi
+
+rm -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded"
+if (cd "$CHAIN_WS" && node --input-type=module -e "
+const mod = await import('./.opencode/plugins/flow-agents.js');
+await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: process.cwd(), worktree: '/' });
+" 2>/dev/null) \
+  && [[ -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "/.kontourai/flow-agents/opencode-plugin.loaded" ]]; then
+  _pass "opencode plugin: filesystem-root worktree sentinel falls back to the active directory"
+else
+  _fail "opencode plugin: filesystem-root worktree sentinel escaped the active directory"
 fi
 
 if [[ ! -e "$TMPDIR_EVAL/.kontourai/telemetry" && ! -e "$TMPDIR_EVAL/.telemetry" ]]; then

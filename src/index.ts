@@ -26,6 +26,62 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  RUN_CORRELATION_IDENTITY_KEYS,
+  RUN_CORRELATION_IDENTITY_STATUSES,
+  RUN_CORRELATION_SCHEMA_VERSION,
+  RunCorrelationValidationError,
+  RUNTIME_CORRELATION_IDENTITY_DECLARATIONS,
+  attachRunCorrelation,
+  containsSensitiveCredential,
+  createRunCorrelationEnvelope,
+  readRunCorrelation,
+  runtimeCorrelationIdentityDeclaration,
+  validateRunCorrelationEnvelope,
+  validateRunCorrelationPresence,
+} from "./run-correlation.js";
+export type {
+  AbsentRunCorrelationIdentity,
+  PresentRunCorrelationIdentity,
+  RunCorrelationEnvelope,
+  RunCorrelationIdentity,
+  RunCorrelationIdentityKey,
+  RunCorrelationIdentityStatus,
+  RunCorrelationInput,
+  RunCorrelationCarrier,
+  RunCorrelationPresence,
+  RuntimeCorrelationIdentityDeclaration,
+  RuntimeCorrelationIdentitySupport,
+} from "./run-correlation.js";
+export {
+  TOOL_RESULT_STATUSES,
+  USAGE_METRICS,
+  USAGE_SEMANTICS,
+  partitionTelemetryRecords,
+  reduceUsageObservations,
+  validateTelemetryRecord,
+} from "./telemetry-semantics.js";
+export {
+  RUN_FACT_KINDS,
+  joinIndependentEvaluation,
+  reconstructRun,
+} from "./run-reconstruction.js";
+export type {
+  EvaluatedRun,
+  IndependentEvaluation,
+  ReconstructedRun,
+  RunFact,
+  RunFactKind,
+} from "./run-reconstruction.js";
+export type {
+  TelemetryDiagnostic,
+  ToolResultStatus,
+  UsageMetric,
+  UsageObservation,
+  UsageSemantics,
+  ValidatedTelemetryRecord,
+} from "./telemetry-semantics.js";
+
+export {
   NARRATIVE_SOURCE_ID_VERSION,
   SourceIdParseError,
   compareSourceIds,
@@ -288,6 +344,51 @@ export {
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
 export {
+  createSurveyFlowGateAdapter,
+  continuePausedFlowGateFromSurvey,
+  SurveyFlowGateInputError,
+} from "./survey-flow-gate-adapter.js";
+
+export {
+  bindSurveyGateReviewItem,
+  discoverSurveyGateReviewWork,
+  publishSurveyGateReviewWork,
+} from "./survey-flow-gate-review-work.js";
+
+export {
+  deriveHostIntegrationLimitations,
+  generateHostConformanceEvidence,
+} from "./conduit-host-integration.js";
+export type {
+  AgentHostAdapter,
+  AssetKind,
+  ConformanceReport as HostConformanceReport,
+  ConformanceResult as HostConformanceResult,
+  GeneratedHostConformanceEvidence,
+  HostCapabilities,
+  InstallationReceipt,
+  IntegrationFidelity,
+  LifecycleEvent,
+  LifecycleOutcome,
+  PortableAsset,
+} from "./conduit-host-integration.js";
+export type {
+  DiscoverSurveyGateReviewWorkInput,
+  PublishedSurveyGateReviewWork,
+  PublishSurveyGateReviewWorkDependencies,
+  SurveyGateReviewWorkProducer,
+  SurveyGateReviewWorkQueue,
+  SurveyGateReviewWorkRequest,
+} from "./survey-flow-gate-review-work.js";
+export type {
+  ContinuePausedFlowGateFromSurveyInput,
+  ContinuePausedFlowGateFromSurveyResult,
+  ResolvedSurveyFlowGateReviewSession,
+  SurveyFlowGateAdapterDependencies,
+  SurveyFlowGateReviewSessionResolver,
+} from "./survey-flow-gate-adapter.js";
+
+export {
   deriveBuilderGateActionEnvelope,
   gateActionProgressSnapshot,
   withGateActionPriorProgress,
@@ -400,9 +501,11 @@ export type {
 // Native hosts should import these instead of shelling out to the CLIs or hand-mirroring their
 // I/O shapes. See `src/cli/provider-interfaces.ts` for the full per-interface documentation,
 // including flagged discrepancies between contract prose and the reference CLIs' actual behavior
-// — notably `WorkItemDriftOutcome` (the contract's normative drift vocabulary) vs.
-// `ReferenceAdapterFreshnessDiagnostic` (what the reference CLI actually emits today, a narrower,
-// tracked gap).
+// — notably `WorkItemDriftOutcome` (the contract's normative material-drift JUDGMENT vocabulary,
+// produced by pickup Probe for routing) vs. `ReferenceAdapterFreshnessDiagnostic` (the reference
+// CLI's mechanical revision-freshness SEVERITY diagnostic) — two distinct dimensions, not
+// competing vocabularies for one signal; see `WorkItemDriftOutcome`'s doc comment (#818) for how
+// they compose.
 export type {
   AssignmentClaimMeta,
   AssignmentProvider,
@@ -483,6 +586,12 @@ export {
   LEGACY_TELEMETRY_DIR,
   telemetryDataDir,
 } from "./lib/local-artifact-root.js";
+export { bindHostWorkflowSession, retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
+export type {
+  HostWorkflowBinding,
+  HostWorkflowBindingInput,
+  RetireHostWorkflowBindingInput,
+} from "./lib/host-workflow-binding.js";
 
 export {
   // Trust-bundle (Hachure) validation — the same validator the writer uses.

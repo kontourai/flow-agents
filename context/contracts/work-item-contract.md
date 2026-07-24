@@ -57,9 +57,58 @@ Recommended fields:
 - current target ref and SHA
 - files, docs, contracts, or schemas changed since `planned_base_sha` when they overlap `planning_scope_refs` or likely execution scope
 - dependency issue/change state that has moved since shaping
-- whether drift is material to scope, acceptance criteria, dependencies, or risk
+- the revision-freshness severity below, its specific reasons, AND the material-drift outcome it routes to
 
-Pickup Probe drift outcomes:
+Drift is tracked along **two distinct, deliberately separate dimensions** (#818 — an earlier draft of
+this contract conflated them; do not repeat that mistake):
+
+1. **Revision-freshness severity** — a mechanical grade of *how stale* the planning base is,
+   computed by `pull-work`'s reference `WorkItemProvider` adapter.
+2. **Material-drift outcome** — a judgment of *why* drift matters and *where the item should route
+   next*, produced by pickup Probe from the freshness severity above plus other context (dependency
+   state, planning scope, execution-scope overlap) the freshness computation does not itself carry.
+
+Neither is a narrower or superseding version of the other; a caller needing "how stale" reads
+severity, a caller needing "what should happen next and why" reads the drift outcome pickup Probe
+records.
+
+### Revision-freshness severity (normative — `pull-work`'s emitted diagnostic)
+
+This is the exact vocabulary `pull-work`'s reference `WorkItemProvider` adapter computes in
+`classifyRevisionFreshness()` and reports as `revision_freshness.classification`;
+`@kontourai/flow-agents` exports it as `ReferenceAdapterFreshnessDiagnostic`, derived from that
+function's own `referenceAdapterFreshnessDiagnostics` runtime array so the type cannot silently
+drift from what the function returns. The four outcomes are evaluated in this precedence order —
+each is a distinct early-return branch, not independently-checked flags:
+
+1. `not_verified` — `planned_base_sha` is missing, OR the current target SHA was not supplied.
+2. `fresh` — (checked only once 1. does not apply) `planned_base_sha` equals the current target SHA
+   AND no `planning_scope_refs` intersect the reported changed files. This check does **not** also
+   inspect `changed_files` for material contract/schema/manifest changes or the planning-base age —
+   a matching SHA with no scope intersection is `fresh` even if the caller separately reported
+   material files changed or an old `planned_at`.
+3. `not_verified` (again, distinct trigger from 1.) — (checked only once 1.–2. do not apply) the
+   target moved (or a scope intersection exists despite a matching SHA), but neither `commits_since`
+   nor any `changed_files` were supplied — there is no evidence to grade severity from.
+4. `stale` — (checked only once 1.–3. do not apply) at least one material-risk signal is present:
+   reported changed files touch `context/contracts/` or a dependency manifest
+   (`package.json`/`package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`), intersect
+   `planning_scope_refs`, ten or more commits landed since `planned_base_sha`, or the planning
+   baseline (`planned_at`) is 30+ days old. Route back to `idea-to-backlog` before planning.
+5. `drifted` — the target moved (evidence was available, per 3.) but none of `stale`'s material-risk
+   signals were met.
+
+### Material-drift outcome (normative — pickup Probe's routing judgment)
+
+This is the vocabulary pickup Probe (`kits/builder/skills/pickup-probe/SKILL.md`,
+`kits/builder/skills/pull-work/SKILL.md`) produces to decide where a drifted item routes and why;
+`@kontourai/flow-agents` exports it as `WorkItemDriftOutcome`. Probe derives this judgment from the
+revision-freshness severity above plus context the freshness computation itself does not fold in —
+dependency/blocker resolution state (`dependency_impacts`, from `dependencyImpacts()`), and the
+planning scope, expected-files, and conflict-risk context carried through the Builder handoff. No
+`WorkItemProvider` CLI mechanically emits this vocabulary today; that is intentional, not a gap — it
+is Probe's judgment output, not adapter output, and it depends on inputs (dependency state, active
+concurrent-work scope) beyond what a single freshness computation has available.
 
 | Outcome | Meaning |
 | --- | --- |
@@ -72,7 +121,6 @@ Pickup Probe drift outcomes:
 If a legacy work item lacks `planned_base_sha`, pickup Probe should record the gap and use current main plus provider history as the best available baseline instead of inventing certainty.
 
 ## Mutations
-
 Selection and planning are read-only. Hosts that render boards (for example a Tasks board) also
 need provider-neutral **write-back**: transitioning a work item's status, updating a field, or
 posting a comment, without growing bespoke per-host sync logic. This section is the engine

@@ -83,10 +83,10 @@
       "step_id": "execute",
       "skills": ["execute-plan"],
       "implementation_allowed": true,
-      "artifacts": ["<slug>--deliver.md", "state.json", "trust.bundle#implementation-scope"],
+      "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"],
       "expectation_ids": ["implementation-scope"],
       "expectation_bindings": [{ "expectation_id": "implementation-scope", "interface": "workflow.evidence" }],
-      "artifact_bindings": [{ "artifact": "<slug>--deliver.md", "expectation_ids": ["implementation-scope"] }, { "artifact": "state.json", "expectation_ids": [] }, { "artifact": "trust.bundle#implementation-scope", "expectation_ids": ["implementation-scope"] }]
+      "artifact_bindings": [{ "artifact": "<slug>--deliver.md", "expectation_ids": ["implementation-scope"] }, { "artifact": "trust.bundle#implementation-scope", "expectation_ids": ["implementation-scope"] }]
     },
     {
       "flow_id": "builder.build",
@@ -265,7 +265,7 @@
     { "skill_id": "builder.pull-work", "role": "step", "flow_id": "builder.build", "step_ids": ["pull-work"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#selected-work"], "expectation_ids": ["selected-work"] },
     { "skill_id": "builder.pickup-probe", "role": "step", "flow_id": "builder.build", "step_ids": ["design-probe"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#pickup-probe"], "expectation_ids": ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"] },
     { "skill_id": "builder.plan-work", "role": "step", "flow_id": "builder.build", "step_ids": ["plan"], "artifacts": ["<slug>--plan-work.md", "acceptance.json", "handoff.json", "trust.bundle#implementation-plan"], "expectation_ids": ["implementation-plan"] },
-    { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "state.json", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
+    { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
     { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
     { "skill_id": "builder.verify-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"], "expectation_ids": ["acceptance-criteria", "tests-evidence", "policy-compliance"] },
     { "skill_id": "builder.evidence-gate", "role": "step", "flow_id": "builder.build", "step_ids": ["merge-ready"], "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"], "expectation_ids": ["merge-readiness"] },

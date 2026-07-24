@@ -9,3 +9,6 @@ npm run validate:repo-hooks --silent
 
 echo "flow-agents pre-push: validating source tree"
 npm run validate:source --silent
+
+echo "flow-agents pre-push: checking generated context map (regenerate with: npm run context-map)"
+npm run context-map:check --silent

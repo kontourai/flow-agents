@@ -60,7 +60,7 @@ a local result file.
 
 When a work item is shaped for the backlog, record the target ref and commit SHA that informed the plan, usually current `main`. Provider adapters should preserve that as `planned_base_ref`, `planned_base_sha`, `planned_at`, and `planning_artifact_ref` when possible.
 
-At pickup time, compare the current target SHA with the planned base SHA before planning implementation. If relevant files, docs, contracts, schemas, or dependency states changed, pickup Probe should classify the drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk` and ask for alignment when the drift changes scope or risk.
+At pickup time, compare the current target SHA with the planned base SHA before planning implementation. If relevant files, docs, contracts, schemas, or dependency states changed, pickup Probe should classify the drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk` and ask for alignment when the drift changes scope or risk. This material-drift judgment is a distinct dimension from `pull-work`'s mechanical `fresh`/`drifted`/`stale`/`not_verified` freshness severity (work-item-contract.md "Planning Base And Drift") — Probe produces the former from the latter plus dependency/scope/conflict context, it does not replace it.
 
 GitHub can store this in the issue body, a managed comment, a source artifact, or adapter metadata. Core workflow logic should still treat it as provider-neutral work item metadata.
 

@@ -77,7 +77,7 @@ function check(packageRoot) {
 }
 check(root);
 const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-if (metadata.name !== '@kontourai/flow' || metadata.version !== '3.5.0') process.exit(1);
+if (metadata.name !== '@kontourai/flow' || metadata.version !== '3.8.1') process.exit(1);
 const entry = path.join(root, 'dist', 'index.js'); rejectSymlink(entry);
 if (!fs.statSync(entry).isFile()) throw new Error('Flow reducer entry is not a regular file');
 const digest = crypto.createHash('sha256');

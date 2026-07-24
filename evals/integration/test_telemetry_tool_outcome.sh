@@ -9,7 +9,7 @@
 #     record is absent (never a fabricated 0 / stale value).
 #   - .tool.outcome — a deterministic tri-state pass|fail|ambiguous, a jq port
 #     of scripts/hooks/evidence-capture.js observeResult (never from stdout text).
-#   - .tool.status — the host exit code int when present, else null.
+#   - .tool.exit_code — the host exit code int when present, else null.
 #
 # The highest-value assertion is the DRIFT-GUARD (case j): a shared fixture
 # battery is fed through BOTH the emitter jq path AND node observeResult, and
@@ -40,7 +40,7 @@ pass=0; fail=0
 _pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
 _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
 
-echo "=== Layer 2: Telemetry Tool-Result Enrichment (#580: duration/outcome/status) ==="
+echo "=== Layer 2: Telemetry Tool-Result Enrichment (#580: duration/outcome/exit_code) ==="
 echo ""
 
 if [[ ! -f "$TELEMETRY_SH" ]]; then
@@ -100,45 +100,45 @@ out_b=$(_run_tool_event "postToolUse" "$res_b")
 dur_b=$(echo "$out_b" | jq -r '.tool.duration_ms')
 [[ "$dur_b" == "null" ]] && _pass "duration_ms is exactly null (not 0) when no invoke start record exists" || _fail "expected duration_ms=null, got '$dur_b'"
 
-# --- (c) exit 0 -> outcome:pass status:0 -------------------------------------
+# --- (c) exit 0 -> outcome:pass exit_code:0 -------------------------------------
 echo ""
-echo "--- (c) host exit code 0 -> outcome:pass status:0 ---"
+echo "--- (c) host exit code 0 -> outcome:pass exit_code:0 ---"
 res_c=$(jq -nc '{session_id:"oc-c",hook_event_name:"PostToolUse",tool_use_id:"tu-c",tool_name:"Bash",tool_input:{command:"echo hi"},tool_response:{exitCode:0}}')
 out_c=$(_run_tool_event "postToolUse" "$res_c")
-oc_c=$(echo "$out_c" | jq -r '.tool.outcome'); st_c=$(echo "$out_c" | jq -r '.tool.status')
+oc_c=$(echo "$out_c" | jq -r '.tool.outcome'); st_c=$(echo "$out_c" | jq -r '.tool.exit_code')
 [[ "$oc_c" == "pass" ]] && _pass "outcome=pass on exit 0" || _fail "expected outcome=pass, got '$oc_c'"
-[[ "$st_c" == "0" ]] && _pass "status=0 on exit 0" || _fail "expected status=0, got '$st_c'"
+[[ "$st_c" == "0" ]] && _pass "exit_code=0 on exit 0" || _fail "expected exit_code=0, got '$st_c'"
 
-# --- (d) non-zero exit -> outcome:fail status:<code> -------------------------
+# --- (d) non-zero exit -> outcome:fail exit_code:<code> -------------------------
 echo ""
-echo "--- (d) non-zero host exit code -> outcome:fail status:<code> ---"
+echo "--- (d) non-zero host exit code -> outcome:fail exit_code:<code> ---"
 res_d=$(jq -nc '{session_id:"oc-d",hook_event_name:"PostToolUse",tool_use_id:"tu-d",tool_name:"Bash",tool_input:{command:"false"},tool_response:{exitCode:2}}')
 out_d=$(_run_tool_event "postToolUse" "$res_d")
-oc_d=$(echo "$out_d" | jq -r '.tool.outcome'); st_d=$(echo "$out_d" | jq -r '.tool.status')
+oc_d=$(echo "$out_d" | jq -r '.tool.outcome'); st_d=$(echo "$out_d" | jq -r '.tool.exit_code')
 [[ "$oc_d" == "fail" ]] && _pass "outcome=fail on exit 2" || _fail "expected outcome=fail, got '$oc_d'"
-[[ "$st_d" == "2" ]] && _pass "status=2 carries the real exit code" || _fail "expected status=2, got '$st_d'"
+[[ "$st_d" == "2" ]] && _pass "exit_code=2 carries the real exit code" || _fail "expected exit_code=2, got '$st_d'"
 
-# --- (e) failure signal, NO clean code -> outcome:fail status:null -----------
+# --- (e) failure signal, NO clean code -> outcome:fail exit_code:null -----------
 echo ""
-echo "--- (e) is_error:true / success:false with no exit code -> fail, status:null ---"
+echo "--- (e) is_error:true / success:false with no exit code -> fail, exit_code:null ---"
 res_e1=$(jq -nc '{session_id:"oc-e1",hook_event_name:"PostToolUse",tool_use_id:"tu-e1",tool_name:"Bash",tool_input:{command:"x"},tool_response:{is_error:true,output:"oops"}}')
 out_e1=$(_run_tool_event "postToolUse" "$res_e1")
-oc_e1=$(echo "$out_e1" | jq -r '.tool.outcome'); st_e1=$(echo "$out_e1" | jq -r '.tool.status')
+oc_e1=$(echo "$out_e1" | jq -r '.tool.outcome'); st_e1=$(echo "$out_e1" | jq -r '.tool.exit_code')
 [[ "$oc_e1" == "fail" ]] && _pass "outcome=fail on is_error:true (no code)" || _fail "expected fail, got '$oc_e1'"
-[[ "$st_e1" == "null" ]] && _pass "status=null when no clean exit code is present (never fabricated)" || _fail "expected status=null, got '$st_e1'"
+[[ "$st_e1" == "null" ]] && _pass "status=null when no clean exit code is present (never fabricated)" || _fail "expected exit_code=null, got '$st_e1'"
 res_e2=$(jq -nc '{session_id:"oc-e2",hook_event_name:"PostToolUse",tool_use_id:"tu-e2",tool_name:"Bash",tool_input:{command:"x"},tool_response:{success:false}}')
 out_e2=$(_run_tool_event "postToolUse" "$res_e2")
 oc_e2=$(echo "$out_e2" | jq -r '.tool.outcome')
 [[ "$oc_e2" == "fail" ]] && _pass "outcome=fail on success:false (no code)" || _fail "expected fail, got '$oc_e2'"
 
-# --- (f) no signal at all -> outcome:ambiguous status:null -------------------
+# --- (f) no signal at all -> outcome:ambiguous exit_code:null -------------------
 echo ""
-echo "--- (f) no exit code and no failure signal -> ambiguous, status:null ---"
+echo "--- (f) no exit code and no failure signal -> ambiguous, exit_code:null ---"
 res_f=$(jq -nc '{session_id:"oc-f",hook_event_name:"PostToolUse",tool_use_id:"tu-f",tool_name:"Read",tool_input:{file:"a"},tool_response:{output:"contents"}}')
 out_f=$(_run_tool_event "postToolUse" "$res_f")
-oc_f=$(echo "$out_f" | jq -r '.tool.outcome'); st_f=$(echo "$out_f" | jq -r '.tool.status')
+oc_f=$(echo "$out_f" | jq -r '.tool.outcome'); st_f=$(echo "$out_f" | jq -r '.tool.exit_code')
 [[ "$oc_f" == "ambiguous" ]] && _pass "outcome=ambiguous when there is no positive success evidence (never pass)" || _fail "expected ambiguous, got '$oc_f'"
-[[ "$st_f" == "null" ]] && _pass "status=null in the no-signal case" || _fail "expected status=null, got '$st_f'"
+[[ "$st_f" == "null" ]] && _pass "status=null in the no-signal case" || _fail "expected exit_code=null, got '$st_f'"
 
 # --- (g) PostToolUseFailure event folds to fail -----------------------------
 echo ""
@@ -149,14 +149,26 @@ et_g=$(echo "$out_g" | jq -r '.event_type'); oc_g=$(echo "$out_g" | jq -r '.tool
 [[ "$et_g" == "tool.result" ]] && _pass "PostToolUseFailure maps to tool.result" || _fail "expected tool.result, got '$et_g'"
 [[ "$oc_g" == "fail" ]] && _pass "PostToolUseFailure folds to outcome=fail regardless of payload signal" || _fail "expected fail, got '$oc_g'"
 
-# --- (h) invoke and permission_request carry NO duration/outcome/status ------
+# --- (g2) typed lifecycle status is independent from the raw exit code -------
+echo ""
+echo "--- (g2) typed tool lifecycle status survives beside exit_code ---"
+status_completed=$(echo "$out_c" | jq -r '.tool.status')
+status_failed=$(echo "$out_d" | jq -r '.tool.status')
+out_canceled=$(_run_tool_event "postToolUse" "$(jq -nc '{tool_name:"Task",tool_response:{canceled:true}}')")
+out_blocked=$(_run_tool_event "postToolUse" "$(jq -nc '{tool_name:"Task",tool_response:{denied:true}}')")
+[[ "$status_completed" == "completed" ]] && _pass "exit 0 maps to typed completed" || _fail "expected completed, got '$status_completed'"
+[[ "$status_failed" == "failed" ]] && _pass "non-zero exit maps to typed failed" || _fail "expected failed, got '$status_failed'"
+[[ "$(echo "$out_canceled" | jq -r '.tool.status')" == "canceled" ]] && _pass "explicit host cancellation remains canceled" || _fail "explicit cancellation was lost"
+[[ "$(echo "$out_blocked" | jq -r '.tool.status')" == "blocked" ]] && _pass "explicit host denial remains blocked" || _fail "explicit denial was lost"
+
+# --- (h) invoke and permission_request carry NO duration/outcome/exit_code ------
 echo ""
 echo "--- (h) tool.invoke and tool.permission_request carry no result meta ---"
 inv_h=$(jq -nc '{session_id:"h-inv",hook_event_name:"PreToolUse",tool_use_id:"tu-h",tool_name:"Read",tool_input:{file:"a"}}')
 out_h_inv=$(_run_tool_event "preToolUse" "$inv_h")
 has_dur_inv=$(echo "$out_h_inv" | jq -r '.tool | has("duration_ms")')
 has_oc_inv=$(echo "$out_h_inv" | jq -r '.tool | has("outcome")')
-[[ "$has_dur_inv" == "false" && "$has_oc_inv" == "false" ]] && _pass "tool.invoke has no duration_ms/outcome/status (invoke has no result yet)" || _fail "tool.invoke unexpectedly carries result meta (duration=$has_dur_inv outcome=$has_oc_inv)"
+[[ "$has_dur_inv" == "false" && "$has_oc_inv" == "false" ]] && _pass "tool.invoke has no duration_ms/outcome/exit_code (invoke has no result yet)" || _fail "tool.invoke unexpectedly carries result meta (duration=$has_dur_inv outcome=$has_oc_inv)"
 perm_h=$(jq -nc '{session_id:"h-perm",hook_event_name:"PermissionRequest",tool_use_id:"tu-hp",tool_name:"Bash",tool_input:{command:"x",description:"run"}}')
 out_h_perm=$(_run_tool_event "permissionRequest" "$perm_h")
 has_oc_perm=$(echo "$out_h_perm" | jq -r '.tool | has("outcome")')
@@ -173,7 +185,7 @@ model_i=$(echo "$out_i" | jq -r '.usage.model // empty'); oc_i=$(echo "$out_i" |
 
 # --- (j) DRIFT-GUARD: emitter jq outcome == node observeResult across battery -
 echo ""
-echo "--- (j) DRIFT-GUARD: emitter jq outcome/status == node observeResult (shared battery) ---"
+echo "--- (j) DRIFT-GUARD: emitter jq outcome/exit_code == node observeResult (shared battery) ---"
 # Shared fixture battery: [name, tool_input_json_or_null, tool_response_json_or_null, top_level_extra_json]
 # Each row is fed BOTH through the full emitter (postToolUse) and node observeResult.
 battery_json=$(cat <<'JSON'
@@ -211,7 +223,7 @@ while IFS= read -r fixture; do
   # Emitter path.
   emit_out=$(_run_tool_event "postToolUse" "$payload")
   emit_oc=$(echo "$emit_out" | jq -r '.tool.outcome')
-  emit_st=$(echo "$emit_out" | jq -c '.tool.status')
+  emit_st=$(echo "$emit_out" | jq -c '.tool.exit_code')
   # Node canonical path — mirror observeResult's exact call shape at the run() site.
   node_json=$(EVCAP="$EVIDENCE_CAPTURE" PAYLOAD="$payload" node -e '
     const {observeResult}=require(process.env.EVCAP);
@@ -229,7 +241,7 @@ while IFS= read -r fixture; do
   fi
 done < <(echo "$battery_json" | jq -c '.[]')
 if [[ "$drift_bad" -eq 0 ]]; then
-  _pass "emitter jq outcome/status matches node observeResult across all $battery_count battery fixtures (no drift)"
+  _pass "emitter jq outcome/exit_code matches node observeResult across all $battery_count battery fixtures (no drift)"
 else
   _fail "$drift_bad/$battery_count battery fixtures drifted between the emitter jq and node observeResult"
 fi
@@ -241,13 +253,13 @@ ROLLOUT="$TMPDIR_EVAL/rollout.jsonl"
 jq -nc '{timestamp:"2026-07-06T00:00:00Z",type:"response_item",payload:{type:"function_call_output",call_id:"call-k",output:"Process exited with code 3\nOriginal token count: 25\nOutput:\nProcess exited with code 0\n"}}' > "$ROLLOUT"
 res_k=$(jq -nc --arg rp "$ROLLOUT" '{session_id:"codex-k",transcript_path:$rp,hook_event_name:"PostToolUse",call_id:"call-k",tool_name:"Bash",tool_input:{command:"some cmd"},tool_response:{output:"no structured code here"}}')
 RUN_TELEMETRY_SH="$SOURCE_TELEMETRY_SH" out_k=$(RUN_TELEMETRY_SH="$SOURCE_TELEMETRY_SH" _run_tool_event "postToolUse" "$res_k" FLOW_AGENTS_TELEMETRY_RUNTIME=codex)
-st_k=$(echo "$out_k" | jq -r '.tool.status'); oc_k=$(echo "$out_k" | jq -r '.tool.outcome')
+st_k=$(echo "$out_k" | jq -r '.tool.exit_code'); oc_k=$(echo "$out_k" | jq -r '.tool.outcome')
 [[ "$st_k" == "3" ]] && _pass "codex status resolved to 3 from the preamble host banner (forged post-Output stdout ignored)" || _fail "expected codex status=3, got '$st_k'"
 [[ "$oc_k" == "fail" ]] && _pass "codex outcome=fail derived from the resolved non-zero banner code" || _fail "expected codex outcome=fail, got '$oc_k'"
 # Codex, unreadable rollout -> honest ambiguous/null degrade (no fabrication).
 res_k2=$(jq -nc '{session_id:"codex-k2",transcript_path:"/nonexistent/rollout.jsonl",hook_event_name:"PostToolUse",call_id:"call-x",tool_name:"Bash",tool_input:{command:"some cmd"},tool_response:{output:"no code"}}')
 out_k2=$(RUN_TELEMETRY_SH="$SOURCE_TELEMETRY_SH" _run_tool_event "postToolUse" "$res_k2" FLOW_AGENTS_TELEMETRY_RUNTIME=codex)
-st_k2=$(echo "$out_k2" | jq -r '.tool.status'); oc_k2=$(echo "$out_k2" | jq -r '.tool.outcome')
+st_k2=$(echo "$out_k2" | jq -r '.tool.exit_code'); oc_k2=$(echo "$out_k2" | jq -r '.tool.outcome')
 [[ "$st_k2" == "null" && "$oc_k2" == "ambiguous" ]] && _pass "codex with an unreadable rollout degrades to ambiguous/null (never a guess)" || _fail "expected ambiguous/null, got outcome=$oc_k2 status=$st_k2"
 
 # --- (privacy) start record stores only a timestamp, no args/output ----------

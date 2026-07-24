@@ -14,6 +14,21 @@ The loop has three parts:
 
 Quality outcomes are not inferred from raw telemetry alone. The CLI can automatically derive coarse outcomes from task artifacts such as `.kontourai/flow-agents/<slug>/*.md`: `delivered` and `complete` become `success`, `failed` becomes `failure`, and optionally open artifacts can be recorded as `not_verified`. It does not invent `quality_score` or `human_minutes_saved`; those remain human/eval/release-gate facts.
 
+### Malformed input and partial reports
+
+Read-only reports and telemetry-source imports quarantine malformed JSONL records
+and continue over valid records. JSON reports expose a `measurement` object with
+total, valid, and malformed counts plus content-free diagnostics; Markdown
+reports show the same counts under **Measurement State**. The CLI also emits one
+stderr warning per affected logical source. Diagnostics include only a logical
+source name, line number, SHA-256 content hash, and parse error class. They never
+include the malformed record or an absolute path.
+
+This tolerance applies only to source analysis. A destination that an import,
+sync, or upsert operation would rewrite remains strict: one malformed existing
+record aborts before any write. The command does not silently discard corrupt
+state.
+
 ## Storage Defaults
 
 Repo-local telemetry defaults to `.telemetry/`:
@@ -176,18 +191,25 @@ Do not store sensitive prompt text, tool payloads, secrets, or customer data in 
 
 Recommended reports should include:
 
-- Success rate.
-- Partial, failure, and not-verified rates.
+- Joined-outcome success rate, with the joined outcome count named as its denominator.
+- Joined partial, failure, and not-verified outcome counts.
 - Session duration, including total and average duration.
 - Tool invocations per session.
 - Delegations per session.
 - Permission requests per session.
-- Rework rate.
+- Joined-outcome rework rate.
 - Average quality score from recorded outcomes.
 - Human minutes saved from recorded outcomes.
-- Sessions with outcomes versus sessions without outcomes.
+- Sessions with joined outcomes versus sessions without joined outcomes.
+- Total, joined, and unjoined outcome records, including content-free unjoined reason counts.
 
 Usage-only metrics can be computed from telemetry. Quality and value metrics require outcome records.
+An outcome contributes to quality metrics only when it resolves to exactly one session through a
+valid run-correlation ID, an explicit runtime-session ID, or the documented legacy
+`{runtime, session_id}` pair, in that precedence order. Missing, invalid, unmatched, and ambiguous
+identities remain visible as unjoined records and never contribute to a success or rework claim.
+Reports are partial when source records are malformed, outcomes are unjoined, or recorded sessions
+lack joined outcome coverage.
 
 ## Core Commands
 

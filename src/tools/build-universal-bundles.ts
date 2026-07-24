@@ -701,27 +701,40 @@ function exportOpencodePlugin(): string {
  */
 
 import { spawnSync } from 'node:child_process';
-import { join, basename } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, basename, dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // opencode runs plugins inside its own compiled (Bun-based) binary, so
 // process.execPath points at opencode itself — spawning it with a script
 // path silently does nothing (caught by live acceptance smoke 2026-06-11).
 // Resolve a real node binary instead; fall back to PATH lookup.
 const NODE_BIN = basename(process.execPath).startsWith('node') ? process.execPath : 'node';
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 
 export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
-  const root = directory || process.cwd();
+  const resolvedWorktree = typeof worktree === 'string' ? resolve(worktree) : null;
+  const fallbackRoot = typeof directory === 'string' && directory ? directory : process.cwd();
+  // opencode uses the filesystem root as its worktree sentinel outside a Git
+  // checkout. In that case directory is the active task root.
+  const root = resolvedWorktree && resolvedWorktree !== dirname(resolvedWorktree)
+    ? resolvedWorktree
+    : fallbackRoot;
+  const projectBundleRoot = resolve(PLUGIN_DIR, '..', '..');
+  const globalRuntimeRoot = join(resolve(PLUGIN_DIR, '..'), '.flow-agents', 'runtime');
+  const runtimeRoot = existsSync(join(globalRuntimeRoot, 'scripts', 'hooks'))
+    ? globalRuntimeRoot
+    : projectBundleRoot;
 
   // Deterministic load marker. opencode invokes this factory at startup but
   // does not reliably surface plugin console output to its log file, and its
   // internal "loading plugin" message was dropped in opencode 1.17.x. Write a
-  // marker into the workspace telemetry dir so acceptance tests can confirm the
-  // plugin loaded without depending on opencode internals. Best-effort only.
+  // marker into the Flow Agents runtime-artifact dir so acceptance tests can
+  // confirm the plugin loaded without depending on opencode internals.
   try {
-    const telemetryDir = join(root, '.telemetry');
-    mkdirSync(telemetryDir, { recursive: true });
-    writeFileSync(join(telemetryDir, 'opencode-plugin.loaded'), 'flow-agents');
+    const artifactDir = join(root, '.kontourai', 'flow-agents');
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, 'opencode-plugin.loaded'), 'flow-agents');
   } catch (_err) {
     // Marker is diagnostic only; never block plugin load on a write failure.
   }
@@ -734,7 +747,7 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
   }
 
   function runAdapter(adapterScript, eventName, detail, ...args) {
-    const adapterPath = join(root, 'scripts', 'hooks', adapterScript);
+    const adapterPath = join(runtimeRoot, 'scripts', 'hooks', adapterScript);
     const result = spawnSync(NODE_BIN, [adapterPath, eventName, ...args], {
       input: hookPayload(eventName, detail),
       encoding: 'utf8',
@@ -750,7 +763,7 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
   }
 
   function runTelemetry(eventName, detail) {
-    const telemetryPath = join(root, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
+    const telemetryPath = join(runtimeRoot, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
     spawnSync(NODE_BIN, [telemetryPath, eventName, 'dev'], {
       input: hookPayload(eventName, detail),
       encoding: 'utf8',

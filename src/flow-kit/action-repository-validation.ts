@@ -2,7 +2,7 @@ import fs from "node:fs";
 import * as path from "node:path";
 import { sameStringSet, type KitFlowStepActionEntry } from "./action-metadata.js";
 
-type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; step_ids: string[]; expectation_ids: string[] };
+type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; step_ids: string[]; expectation_ids: string[]; artifacts: string[] };
 type FlowExpectation = { id: string; exportKeys: Set<string> };
 type FlowMetadata = { steps: Set<string>; expectationsByStep: Map<string, Map<string, FlowExpectation>>; usesFlowByStep: Map<string, string>; exports: Set<string> };
 type EffectiveFlowStep = { sourceFlowId: string; stepId: string; expectations: Map<string, FlowExpectation>; flowIds: Set<string> };
@@ -20,10 +20,31 @@ export function validateActionRepositoryMetadata(input: {
   const flows = loadFlowMetadata(input.kitDir, input.manifest, input.manifestPath, errors);
   const resolve = effectiveStepResolver(flows);
   validateRoleReferences(input.skillRoles, flows, resolve, input.manifestPath, errors);
+  validateSkillArtifactOwnership(input.actions, input.skillRoles, resolve, input.manifest, input.manifestPath, errors);
   const owners = seedSkillOwners(input.skillRoles, resolve);
   validateActions(input.actions, input.skillRoles, flows, resolve, owners, input.manifest, input.manifestPath, errors);
   validateOwnerCardinality(flows, owners, input.manifestPath, errors);
   return errors;
+}
+
+function validateSkillArtifactOwnership(actions: KitFlowStepActionEntry[], roles: SkillRoleEntry[], resolve: ReturnType<typeof effectiveStepResolver>, manifest: Record<string, unknown>, manifestPath: string, errors: string[]): void {
+  const prefix = `${String(manifest.id)}.`;
+  for (const row of roles) {
+    if (row.role !== "step" || !row.flow_id) continue;
+    const shortId = row.skill_id.replace(prefix, "");
+    const declared = actions.flatMap((action) => resolve(action.flow_id, action.step_id)?.flowIds.has(row.flow_id!)
+      && row.step_ids.includes(action.step_id)
+      && action.skills.includes(shortId)
+      ? action.artifacts
+      : []);
+    const declaredSet = new Set(declared);
+    if (row.artifacts.some((artifact) => !declaredSet.has(artifact))) {
+      errors.push(`${manifestPath}: skill_roles '${row.skill_id}' artifacts must be a subset of its gate-action artifacts`);
+    }
+    if (row.artifacts.includes("state.json")) {
+      errors.push(`${manifestPath}: skill_roles '${row.skill_id}' cannot own workflow control artifact 'state.json'`);
+    }
+  }
 }
 
 function validateDeclaredSkills(manifest: Record<string, unknown>, roles: SkillRoleEntry[], manifestPath: string, errors: string[]): void {

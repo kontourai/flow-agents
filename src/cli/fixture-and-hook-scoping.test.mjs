@@ -10,6 +10,10 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import {
+  RUN_CORRELATION_IDENTITY_KEYS,
+  createRunCorrelationEnvelope,
+} from "../../build/src/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "..", "..");
@@ -58,6 +62,43 @@ test("fixture write --from-json refuses schema-invalid content and names the esc
   assert.throws(
     () => runFixture(["write", path.join(scratch, "t"), "--from-json", input], scratch),
     /does not satisfy workflow-state\.schema\.json[\s\S]*--malformed/,
+  );
+});
+
+test("fixture write rejects schema-shaped correlation containing a credential identity", () => {
+  const scratch = tmpdir();
+  const identities = Object.fromEntries(RUN_CORRELATION_IDENTITY_KEYS.map((key) => [
+    key,
+    key === "flow_run"
+      ? { status: "present", value: "fixture-spec" }
+      : { status: "unavailable", reason: `${key} is unavailable in this fixture` },
+  ]));
+  const correlation = createRunCorrelationEnvelope({ identities });
+  correlation.identities.runtime_session = {
+    status: "present",
+    value: "ghp_abcdefgh12345678",
+  };
+  const input = path.join(scratch, "input.json");
+  fs.writeFileSync(input, JSON.stringify({ ...VALID_STATE, run_correlation: correlation }));
+  assert.throws(
+    () => runFixture(["write", path.join(scratch, "t"), "--from-json", input], scratch),
+    /run correlation envelope[\s\S]*runtime_session/,
+  );
+});
+
+test("fixture write rejects a credential-shaped incomplete correlation reason", () => {
+  const scratch = tmpdir();
+  const input = path.join(scratch, "input.json");
+  fs.writeFileSync(input, JSON.stringify({
+    ...VALID_STATE,
+    run_correlation: {
+      status: "incomplete",
+      reason: "token=secret-value",
+    },
+  }));
+  assert.throws(
+    () => runFixture(["write", path.join(scratch, "t"), "--from-json", input], scratch),
+    /incomplete run correlation reason[\s\S]*non-sensitive/,
   );
 });
 

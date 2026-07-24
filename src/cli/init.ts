@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -616,6 +616,88 @@ function copyDirMerge(srcDir: string, destDir: string): { added: number; updated
   return { added, updated };
 }
 
+function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeKitIds: string[]): string[] {
+  const selected = new Set<string>();
+  const coreSkills = path.join(bundle, "skills");
+  for (const entry of fs.readdirSync(coreSkills, { withFileTypes: true })) {
+    if (entry.isDirectory() && fs.existsSync(path.join(coreSkills, entry.name, "SKILL.md"))) selected.add(entry.name);
+  }
+  const visited = new Set<string>();
+  const visit = (kitId: string): void => {
+    if (visited.has(kitId)) return;
+    visited.add(kitId);
+    const kitRoot = path.join(bundle, "kits", kitId);
+    const manifestPath = path.join(kitRoot, "kit.json");
+    if (!fs.existsSync(manifestPath)) throw new Error(`activated OpenCode kit is missing its manifest: ${kitId}`);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { id?: unknown; skills?: unknown; dependencies?: unknown };
+    if (manifest.id !== kitId) throw new Error(`activated OpenCode kit manifest identity mismatch: ${kitId}`);
+    if (Array.isArray(manifest.skills)) {
+      for (const skill of manifest.skills) {
+        if (!skill || typeof skill !== "object") throw new Error(`activated OpenCode kit has an invalid skill: ${kitId}`);
+        const skillPath = (skill as Record<string, unknown>)["path"];
+        if (typeof skillPath !== "string" || path.basename(skillPath) !== "SKILL.md") throw new Error(`activated OpenCode kit has an invalid skill: ${kitId}`);
+        const skillName = path.basename(path.dirname(skillPath));
+        const exportedSkill = path.join(skillsSource, skillName, "SKILL.md");
+        if (!fs.existsSync(exportedSkill)) throw new Error(`activated OpenCode kit skill is missing from the runtime export: ${kitId}/${skillName}`);
+        selected.add(skillName);
+      }
+    }
+    if (Array.isArray(manifest.dependencies)) {
+      for (const dependency of manifest.dependencies) {
+        if (!dependency || typeof dependency !== "object") throw new Error(`activated OpenCode kit has an invalid dependency: ${kitId}`);
+        const dependencyId = (dependency as Record<string, unknown>)["kit_id"];
+        if (typeof dependencyId !== "string" || dependencyId.length === 0) throw new Error(`activated OpenCode kit has an invalid dependency: ${kitId}`);
+        visit(dependencyId);
+      }
+    }
+  };
+  for (const kitId of activeKitIds) visit(kitId);
+  const skillNames = [...selected].sort();
+  for (const skillName of skillNames) {
+    const skillPath = path.join(skillsSource, skillName, "SKILL.md");
+    const content = fs.readFileSync(skillPath, "utf8");
+    const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+    if (!frontmatter || !frontmatter[1].split(/\r?\n/).some((line) => line.match(/^name:\s*["']?([^"']+)["']?\s*$/)?.[1] === skillName)) {
+      throw new Error(`generated OpenCode skill is corrupt or has the wrong identity: ${skillName}`);
+    }
+  }
+  return skillNames;
+}
+
+function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[]): number {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
+  let fileCount = 0;
+  const stage = (source: string, destinationRelative: string): void => {
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(source).sort()) stage(path.join(source, name), path.join(destinationRelative, name));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+    const destination = path.join(overlay, destinationRelative);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(destination, stat.mode & 0o777);
+    fileCount += 1;
+  };
+  try {
+    stage(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js");
+    stage(path.join(bundle, ".opencode", "agents"), "agents");
+    for (const skillName of skillNames) stage(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName));
+    for (const entry of runtimeSources) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
+    for (const entry of runtimeFiles) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds });
+    const installer = path.join(root, "scripts", "install-owned-files.js");
+    const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+    return fileCount;
+  } finally {
+    fs.rmSync(overlay, { recursive: true, force: true });
+  }
+}
+
 function installBundle(bundle: string, options: InitOptions): number {
   const args = ["install.sh", options.dest];
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
@@ -842,18 +924,33 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       return 0;
     }
-    // --global for opencode: merge FA opencode.json into the global opencode config dir.
+    // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
     // Global path: ~/.config/opencode/opencode.json (honor XDG_CONFIG_HOME).
     // Test isolation: FLOW_AGENTS_USER_OPENCODE_CONFIG points to the opencode.json FILE.
     if (options.global && options.runtime === "opencode") {
       const bundle = ensureBundle(options.runtime);
       const sourcePath = path.join(bundle, "opencode.json");
-      if (!fs.existsSync(sourcePath)) {
-        console.error(`flow-agents init: bundle opencode.json missing: ${sourcePath}`);
+      const pluginSource = path.join(bundle, ".opencode", "plugins", "flow-agents.js");
+      const agentsSource = path.join(bundle, ".opencode", "agents");
+      const skillsSource = path.join(bundle, ".opencode", "skills");
+      const runtimeSources = ["build", "context", "kits", "packaging", "schemas", "scripts"];
+      const runtimeFiles = ["AGENTS.md", "console.telemetry.json"];
+      const requiredSources = [sourcePath, pluginSource, agentsSource, skillsSource, ...runtimeSources.map((entry) => path.join(bundle, entry)), ...runtimeFiles.map((entry) => path.join(bundle, entry))];
+      const missingSource = requiredSources.find((entry) => !fs.existsSync(entry));
+      if (missingSource) {
+        console.error(`flow-agents init: bundle OpenCode asset missing: ${missingSource}`);
         return 1;
       }
+      const pluginCheck = spawnSync(process.execPath, ["--check", pluginSource], { encoding: "utf8" });
+      if (pluginCheck.status !== 0 || !fs.readFileSync(pluginSource, "utf8").includes("export const FlowAgentsPlugin")) {
+        console.error(`flow-agents init: generated OpenCode plugin is corrupt: ${pluginCheck.stderr.trim()}`);
+        return 1;
+      }
+      const skillNames = resolveOpencodeSkillNames(bundle, skillsSource, options.activeKitIds ?? []);
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
       fs.mkdirSync(options.dest, { recursive: true });
+      const runtimeRoot = path.join(options.dest, ".flow-agents", "runtime");
+      managed["instructions"] = [path.join(runtimeRoot, "AGENTS.md")];
       // The global opencode.json lives directly at dest/opencode.json.
       const destConfigPath = path.join(options.dest, "opencode.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
@@ -861,16 +958,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(destConfigPath)) {
-        try { existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+        try {
+          existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          throw new Error(`existing OpenCode config is invalid JSON; refusing to replace it: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       const merged = mergeInstallSettings(mergeSettings, existing, managed);
+      const existingInstructions = existing["instructions"];
+      if (existingInstructions !== undefined && (!Array.isArray(existingInstructions) || existingInstructions.some((entry) => typeof entry !== "string"))) {
+        throw new Error("existing OpenCode instructions must be an array of strings");
+      }
+      const managedInstructions = managed["instructions"] as string[];
+      merged["instructions"] = [...new Set([...(existingInstructions as string[] | undefined ?? []), ...managedInstructions])];
+      const installedAssetCount = installOpencodeGlobalAssets(options.dest, bundle, runtimeSources, runtimeFiles, skillNames, options.activeKitIds ?? []);
       const tmp = `${destConfigPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
 `, "utf8");
       fs.renameSync(tmp, destConfigPath);
-      // Write version stamp.
+      // Stamp only after every required runtime asset and its content manifest exist.
       writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
-      console.log(`Flow Agents global config merged for opencode in ${options.dest}`);
+      console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
+      console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
       return 0;
     }
     // --global for codex: run install-codex-home.sh to install into the Codex home.

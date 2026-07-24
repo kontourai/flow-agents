@@ -30,19 +30,12 @@ if (!/validat\w*Resolution\w*(?:Event|Ledger)/i.test(source)) {
   throw new Error('coordinator must validate the external resolution-event ledger before mutation');
 }
 NODE
-# The privileged coordinator intentionally remains pinned to the audited Flow 3.5.0
-# reducer closure even when the application runtime consumes a newer Flow release.
+# The privileged coordinator is pinned to the audited Flow 3.8.1 reducer closure.
+# npm installs the package's declared transitive dependencies; callers do not
+# reproduce Flow's private dependency list.
 pinned_reducer_root="$(mktemp -d)"
 npm install --prefix "$pinned_reducer_root" --ignore-scripts --no-save --silent \
-  @kontourai/flow@3.5.0 \
-  @kontourai/surface@2.13.0 \
-  hachure@0.15.0 \
-  ajv@8.20.0 \
-  ajv-formats@3.0.1 \
-  fast-deep-equal@3.1.3 \
-  fast-uri@3.1.2 \
-  json-schema-traverse@1.0.0 \
-  require-from-string@2.0.2
+  @kontourai/flow@3.8.1
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
@@ -104,18 +97,17 @@ if su -s /bin/bash nobody -c "sudo -n -- '$LIFECYCLE_HELPER_PATH' </dev/null"; t
 cat > /work/setup-fixture.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
 import { startBuilderFlowSession } from './build/src/builder-flow-runtime.js';
-import { performLocalClaim } from './build/src/cli/assignment-provider.js';
+import { performLocalClaim, resolveCurrentAssignmentActor } from './build/src/cli/assignment-provider.js';
 const project = '/tmp/lifecycle-authority-e2e';
 const subject = 'local:work-item/lifecycle-authority-e2e';
-const actor = { runtime: 'fixture', session_id: 'lifecycle-e2e', host: 'container', human: null };
-const actorKey = 'fixture:lifecycle-e2e:container';
+const { actor, actorKey } = resolveCurrentAssignmentActor();
 const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); };
 async function makeSession(slug) {
   const session = path.join(project, '.kontourai', 'flow-agents', slug);
   write(path.join(session, 'state.json'), { schema_version: '1.0', task_slug: slug, status: 'planned', phase: 'planning', updated_at: new Date().toISOString(), work_item_refs: [subject], next_action: { status: 'continue', summary: 'Fixture lifecycle operation.' } });
   write(path.join(session, 'acceptance.json'), { schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'The signed lifecycle transition is accepted by Builder.', status: 'pending', evidence_refs: [] }], goal_fit: { status: 'pending', summary: 'Fixture acceptance is pending.' } });
-  await startBuilderFlowSession({ sessionDir: session });
   performLocalClaim(path.join(project, '.kontourai', 'flow-agents'), slug, actor, { ttlSeconds: 1800, actorKey, branch: `fixture/${slug}`, artifactDir: slug, workItemRef: subject, reason: 'container lifecycle fixture' });
+  await startBuilderFlowSession({ sessionDir: session });
   return session;
 }
 fs.rmSync(project, { recursive: true, force: true }); fs.mkdirSync(path.join(project, 'review-target'), { recursive: true });
@@ -487,7 +479,7 @@ node /work/sign-authorization.mjs /tmp/reseal-request.json /root/lifecycle-autho
 cat > /work/pinned-flow-lock-holder.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import { pathToFileURL } from 'node:url';
 const [flowRoot, project, runId, readyFile, releaseFile] = process.argv.slice(2);
-const store = await import(pathToFileURL(path.join(flowRoot, 'dist', 'runtime', 'flow-run-store.js')).href);
+const store = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await store.withRunMutationLock(runId, project, async () => {
   fs.writeFileSync(readyFile, 'ready\n');
   while (!fs.existsSync(releaseFile)) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -499,10 +491,10 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 3.5.0 mutation after reseal',
+  reason: 'installed Flow 3.8.1 mutation after reseal',
   authority: {
     kind: 'operator_request',
-    actor: 'installed-flow-3.5-container',
+    actor: 'installed-flow-3.8.1-container',
     request_ref: 'container:reseal-native-lock',
     requested_at: '2026-07-20T00:20:00Z'
   },
@@ -538,7 +530,7 @@ const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
 const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
 if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
 const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
-if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.5.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.5.0');
+if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.8.1') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.8.1');
 if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
 const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
 for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -553,48 +545,9 @@ const spawnAsNode = (script, args) => {
   });
   return { child, result };
 };
-const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'runtime', 'flow-run-store.js')).href);
+const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
 if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
-  const treeDigest = (root) => {
-    if (!fs.existsSync(root)) return 'absent';
-    const entries = [];
-    const walk = (dir) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-        const file = path.join(dir, entry.name), relative = path.relative(root, file);
-        if (entry.isDirectory()) walk(file);
-        else entries.push(`${relative}\0${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`);
-      }
-    };
-    walk(root);
-    return crypto.createHash('sha256').update(entries.join('\n')).digest('hex');
-  };
-  const durableBefore = treeDigest(process.env.LIFECYCLE_STATE_ROOT);
-  const sessionBefore = treeDigest(session);
-  const runBefore = treeDigest(runRoot);
-  const result = await spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']).result;
-  if (result.status === 0 || !`${result.stdout}${result.stderr}`.includes('verification reseal capability')) {
-    throw new Error(`missing installed Flow recovery API did not fail at capability preflight: ${result.stdout}${result.stderr}`);
-  }
-  if (treeDigest(process.env.LIFECYCLE_STATE_ROOT) !== durableBefore) throw new Error('missing installed Flow recovery API created durable nonce/completion residue');
-  if (treeDigest(session) !== sessionBefore || treeDigest(runRoot) !== runBefore) {
-    throw new Error('missing installed Flow recovery API changed session or canonical Flow bytes');
-  }
-  const residue = [session, runRoot].flatMap((root) => {
-    const found = [];
-    const walk = (dir) => {
-      if (!fs.existsSync(dir)) return;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const file = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(file);
-        else if (entry.name === '.verification-reseal.transaction.json' || entry.name.includes('.verification-reseal-')) found.push(file);
-      }
-    };
-    walk(root);
-    return found;
-  });
-  if (residue.length) throw new Error(`missing installed Flow recovery API created transaction residue: ${residue.join(',')}`);
-  console.log('PASS: installed @kontourai/flow@3.5.0 lacks the recovery API and fresh reseal fails before nonce, plan, or stage residue');
-  process.exit(0);
+  throw new Error('installed exact @kontourai/flow@3.8.1 does not expose the public recovery contract');
 }
 const waitFor = async (label, predicate) => {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -609,24 +562,24 @@ const ticketCount = () => fs.existsSync(lockRoot)
 const ledgerBefore = fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json'));
 const holder = spawnAsNode('/work/pinned-flow-lock-holder.mjs', [pinnedFlowRoot, project, runId, readyFile, releaseFile]);
 await Promise.race([
-  waitFor('installed 3.5 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
-  holder.result.then((result) => { throw new Error(`installed 3.5 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed 3.8.1 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
+  holder.result.then((result) => { throw new Error(`installed 3.8.1 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
 ]);
 const reseal = spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']);
 await Promise.race([
-  waitFor('root reseal ticket behind installed 3.5 holder', () => ticketCount() === 2),
-  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.5: ${result.stdout}${result.stderr}`); }),
+  waitFor('root reseal ticket behind installed 3.8.1 holder', () => ticketCount() === 2),
+  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.8.1: ${result.stdout}${result.stderr}`); }),
 ]);
 const pause = spawnAsNode('/work/pinned-flow-pause.mjs', [pinnedFlowRoot, project, runId]);
 await Promise.race([
-  waitFor('installed 3.5 public pause behind reseal', () => ticketCount() === 3),
-  pause.result.then((result) => { throw new Error(`installed 3.5 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed 3.8.1 public pause behind reseal', () => ticketCount() === 3),
+  pause.result.then((result) => { throw new Error(`installed 3.8.1 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
 ]);
 fs.writeFileSync(releaseFile, 'release\n');
 const [holderResult, resealResult, pauseResult] = await Promise.all([holder.result, reseal.result, pause.result]);
-if (holderResult.status !== 0) throw new Error(`installed 3.5 holder failed: ${holderResult.stderr}`);
-if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.5 lock: ${resealResult.stdout}${resealResult.stderr}`);
-if (pauseResult.status !== 0) throw new Error(`installed 3.5 pause failed behind reseal: ${pauseResult.stderr}`);
+if (holderResult.status !== 0) throw new Error(`installed 3.8.1 holder failed: ${holderResult.stderr}`);
+if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.8.1 lock: ${resealResult.stdout}${resealResult.stderr}`);
+if (pauseResult.status !== 0) throw new Error(`installed 3.8.1 pause failed behind reseal: ${pauseResult.stderr}`);
 const resealReceipt = JSON.parse(resealResult.stdout);
 if (resealReceipt.operation_status !== 'applied') throw new Error('installed-closure reseal was not applied');
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
@@ -638,11 +591,11 @@ if (completionResult.status !== 0) throw new Error(`unprivileged completion veri
 const completion = JSON.parse(completionResult.stdout);
 if (completion.action !== 'reseal-verification-evidence') throw new Error('reseal did not install its exact completion');
 const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
-if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.5 public mutation was not preserved');
+if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.8.1 public mutation was not preserved');
 const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
 if (manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`).length !== 1) throw new Error('reseal attachment is absent or duplicated');
 if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
-console.log('PASS: installed exact @kontourai/flow@3.5.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
+console.log('PASS: installed exact @kontourai/flow@3.8.1 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
 NODE
 node /work/reseal-native-lock-e2e.mjs
 

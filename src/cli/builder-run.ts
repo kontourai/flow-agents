@@ -9,8 +9,9 @@ import {
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
 } from "../builder-flow-runtime.js";
+import { reclaimBuilderWorktree } from "./worktree-reclaim.js";
 
-const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive> --session-dir <path> [--reason <text> | --authorization-file <path>]";
+const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive|reclaim> --session-dir <path> [--reason <text> | --authorization-file <path>]";
 const CANCEL_REQUEST_USAGE = "Usage: flow-agents builder-run cancel-request --session-dir <path> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]";
 
 /**
@@ -96,6 +97,14 @@ export async function main(argv: string[]): Promise<number> {
       return 64;
     }
     return await runCancelRequest(sessionDir, parsed.flags);
+  }
+  if (action === "reclaim") {
+    if (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => name !== "session-dir")) {
+      console.error(USAGE);
+      return 64;
+    }
+    console.log(JSON.stringify(await reclaimBuilderWorktree(sessionDir)));
+    return 0;
   }
   if (!action || !["recover", "pause", "resume", "cancel", "release-assignment", "archive"].includes(action)) {
     console.error(USAGE);
