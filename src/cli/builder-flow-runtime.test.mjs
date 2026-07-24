@@ -7,7 +7,7 @@ import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 
-import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir } from "@kontourai/flow";
+import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, withRunMutationLock } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
@@ -1921,6 +1921,19 @@ test("production Builder start mints and reuses one actor-bound run correlation"
   }
   assert.equal(correlation.identities.agent.value, firstOwner.actorKey);
   assert.deepEqual(started.projection.run_correlation, correlation);
+  assert.deepEqual(started.projection.workflow_outcome, {
+    schema_version: "1.0",
+    source: "canonical_flow_projection",
+    flow_status: "active",
+    process_status: "not_verified",
+    verification_status: "NOT_VERIFIED",
+    quality_status: "not_independently_evaluated",
+  });
+  assert.equal(
+    fs.existsSync(path.join(first.sessionDir, "workflow-outcome.json")),
+    false,
+    "an active projection must not satisfy the terminal fact kind",
+  );
   assert.deepEqual(
     JSON.parse(started.run.state.params.run_correlation),
     correlation,
@@ -2133,6 +2146,13 @@ test("Builder projection preserves Flow continuation semantics for exceptional s
     writeJson(stateFile, { ...original, status, next_action: `fixture ${status}` });
     const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
     assert.equal(recovered.projection.next_action.status, expected, status);
+    if (status === "accepted_by_exception") {
+      assert.equal(
+        fs.existsSync(path.join(session.sessionDir, "workflow-outcome.json")),
+        false,
+        "continuing exception status must not mint a terminal workflow outcome",
+      );
+    }
   }
 });
 
@@ -2830,6 +2850,8 @@ test("pause and resume preserve the current Flow step and active assignment", as
   assert.equal(paused.run.state.current_step, before.current_step);
   assert.deepEqual(paused.run.state.transitions, before.transitions);
   assert.equal(paused.projection.status, "blocked");
+  assert.equal(paused.projection.workflow_outcome.process_status, "blocked");
+  assert.equal(paused.projection.workflow_outcome.quality_status, "not_independently_evaluated");
   assert.equal(readLocalAssignmentStatus(session.artifactRoot, session.slug).record.status, "claimed");
 
   const resumed = await resumeBuilderFlowSession({
@@ -3727,6 +3749,253 @@ test("terminal Flow projection supersedes matching actor bindings", async () => 
   const retired = readJson(currentPointer.perActorCurrentFile(session.artifactRoot, ambient.actorKey));
   assert.equal(retired.binding_status, "retired");
   assert.equal(retired.binding_reason, "flow_canceled");
+  assert.deepEqual(
+    readJson(path.join(session.sessionDir, "workflow-outcome.json")),
+    {
+      schema: "kontour.flow-agents.workflow-outcome",
+      version: "1.0",
+      kind: "terminal",
+      record_id: `workflow-outcome:${synchronized.projection.run_correlation.correlation_id}`,
+      task_slug: session.slug,
+      recorded_at: synchronized.projection.updated_at,
+      run_correlation: synchronized.projection.run_correlation,
+      process_status: "canceled",
+      workflow_outcome: synchronized.projection.workflow_outcome,
+    },
+  );
+  const validator = path.resolve("build/src/cli/validate-workflow-artifacts.js");
+  execFileSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+    cwd: session.projectRoot,
+    stdio: "pipe",
+  });
+  const outcomeFile = path.join(session.sessionDir, "workflow-outcome.json");
+  const outcome = readJson(outcomeFile);
+  fs.unlinkSync(outcomeFile);
+  const missingOutcome = spawnSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+    cwd: session.projectRoot,
+    encoding: "utf8",
+  });
+  assert.notEqual(missingOutcome.status, 0);
+  assert.match(missingOutcome.stderr, /terminal Flow status canceled requires workflow-outcome\.json/);
+  fs.writeFileSync(outcomeFile, `${JSON.stringify(outcome, null, 2)}\n`);
+  fs.writeFileSync(outcomeFile, `${JSON.stringify({ ...outcome, process_status: "failed" }, null, 2)}\n`);
+  const mismatchedOutcome = spawnSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+    cwd: session.projectRoot,
+    encoding: "utf8",
+  });
+  assert.notEqual(mismatchedOutcome.status, 0);
+  assert.match(mismatchedOutcome.stderr, /workflow outcome process_status must match state\.json workflow_outcome\.process_status/);
+  fs.writeFileSync(outcomeFile, `${JSON.stringify({
+    ...outcome,
+    process_status: "failed",
+    workflow_outcome: { ...outcome.workflow_outcome, process_status: "failed" },
+  }, null, 2)}\n`);
+  const consistentlyWrongOutcome = spawnSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+    cwd: session.projectRoot,
+    encoding: "utf8",
+  });
+  assert.notEqual(consistentlyWrongOutcome.status, 0);
+  assert.match(consistentlyWrongOutcome.stderr, /workflow outcome projection must match state\.json workflow_outcome/);
+  fs.writeFileSync(outcomeFile, `${JSON.stringify({
+    ...outcome,
+    workflow_outcome: { ...outcome.workflow_outcome, verification_status: "verified" },
+  }, null, 2)}\n`);
+  const wrongVerificationOutcome = spawnSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+    cwd: session.projectRoot,
+    encoding: "utf8",
+  });
+  assert.notEqual(wrongVerificationOutcome.status, 0);
+  assert.match(wrongVerificationOutcome.stderr, /workflow outcome projection must match state\.json workflow_outcome/);
+  fs.writeFileSync(outcomeFile, `${JSON.stringify({ ...outcome, process_status: "invented" })}\n`);
+  assert.throws(
+    () => execFileSync(process.execPath, [validator, "--skip-markdown-validation", session.sessionDir], {
+      cwd: session.projectRoot,
+      stdio: "pipe",
+    }),
+    /Command failed/,
+  );
+});
+
+test("correlation producers reject a stale Flow projection until recovery", async () => {
+  const session = makeSession("projection-freshness");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await builderFlowRuntime.assertBuilderFlowProjectionCurrent({ sessionDir: session.sessionDir });
+  await pauseRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "advance canonical state without projecting it",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://projection-freshness",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+  await assert.rejects(
+    () => builderFlowRuntime.assertBuilderFlowProjectionCurrent({ sessionDir: session.sessionDir }),
+    /stale relative to the canonical Flow run/,
+  );
+  await assert.rejects(
+    () => workflowSidecarMain([
+      "record-agent-event",
+      "--artifact-root", session.artifactRoot,
+      "--agent-id", "stale-projection-worker",
+      "--kind", "note",
+      "--status", "active",
+      "--summary", "must not land against stale canonical state",
+    ]),
+    /stale relative to the canonical Flow run/,
+  );
+  assert.equal(
+    fs.existsSync(path.join(session.sessionDir, "agents", "stale-projection-worker", "events.jsonl")),
+    false,
+  );
+  await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  await builderFlowRuntime.assertBuilderFlowProjectionCurrent({ sessionDir: session.sessionDir });
+});
+
+test("a current-projection producer transaction serializes against canonical Flow mutation", async () => {
+  const session = makeSession("projection-producer-serialization");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  let enterOperation;
+  const operationEntered = new Promise((resolve) => { enterOperation = resolve; });
+  let releaseOperation;
+  const operationRelease = new Promise((resolve) => { releaseOperation = resolve; });
+  const producer = builderFlowRuntime.withBuilderFlowProjectionCurrent(
+    { sessionDir: session.sessionDir },
+    async () => {
+      enterOperation();
+      await operationRelease;
+      fs.writeFileSync(path.join(session.sessionDir, "producer-transaction-proof"), "committed under Flow lock\n");
+    },
+  );
+  await operationEntered;
+  let mutationSettled = false;
+  const mutation = pauseRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "must wait for the correlated producer transaction",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://projection-producer-serialization",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  }).finally(() => { mutationSettled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  assert.equal(mutationSettled, false, "canonical mutation must wait until the producer transaction commits");
+  releaseOperation();
+  await producer;
+  await mutation;
+  assert.equal(fs.readFileSync(path.join(session.sessionDir, "producer-transaction-proof"), "utf8"), "committed under Flow lock\n");
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.status, "paused");
+});
+
+test("record-agent-event rejects a pointer rebound while waiting for another run lock", async () => {
+  const first = makeSession("projection-event-rebind-first");
+  await startClaimedBuilderFlowSession({ sessionDir: first.sessionDir });
+  const ambient = resolveCurrentAssignmentActor();
+  const firstPointer = currentPointer.readOwnCurrentPointer(first.artifactRoot, ambient.actorKey).payload;
+  assert.ok(firstPointer);
+
+  const second = {
+    projectRoot: first.projectRoot,
+    artifactRoot: first.artifactRoot,
+    slug: "projection-event-rebind-second",
+    sessionDir: path.join(first.artifactRoot, "projection-event-rebind-second"),
+  };
+  writeJson(path.join(second.sessionDir, "state.json"), {
+    schema_version: "1.0",
+    task_slug: second.slug,
+    status: "planned",
+    phase: "planning",
+    updated_at: NOW,
+    work_item_refs: [SUBJECT],
+    next_action: { status: "continue", summary: "Start second Builder run." },
+  });
+  await startClaimedBuilderFlowSession({ sessionDir: second.sessionDir });
+  const secondPointer = currentPointer.readOwnCurrentPointer(second.artifactRoot, ambient.actorKey).payload;
+  assert.ok(secondPointer);
+  currentPointer.writePerActorCurrent(first.artifactRoot, ambient.actorKey, firstPointer);
+
+  let releaseHolder;
+  const holderRelease = new Promise((resolve) => { releaseHolder = resolve; });
+  let holderEntered;
+  const entered = new Promise((resolve) => { holderEntered = resolve; });
+  const holder = withRunMutationLock(first.slug, first.projectRoot, async () => {
+    holderEntered();
+    await holderRelease;
+  });
+  await entered;
+  const record = workflowSidecarMain([
+    "record-agent-event",
+    "--artifact-root", first.artifactRoot,
+    "--agent-id", "rebound-worker",
+    "--kind", "note",
+    "--status", "active",
+    "--summary", "must remain bound to the lock-selected run",
+  ]);
+  const lockRoot = path.join(runDir(first.slug, first.projectRoot), ".mutation.lock");
+  let queued = false;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const tickets = fs.existsSync(lockRoot)
+      ? fs.readdirSync(lockRoot).filter((name) => name.startsWith("ticket-"))
+      : [];
+    if (tickets.length >= 2) {
+      queued = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(queued, true, "event writer must be waiting on the first run lock before the rebind");
+  currentPointer.writePerActorCurrent(first.artifactRoot, ambient.actorKey, secondPointer);
+  releaseHolder();
+  await holder;
+  await assert.rejects(record, /authenticated binding changed while waiting for the canonical Flow lock/);
+  assert.equal(
+    fs.existsSync(path.join(second.sessionDir, "agents", "rebound-worker", "events.jsonl")),
+    false,
+  );
+});
+
+test("terminal projection rollback restores state and outcome when pointer publication fails", async () => {
+  const session = makeSession("lifecycle-terminal-projection-rollback");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "terminal projection rollback fixture",
+    authority: {
+      kind: "operator_request",
+      actor: "test",
+      request_ref: "fixture://terminal-projection-rollback",
+      requested_at: "2026-07-24T01:00:00.000Z",
+    },
+    at: "2026-07-24T01:00:00.000Z",
+  });
+  const stateFile = path.join(session.sessionDir, "state.json");
+  const outcomeFile = path.join(session.sessionDir, "workflow-outcome.json");
+  const stateBefore = fs.readFileSync(stateFile, "utf8");
+  const globalFile = path.join(session.artifactRoot, "current.json");
+  const globalBefore = fs.readFileSync(globalFile, "utf8");
+  const originalReplace = currentPointer.replaceCurrentPointersIfUnchanged;
+  currentPointer.replaceCurrentPointersIfUnchanged = (_root, _writes, _options, commit) => {
+    const rollback = commit();
+    assert.notEqual(fs.readFileSync(stateFile, "utf8"), stateBefore);
+    assert.equal(fs.existsSync(outcomeFile), true);
+    rollback();
+    throw new Error("fixture pointer publication failure");
+  };
+  try {
+    await assert.rejects(
+      () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+      /fixture pointer publication failure/,
+    );
+  } finally {
+    currentPointer.replaceCurrentPointersIfUnchanged = originalReplace;
+  }
+  assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
+  assert.equal(fs.existsSync(outcomeFile), false);
+  assert.equal(fs.readFileSync(globalFile, "utf8"), globalBefore);
 });
 
 test("terminal Flow projection cannot retire a newer generation of the same task binding", async () => {

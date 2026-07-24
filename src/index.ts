@@ -72,6 +72,16 @@ export type {
   RunFact,
   RunFactKind,
 } from "./run-reconstruction.js";
+export {
+  WORKFLOW_PROCESS_STATUSES,
+  deriveWorkflowOutcome,
+  verificationStatusFromFlowGateOutcomes,
+} from "./workflow-outcome.js";
+export type {
+  WorkflowOutcome,
+  WorkflowProcessStatus,
+  WorkflowVerificationStatus,
+} from "./workflow-outcome.js";
 export type {
   TelemetryDiagnostic,
   ToolResultStatus,

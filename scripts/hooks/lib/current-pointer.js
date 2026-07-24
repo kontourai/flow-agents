@@ -66,6 +66,9 @@
  *                                                        file: string|null }  (#440 — ownership-bearing
  *                                                        read; never falls back to the shared legacy
  *                                                        current.json for a RESOLVED actor)
+ *   readOwnCurrentPointerRecord(flowAgentsDir, actorKey) → same shape, but preserves an
+ *                                                        actor's retirement marker for narrowly
+ *                                                        scoped terminal consumers
  *   writePerActorCurrent(flowAgentsDir, actorKey, payload) → void
  */
 
@@ -539,18 +542,16 @@ function readCurrentPointer(flowAgentsDir, actorKey) {
  * @param {string} [actorKey]
  * @returns {{ payload: object|null, source: "per-actor"|"none"|"legacy", file: string|null }}
  */
-function readOwnCurrentPointer(flowAgentsDir, actorKey) {
+function readOwnCurrentPointerRecord(flowAgentsDir, actorKey) {
   const key = actorKey == null ? '' : String(actorKey);
-  if (!key || isUnresolvedActor(key)) {
-    return readCurrentPointer(flowAgentsDir, actorKey);
-  }
+  if (!key || isUnresolvedActor(key)) return { payload: null, source: 'none', file: null };
   const perActorFile = perActorCurrentFile(flowAgentsDir, key);
   const actorIdentity = actorDirectoryIdentityForRead(flowAgentsDir);
   if (actorIdentity === null) {
     return { payload: null, source: 'none', file: perActorFile };
   }
   const perActor = readActorJsonFileState(perActorFile, actorIdentity);
-  if (perActor.status === 'valid') return resolvedPointer(perActor.payload, perActorFile, 'per-actor');
+  if (perActor.status === 'valid') return { payload: perActor.payload, source: 'per-actor', file: perActorFile };
   if (perActor.status === 'invalid') return { payload: null, source: 'none', file: perActorFile };
   // #440 fix-wave 2: the new collision-resistant file doesn't exist/parse — fall back to the
   // pre-fix-wave-2 legacy per-actor filename (transition window only; see module header). This
@@ -558,9 +559,18 @@ function readOwnCurrentPointer(flowAgentsDir, actorKey) {
   // D1 is unaffected, only the per-actor filename resolution gained a second name to try.
   const legacyPerActorFile = legacyPerActorCurrentFile(flowAgentsDir, key);
   const legacyPerActor = readActorJsonFileState(legacyPerActorFile, actorIdentity);
-  if (legacyPerActor.status === 'valid') return resolvedPointer(legacyPerActor.payload, legacyPerActorFile, 'per-actor');
+  if (legacyPerActor.status === 'valid') return { payload: legacyPerActor.payload, source: 'per-actor', file: legacyPerActorFile };
   if (legacyPerActor.status === 'invalid') return { payload: null, source: 'none', file: legacyPerActorFile };
   return { payload: null, source: 'none', file: null };
+}
+
+function readOwnCurrentPointer(flowAgentsDir, actorKey) {
+  const key = actorKey == null ? '' : String(actorKey);
+  if (!key || isUnresolvedActor(key)) return readCurrentPointer(flowAgentsDir, actorKey);
+  const own = readOwnCurrentPointerRecord(flowAgentsDir, key);
+  return own.source === 'per-actor'
+    ? resolvedPointer(own.payload, own.file, own.source)
+    : own;
 }
 
 /**
@@ -690,6 +700,18 @@ function applyRawPointerWrites(writes) {
       }
     }
     throw error;
+  }
+}
+
+function restoreRawPointerWrites(writes) {
+  for (const write of [...writes].reverse()) {
+    if (write.expectedRaw === null) {
+      try { fs.unlinkSync(write.file); } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+      }
+    } else {
+      atomicWriteRaw(write.file, write.expectedRaw);
+    }
   }
 }
 
@@ -826,8 +848,23 @@ function replaceCurrentPointersIfUnchanged(
   }
   return withPointerFileLocks(pointerTransactionLockFiles(root, normalized, options), () => {
     if (!pointerSnapshotsMatch(root, normalized, options)) return 'changed';
-    if (typeof commit === 'function') commit();
-    applyRawPointerWrites(normalized);
+    let rollbackCommit = null;
+    try {
+      if (typeof commit === 'function') rollbackCommit = commit();
+      applyRawPointerWrites(normalized);
+    } catch (error) {
+      if (typeof rollbackCommit === 'function') {
+        try {
+          rollbackCommit();
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            'current pointer transaction and projection rollback failed',
+          );
+        }
+      }
+      throw error;
+    }
     return 'updated';
   });
 }
@@ -837,7 +874,14 @@ function replaceCurrentPointersIfUnchanged(
  * Reads happen only after both mutation locks are held, and a concurrent rebind
  * therefore wins without being overwritten by stale agent metadata.
  */
-function updateCurrentPointersForBinding(flowAgentsDir, actorKey, artifactDir, update, stage) {
+function updateCurrentPointersForBinding(
+  flowAgentsDir,
+  actorKey,
+  artifactDir,
+  update,
+  stage,
+  expectedBindingId,
+) {
   const root = path.resolve(flowAgentsDir);
   const globalFile = path.join(root, 'current.json');
   const resolvedActor = actorKey && !isUnresolvedActor(String(actorKey))
@@ -851,9 +895,12 @@ function updateCurrentPointersForBinding(flowAgentsDir, actorKey, artifactDir, u
   return withPointerFileLocks(lockFiles, () => {
     const writes = [];
     const globalRaw = assertRegularPointerOrMissing(globalFile);
+    const matchesExpectedBinding = (payload) => payload?.artifact_dir === artifactDir
+      && (expectedBindingId === undefined
+        || (payload.binding_id ?? null) === expectedBindingId);
     if (globalRaw !== null) {
       const globalPayload = JSON.parse(globalRaw);
-      if (globalPayload?.artifact_dir === artifactDir) {
+      if (matchesExpectedBinding(globalPayload)) {
         writes.push({
           file: globalFile,
           expectedRaw: globalRaw,
@@ -863,7 +910,7 @@ function updateCurrentPointersForBinding(flowAgentsDir, actorKey, artifactDir, u
     }
     if (resolvedActor) {
       const own = readOwnCurrentPointer(root, resolvedActor);
-      if (own.payload?.artifact_dir === artifactDir) {
+      if (matchesExpectedBinding(own.payload)) {
         const canonicalFile = perActorCurrentFile(root, resolvedActor);
         writes.push({
           file: canonicalFile,
@@ -872,11 +919,23 @@ function updateCurrentPointersForBinding(flowAgentsDir, actorKey, artifactDir, u
         });
       }
     }
-    const staged = typeof stage === 'function' ? stage() : null;
+    const staged = writes.length > 0 && typeof stage === 'function' ? stage() : null;
+    let pointersApplied = false;
     try {
       applyRawPointerWrites(writes);
+      pointersApplied = true;
+      staged?.commit?.();
     } catch (error) {
-      staged?.rollback?.();
+      let rollbackError = null;
+      try { staged?.rollback?.(); } catch (stagedError) { rollbackError = stagedError; }
+      try {
+        if (pointersApplied) restoreRawPointerWrites(writes);
+      } catch (pointerError) {
+        rollbackError ??= pointerError;
+      }
+      if (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'current pointer and staged event transaction rollback failed');
+      }
       throw error;
     }
     return writes.length;
@@ -888,6 +947,7 @@ module.exports = {
   legacyPerActorCurrentFile,
   readCurrentPointer,
   readOwnCurrentPointer,
+  readOwnCurrentPointerRecord,
   writePerActorCurrent,
   retireOwnCurrentPointer,
   replacePerActorCurrentIfUnchanged,

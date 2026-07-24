@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # economics-record.sh — per-run kit-economics record emitter (#349, console ADR 0003 calls 1/2/3/6).
 #
-# Assembles ONE immutable `kontour.console.economics` v0.1 record per run — cost, time, iterations,
+# Assembles ONE immutable `kontour.console.economics` v0.2 record per run — cost, time, iterations,
 # and defects caught — the measurement substrate for the value proof (I32–I35). Modeled byte-for-byte
 # on scripts/liveness/relay.sh (#295): source ${TELEMETRY_DIR}/lib/transport.sh, build the record with
 # a single `jq -c` filter (valid JSON + \u-escaping of every untrusted field), then hand off to the
@@ -13,9 +13,9 @@
 # aggregation/value is a console projection. Tenancy is stamped console-side from the principal (call
 # 2); tenant_id here is self-description only.
 #
-# Ground-truth tokens/cost come from the `session.usage` event's .usage block (parsed upstream by
-# usage_parse_transcript from each assistant message's .message.usage — never re-estimated). Defects
-# join from the review sidecar critique.json; verdict/slug from state.json.
+# Ground-truth tokens/cost and canonical run correlation come from the `session.usage` event.
+# Defects join from the review sidecar critique.json; verdict/phase come from state.json only after
+# telemetry.sh has authenticated that sidecar against the same correlation envelope.
 #
 # Invoked (detached, best-effort) from scripts/telemetry/telemetry.sh after the session.usage event is
 # emitted at run end. Usage:
@@ -62,14 +62,43 @@ while [[ $# -gt 0 ]]; do
     *) [[ -z "$usage_event" ]] && usage_event="$1"; shift ;;
   esac
 done
+explicit_sidecars=false
+[[ -n "$state_path$acceptance_path$critique_path$agents_dir" ]] && explicit_sidecars=true
+if [[ "$explicit_sidecars" == "true" && "${FLOW_AGENTS_ECONOMICS_FIXTURE_MODE:-}" != "true" ]]; then
+  echo "economics-record: explicit sidecars require FLOW_AGENTS_ECONOMICS_FIXTURE_MODE=true" >&2
+  exit 2
+fi
 # Fall back to stdin when no positional event was supplied.
 if [[ -z "$usage_event" && ! -t 0 ]]; then
   usage_event="$(cat 2>/dev/null || true)"
 fi
 [[ -z "$usage_event" ]] && exit 0
 
+# Canonical validation is mandatory even for direct invocation. Invalid, missing, or explicit
+# incomplete input remains explicit and cannot carry an authenticated task slug or sidecar join.
+validated_correlation="$(
+  printf '%s' "$usage_event" | node "$SCRIPT_DIR/run-correlation-binding.js" --validate-correlation 2>/dev/null
+)" || validated_correlation='{"run_correlation":{"status":"incomplete","reason":"the economics correlation validator is unavailable"}}'
+usage_event="$(
+  printf '%s' "$usage_event" | jq -c \
+    --argjson correlation "$(printf '%s' "$validated_correlation" | jq -c '.run_correlation')" '
+      .run_correlation = $correlation
+      | if $correlation.status? == "incomplete" then del(.task_slug) else . end
+    ' 2>/dev/null
+)" || exit 0
+run_usage_authenticated=false
+if printf '%s' "$usage_event" | jq -e '
+  .usage.scope == "run"
+  and .usage.semantics == "delta"
+  and .usage.baseline_status == "present"
+' >/dev/null 2>&1; then
+  run_usage_authenticated=true
+fi
+
 # --- read sidecars as JSON args (never the token source; join sources only) -------------------------
-# Each is `null` when missing/unreadable/unparseable so the jq filter defaults cleanly.
+# Production stop telemetry supplies no paths. In that mode, resolve one descriptor-safe snapshot
+# through the authenticated actor binding and compare its exact envelope to the usage event.
+# Explicit paths remain available for direct fixture/operator invocation.
 read_json_or_null() {
   local p="$1" out
   [[ -n "$p" && -f "$p" ]] || { printf 'null'; return; }
@@ -77,10 +106,96 @@ read_json_or_null() {
   [[ -z "$out" ]] && out='null'
   printf '%s' "$out"
 }
-state_json="$(read_json_or_null "$state_path")"
-critique_json="$(read_json_or_null "$critique_path")"
-# acceptance.json is read for future criteria/goal_fit joins; carried but not yet a required field.
-acceptance_json="$(read_json_or_null "$acceptance_path")"
+state_json='null'
+critique_json='null'
+acceptance_json='null'
+agent_events_json='[]'
+production_snapshot_authenticated=false
+if [[ -z "$state_path$acceptance_path$critique_path$agents_dir" && -f "$SCRIPT_DIR/run-correlation-binding.js" ]]; then
+  expected_correlation="$(printf '%s' "$usage_event" | jq -c '.run_correlation // null' 2>/dev/null)" || expected_correlation='null'
+  sidecar_snapshot="$(printf '%s' "$usage_event" | node "$SCRIPT_DIR/run-correlation-binding.js" --sidecar-snapshot --terminal-capture 2>/dev/null)" || sidecar_snapshot=''
+  if [[ -n "$sidecar_snapshot" ]] && printf '%s' "$sidecar_snapshot" | jq -e \
+    --argjson expected "$expected_correlation" '
+      .run_correlation == $expected
+      and (.task_slug | type == "string")
+      and (.sidecars.state | type == "object")
+      and .sidecars.state.task_slug == .task_slug
+      and .sidecars.state.run_correlation == $expected
+      and (.sidecars.agent_events | type == "array")
+    ' >/dev/null 2>&1; then
+    state_json="$(printf '%s' "$sidecar_snapshot" | jq -c '.sidecars.state')"
+    critique_json="$(printf '%s' "$sidecar_snapshot" | jq -c '.sidecars.critique')"
+    acceptance_json="$(printf '%s' "$sidecar_snapshot" | jq -c '.sidecars.acceptance')"
+    agent_events_json="$(printf '%s' "$sidecar_snapshot" | jq -c '.sidecars.agent_events')"
+    production_snapshot_authenticated=true
+  else
+    usage_event="$(printf '%s' "$usage_event" | jq -c '
+      .run_correlation = {
+        status: "incomplete",
+        reason: "the economics source event was not authenticated against its runtime binding"
+      }
+      | del(.task_slug)
+    ')"
+  fi
+else
+  state_json="$(read_json_or_null "$state_path")"
+  critique_json="$(read_json_or_null "$critique_path")"
+  # acceptance.json is read for future criteria/goal_fit joins; carried but not yet a required field.
+  acceptance_json="$(read_json_or_null "$acceptance_path")"
+fi
+if [[ "$explicit_sidecars" == "true" ]] && ! jq -e -n \
+  --argjson event "$usage_event" \
+  --argjson state "$state_json" '
+    $event.run_correlation.status? != "incomplete"
+    and ($state | type) == "object"
+    and $state.task_slug == $event.task_slug
+    and $state.run_correlation == $event.run_correlation
+  ' >/dev/null 2>&1; then
+  state_json='null'
+  critique_json='null'
+  acceptance_json='null'
+  agent_events_json='[]'
+  agents_dir=''
+fi
+
+# Malformed optional components must not suppress the authenticated usage core.
+# Reject the whole component when a field consumed below has an incompatible
+# shape; the record then degrades to unattributed/NOT_VERIFIED defaults.
+state_json="$(printf '%s' "$state_json" | jq -c '
+  def valid_number: type == "number" and . >= 0;
+  if type != "object"
+    or ((.iterations? != null) and ((.iterations | type) != "object"))
+    or ((.workflow_outcome? != null) and ((.workflow_outcome | type) != "object"))
+    or ((.phase? != null) and ((.phase | type) != "string"))
+    or ((.iteration_count? != null) and (.iteration_count | valid_number | not))
+    or ((.route_backs? != null) and (.route_backs | valid_number | not))
+    or ((.gate_fires? != null) and (.gate_fires | valid_number | not))
+    or ((.human_wait_s? != null) and (.human_wait_s | valid_number | not))
+    or ((.iterations.count? != null) and (.iterations.count | valid_number | not))
+    or ((.iterations.route_backs? != null) and (.iterations.route_backs | valid_number | not))
+  then null else . end
+' 2>/dev/null)" || state_json='null'
+acceptance_json="$(printf '%s' "$acceptance_json" | jq -c '
+  if type == "object" then . else null end
+' 2>/dev/null)" || acceptance_json='null'
+critique_json="$(printf '%s' "$critique_json" | jq -c '
+  def valid_number: type == "number" and . >= 0;
+  if type != "object"
+    or ((.critiques? != null) and ((.critiques | type) != "array"))
+    or ((.gate_fires? != null) and (.gate_fires | valid_number | not))
+    or ((.caught_false_completions? != null) and (.caught_false_completions | valid_number | not))
+    or any((.critiques // [])[];
+      type != "object"
+      or ((.findings? != null) and ((.findings | type) != "array"))
+      or any((.findings // [])[];
+        type != "object"
+        or ((.severity? != null) and ((.severity | type) != "string"))
+        or ((.category? != null) and ((.category | type) != "string"))
+        or ((.type? != null) and ((.type | type) != "string"))
+      )
+    )
+  then null else . end
+' 2>/dev/null)" || critique_json='null'
 
 # --- delegations[] FACT (#415): per-sub-agent role/model + honestly-derived outcome ------------------
 # Scan each per-agent event log; group ALL events by agent_id. Role/model come from the latest
@@ -99,11 +214,14 @@ acceptance_json="$(read_json_or_null "$acceptance_path")"
 # Per-delegation COST is still not attributed here — token usage IS sub-agent-internal and no runtime
 # isolates it today (see the `signals` block); cost-per-(role,model) is a console projection.
 # Any read/parse failure degrades to an empty array; never fatal (local-first, best-effort).
-delegations_json='[]'
 if [[ -n "$agents_dir" && -d "$agents_dir" ]]; then
-  assembled="$(
+  agent_events_json="$(
     { for f in "$agents_dir"/*/events.jsonl; do [[ -f "$f" ]] && cat "$f"; done; } 2>/dev/null \
-    | jq -s -c '
+    | jq -s -c '[.[] | select(type == "object")]' 2>/dev/null
+  )"
+fi
+delegations_json="$(
+  printf '%s' "$agent_events_json" | jq -c '
         [ .[] | select(type == "object") | select(.agent_id != null) ]
         | group_by(.agent_id)
         | map(
@@ -127,16 +245,14 @@ if [[ -n "$agents_dir" && -d "$agents_dir" ]]; then
                 agent_id: $l.agent_id,
                 role: $l.role,
                 resolved_model: $l.model,
-                summary: ($l.summary // null),
                 dispatch_count: $dispatch_count,
                 outcome: $outcome
               }
             + (if ($l.escalated_from // null) != null then { escalated_from: $l.escalated_from } else {} end)
           )
       ' 2>/dev/null
-  )"
-  [[ -n "$assembled" && "$assembled" != "null" ]] && delegations_json="$assembled"
-fi
+)" || delegations_json='[]'
+[[ -z "$delegations_json" || "$delegations_json" == "null" ]] && delegations_json='[]'
 
 # --- per_delegation_tokens signal: DERIVED from the capability declaration (#620) ------------------
 # Replaces the former hardcoded `false` literal. The value is read from the build-only generated
@@ -178,6 +294,12 @@ case "$per_delegation_tokens" in
 esac
 
 tenant_self="${CONSOLE_TENANT_ID:-${FLOW_AGENTS_CONSOLE_TENANT:-}}"
+producer_authority="unavailable"
+if [[ "$production_snapshot_authenticated" == "true" ]]; then
+  producer_authority="authenticated_runtime_binding"
+elif [[ "$explicit_sidecars" == "true" ]]; then
+  producer_authority="fixture_input"
+fi
 
 # --- assemble the record with ONE jq -c filter (injection-safe, valid JSON) -------------------------
 # Untrusted fields (task_slug, model names, finding text) flow through jq string handling so hostile
@@ -188,9 +310,16 @@ record="$(printf '%s' "$usage_event" | jq -c \
   --argjson acceptance "$acceptance_json" \
   --argjson delegations "$delegations_json" \
   --argjson per_delegation_tokens "$per_delegation_tokens" \
+  --arg producer_authority "$producer_authority" \
   --arg tenant "$tenant_self" '
+  def valid_number: type == "number" and . >= 0;
+  def bounded_number: if valid_number then . else 0 end;
   . as $e
   | ($e.usage // {}) as $u
+  | ($e.run_correlation // {
+      status: "incomplete",
+      reason: "the economics source event did not provide run correlation"
+    }) as $correlation
   # findings_by_severity: group critique.json .critiques[].findings[] on .severity; missing → low.
   | ([($critique.critiques // [])[].findings[]?
        | (.severity // "low" | ascii_downcase)]
@@ -205,24 +334,29 @@ record="$(printf '%s' "$usage_event" | jq -c \
                 or ((.type // "")     | ascii_downcase | test("false[_-]?completion")))]
      | length) as $cfc
   # verification verdict: explicit sidecar field wins; else null-derived → NOT_VERIFIED.
-  | (($critique.verification_verdict // $acceptance.verification_verdict
-        // $state.verification_verdict // $state.verify_verdict) // null) as $vv0
+  | (($state.workflow_outcome.verification_status // null)) as $vv0
   | (if ($vv0 == "PASS" or $vv0 == "FAIL" or $vv0 == "NOT_VERIFIED") then $vv0 else "NOT_VERIFIED" end) as $vv
   # phase attribution: when state.json carries a phase, one bucket for it; else all → unattributed.
   # The single bucket carries the full cost/time totals so the phase-sum invariant holds by construction.
   | (($state.phase // null) | if . == null or . == "" then "unattributed" else . end) as $phase
-  | (($u.input_tokens // 0)) as $it
-  | (($u.output_tokens // 0)) as $ot
-  | (($u.cache_creation_input_tokens // 0)) as $cc
-  | (($u.cache_read_input_tokens // 0)) as $cr
-  | (($u.estimated_cost_usd // 0)) as $ec
-  | (($u.duration_s // 0)) as $wc
+  | (($u.input_tokens // 0) | bounded_number) as $it
+  | (($u.output_tokens // 0) | bounded_number) as $ot
+  | (($u.cache_creation_input_tokens // 0) | bounded_number) as $cc
+  | (($u.cache_read_input_tokens // 0) | bounded_number) as $cr
+  | (($u.estimated_cost_usd // 0) | bounded_number) as $ec
+  | (($u.duration_s // 0) | bounded_number) as $wc
   | {
       schema: "kontour.console.economics",
-      version: "0.1",
-      run_id: ($e.session_id // "unknown"),
+      version: "0.2",
+      run_id: (if $correlation.status? == "incomplete"
+        then ($e.session_id // "unknown")
+        else $correlation.correlation_id
+      end),
+      run_correlation: $correlation,
+      observation_semantics: "snapshot",
+      producer_authority: $producer_authority,
       at: ($e.timestamp // null),
-      task_slug: ($state.task_slug // null),
+      task_slug: ($e.task_slug // null),
       model: ($u.model // null),
       pricing_version: ($u.pricing_version // null),
       cost: {
@@ -231,11 +365,11 @@ record="$(printf '%s' "$usage_event" | jq -c \
         cache_creation_input_tokens: $cc,
         cache_read_input_tokens: $cr,
         estimated_cost_usd: $ec,
-        by_model: ($u.by_model // [])
+        by_model: (if ($u.by_model | type) == "array" then $u.by_model else [] end)
       },
       time: {
         wall_clock_s: $wc,
-        human_wait_s: (($state.human_wait_s // $e.usage.human_wait_s) // 0)
+        human_wait_s: ((($state.human_wait_s // $e.usage.human_wait_s) // 0) | bounded_number)
       },
       phases: [ {
         phase: $phase,
@@ -247,13 +381,13 @@ record="$(printf '%s' "$usage_event" | jq -c \
         wall_clock_s: $wc
       } ],
       iterations: {
-        count: (($state.iterations.count // $state.iteration_count) // 1),
-        route_backs: (($state.iterations.route_backs // $state.route_backs) // 0)
+        count: ((($state.iterations.count // $state.iteration_count) // 1) | bounded_number),
+        route_backs: ((($state.iterations.route_backs // $state.route_backs) // 0) | bounded_number)
       },
       defects: {
-        gate_fires: (($critique.gate_fires // $state.gate_fires) // 0),
+        gate_fires: ((($critique.gate_fires // $state.gate_fires) // 0) | bounded_number),
         findings_by_severity: $sev,
-        caught_false_completions: (($critique.caught_false_completions // $cfc) // 0),
+        caught_false_completions: ((($critique.caught_false_completions // $cfc) // 0) | bounded_number),
         verification_verdict: $vv
       },
       delegations: ($delegations // []),
@@ -282,6 +416,33 @@ record="$(printf '%s' "$usage_event" | jq -c \
       tenant_id: (if $tenant == "" then null else $tenant end)
     }' 2>/dev/null)" || exit 0
 [[ -z "$record" || "$record" == "null" ]] && exit 0
+if ! printf '%s' "$record" | jq -e '
+  def number: type == "number" and . >= 0;
+  .schema == "kontour.console.economics"
+  and .version == "0.2"
+  and (.run_id | type == "string")
+  and (.cost.input_tokens | number)
+  and (.cost.output_tokens | number)
+  and (.cost.cache_creation_input_tokens | number)
+  and (.cost.cache_read_input_tokens | number)
+  and (.cost.estimated_cost_usd | number)
+  and (.cost.by_model | type == "array")
+  and (.time.wall_clock_s | number)
+  and (.time.human_wait_s | number)
+  and (.iterations.count | number)
+  and (.iterations.route_backs | number)
+  and (.defects.gate_fires | number)
+  and (.defects.caught_false_completions | number)
+  and ([.defects.findings_by_severity[] | number] | all)
+  and ([.phases[] | (.input_tokens | number)
+    and (.output_tokens | number)
+    and (.cache_creation_input_tokens | number)
+    and (.cache_read_input_tokens | number)
+    and (.estimated_cost_usd | number)
+    and (.wall_clock_s | number)] | all)
+' >/dev/null 2>&1; then
+  exit 0
+fi
 
 # --- LOCAL-FIRST: append the record to the local economics log BEFORE any network attempt -----------
 # This write must happen and must NOT depend on the POST. TELEMETRY_DATA_DIR comes from config.sh
@@ -305,6 +466,23 @@ printf '%s\n' "$record" >> "$economics_log" 2>/dev/null || true
 # Off by default (local-first). Endpoint resolution copies relay.sh: explicit override, else base + /records.
 case "${FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY:-}" in
   1 | true | TRUE | yes | on) ;;
+  *) exit 0 ;;
+esac
+
+# Explicit paths are a hermetic fixture/operator surface, not an authenticated
+# producer. They may write only to the caller-selected local log and can never
+# relay an apparently authoritative record.
+[[ "$explicit_sidecars" == "true" ]] && exit 0
+[[ "$production_snapshot_authenticated" != "true" ]] && exit 0
+[[ "$run_usage_authenticated" != "true" ]] && exit 0
+
+# Production Stop observations are cumulative snapshots. Keep every local
+# observation for deterministic retrospective compilation, but relay only a
+# canonical terminal snapshot so Console's immutable per-run store cannot
+# freeze an early partial total or double-count repeated Stops.
+process_status="$(printf '%s' "$state_json" | jq -r '.workflow_outcome.process_status // ""' 2>/dev/null)"
+case "$process_status" in
+  completed|canceled|failed) ;;
   *) exit 0 ;;
 esac
 

@@ -605,6 +605,14 @@ async function resealVerificationEvidence(sessionDir: string, argv: string[], js
     session_dir: canonicalSessionDir,
     authorization_file: path.resolve(authorizationFile),
   });
+  try {
+    await recoverBuilderFlowSession({ sessionDir: canonicalSessionDir });
+  } catch (error) {
+    throw new Error(
+      `verification evidence reseal was ${report.operation_status}, but the Flow Agents projection requires recovery`,
+      { cause: error },
+    );
+  }
   if (json) console.log(JSON.stringify(report));
   else console.log(report.operation_status === "replayed" ? "Verification evidence reseal was already applied." : "Resealed verification evidence atomically.");
   return 0;

@@ -165,11 +165,44 @@ Stop hook treats an unfinished canonical Flow run as active even during pickup o
 planning, blocks a premature stop in block mode, and does not release its liveness
 claim. A run is complete only when Flow reaches its terminal step.
 
+Effective-definition compilation treats a referenced, ungated step with
+`next: null` as a named terminal sentinel. The sentinel is removed and its
+predecessor receives the terminal edge so Flow completes on the final gated
+transition; kit authors are not required to name that sentinel `done`.
+
 Projection is always derived from the canonical run's `current_step`, including
 composed steps that have no legacy sidecar phase (`merge-ready-ci` and `learn`).
 Both the legacy `current.json` pointer and every matching per-actor pointer are
 updated from that canonical step; `phase_map` is presentation metadata, not the
 authority for pointer navigation.
+
+Every projection also carries `workflow_outcome`, derived from the canonical Flow
+status rather than from artifacts or Stop-hook timing:
+
+- `completed` projects process status `completed`.
+- `blocked`, `needs_decision`, and `paused` project `blocked`.
+- `canceled` and `failed` remain distinct.
+- Continuing statuses, including `accepted_by_exception`, project `not_verified`.
+
+Verification status is derived only from the latest canonical Flow `verify-gate`
+outcome: `pass` projects `PASS`, `route-back` projects `FAIL`, and absence or any
+other outcome projects `NOT_VERIFIED`. Arbitrary sidecar verdict fields cannot
+override that authority. This is workflow verification evidence, not an independent
+quality grade. `quality_status` is therefore always
+`not_independently_evaluated`, leaving eval identity and grading outside Builder.
+
+Each canonical terminal projection (`completed`, `canceled`, `failed`, or
+`archived`) writes `workflow-outcome.json` before its matching actor
+pointer can retire. Active projections retain `workflow_outcome` in `state.json` for
+status and Stop-time observations but do not emit a `kind: terminal` fact. The
+terminal record carries the canonical correlation envelope and outcome, so
+reconstruction cannot mistake active `not_verified` status for completion.
+State, terminal outcome, and current-pointer projection form one rollback-aware
+transaction: a failed outcome or pointer publication restores the prior state
+and prior optional outcome rather than exposing a partial terminal projection.
+Artifact validation requires every terminal Flow projection to carry the same
+task slug, correlation envelope, canonical Flow status, and process status in
+`workflow-outcome.json`; a terminal `state.json` without that record is invalid.
 
 ### Gate-Action Envelope
 
@@ -485,6 +518,15 @@ cleanup-replay state, not a permanent rejection.
 Candidate, bundle, ledger, completion, Flow, signature, expiry, nonce, or claim-scope drift fails
 closed.
 
+After an applied or replayed reseal, the public package recovers `state.json`,
+current pointers, and the optional terminal outcome from the new canonical Flow
+head before reporting success. If that projection cannot commit, the command
+reports recovery required rather than presenting the reseal as a complete local
+operation. Authenticated correlation producers hold Flow's canonical per-run
+mutation lock across their complete capture or commit, reject an active recovery
+fence, and reject a projected run head, status, or step that differs from
+canonical Flow.
+
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
 a `visudo`-validated, exact no-argument rule in `/etc/sudoers.d/`; `env_reset` and a fixed
@@ -508,6 +550,14 @@ Flow's canonical cancellation transition, then releases the exact bound local as
 requires a canceled or completed canonical Flow run and atomically relocates only the session to
 `.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains
 `NOT_VERIFIED` pending the root/container conformance lane.
+After an applied or replayed cancellation, the package recovers the terminal
+projection and retires its matching correlation binding before returning the
+signed receipt. Archive authenticates the signed request before consulting or
+mutating the session, then requires the existing projection and
+`workflow-outcome.json` to match the canonical terminal Flow state while holding
+Flow's per-run mutation lock. A rejected authorization is read-only, and the
+exact completed archive can replay from coordinator state after the source
+session has moved.
 
 An administrator upgrade copies the direct coordinator source
 `packaging/lifecycle-authority/coordinator.mjs`; it is not generated package output. The signed
@@ -622,7 +672,9 @@ current Flow step and assignment. Assignment release does not
 change the Flow run. Cancellation changes Flow first and then idempotently releases the owning
 assignment while holding the same lock inside the external helper; a successfully consumed
 cancellation nonce cannot be replayed. Archive accepts only completed or canceled runs, moves the session under
-`.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
+`.kontourai/flow-agents/archive/<slug>/`, requires an already synchronized
+terminal workflow outcome, supports exact receipt replay through the original
+session identity after the move, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires the separate
 provider-aware `builder-run reclaim` action. Reclaim is valid only after accepted
 Builder learning evidence and a fresh authenticated merged observation for the

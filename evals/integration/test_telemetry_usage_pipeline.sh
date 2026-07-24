@@ -91,8 +91,18 @@ _run_stop() {
   local before_lines
   touch "$TMPLOG"
   before_lines=$(wc -l < "$TMPLOG" | tr -d ' ')
-  echo '{"cwd":"/tmp"}' | env "${common_env[@]}" bash "$TELEMETRY_SH" agentSpawn dev >/dev/null 2>&1
+  echo "$input" | env "${common_env[@]}" bash "$TELEMETRY_SH" agentSpawn dev >/dev/null 2>&1
   _wait_for_line "$before_lines"
+
+  # Give an active Builder binding one non-terminal observation on which to
+  # seal its cumulative transcript baseline before the terminal Stop snapshot.
+  if [[ "$extra_env_count" -gt 0 ]]; then
+    echo "$input" | env "${common_env[@]}" TELEMETRY_USAGE_TRACKING=true "${extra_env[@]}" \
+      bash "$TELEMETRY_SH" UserPromptSubmit dev >/dev/null 2>&1
+  else
+    echo "$input" | env "${common_env[@]}" TELEMETRY_USAGE_TRACKING=true \
+      bash "$TELEMETRY_SH" UserPromptSubmit dev >/dev/null 2>&1
+  fi
 
   before_lines=$(wc -l < "$TMPLOG" | tr -d ' ')
   if [[ "$extra_env_count" -gt 0 ]]; then
@@ -132,34 +142,230 @@ else
   _fail "no session.usage event emitted for fixture transcript"
 fi
 
-# --- 1b. Economics attribution: canonical current pointer beats stale legacy
+# --- 1a. Concurrent runtime sessions keep independent lifecycle clocks
 echo ""
-echo "--- Economics attribution uses canonical current pointer ---"
+echo "--- Interleaved runtime sessions keep independent elapsed time ---"
+INTERLEAVE_LOG="$TMPDIR_EVAL/interleaved.jsonl"
+INTERLEAVE_SESSIONS="$TMPDIR_EVAL/interleaved-sessions"
+mkdir -p "$INTERLEAVE_SESSIONS"
+: > "$INTERLEAVE_LOG"
+interleave_env=(
+  HOME="$FAKE_HOME"
+  TELEMETRY_ENABLED=true
+  TELEMETRY_CHANNELS=full
+  TELEMETRY_CHANNEL_FULL_LOG_FILE="$INTERLEAVE_LOG"
+  FLOW_AGENTS_TELEMETRY_FOREGROUND=true
+  FLOW_AGENTS_TELEMETRY_RUNTIME=claude-code
+  TELEMETRY_CONFIG_FILE="$TMPDIR_EVAL/telemetry.conf"
+  TELEMETRY_DATA_DIR="$TMPDIR_EVAL"
+  TELEMETRY_SESSION_DIR="$INTERLEAVE_SESSIONS"
+  TELEMETRY_USAGE_TRACKING=true
+  TELEMETRY_PRICING_FILE="$PRICING_FILE"
+)
+clock_a=$(jq -nc --arg tp "$FIXTURE_TRANSCRIPT" '{session_id:"clock-a",transcript_path:$tp,hook_event_name:"SessionStart"}')
+clock_b=$(jq -nc --arg tp "$FIXTURE_TRANSCRIPT" '{session_id:"clock-b",transcript_path:$tp,hook_event_name:"SessionStart"}')
+printf '%s' "$clock_a" | env "${interleave_env[@]}" bash "$TELEMETRY_SH" agentSpawn dev >/dev/null
+printf '%s' "$clock_b" | env "${interleave_env[@]}" bash "$TELEMETRY_SH" agentSpawn dev >/dev/null
+clock_a_file=""
+clock_b_file=""
+for file in "$INTERLEAVE_SESSIONS"/*.session; do
+  case "$(jq -r '.runtime_session_id // ""' "$file")" in
+    clock-a) clock_a_file="$file" ;;
+    clock-b) clock_b_file="$file" ;;
+  esac
+done
+now_epoch=$(date +%s)
+jq --argjson start "$((now_epoch - 120))" '.start_time = $start' "$clock_a_file" > "$clock_a_file.tmp" && mv "$clock_a_file.tmp" "$clock_a_file"
+jq --argjson start "$((now_epoch - 5))" '.start_time = $start' "$clock_b_file" > "$clock_b_file.tmp" && mv "$clock_b_file.tmp" "$clock_b_file"
+printf '%s' "$clock_a" | env "${interleave_env[@]}" bash "$TELEMETRY_SH" Stop dev >/dev/null
+clock_a_usage=$(jq -c 'select(.event_type == "session.usage" and .hook.runtime_session_id == "clock-a")' "$INTERLEAVE_LOG" | tail -1)
+clock_a_duration=$(printf '%s' "$clock_a_usage" | jq -r '.usage.duration_s // 0')
+clock_a_session_duration=$(jq -r '.duration_s // 0' "$clock_a_file")
+clock_b_ended=$(jq -r 'has("end_time")' "$clock_b_file")
+if [[ "$clock_a_duration" -ge 110 && "$clock_a_session_duration" -ge 110 && "$clock_b_ended" == "false" ]]; then
+  _pass "interleaved Stop uses the exact runtime session clock"
+else
+  _fail "runtime clocks crossed (usage=$clock_a_duration session=$clock_a_session_duration clock_b_ended=$clock_b_ended)"
+fi
+
+# --- 1b. Authenticated economics/outcome attribution ignores competing shared current
+echo ""
+echo "--- Economics and workflow outcome use authenticated correlation, never shared current ---"
 ATTR_CWD="${TMPDIR_EVAL}/workspace"
 CANON_SLUG="canonical-task"
 LEGACY_SLUG="legacy-task"
 ECON_LOG="${TMPDIR_EVAL}/economics.jsonl"
-mkdir -p "$ATTR_CWD/.kontourai/flow-agents/$CANON_SLUG" "$ATTR_CWD/.flow-agents/$LEGACY_SLUG"
+ECON_RELAY_LOG="${TMPDIR_EVAL}/economics-relay.jsonl"
+ECON_FAKE_BIN="${TMPDIR_EVAL}/fake-curl-bin"
+ATTR_ROOT="$ATTR_CWD/.kontourai/flow-agents"
+mkdir -p "$ATTR_ROOT/$CANON_SLUG" "$ATTR_ROOT/$LEGACY_SLUG" "$ECON_FAKE_BIN"
 : > "$ECON_LOG"
-printf '%s\n' "{\"active_slug\":\"$CANON_SLUG\"}" > "$ATTR_CWD/.kontourai/flow-agents/current.json"
-printf '%s\n' "{\"active_slug\":\"$LEGACY_SLUG\"}" > "$ATTR_CWD/.flow-agents/current.json"
-printf '%s\n' '{"schema_version":"1.0","task_slug":"canonical-task","phase":"execution","verification_verdict":"PASS"}' > "$ATTR_CWD/.kontourai/flow-agents/$CANON_SLUG/state.json"
-printf '%s\n' '{"schema_version":"1.0","task_slug":"legacy-task","phase":"execution","verification_verdict":"PASS"}' > "$ATTR_CWD/.flow-agents/$LEGACY_SLUG/state.json"
+: > "$ECON_RELAY_LOG"
+cat > "$ECON_FAKE_BIN/curl" <<'SH'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config) config="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+body_file="$(sed -n 's/^data-binary = "@\(.*\)"$/\1/p' "$config" | head -1)"
+[[ -n "$body_file" && -f "$body_file" ]] || exit 2
+cat "$body_file" >> "$TELEMETRY_RELAY_CAPTURE"
+printf '\n' >> "$TELEMETRY_RELAY_CAPTURE"
+SH
+chmod +x "$ECON_FAKE_BIN/curl"
+ATTR_CORRELATION="$(FLOW_AGENTS_ACTOR=runtime-a node - "$ROOT_DIR" "$ATTR_CWD" "$CANON_SLUG" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+(async () => {
+  const [root, workspace, slug] = process.argv.slice(2);
+  const runtime = await import(pathToFileURL(path.join(root, "build/src/builder-flow-runtime.js")).href);
+  const assignment = await import(pathToFileURL(path.join(root, "build/src/cli/assignment-provider.js")).href);
+  const flow = await import("@kontourai/flow");
+  const artifactRoot = path.join(workspace, ".kontourai", "flow-agents");
+  const sessionDir = path.join(artifactRoot, slug);
+  const subject = `local:work-item/${slug}`;
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(workspace, "package.json"), '{"name":"telemetry-usage-pipeline","private":true}\n');
+  fs.writeFileSync(path.join(sessionDir, "state.json"), `${JSON.stringify({
+    schema_version: "1.0",
+    task_slug: slug,
+    status: "planned",
+    phase: "planning",
+    updated_at: new Date().toISOString(),
+    work_item_refs: [subject],
+    next_action: { status: "continue", summary: "Start telemetry attribution fixture." },
+  }, null, 2)}\n`);
+  const actor = assignment.resolveCurrentAssignmentActor();
+  assignment.performLocalClaim(artifactRoot, slug, actor.actor, {
+    ttlSeconds: 1800,
+    actorKey: actor.actorKey,
+    branch: `fixture/${slug}`,
+    artifactDir: slug,
+    workItemRef: subject,
+    reason: "telemetry attribution fixture",
+  });
+  const started = await runtime.startBuilderFlowSession({ sessionDir });
+  await flow.pauseRun(slug, {
+    cwd: workspace,
+    reason: "exercise a non-terminal blocked process outcome",
+    authority: {
+      kind: "operator_request",
+      actor: "fixture",
+      request_ref: "fixture://telemetry-pause",
+      requested_at: "2026-07-24T15:00:00.000Z",
+    },
+    at: "2026-07-24T15:00:00.000Z",
+  });
+  await runtime.syncBuilderFlowSession({ sessionDir });
+  process.stdout.write(JSON.stringify(started.run.correlation.envelope));
+})().catch((error) => { console.error(error); process.exit(1); });
+NODE
+)"
+printf '%s\n' '{"schema_version":"1.0","task_slug":"legacy-task","phase":"wrong","verification_verdict":"PASS","flow_run":{"run_id":"legacy-task","status":"completed"}}' > "$ATTR_ROOT/$LEGACY_SLUG/state.json"
+printf '%s\n' '{"gate_fires":99,"verification_verdict":"PASS"}' > "$ATTR_ROOT/$LEGACY_SLUG/critique.json"
+ln -s "../$LEGACY_SLUG/critique.json" "$ATTR_ROOT/$CANON_SLUG/critique.json"
+printf '%s\n' "{\"active_slug\":\"$LEGACY_SLUG\",\"artifact_dir\":\"$LEGACY_SLUG\"}" > "$ATTR_ROOT/current.json"
+ATTR_PHASE="$(jq -r '.phase' "$ATTR_ROOT/$CANON_SLUG/state.json")"
 input_attr=$(jq -nc --arg tp "$FIXTURE_TRANSCRIPT" --arg cwd "$ATTR_CWD" '{session_id:"pipeline-attribution",transcript_path:$tp,hook_event_name:"Stop",cwd:$cwd}')
 TELEMETRY_SH_SAVED="$TELEMETRY_SH"
 TELEMETRY_SH="$ROOT_DIR/scripts/telemetry/telemetry.sh"
-out_attr=$(_run_stop "$input_attr" TELEMETRY_PRICING_FILE="$PRICING_FILE" TELEMETRY_ECONOMICS_LOG_FILE="$ECON_LOG")
+out_attr=$(_run_stop "$input_attr" \
+  FLOW_AGENTS_ACTOR=runtime-a \
+  TELEMETRY_PRICING_FILE="$PRICING_FILE" \
+  TELEMETRY_ECONOMICS_LOG_FILE="$ECON_LOG" \
+  FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1 \
+  FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL=http://127.0.0.1:43119/records \
+  CONSOLE_TELEMETRY_TOKEN=fixture-token \
+  TELEMETRY_RELAY_CAPTURE="$ECON_RELAY_LOG" \
+  PATH="$ECON_FAKE_BIN:$PATH")
 TELEMETRY_SH="$TELEMETRY_SH_SAVED"
 _wait_for_file_line "$ECON_LOG"
 
 if [[ -n "$out_attr" && -s "$ECON_LOG" ]]; then
   attr_task=$(tail -1 "$ECON_LOG" | jq -r '.task_slug')
   attr_phase=$(tail -1 "$ECON_LOG" | jq -r '.phases[0].phase')
-  [[ "$attr_task" == "$CANON_SLUG" ]] && _pass "economics record task_slug comes from canonical .kontourai current pointer" || _fail "expected canonical task_slug '$CANON_SLUG', got '$attr_task'"
-  [[ "$attr_phase" == "execution" ]] && _pass "economics record phase comes from canonical state.json" || _fail "expected canonical phase execution, got '$attr_phase'"
+  attr_gate_fires=$(tail -1 "$ECON_LOG" | jq -r '.defects.gate_fires')
+  attr_correlation=$(tail -1 "$ECON_LOG" | jq -r '.run_correlation.correlation_id')
+  [[ "$attr_task" == "$CANON_SLUG" ]] && _pass "economics task_slug comes from authenticated actor binding" || _fail "expected authenticated task_slug '$CANON_SLUG', got '$attr_task'"
+  [[ "$attr_phase" == "$ATTR_PHASE" && "$attr_phase" != "wrong" ]] && _pass "economics sidecars come from the correlated state, not competing shared current" || _fail "expected correlated phase '$ATTR_PHASE', got '$attr_phase'"
+  [[ "$attr_gate_fires" == "0" ]] && _pass "economics snapshot rejects a symlinked critique instead of following foreign sidecar content" || _fail "symlinked critique leaked gate_fires=$attr_gate_fires"
+  [[ "$attr_correlation" == "$(printf '%s' "$ATTR_CORRELATION" | jq -r '.correlation_id')" ]] && _pass "economics record preserves the authenticated correlation" || _fail "expected authenticated correlation, got '$attr_correlation'"
+  outcome_record=$(jq -c 'select(.event_type=="workflow.outcome")' "$TMPLOG" | tail -1)
+  outcome_correlation=$(printf '%s' "$outcome_record" | jq -r '.run_correlation.correlation_id')
+  outcome_status=$(printf '%s' "$outcome_record" | jq -r '.workflow_outcome.process_status')
+  outcome_quality=$(printf '%s' "$outcome_record" | jq -r '.workflow_outcome.quality_status')
+  [[ "$outcome_correlation" == "$(printf '%s' "$ATTR_CORRELATION" | jq -r '.correlation_id')" ]] && _pass "workflow outcome preserves the same correlation" || _fail "workflow outcome correlation mismatch: '$outcome_correlation'"
+  [[ "$outcome_status" == "blocked" ]] && _pass "workflow outcome distinguishes blocked process state" || _fail "expected blocked process status, got '$outcome_status'"
+  [[ "$outcome_quality" == "not_independently_evaluated" ]] && _pass "workflow outcome does not impersonate independent task quality" || _fail "workflow outcome quality boundary missing: '$outcome_quality'"
+  sleep 1
+  [[ ! -s "$ECON_RELAY_LOG" ]] && _pass "non-terminal cumulative snapshot stays local" || _fail "non-terminal cumulative snapshot was relayed"
 else
-  _fail "economics attribution record was not emitted for canonical-current test"
+  _fail "authenticated economics/outcome records were not emitted"
 fi
+
+# A canonical terminal projection retires the actor pointer before the runtime's
+# Stop hook necessarily runs. The terminal-only handoff must preserve the exact
+# generation without making that retired binding visible to ordinary events.
+echo ""
+echo "--- Terminal Stop consumes the exact retired actor generation ---"
+FLOW_AGENTS_ACTOR=runtime-a node - "$ROOT_DIR" "$ATTR_CWD" "$CANON_SLUG" <<'NODE'
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+(async () => {
+  const [root, workspace, slug] = process.argv.slice(2);
+  const runtime = await import(pathToFileURL(path.join(root, "build/src/builder-flow-runtime.js")).href);
+  const flow = await import("@kontourai/flow");
+  await flow.cancelRun(slug, {
+    cwd: workspace,
+    reason: "exercise terminal telemetry handoff",
+    authority: {
+      kind: "operator_request",
+      actor: "fixture",
+      request_ref: "fixture://telemetry-cancel",
+      requested_at: "2026-07-24T15:01:00.000Z",
+    },
+    at: "2026-07-24T15:01:00.000Z",
+  });
+  await runtime.syncBuilderFlowSession({
+    sessionDir: path.join(workspace, ".kontourai", "flow-agents", slug),
+  });
+})().catch((error) => { console.error(error); process.exit(1); });
+NODE
+: > "$ECON_LOG"
+input_terminal=$(jq -nc --arg tp "$FIXTURE_TRANSCRIPT" --arg cwd "$ATTR_CWD" '{session_id:"pipeline-terminal",transcript_path:$tp,hook_event_name:"Stop",cwd:$cwd}')
+TELEMETRY_SH_SAVED="$TELEMETRY_SH"
+TELEMETRY_SH="$ROOT_DIR/scripts/telemetry/telemetry.sh"
+out_terminal=$(_run_stop "$input_terminal" \
+  FLOW_AGENTS_ACTOR=runtime-a \
+  TELEMETRY_PRICING_FILE="$PRICING_FILE" \
+  TELEMETRY_ECONOMICS_LOG_FILE="$ECON_LOG" \
+  FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1 \
+  FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL=http://127.0.0.1:43119/records \
+  CONSOLE_TELEMETRY_TOKEN=fixture-token \
+  TELEMETRY_RELAY_CAPTURE="$ECON_RELAY_LOG" \
+  PATH="$ECON_FAKE_BIN:$PATH")
+TELEMETRY_SH="$TELEMETRY_SH_SAVED"
+_wait_for_file_line "$ECON_LOG"
+terminal_usage_correlation=$(printf '%s' "$out_terminal" | jq -r '.run_correlation.correlation_id')
+terminal_usage_scope=$(printf '%s' "$out_terminal" | jq -r '.usage.scope')
+terminal_baseline_status=$(printf '%s' "$out_terminal" | jq -r '.usage.baseline_status')
+terminal_econ_correlation=$(tail -1 "$ECON_LOG" | jq -r '.run_correlation.correlation_id')
+terminal_outcome=$(jq -c 'select(.event_type=="workflow.outcome" and .workflow_outcome.process_status=="canceled")' "$TMPLOG" | tail -1)
+terminal_outcome_correlation=$(printf '%s' "$terminal_outcome" | jq -r '.run_correlation.correlation_id')
+_wait_for_file_line "$ECON_RELAY_LOG"
+terminal_relay_run_id=$(tail -1 "$ECON_RELAY_LOG" | jq -r '.run_id')
+terminal_relay_authority=$(tail -1 "$ECON_RELAY_LOG" | jq -r '.producer_authority')
+ATTR_CORRELATION_ID="$(printf '%s' "$ATTR_CORRELATION" | jq -r '.correlation_id')"
+[[ "$terminal_usage_correlation" == "$ATTR_CORRELATION_ID" ]] && _pass "terminal usage consumes the retired binding's exact generation" || _fail "terminal usage correlation mismatch: '$terminal_usage_correlation'"
+[[ "$terminal_usage_scope" == "run" && "$terminal_baseline_status" == "present" ]] && _pass "terminal usage is run-scoped only after a sealed baseline" || _fail "terminal usage scope/baseline mismatch: '$terminal_usage_scope'/'$terminal_baseline_status'"
+[[ "$terminal_econ_correlation" == "$ATTR_CORRELATION_ID" ]] && _pass "terminal economics preserves the retired binding's exact generation" || _fail "terminal economics correlation mismatch: '$terminal_econ_correlation'"
+[[ "$terminal_outcome_correlation" == "$ATTR_CORRELATION_ID" ]] && _pass "terminal workflow outcome preserves the retired binding's exact generation" || _fail "terminal workflow outcome correlation mismatch: '$terminal_outcome_correlation'"
+[[ "$terminal_relay_run_id" == "$ATTR_CORRELATION_ID" ]] && _pass "terminal economics relay uses correlation as immutable run id" || _fail "terminal economics relay run id mismatch: '$terminal_relay_run_id'"
+[[ "$terminal_relay_authority" == "authenticated_runtime_binding" ]] && _pass "terminal economics relay discloses authenticated runtime authority" || _fail "terminal economics authority mismatch: '$terminal_relay_authority'"
 
 # --- 2. Pricing forced unavailable: tokens survive, cost is null ------------
 echo ""

@@ -90,6 +90,30 @@
         }
       ]
     },
+    "workflow_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source",
+        "flow_status",
+        "process_status",
+        "verification_status",
+        "quality_status"
+      ],
+      "properties": {
+        "schema_version": { "const": "1.0" },
+        "source": { "const": "canonical_flow_projection" },
+        "flow_status": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "process_status": {
+          "enum": ["completed", "blocked", "canceled", "failed", "not_verified"]
+        },
+        "verification_status": {
+          "enum": ["PASS", "FAIL", "NOT_VERIFIED"]
+        },
+        "quality_status": { "const": "not_independently_evaluated" }
+      }
+    },
     "flow_run": {
       "type": "object",
       "additionalProperties": false,

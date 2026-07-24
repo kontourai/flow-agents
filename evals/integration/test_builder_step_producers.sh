@@ -754,7 +754,7 @@ NODE
   record_public_expectation "slices-defined"
   assert_public_shape_step "file-issues" "idea-to-backlog"
   record_public_expectation "work-items-filed"
-  assert_public_shape_step "shape-done" "" "active-or-completed"
+  assert_public_shape_step "file-issues" "" "completed"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ const sidecarSchemas: Record<string, string> = {
   "release.json": "schemas/workflow-release.schema.json",
   "learning.json": "schemas/workflow-learning.schema.json",
   "waves.json": "schemas/workflow-waves.schema.json",
+  "workflow-outcome.json": "schemas/workflow-outcome.schema.json",
 };
 
 // Signed critique-resolution events are verified against the repository-owned
@@ -417,6 +418,31 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     }
     const slugs = new Set([...payloads.values()].map((p: any) => p.task_slug).filter(Boolean));
     if (slugs.size > 1) issues.push({ path: dir, message: "sidecar task_slug mismatch" });
+    const state = payloads.get("state.json");
+    const flowStatus = state?.flow_run?.status;
+    if (["completed", "canceled", "failed", "archived"].includes(flowStatus)) {
+      const outcomeFile = path.join(dir, "workflow-outcome.json");
+      const outcome = payloads.get("workflow-outcome.json");
+      if (!outcome) {
+        issues.push({ path: outcomeFile, message: `terminal Flow status ${flowStatus} requires workflow-outcome.json` });
+      } else {
+        if (outcome.task_slug !== state.task_slug) {
+          issues.push({ path: outcomeFile, message: "workflow outcome task_slug must match state.json" });
+        }
+        if (!isDeepStrictEqual(outcome.run_correlation, state.run_correlation)) {
+          issues.push({ path: outcomeFile, message: "workflow outcome run_correlation must match state.json" });
+        }
+        if (outcome.workflow_outcome?.flow_status !== flowStatus) {
+          issues.push({ path: outcomeFile, message: "workflow outcome flow_status must match terminal state.json flow_run.status" });
+        }
+        if (!isDeepStrictEqual(outcome.workflow_outcome, state.workflow_outcome)) {
+          issues.push({ path: outcomeFile, message: "workflow outcome projection must match state.json workflow_outcome" });
+        }
+        if (outcome.process_status !== state.workflow_outcome?.process_status) {
+          issues.push({ path: outcomeFile, message: "workflow outcome process_status must match state.json workflow_outcome.process_status" });
+        }
+      }
+    }
     const evidence = payloads.get("evidence.json");
     if (evidence?.verdict === "pass" && Array.isArray(evidence.checks) && evidence.checks.some((c: any) => c.status !== "pass" && c.status !== "skip")) issues.push({ path: path.join(dir, "evidence.json"), message: "pass verdict requires all non-skipped checks to pass" });
   }
@@ -442,7 +468,9 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       const hasTrustBundle = fs.existsSync(path.join(dir, "trust.bundle"));
       const evidenceRequired = delivered && !hasTrustBundle;
       if (requireSidecars) {
-        for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
+        const state = readJson(path.join(dir, "state.json")).value;
+        const terminalOutcomeRequired = ["completed", "canceled", "failed", "archived"].includes(state?.flow_run?.status);
+        for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json", ...(terminalOutcomeRequired ? ["workflow-outcome.json"] : [])]) {
           if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
         }
       }

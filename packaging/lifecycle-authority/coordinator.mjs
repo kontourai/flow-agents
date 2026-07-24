@@ -848,6 +848,28 @@ async function archiveCanonicalSession(paths, authorization) {
   const run = await flow.loadRun(paths.runId, paths.projectRoot);
   assertAuthorizationBinding(paths, authorization, run);
   if (!['canceled', 'completed'].includes(run.state.status)) throw new Error("only canceled or completed canonical Flow runs may be archived");
+  let state;
+  let outcome;
+  try {
+    state = protectedJson(path.join(paths.sessionDir, "state.json"), "workflow session state", 4 * 1024 * 1024);
+    outcome = protectedJson(path.join(paths.sessionDir, "workflow-outcome.json"), "workflow outcome", 4 * 1024 * 1024);
+  } catch (error) {
+    throw new Error("archive requires a synchronized terminal Flow Agents projection and workflow outcome", { cause: error });
+  }
+  const projectedOutcome = state.workflow_outcome;
+  if (!record(state.flow_run)
+      || state.flow_run.run_id !== paths.runId
+      || state.flow_run.run_head !== flow.flowRunHead(run.state)
+      || state.flow_run.status !== run.state.status
+      || state.flow_run.current_step !== run.state.current_step
+      || !record(projectedOutcome)
+      || projectedOutcome.flow_status !== run.state.status
+      || outcome.task_slug !== paths.runId
+      || canonicalJson(outcome.run_correlation) !== canonicalJson(state.run_correlation)
+      || canonicalJson(outcome.workflow_outcome) !== canonicalJson(projectedOutcome)
+      || outcome.process_status !== projectedOutcome.process_status) {
+    throw new Error("archive requires a synchronized terminal Flow Agents projection and workflow outcome");
+  }
   const archiveRoot = path.join(paths.projectRoot, ".kontourai", "flow-agents", "archive");
   if (fs.existsSync(archiveRoot)) {
     const stat = fs.lstatSync(archiveRoot);
@@ -1204,7 +1226,7 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
     }
     const outcome = envelope.action === "cancel"
       ? await cancelCanonicalFlow(paths, authorization)
-      : await archiveCanonicalSession(paths, authorization);
+      : await withCanonicalFlowRunMutationLock(paths, () => archiveCanonicalSession(paths, authorization));
     return { result_core_sha256: outcome.result_core_sha256, run_id: paths.runId };
 }
 function callerIdentity() {

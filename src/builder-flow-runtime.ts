@@ -12,6 +12,7 @@ import {
   expectationsForGate,
   flowRunHead,
   openGates,
+  withRunMutationLock,
   type FlowGate,
   type FlowExpectation,
   type FlowRunState,
@@ -49,7 +50,12 @@ import {
   type BuilderFlowRunResult,
 } from "./builder-flow-run-adapter.js";
 import { createBuilderRunCorrelation } from "./builder-run-correlation.js";
+import {
+  deriveWorkflowOutcome,
+  verificationStatusFromFlowGateOutcomes,
+} from "./workflow-outcome.js";
 import { retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
+import { atomicWriteFile } from "./lib/fs.js";
 import { replaceStateIfUnchanged } from "./lib/state-file-lock.js";
 
 type AnyRecord = Record<string, any>;
@@ -407,6 +413,34 @@ export async function inspectBuilderFlowSession(input: BuilderFlowSessionInput):
   };
 }
 
+export async function withBuilderFlowProjectionCurrent<T>(
+  input: BuilderFlowSessionInput,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  const context = resolveSessionContext(input.sessionDir);
+  return withRunMutationLock(context.slug, context.projectRoot, async () => {
+    const sidecarSnapshot = readSidecarSnapshot(context);
+    const subject = workflowSubject(sidecarSnapshot.state);
+    const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+    assertRunSubjectBinding(run, subject);
+    const projectedHead = sidecarSnapshot.state.flow_run?.run_head;
+    if (typeof projectedHead !== "string"
+        || projectedHead !== flowRunHead(run.state)
+        || sidecarSnapshot.state.flow_run?.status !== run.state.status
+        || sidecarSnapshot.state.flow_run?.current_step !== run.state.current_step) {
+      throw new BuilderBuildRunInputError(
+        "state.json.flow_run",
+        "is stale relative to the canonical Flow run; recover the Builder session before recording correlated facts",
+      );
+    }
+    return operation();
+  });
+}
+
+export async function assertBuilderFlowProjectionCurrent(input: BuilderFlowSessionInput): Promise<void> {
+  await withBuilderFlowProjectionCurrent(input, () => undefined);
+}
+
 export async function pauseBuilderFlowSession(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult> {
   return changeBuilderFlowSessionLifecycle(input, "pause");
 }
@@ -417,7 +451,16 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
 
 export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
+  const result = invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
+  try {
+    await recoverBuilderFlowSession({ sessionDir: context.sessionDir });
+  } catch (error) {
+    throw new Error(
+      `lifecycle authority ${result.operation_status} cancel for ${result.run_id}, but the Flow Agents projection requires recovery`,
+      { cause: error },
+    );
+  }
+  return result;
 }
 
 export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
@@ -548,8 +591,21 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
 }
 
 export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
-  const context = resolveSessionContext(input.sessionDir);
-  return invokeExternalLifecycleAuthority({ action: "archive", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
+  const sessionDir = path.resolve(input.sessionDir);
+  const artifactRoot = path.dirname(sessionDir);
+  const kontouraiRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) !== "flow-agents"
+      || path.basename(kontouraiRoot) !== ".kontourai"
+      || !path.basename(sessionDir)
+      || [".", ".."].includes(path.basename(sessionDir))) {
+    throw new BuilderBuildRunInputError("sessionDir", "must be .kontourai/flow-agents/<slug>");
+  }
+  return invokeExternalLifecycleAuthority({
+    action: "archive",
+    project_root: path.dirname(kontouraiRoot),
+    session_dir: sessionDir,
+    authorization_file: path.resolve(input.authorizationFile),
+  });
 }
 
 async function changeBuilderFlowSessionLifecycle(
@@ -1642,11 +1698,13 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
         command: syncCommand,
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
+  const verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes);
   return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
     run_correlation: run.correlation.status === "present"
       ? run.correlation.envelope
       : { status: "incomplete", reason: run.correlation.reason },
+    workflow_outcome: deriveWorkflowOutcome(run.state.status, verificationStatus),
     status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
@@ -1683,6 +1741,13 @@ function writeProjection(
   }
   const globalFile = path.join(context.artifactRoot, "current.json");
   const globalTarget = prepared.targets.find((target) => target.file === globalFile);
+  const outcomeFile = path.join(context.sessionDir, "workflow-outcome.json");
+  const outcomeTarget = isTerminalWorkflowProjection(projection)
+    ? readOptionalProjectionTarget(outcomeFile, context.sessionDir, "workflow-outcome.json")
+    : null;
+  const outcomeContent = outcomeTarget
+    ? `${JSON.stringify(workflowOutcomeRecord(context, projection), null, 2)}\n`
+    : null;
   const result = currentPointerHelper().replaceCurrentPointersIfUnchanged(
     context.artifactRoot,
     pointerWrites.map((write) => ({
@@ -1702,11 +1767,116 @@ function writeProjection(
       )) {
         throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
       }
+      try {
+        if (outcomeTarget && outcomeContent) {
+          atomicWriteFile(context.sessionDir, outcomeFile, outcomeContent);
+        }
+      } catch (error) {
+        try {
+          rollbackProjectionCommit(
+            context,
+            expectedStateRaw,
+            stateWrite.content,
+            outcomeTarget,
+            outcomeContent,
+          );
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "terminal projection write and rollback failed",
+          );
+        }
+        throw error;
+      }
+      return () => rollbackProjectionCommit(
+        context,
+        expectedStateRaw,
+        stateWrite.content,
+        outcomeTarget,
+        outcomeContent,
+      );
     },
   );
   if (result !== "updated") {
     throw new BuilderBuildRunInputError("projection target", `changed during ${operation}`);
   }
+}
+
+function rollbackProjectionCommit(
+  context: SessionContext,
+  expectedStateRaw: string,
+  writtenStateRaw: string,
+  outcomeTarget: ProjectionTargetSnapshot | null,
+  writtenOutcomeRaw: string | null,
+): void {
+  const errors: unknown[] = [];
+  if (outcomeTarget && writtenOutcomeRaw) {
+    try {
+      const current = readOptionalProjectionTarget(
+        outcomeTarget.file,
+        context.sessionDir,
+        "workflow-outcome.json",
+      );
+      if (current.raw !== outcomeTarget.raw) {
+        if (current.raw !== writtenOutcomeRaw) {
+          throw new BuilderBuildRunInputError(
+            "workflow-outcome.json",
+            "changed before projection rollback",
+          );
+        }
+        if (outcomeTarget.raw === null) {
+          fs.unlinkSync(outcomeTarget.file);
+        } else {
+          atomicWriteFile(context.sessionDir, outcomeTarget.file, outcomeTarget.raw);
+        }
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    if (!replaceStateIfUnchanged(context.stateFile, writtenStateRaw, expectedStateRaw)) {
+      const current = fs.readFileSync(context.stateFile, "utf8");
+      if (current !== expectedStateRaw) {
+        throw new BuilderBuildRunInputError("state.json", "changed before projection rollback");
+      }
+    }
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "projection commit rollback failed");
+  }
+}
+
+function isTerminalWorkflowProjection(projection: AnyRecord): boolean {
+  const status = isRecord(projection.flow_run) ? projection.flow_run.status : null;
+  return status === "completed"
+    || status === "canceled"
+    || status === "failed"
+    || status === "archived";
+}
+
+function workflowOutcomeRecord(context: SessionContext, projection: AnyRecord): AnyRecord {
+  const correlation = projection.run_correlation;
+  const outcome = projection.workflow_outcome;
+  if (!isRecord(correlation) || !isRecord(outcome)) {
+    throw new BuilderBuildRunInputError("workflow_outcome", "requires the projected run correlation and outcome");
+  }
+  const recordIdentity = typeof correlation.correlation_id === "string"
+    ? correlation.correlation_id
+    : context.slug;
+  return {
+    schema: "kontour.flow-agents.workflow-outcome",
+    version: "1.0",
+    kind: "terminal",
+    record_id: `workflow-outcome:${recordIdentity}`,
+    task_slug: context.slug,
+    recorded_at: projection.updated_at,
+    run_correlation: correlation,
+    process_status: outcome.process_status,
+    workflow_outcome: outcome,
+  };
 }
 
 function prepareProjectionWrites(
@@ -1956,7 +2126,7 @@ function currentPointerHelper(): {
       expectedGlobalRaw?: string | null;
       expectedActorEntries?: string[] | null;
     },
-    commit?: () => void,
+    commit?: () => void | (() => void),
   ): "updated" | "changed";
 } {
   const require = createRequire(import.meta.url);

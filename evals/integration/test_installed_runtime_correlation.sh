@@ -112,8 +112,8 @@ invoke_hook() {
     turn_id: "turn-one",
     cwd: $cwd,
     hook_event_name: "PreToolUse",
-    tool_name: "Bash",
-    tool_input: {command: "echo installed"}
+    tool_name: "Task",
+    tool_input: {subagent_type: "worker", prompt: "perform the installed fixture step"}
   }')
   local common=(
     HOME="$TMP/home"
@@ -160,6 +160,40 @@ invoke_hook() {
   esac
 }
 
+invoke_claude_lifecycle() {
+  local event="$1" session="$2" workspace="$3" prefix="$4" transcript="$5"
+  local input
+  input=$(jq -nc \
+    --arg event "$event" \
+    --arg cwd "$workspace" \
+    --arg session "$session" \
+    --arg transcript "$transcript" '{
+      session_id: $session,
+      turn_id: "terminal-turn",
+      cwd: $cwd,
+      hook_event_name: $event,
+      transcript_path: $transcript
+    }')
+  local common=(
+    HOME="$TMP/home"
+    TELEMETRY_ENABLED=true
+    TELEMETRY_CHANNELS=full,analytics
+    TELEMETRY_CHANNEL_FULL_LOG_FILE="$prefix.full.jsonl"
+    TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="$prefix.analytics.jsonl"
+    TELEMETRY_CONFIG_FILE="$TMP/telemetry.conf"
+    TELEMETRY_DATA_DIR="$TMP/telemetry"
+    TELEMETRY_SESSION_DIR="$TMP/telemetry/sessions"
+    TELEMETRY_USAGE_TRACKING=true
+    TELEMETRY_PRICING_FILE="$ROOT/scripts/telemetry/pricing.json"
+    TELEMETRY_ECONOMICS_LOG_FILE="$prefix.economics.jsonl"
+    FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=false
+    FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND=true
+    FLOW_AGENTS_CLAUDE_TELEMETRY_CHANNELS=full,analytics
+  )
+  printf '%s' "$input" | run_runtime claude "$session" env "${common[@]}" \
+    node "$PACKAGE/scripts/hooks/claude-telemetry-hook.js" "$event" dev >/dev/null
+}
+
 PRE_WORKSPACE="$TMP/pre-activation"
 mkdir -p "$PRE_WORKSPACE"
 invoke_hook claude pre-activation-session "$PRE_WORKSPACE" "$TMP/pre"
@@ -182,15 +216,167 @@ for runtime in claude codex kiro opencode pi; do
 
   full="$TMP/$runtime.full.jsonl"
   analytics="$TMP/$runtime.analytics.jsonl"
+  state="$workspace/.kontourai/flow-agents/$slug/state.json"
+  usage_event="$(jq -nc \
+    --arg session "$session" \
+    --arg slug "$slug" \
+    --arg cwd "$workspace" \
+    --slurpfile correlation "$expected" '{
+      event_type: "session.usage",
+      session_id: $session,
+      timestamp: "1784707200000",
+      task_slug: $slug,
+      context: {cwd: $cwd},
+      run_correlation: $correlation[0],
+      usage: {
+        model: "installed-fixture",
+        input_tokens: 100,
+        output_tokens: 25,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        estimated_cost_usd: null,
+        duration_s: 1,
+        by_model: null
+      }
+    }')"
+  TELEMETRY_ECONOMICS_LOG_FILE="$TMP/$runtime.economics.jsonl" \
+    TELEMETRY_ECONOMICS_RELAY=false \
+    FLOW_AGENTS_ECONOMICS_FIXTURE_MODE=true \
+    bash "$PACKAGE/scripts/telemetry/economics-record.sh" "$usage_event" --state "$state"
+
   if [[ -s "$full" && -s "$analytics" ]] \
     && cmp -s <(tail -1 "$full" | jq -S '.run_correlation') <(jq -S . "$expected") \
     && cmp -s <(tail -1 "$analytics" | jq -S '.run_correlation') <(jq -S . "$expected") \
+    && cmp -s <(jq -cS 'select(.event_type == "agent.delegate") | .run_correlation' "$full" | tail -1) <(jq -cS . "$expected") \
+    && cmp -s <(jq -cS '.run_correlation' "$state") <(jq -cS . "$expected") \
+    && cmp -s <(tail -1 "$TMP/$runtime.economics.jsonl" | jq -cS '.run_correlation') <(jq -cS . "$expected") \
+    && jq -e '
+      .workflow_outcome.source == "canonical_flow_projection"
+      and .workflow_outcome.process_status == "not_verified"
+      and .workflow_outcome.quality_status == "not_independently_evaluated"
+    ' "$state" >/dev/null \
+    && [[ ! -e "$workspace/.kontourai/flow-agents/$slug/workflow-outcome.json" ]] \
     && [[ "$(tail -1 "$full" | jq -r '.task_slug')" == "$slug" ]]; then
-    _pass "packed $runtime producer preserves exact correlation through full and redacted channels"
+    _pass "packed $runtime producers preserve exact correlation through telemetry, delegation, state, and economics"
   else
-    _fail "packed $runtime producer did not emit the exact Builder correlation"
+    _fail "packed $runtime producers did not preserve the exact Builder correlation"
   fi
 done
+
+echo ""
+echo "--- Installed terminal reconstruction from producer-owned records ---"
+TERMINAL_WORKSPACE="$TMP/terminal-workspace"
+TERMINAL_ROOT="$TERMINAL_WORKSPACE/.kontourai/flow-agents"
+TERMINAL_SLUG="installed-terminal-shape"
+TERMINAL_SESSION="$TERMINAL_ROOT/$TERMINAL_SLUG"
+TERMINAL_RUNTIME_SESSION="claude-terminal-session"
+TERMINAL_PREFIX="$TMP/terminal"
+TERMINAL_TRANSCRIPT="$TMP/terminal-transcript.jsonl"
+TERMINAL_ARTIFACT="$TERMINAL_SESSION/$TERMINAL_SLUG--idea-to-backlog.md"
+TERMINAL_CLI="$PACKAGE/build/src/cli.js"
+mkdir -p "$TERMINAL_WORKSPACE" "$TERMINAL_SESSION"
+: > "$TERMINAL_TRANSCRIPT"
+printf '%s\n' '{"name":"installed-terminal-reconstruction","private":true}' > "$TERMINAL_WORKSPACE/package.json"
+printf '%s\n' '# Installed terminal shape' > "$TERMINAL_ARTIFACT"
+
+terminal_flow() {
+  (cd "$TERMINAL_WORKSPACE" && run_runtime claude "$TERMINAL_RUNTIME_SESSION" \
+    node "$TERMINAL_CLI" workflow "$@")
+}
+
+invoke_claude_lifecycle SessionStart "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
+terminal_flow start --artifact-root "$TERMINAL_ROOT" --flow builder.shape \
+  --task-slug "$TERMINAL_SLUG" --summary "Installed terminal reconstruction fixture." >/dev/null
+TERMINAL_CORRELATION="$TMP/terminal.expected.json"
+jq '.run_correlation' "$TERMINAL_SESSION/state.json" > "$TERMINAL_CORRELATION"
+invoke_claude_lifecycle UserPromptSubmit "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
+invoke_hook claude "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX"
+
+TERMINAL_REF="$(jq -nc --arg file "$TERMINAL_ARTIFACT" '{
+  kind:"artifact",
+  file:$file,
+  summary:"Installed shape evidence bound to the terminal run."
+}')"
+for expectation in shaped-problem shaped-outcome shaped-constraints shaped-non-goals shaped-success shaped-risk slices-defined work-items-filed; do
+  terminal_flow evidence --session-dir "$TERMINAL_SESSION" \
+    --expectation "$expectation" \
+    --status pass \
+    --summary "Installed terminal fixture records $expectation." \
+    --evidence-ref-json "$TERMINAL_REF" >/dev/null
+done
+cp "$ROOT/evals/fixtures/telemetry/usage-transcript-sample.jsonl" "$TERMINAL_TRANSCRIPT"
+invoke_claude_lifecycle Stop "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
+for _ in $(seq 1 50); do
+  [[ -s "$TERMINAL_PREFIX.economics.jsonl" ]] && break
+  sleep 0.1
+done
+
+TERMINAL_FLOW_DIR="$TERMINAL_WORKSPACE/.kontourai/flow/runs/$TERMINAL_SLUG"
+if node --input-type=module - \
+  "$PACKAGE" \
+  "$TERMINAL_PREFIX.full.jsonl" \
+  "$TERMINAL_SESSION/state.json" \
+  "$TERMINAL_SESSION/trust.bundle" \
+  "$TERMINAL_FLOW_DIR/state.json" \
+  "$TERMINAL_FLOW_DIR/evidence/manifest.json" \
+  "$TERMINAL_PREFIX.economics.jsonl" \
+  "$TERMINAL_SESSION/workflow-outcome.json" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [packageRoot, fullFile, stateFile, trustFile, flowFile, manifestFile, economicsFile, terminalFile] = process.argv.slice(2);
+const { reconstructRun } = await import(pathToFileURL(path.join(packageRoot, 'build/src/run-reconstruction.js')).href);
+const lines = fs.readFileSync(fullFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+const trust = JSON.parse(fs.readFileSync(trustFile, 'utf8'));
+const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const economics = JSON.parse(fs.readFileSync(economicsFile, 'utf8').trim().split('\n').at(-1));
+const terminal = JSON.parse(fs.readFileSync(terminalFile, 'utf8'));
+const correlation = terminal.run_correlation;
+const exact = (value, label) => {
+  if (JSON.stringify(value) !== JSON.stringify(correlation)) throw new Error(`${label} correlation mismatch`);
+  return value;
+};
+const usage = lines.findLast((record) => record.event_type === 'session.usage');
+const turn = lines.findLast((record) => record.event_type === 'turn.user');
+const tool = lines.findLast((record) => record.event_type === 'tool.invoke');
+const delegation = lines.findLast((record) => record.event_type === 'agent.delegate');
+for (const [record, label] of [[usage, 'usage'], [turn, 'turn'], [tool, 'tool'], [delegation, 'delegation']]) {
+  if (!record) throw new Error(`missing ${label} producer record`);
+  exact(record.run_correlation, label);
+}
+exact(state.run_correlation, 'state');
+exact(economics.run_correlation, 'economics');
+if (flow.status !== 'completed' || state.workflow_outcome.process_status !== 'completed') {
+  throw new Error('canonical Flow did not complete');
+}
+if (!Array.isArray(trust.claims) || trust.claims.length < 8) throw new Error('trust evidence is incomplete');
+const attached = (manifest.evidence || []).filter((entry) =>
+  entry.analytics?.run_correlation
+  && JSON.stringify(entry.analytics.run_correlation) === JSON.stringify(correlation));
+if (attached.length < 3) throw new Error('canonical Flow trust references lack correlation');
+const facts = [
+  { kind: 'runtime_session', record_id: usage.event_id, run_correlation: usage.run_correlation },
+  { kind: 'runtime_turn', record_id: turn.event_id, run_correlation: turn.run_correlation },
+  { kind: 'tool', record_id: tool.event_id, run_correlation: tool.run_correlation },
+  { kind: 'flow_gate', record_id: `flow-gates:${flow.run_id}`, run_correlation: state.run_correlation },
+  { kind: 'route_back', record_id: `route-backs:${flow.run_id}`, run_correlation: state.run_correlation },
+  { kind: 'delegation', record_id: delegation.event_id, run_correlation: delegation.run_correlation },
+  { kind: 'trust', record_id: `trust:${flow.run_id}`, run_correlation: attached.at(-1).analytics.run_correlation },
+  { kind: 'economics', record_id: `economics:${economics.run_id}`, run_correlation: economics.run_correlation },
+  { kind: 'terminal', record_id: terminal.record_id, run_correlation: terminal.run_correlation, process_status: terminal.process_status },
+];
+const reconstructed = reconstructRun(facts, correlation.correlation_id);
+if (reconstructed.missing_kinds.length !== 0 || reconstructed.process_status !== 'completed') {
+  throw new Error(`incomplete reconstruction: ${reconstructed.missing_kinds.join(',')}`);
+}
+NODE
+then
+  _pass "installed producers reconstruct one terminal run by canonical identity alone"
+else
+  _fail "installed terminal producer path did not reconstruct end to end"
+fi
 
 unique_correlations="$(
   for runtime in claude codex kiro opencode pi; do
