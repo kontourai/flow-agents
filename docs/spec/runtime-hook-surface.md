@@ -103,26 +103,30 @@ way.
   supported, it resolves from step 3 onward. Adapters MUST document which manifests they honor so the
   attribution granularity difference is explicit, not surprising.
 
-#### Work-item attribution (`task_slug`)
+#### Authenticated run correlation and work-item attribution
 
-Where `context.project` groups events by *codebase*, `task_slug` groups them by the *active Builder
-work item* — so the console can report cost and activity per unit of work (the "Cost by work-item"
-breakdown), not just per project.
+Where `context.project` groups events by *codebase*, `run_correlation` binds an event to the exact
+authenticated Builder run. `task_slug` remains a convenience projection for displays and grouping;
+it is emitted only when that correlation resolves successfully and is not an independent join key.
 
 | Field | Semantics | Redacted? | Producer requirement |
 | --- | --- | --- | --- |
-| `task_slug` | Top-level slug of the Builder run active in `context.cwd` at emission time. | **No** (an opaque work-item slug; carries no path or content) | Adapters SHOULD stamp `task_slug` when a Builder run is active in the working dir. **Omit the field entirely when no run is active — never emit an empty string and never fabricate a slug.** |
+| `run_correlation` | The exact validated envelope persisted by the actor-bound Builder run, or `{status:"incomplete", reason}`. | **No** (validated opaque identities and bounded reasons only) | Every event MUST carry this field. Unbound, retired, changing, unsupported, or invalid bindings stay explicitly incomplete. |
+| `task_slug` | Top-level slug of the successfully authenticated Builder run. | **No** (an opaque run slug; carries no path or content) | Emit only with a present `run_correlation`; omit for incomplete correlation. |
 
-Canonical resolution (harness adapter), first match wins, read from the *same* `current.json` the
-economics relay reads so both surfaces attribute to one identifier:
+Canonical resolution uses `scripts/telemetry/run-correlation-binding.js`:
 
-1. `<cwd>/.kontourai/flow-agents/current.json` → `.active_slug`, else `.artifact_dir`.
-2. `<cwd>/.flow-agents/current.json` (legacy location) → `.active_slug`, else `.artifact_dir`.
-3. No file, or both fields empty → **no `task_slug` key on the record.**
+1. Resolve the canonical runtime actor from the hook environment.
+2. Read only that actor's `current/<actor>.json` pointer; never shared `current.json`.
+3. Read the pointed task's `state.json` without following symlinks and validate its correlation
+   through the public run-correlation contract.
+4. Require pointer generation, Flow run identity, runtime actor identity, and selected Work Item
+   to agree, then re-read the actor pointer to detect a concurrent generation change.
+5. Embed the exact envelope and derive `task_slug`, or emit a content-free incomplete reason.
 
-Only the slug string is stored; no prompt, args, or file content is ever read into it. A non-Builder
-session (no `current.json`) therefore emits records with no `task_slug`, and the console buckets
-those under "unknown" rather than inventing an attribution.
+The adapter reads no prompts, tool arguments, or source content. Redaction preserves valid opaque
+identity fields, while the validator rejects credential-shaped or malformed values before they can
+enter either telemetry channel.
 
 ### Exit Code Protocol (Canonical Hook Scripts)
 

@@ -1804,7 +1804,16 @@ function buildPointerProjectionWrite(
   const isGlobalPointer = target.file === path.join(context.artifactRoot, "current.json");
   const relativeDir = path.relative(context.artifactRoot, context.sessionDir);
   if (binding && !isGlobalPointer && target.file !== boundActorFile) return null;
-  if (isRecord(pointer) && pointer.artifact_dir !== relativeDir) return null;
+  const isAuthenticatedActorRebind = Boolean(
+    binding
+    && !isGlobalPointer
+    && target.file === boundActorFile,
+  );
+  if (
+    isRecord(pointer)
+    && pointer.artifact_dir !== relativeDir
+    && !isAuthenticatedActorRebind
+  ) return null;
   if (!isRecord(pointer) && target.file !== boundActorFile) return null;
   if (isRecord(pointer) && pointer.binding_status === "retired") return null;
   const projectedBindingId = isRecord(projection.run_correlation)

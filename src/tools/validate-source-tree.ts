@@ -21,6 +21,7 @@ const ignoredRefDirs = new Set(["node_modules", "__pycache__", ".pytest_cache", 
 const legacyRefRe = /(?<![A-Za-z0-9_.-])(?:agents|agent-cards|context|evals|lib|powers|prompts|scripts|skills)\/[A-Za-z0-9_./@:+-]+/g;
 const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Array<[string, string]> }>([
   ["scripts/telemetry/telemetry.sh", { mirror: "context/scripts/telemetry/telemetry.sh", allowedDifferences: [] }],
+  ["scripts/telemetry/run-correlation-binding.js", { mirror: "context/scripts/telemetry/run-correlation-binding.js", allowedDifferences: [] }],
   ["scripts/telemetry/lib/config.sh", { mirror: "context/scripts/telemetry/lib/config.sh", allowedDifferences: [] }],
   ["scripts/telemetry/telemetry.conf", { mirror: "context/scripts/telemetry/telemetry.conf", allowedDifferences: [] }],
   ["scripts/telemetry/console-presets.sh", { mirror: "context/scripts/telemetry/console-presets.sh", allowedDifferences: [] }],
