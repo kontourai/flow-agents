@@ -215,7 +215,7 @@ echo "--- SEC: metacharacter destination does not inject shell into hook command
 INJECT_ROOT="$TMPDIR_EVAL/inject"
 INJECT_MARKER="$INJECT_ROOT/INJECTED"
 # A destination that closes the single quote, runs a command, and reopens it.
-INJECT_DEST="$INJECT_ROOT/o'\''brien; touch $INJECT_MARKER; echo '\''x"
+INJECT_DEST="$INJECT_ROOT/o'brien; touch $INJECT_MARKER; echo 'x"
 mkdir -p "$INJECT_DEST"
 
 if FLOW_AGENTS_USER_CLAUDE_SETTINGS="$INJECT_DEST/settings.json" \
