@@ -21,20 +21,26 @@ import {
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
-import { builderLifecycleAuthorizationPayload, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import * as builderFlowRuntime from "../../build/src/builder-flow-runtime.js";
+import { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import * as builderLifecycleAuthority from "../../build/src/builder-lifecycle-authority.js";
+import { lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
+import * as critiqueResolutionRuntime from "../../build/src/cli/critique-resolution.js";
 import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, stageDeliveryDestination, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import * as workflowRuntime from "../../build/src/cli/workflow.js";
+import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
-import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
@@ -81,6 +87,57 @@ test("critique chain diagnostics identify the first sequence and predecessor mis
   } };
   const graph = validateCritiqueResolutionGraph([claim], SUBJECT);
   assert.match(graph.errors.join("\n"), new RegExp(`critique chain mismatch at sequence 1:.*declares sequence 2.*expected predecessor ${CRITIQUE_CHAIN_GENESIS}`));
+});
+
+test("critique resolution accepts a verified PASS recheck chain and rejects invalid terminal, cycle, and mismatched edges", () => {
+  const makeClaim = (sequence, predecessor, status = "verified") => {
+    const record = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer: "reviewer-a", reviewed_at: `2030-01-01T00:0${sequence}:00.000Z`,
+      verdict: sequence === 1 ? "fail" : "pass", summary: `review ${sequence}`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(record);
+    return { id: `claim-${sequence}`, value: record.verdict, fieldOrBehavior: record.summary, status, metadata: { ...record, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash } };
+  };
+  const first = makeClaim(1, CRITIQUE_CHAIN_GENESIS, "superseded");
+  const second = makeClaim(2, first.metadata.critique_record_hash, "superseded");
+  const third = makeClaim(3, second.metadata.critique_record_hash);
+  const edge = (prior, resolving, suffix) => ({
+    schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: prior.metadata.critique_record_id,
+    resolving_record_id: resolving.metadata.critique_record_id, resolver: "reviewer-a", resolved_lane_ids: [], resolved_finding_ids: [],
+    resolved_at: `2030-01-01T00:0${suffix}:30.000Z`, authorization_sha256: String(suffix).repeat(64), resolution_event_id: `critique-resolution:${String(suffix).repeat(64)}`,
+  });
+  first.metadata.superseded_by = second.metadata.critique_record_id;
+  first.metadata.critique_resolution = edge(first, second, 1);
+  second.metadata.superseded_by = third.metadata.critique_record_id;
+  second.metadata.critique_resolution = edge(second, third, 2);
+  const chain = [first, second, third];
+  assert.equal(validateCritiqueResolutionGraph(chain, SUBJECT).valid, true, "a historical PASS resolver may lead through a valid forward chain to the current verified PASS");
+
+  const invalidTerminal = structuredClone(chain);
+  invalidTerminal[2].status = "superseded";
+  assert.equal(validateCritiqueResolutionGraph(invalidTerminal, SUBJECT).valid, false, "a transitive chain without a current verified PASS terminal fails");
+
+  const nonVerifiedResolver = structuredClone(chain);
+  nonVerifiedResolver[1].status = "pending";
+  assert.match(validateCritiqueResolutionGraph(nonVerifiedResolver, SUBJECT).errors.join("\n"), /critique resolver must be a verified PASS/, "a non-verified historical resolver remains rejected");
+
+  const incorrectlyCurrentIntermediate = structuredClone(chain);
+  incorrectlyCurrentIntermediate[1].status = "verified";
+  assert.match(validateCritiqueResolutionGraph(incorrectlyCurrentIntermediate, SUBJECT).errors.join("\n"), /critique resolver chain history must be superseded/, "an intermediate PASS with a valid successor edge cannot retain verified status");
+
+  const failingResolver = structuredClone(chain);
+  failingResolver[1].value = "fail";
+  assert.match(validateCritiqueResolutionGraph(failingResolver, SUBJECT).errors.join("\n"), /critique resolver must be a verified PASS/, "a FAIL historical resolver remains rejected");
+
+  const cycle = structuredClone(chain);
+  cycle[2].status = "superseded";
+  cycle[2].metadata.superseded_by = cycle[1].metadata.critique_record_id;
+  cycle[2].metadata.critique_resolution = edge(cycle[2], cycle[1], 3);
+  assert.equal(validateCritiqueResolutionGraph(cycle, SUBJECT).valid, false, "a backward or cyclic resolver chain fails");
+
+  const mismatch = structuredClone(chain);
+  mismatch[1].metadata.superseded_by = "critique:missing";
+  assert.equal(validateCritiqueResolutionGraph(mismatch, SUBJECT).valid, false, "a resolver chain with a mismatched edge fails");
 });
 childProcess.execFileSync = ((file, args, options) => {
   if (Array.isArray(args) && String(args[0]).endsWith("lifecycle-authority-verifier.js")) {
@@ -166,11 +223,653 @@ test("public delivery restores the exact prior destination when source mutates d
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
 const require = createRequire(import.meta.url);
+const commandLogChain = require("../../scripts/lib/command-log-chain.js");
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const currentPointer = require("../../scripts/hooks/lib/current-pointer.js");
 const runtimeTestSeams = await loadRuntimeTestSeams();
 const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
 const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
+
+function currentGateVisitForTest(state, step) {
+  assert.equal(typeof builderFlowRuntime.currentGateVisit, "function", "the runtime must expose its canonical current-gate visit seam to internal CLI consumers");
+  return builderFlowRuntime.currentGateVisit(state, step);
+}
+
+test("current gate visit exposes the initial entry boundary", () => {
+  const enteredAt = "2026-07-09T20:00:00.000Z";
+  const visit = currentGateVisitForTest({ transitions: [], updated_at: enteredAt }, "pull-work");
+  assert.deepEqual(visit, { enteredAt: Date.parse(enteredAt), initial: true });
+});
+
+test("current gate visit uses the latest valid re-entry boundary", () => {
+  const firstEntry = "2026-07-09T20:00:00.000Z";
+  const latestEntry = "2026-07-09T22:00:00.000Z";
+  const visit = currentGateVisitForTest({
+    transitions: [
+      { to_step: "verify", at: firstEntry },
+      { to_step: "execute", at: "2026-07-09T21:00:00.000Z" },
+      { to_step: "verify", at: latestEntry },
+    ],
+    updated_at: "2026-07-09T23:00:00.000Z",
+  }, "verify");
+  assert.deepEqual(visit, { enteredAt: Date.parse(latestEntry), initial: false });
+});
+
+test("current gate visit ignores transitions into other steps", () => {
+  const initialEntry = "2026-07-09T20:00:00.000Z";
+  const visit = currentGateVisitForTest({
+    transitions: [{ to_step: "execute", at: "not-a-timestamp" }],
+    updated_at: initialEntry,
+  }, "verify");
+  assert.deepEqual(visit, { enteredAt: Date.parse(initialEntry), initial: true });
+});
+
+test("current gate visit rejects malformed or missing canonical boundary timestamps with a typed input error", () => {
+  for (const at of ["not-a-timestamp", undefined]) {
+    assert.throws(
+      () => currentGateVisitForTest({
+        transitions: [{ to_step: "verify", at }],
+        updated_at: "2026-07-09T20:00:00.000Z",
+      }, "verify"),
+      (error) => error?.name === "BuilderBuildRunInputError"
+        && error.code === "BUILDER_BUILD_RUN_INVALID_INPUT"
+        && error.field === "flow_run.state.transitions.at",
+    );
+  }
+});
+
+test("current gate visit rejects a missing canonical boundary with a typed input error", () => {
+  assert.throws(
+    () => currentGateVisitForTest({ transitions: [], updated_at: "not-a-timestamp" }, "verify"),
+    (error) => error?.name === "BuilderBuildRunInputError"
+      && error.code === "BUILDER_BUILD_RUN_INVALID_INPUT"
+      && error.field === "flow_run.state.updated_at",
+  );
+});
+
+function classifyCanonicalEvidenceAttachmentForTest(receipt, run, beforeEvidence = []) {
+  assert.equal(typeof workflowRuntime.classifyCanonicalEvidenceAttachment, "function", "workflow must expose the exact canonical receipt classifier to its internal tests");
+  return workflowRuntime.classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
+}
+
+test("canonical evidence receipt classifier accepts only one exactly bound live attachment", () => {
+  const enteredAt = "2026-07-09T20:00:00.000Z";
+  const recordedAt = "2026-07-09T20:01:00.000Z";
+  const attachedAt = "2026-07-09T20:02:00.000Z";
+  const receipt = {
+    runId: "receipt-run", subject: SUBJECT, gateId: "pull-work-gate", stepId: "pull-work",
+    expectedRunHead: "a".repeat(64), expectationIds: ["selected-work"], expectation: "selected-work",
+    visit: { enteredAt: Date.parse(enteredAt), initial: true }, recordedAt, digest: "b".repeat(64),
+    claimSubject: SUBJECT, claimStepId: "pull-work", claimExpectation: "selected-work", claimRunHead: "a".repeat(64),
+  };
+  const entry = {
+    id: "receipt-entry", gate_id: "pull-work-gate", sha256: "b".repeat(64), expectation_ids: ["selected-work"], attached_at: attachedAt,
+  };
+  const run = { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [entry] } };
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, run), "attached");
+
+  const cases = [
+    ["run", (value) => { value.runId = "other-run"; }],
+    ["gate", (value) => { value.manifest.evidence[0].gate_id = "other-gate"; }],
+    ["subject", (value) => { value.receipt.claimSubject = "local:work-item/other"; }],
+    ["step", (value) => { value.receipt.claimStepId = "other-step"; }],
+    ["run head", (value) => { value.receipt.claimRunHead = "c".repeat(64); }],
+    ["digest", (value) => { value.manifest.evidence[0].sha256 = "c".repeat(64); }],
+    ["recorded time", (value) => { value.receipt.recordedAt = "not-a-time"; }],
+    ["attached time", (value) => { value.manifest.evidence[0].attached_at = "not-a-time"; }],
+    ["before visit", (value) => { value.manifest.evidence[0].attached_at = "2026-07-09T19:59:00.000Z"; }],
+    ["subset expectations", (value) => { value.receipt.expectationIds = ["selected-work", "additional"]; }],
+    ["superset expectations", (value) => { value.manifest.evidence[0].expectation_ids = ["selected-work", "additional"]; }],
+    ["duplicate", (value) => { value.manifest.evidence.push({ ...value.manifest.evidence[0], id: "duplicate" }); }],
+    ["duplicate identifier", (value) => { value.manifest.evidence.push({ ...value.manifest.evidence[0] }); }],
+    ["superseded-only", (value) => { value.manifest.evidence[0].superseded_by = "later-entry"; }],
+    ["incomplete", (value) => { delete value.manifest.evidence[0].expectation_ids; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const value = { receipt: structuredClone(receipt), ...structuredClone(run) };
+    mutate(value);
+    assert.equal(classifyCanonicalEvidenceAttachmentForTest(value.receipt, value), "unknown", label);
+  }
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { ...run, manifest: { evidence: [] } }), "unattached", "only a clean empty new-entry set permits rollback");
+});
+
+test("canonical evidence receipt classifier binds every prior manifest entry", () => {
+  const receipt = {
+    runId: "receipt-run", subject: SUBJECT, gateId: "pull-work-gate", stepId: "pull-work",
+    expectedRunHead: "a".repeat(64), expectationIds: ["selected-work"], expectation: "selected-work",
+    visit: { enteredAt: Date.parse("2026-07-09T20:00:00.000Z"), initial: true },
+    recordedAt: "2026-07-09T20:01:00.000Z", digest: "b".repeat(64),
+    claimSubject: SUBJECT, claimStepId: "pull-work", claimExpectation: "selected-work", claimRunHead: "a".repeat(64),
+  };
+  const prior = { id: "prior-entry", gate_id: "older-gate", sha256: "c".repeat(64), expectation_ids: ["older"] };
+  const candidate = { id: "receipt-entry", gate_id: "pull-work-gate", sha256: "b".repeat(64), expectation_ids: ["selected-work"], attached_at: "2026-07-09T20:02:00.000Z" };
+  const beforeManifest = [structuredClone(prior)];
+
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [prior, candidate] } }, beforeManifest), "attached");
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [candidate] } }, beforeManifest), "unknown", "removing prior evidence is uncertain");
+  assert.equal(classifyCanonicalEvidenceAttachmentForTest(receipt, { runId: "receipt-run", state: { subject: SUBJECT }, manifest: { evidence: [{ ...prior, sha256: "d".repeat(64) }, candidate] } }, beforeManifest), "unknown", "mutating prior evidence is uncertain");
+});
+
+function stagedCandidateArgs(session, summary = "stage candidate fixture") {
+  const projected = readJson(path.join(session.sessionDir, "state.json")).flow_run;
+  return [
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified", "--summary", summary,
+    "--timestamp", NOW, "--actor", ACTOR_KEY, "--flow-run-head", projected.run_head,
+  ];
+}
+
+test("internal evidence candidate is retained, correlated, durable, and non-authoritative", async () => {
+  const absent = makeSession("staged-candidate-absent");
+  claimAmbientSessionAssignment(absent);
+  await startBuilderFlowSession({ sessionDir: absent.sessionDir });
+  const args = stagedCandidateArgs(absent);
+  const staged = await stageWorkflowEvidenceCandidate(absent.sessionDir, args);
+  assert.equal(fs.existsSync(path.join(absent.sessionDir, "trust.bundle")), false, "staging does not create canonical trust when it was absent");
+  assert.equal(fs.existsSync(staged.file), true, "candidate residue is retained");
+  assert.equal(path.basename(staged.directory), `.workflow-evidence-transaction-${staged.transaction_id}`);
+  assert.equal(fs.statSync(staged.directory).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(staged.file).mode & 0o777, 0o600);
+  assert.deepEqual(fs.readFileSync(staged.file), staged.bytes);
+  assert.equal(staged.digest, createHash("sha256").update(staged.bytes).digest("hex"));
+
+  await mainFromPublicWorkflow(args);
+  assert.deepEqual(fs.readFileSync(path.join(absent.sessionDir, "trust.bundle")), staged.bytes, "omitting the internal target preserves the public writer bytes");
+
+  const present = makeSession("staged-candidate-present");
+  claimAmbientSessionAssignment(present);
+  await startBuilderFlowSession({ sessionDir: present.sessionDir });
+  writeBundle(present.sessionDir, []);
+  const prior = fs.readFileSync(path.join(present.sessionDir, "trust.bundle"));
+  const stagedPresent = await stageWorkflowEvidenceCandidate(present.sessionDir, stagedCandidateArgs(present, "stage over prior"));
+  assert.deepEqual(fs.readFileSync(path.join(present.sessionDir, "trust.bundle")), prior, "staging leaves prior canonical trust byte-identical");
+  assert.notDeepEqual(stagedPresent.bytes, prior);
+});
+
+test("candidate staging closes acquired descriptors on every setup fault and retains correlated residue", async () => {
+  const resources = ["artifact-directory", "session-directory", "trust-snapshot", "abort-capability", "candidate-directory", "candidate-file"];
+  for (const faultAt of resources) {
+    const session = makeSession(`staged-candidate-fault-${faultAt}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const canonicalBefore = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    const closed = [];
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterCandidateResourceAcquired: (resource) => { if (resource === faultAt) throw new Error(`fault after ${resource}`); },
+      candidateResourceClosed: (resource) => closed.push(resource),
+    });
+    try {
+      await assert.rejects(() => stageWorkflowEvidenceCandidate(session.sessionDir, stagedCandidateArgs(session)), new RegExp(`fault after ${faultAt}`));
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.equal(new Set(closed).size, closed.length, `${faultAt}: every acquired descriptor closes once`);
+    const expectedClosed = {
+      "artifact-directory": ["artifact-directory"],
+      "session-directory": ["session-directory", "artifact-directory"],
+      "trust-snapshot": ["trust-snapshot", "session-directory", "artifact-directory"],
+      "abort-capability": ["trust-snapshot", "session-directory", "artifact-directory"],
+      "candidate-directory": ["candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"],
+      "candidate-file": ["candidate-file", "candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"],
+    }[faultAt];
+    assert.deepEqual(closed, expectedClosed, `${faultAt}: all acquired descriptors close in reverse lifetime order`);
+    const residue = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+    if (["candidate-directory", "candidate-file"].includes(faultAt)) assert.equal(residue.length, 1, `${faultAt}: transaction residue is retained`);
+    assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), canonicalBefore, `${faultAt}: canonical trust remains byte-identical`);
+  }
+});
+
+test("candidate staging loops short writes and rejects zero writes and reread corruption", async () => {
+  const runFault = async (slug, hooks, succeeds) => {
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(hooks);
+    try {
+      const operation = stageWorkflowEvidenceCandidate(session.sessionDir, stagedCandidateArgs(session));
+      if (succeeds) return await operation;
+      await assert.rejects(() => operation);
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false);
+    assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+  };
+  const partial = await runFault("staged-candidate-short-write", {
+    candidateWrite: (fd, buffer, offset, length, position) => fs.writeSync(fd, buffer, offset, Math.min(length, 5), position),
+  }, true);
+  assert.ok(partial.bytes.length > 5);
+  await runFault("staged-candidate-zero-write", { candidateWrite: () => 0 }, false);
+  await runFault("staged-candidate-reread-corrupt", {
+    beforeCandidateReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
+  }, false);
+});
+
+test("sync accepts only the exact staged descriptor digest and pathname identity", async () => {
+  const makeCandidate = async (slug) => {
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+    const bytes = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    fs.unlinkSync(path.join(session.sessionDir, "trust.bundle"));
+    const directory = path.join(session.sessionDir, `.workflow-evidence-transaction-${slug}`);
+    fs.mkdirSync(directory, { mode: 0o700 });
+    const file = path.join(directory, "trust.bundle.candidate");
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const stat = fs.fstatSync(descriptor);
+    return { session, file, descriptor, identity: { dev: stat.dev, ino: stat.ino }, digest: createHash("sha256").update(bytes).digest("hex") };
+  };
+
+  const wrong = await makeCandidate("staged-sync-wrong-digest");
+  try {
+    await assert.rejects(() => syncBuilderFlowSession({
+      sessionDir: wrong.session.sessionDir,
+      stagedTrustBundle: { file: wrong.file, descriptor: wrong.descriptor, identity: wrong.identity, expectedSha256: "0".repeat(64) },
+    }), /does not match the descriptor bytes/);
+  } finally { fs.closeSync(wrong.descriptor); }
+
+  const swapped = await makeCandidate("staged-sync-swapped-path");
+  try {
+    fs.renameSync(swapped.file, `${swapped.file}.parked`);
+    fs.writeFileSync(swapped.file, "foreign candidate\n");
+    await assert.rejects(() => syncBuilderFlowSession({
+      sessionDir: swapped.session.sessionDir,
+      stagedTrustBundle: { file: swapped.file, descriptor: swapped.descriptor, identity: swapped.identity, expectedSha256: swapped.digest },
+    }), /descriptor and pathname must identify/);
+  } finally { fs.closeSync(swapped.descriptor); }
+});
+
+test("public staged commit preserves foreign create-if-absent targets and retained residue", async () => {
+  for (const mode of ["eexist", "post-create-mismatch", "directory-fsync"]) {
+    const session = makeSession(`staged-commit-${mode}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    const foreign = `${mode} foreign canonical\n`;
+    setWorkflowEvidenceTransactionTestHooksForTest(mode === "eexist" ? {
+      beforeCandidateCommit: () => fs.writeFileSync(canonical, foreign),
+    } : mode === "post-create-mismatch" ? {
+      afterCanonicalCreate: () => { fs.renameSync(canonical, `${canonical}.staged-link`); fs.writeFileSync(canonical, foreign); },
+    } : {
+      beforeCandidateCommitDirectoryFsync: () => { throw new Error("candidate directory fsync uncertainty"); },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${mode} commit fixture`]),
+        /recovery required/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    if (mode !== "directory-fsync") assert.equal(fs.readFileSync(canonical, "utf8"), foreign, `${mode}: foreign canonical target is untouched`);
+    const residues = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+    assert.equal(residues.length, 1, `${mode}: staged residue remains correlated`);
+    assert.equal(fs.existsSync(path.join(session.sessionDir, residues[0], "trust.bundle.candidate")), true);
+  }
+});
+
+test("public staged commit copies the pinned candidate descriptor into an exclusively created absent target", async () => {
+  for (const baseline of ["absent", "present"]) {
+    const session = makeSession(`staged-commit-success-${baseline}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    let priorIdentity = null;
+    if (baseline === "present") {
+      writeBundle(session.sessionDir, []);
+      const stat = fs.statSync(canonical);
+      priorIdentity = { dev: stat.dev, ino: stat.ino };
+    }
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${baseline} commit success`]);
+    const residue = fs.readdirSync(session.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+    const candidate = path.join(session.sessionDir, residue, "trust.bundle.candidate");
+    assert.deepEqual(fs.readFileSync(canonical), fs.readFileSync(candidate));
+    const canonicalStat = fs.statSync(canonical);
+    const candidateStat = fs.statSync(candidate);
+    if (baseline === "absent") assert.notDeepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, { dev: candidateStat.dev, ino: candidateStat.ino }, "absent baseline publishes a distinct exclusively-created canonical inode");
+    else assert.deepEqual({ dev: canonicalStat.dev, ino: canonicalStat.ino }, priorIdentity, "present baseline commits through the pinned original inode");
+  }
+});
+
+test("prior-absent publication cannot select foreign bytes after the staged pathname is replaced", async () => {
+  const session = makeSession("staged-commit-absent-path-replacement");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  let parked = "";
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeCandidateCommit: () => {
+      const residue = fs.readdirSync(session.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+      const candidate = path.join(session.sessionDir, residue, "trust.bundle.candidate");
+      parked = `${candidate}.pinned`;
+      fs.renameSync(candidate, parked);
+      fs.writeFileSync(candidate, "foreign staged pathname bytes\n");
+    },
+  });
+  try {
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "absent staged pathname replacement"]);
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.deepEqual(fs.readFileSync(canonical), fs.readFileSync(parked), "publication consumes the retained staged descriptor, never its mutable pathname");
+  assert.notEqual(fs.readFileSync(canonical, "utf8"), "foreign staged pathname bytes\n");
+});
+
+test("prior-absent exclusive creation preserves collision and dangling-symlink entries without retry", async () => {
+  for (const kind of ["collision", "dangling-symlink"]) {
+    const session = makeSession(`staged-commit-absent-${kind}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const canonical = path.join(session.sessionDir, "trust.bundle");
+    const foreign = `${kind} foreign canonical\n`;
+    if (kind === "collision") {
+      setWorkflowEvidenceTransactionTestHooksForTest({ beforeCandidateCommit: () => fs.writeFileSync(canonical, foreign) });
+    } else {
+      const target = path.join(session.sessionDir, "missing-foreign-target");
+      fs.symlinkSync(target, canonical);
+    }
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${kind} exclusive create`]),
+        /recovery required.*no retry/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    if (kind === "collision") assert.equal(fs.readFileSync(canonical, "utf8"), foreign, `${kind}: foreign bytes stay byte-identical`);
+    else assert.equal(fs.lstatSync(canonical).isSymbolicLink(), true, `${kind}: foreign dangling symlink stays in place`);
+  }
+});
+
+test("post-create short writes are completed through the canonical descriptor", async () => {
+  const session = makeSession("staged-commit-post-create-short-write");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let writes = 0;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateCommitWrite: (descriptor, bytes, offset, length, position) => {
+      writes += 1;
+      return fs.writeSync(descriptor, bytes, offset, Math.min(length, 5), position);
+    },
+  });
+  try {
+    await workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "short canonical copy"]);
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.ok(writes > 1, "the canonical copy seam must be called until a short write completes");
+});
+
+for (const [fault, hooks] of [
+  ["zero-write", { candidateCommitWrite: () => 0 }],
+  ["reread-corruption", { beforeCanonicalCommitReread: (descriptor) => fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0) }],
+  ["identity-replacement", { afterCanonicalCreate: (canonical) => { fs.renameSync(canonical, `${canonical}.owned`); fs.writeFileSync(canonical, "foreign replacement\n"); } }],
+  ["parent-fsync", { beforeCandidateCommitDirectoryFsync: () => { throw new Error("parent fsync uncertainty"); } }],
+]) {
+  test(`post-create ${fault} retains residue and requires no retry`, async () => {
+    const session = makeSession(`staged-commit-post-create-${fault}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(hooks);
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", `${fault} post-create uncertainty`]),
+        /recovery required.*no retry/i,
+      );
+    } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+    assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true, `${fault}: staged residue remains available`);
+  });
+}
+
+const cleanupResources = ["candidate-file", "candidate-directory", "trust-snapshot", "session-directory", "artifact-directory"];
+for (const faultAt of cleanupResources) {
+  test(`cleanup continues after ${faultAt} close fault and keeps the writer failure primary`, async () => {
+    const session = makeSession(`staged-cleanup-close-${faultAt}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const closed = [];
+    let injected = false;
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      candidateResourceClose: (resource) => {
+        if (resource === faultAt) {
+          injected = true;
+          throw new Error(`injected close fault ${faultAt}`);
+        }
+      },
+      candidateResourceClosed: (resource) => closed.push(resource),
+    });
+    try {
+      await assert.rejects(
+        () => stageWorkflowEvidenceCandidate(session.sessionDir, ["record-gate-claim", session.sessionDir, "--expectation", "selected-work", "--status", "invalid", "--summary", "cleanup fault primary error", "--timestamp", NOW, "--actor", ACTOR_KEY, "--flow-run-head", readJson(path.join(session.sessionDir, "state.json")).flow_run.run_head]),
+        /status must be one of/,
+      );
+      assert.equal(injected, true, `${faultAt}: close-fault injection seam must be reached`);
+      assert.deepEqual(closed, cleanupResources, `${faultAt}: every close is observed after all later closes are attempted`);
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  });
+}
+
+test("typed staged setup recovery remains recovery-required when outer cleanup is uncertain", async () => {
+  const session = makeSession("staged-setup-recovery-cleanup-type");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterCandidateResourceAcquired: (resource) => {
+      if (resource === "session-directory" && !fs.existsSync(canonical)) fs.mkdirSync(canonical);
+    },
+    candidateResourceClose: (resource) => {
+      if (resource === "session-directory") throw new Error("setup cleanup fault");
+    },
+  });
+  try {
+    let setupError;
+    try {
+      await stageWorkflowEvidenceCandidate(session.sessionDir, []);
+    } catch (error) {
+      setupError = error;
+    }
+    assert.ok(setupError);
+    assert.equal(setupError.constructor.name, "StagedEvidenceSetupRecoveryRequiredError", "cleanup composition preserves the typed setup-recovery classification");
+    assert.equal(setupError.cause?.constructor?.name, "StagedEvidenceSetupRecoveryRequiredError", "the original typed setup error remains the cause");
+    assert.match(String(setupError), /canonical trust entry is present or uncertain/i);
+    assert.match(String(setupError), /cleanup uncertainty.*session-directory/i);
+    fs.rmdirSync(canonical);
+
+    const publicResult = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "typed setup recovery with cleanup uncertainty",
+    ]);
+    assert.ok(publicResult.error);
+    assert.match(String(publicResult.error), /workflow evidence recovery required; inspect canonical workflow state/i, "typed setup recovery must never be downgraded to safely rolled back");
+    assert.match(String(publicResult.error), /cleanup uncertainty.*session-directory/i);
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("a returned evidence transaction failure retains its primary cause when outer cleanup is uncertain", async () => {
+  const session = makeSession("staged-returned-failure-cleanup-primary");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let cleanupInjected = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterRecord: () => { throw new Error("returned transaction primary failure"); },
+    candidateResourceClose: (resource) => {
+      if (resource === "candidate-file") {
+        cleanupInjected = true;
+        throw new Error("outer cleanup fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "returned failure cleanup composition",
+    ]);
+    assert.ok(result.error, "the returned evidence transaction failure remains a public failure");
+    assert.match(String(result.error), /returned transaction primary failure/i, "cleanup uncertainty must not replace the returned transaction cause");
+    assert.match(String(result.error), /cleanup uncertainty/i, "the secondary cleanup uncertainty remains visible without replacing the primary cause");
+    assert.equal(cleanupInjected, true, "the deterministic outer cleanup fault was exercised");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("an exclusively-created canonical descriptor is guarded during cleanup", async () => {
+  const session = makeSession("staged-canonical-close-guard");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let canonicalCloseAttempted = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateResourceClose: (resource) => {
+      if (resource === "canonical-trust") {
+        canonicalCloseAttempted = true;
+        throw new Error("canonical descriptor close fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "canonical descriptor close recovery",
+    ]);
+    assert.equal(canonicalCloseAttempted, true, "the exclusively-created canonical descriptor must use the guarded close path");
+    assert.ok(result.error, "a successful publication plus canonical-close uncertainty is recovery-required");
+    assert.match(String(result.error), /recovery required.*no retry/i);
+    assert.match(String(result.error), /canonical.*cleanup uncertainty/i);
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("a canonical close fault keeps the earlier canonical write failure primary", async () => {
+  const session = makeSession("staged-canonical-close-primary");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  let canonicalCloseAttempted = false;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    candidateCommitWrite: () => 0,
+    candidateResourceClose: (resource) => {
+      if (resource === "canonical-trust") {
+        canonicalCloseAttempted = true;
+        throw new Error("canonical descriptor close fault");
+      }
+    },
+  });
+  try {
+    const result = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "canonical write and close failure composition",
+    ]);
+    assert.equal(canonicalCloseAttempted, true, "the canonical descriptor close is attempted after the earlier write failure");
+    assert.ok(result.error);
+    assert.match(String(result.error), /canonical trust write returned zero or invalid byte count/i, "the write failure remains primary");
+    assert.match(String(result.error), /cleanup uncertainty.*canonical-trust/i, "the close failure remains secondary recovery context");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+for (const [phase, installDrift] of [
+  ["before exclusive creation", (session) => ({
+    beforeCandidateCommit: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+  ["after exclusive creation", (session) => ({
+    afterCanonicalCreate: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+  ["after parent fsync", (session) => ({
+    afterCandidateCommitDirectoryFsync: () => replacePinnedSessionDirectoryForTest(session),
+  })],
+]) {
+  test(`persistent cooperative session-parent drift ${phase} is recovery-required without writing the replacement namespace`, async () => {
+    const session = makeSession(`staged-session-parent-drift-${phase.replaceAll(" ", "-")}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(installDrift(session));
+    try {
+      const result = await captureWorkflowPublicResult([
+        "evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", `session parent drift ${phase}`,
+      ]);
+      assert.ok(result.error, `${phase}: persistent parent drift must not report a successful publication`);
+      assert.match(String(result.error), /pinned session directory pathname changed/i, `${phase}: diagnose the parent identity drift, not an unrelated child-path symptom`);
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false, `${phase}: the replacement namespace must not receive a transaction-owned canonical bundle`);
+      assert.equal(fs.readFileSync(path.join(session.sessionDir, "foreign-sentinel"), "utf8"), "foreign replacement namespace\n");
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  });
+}
+
+test("attached prior-present commit preserves both baseline inode and foreign pathname replacement", async () => {
+  const session = makeSession("staged-commit-present-path-replacement");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const baseline = fs.readFileSync(canonical);
+  const parked = `${canonical}.baseline`;
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeCandidateCommit: () => { fs.renameSync(canonical, parked); fs.writeFileSync(canonical, "foreign replacement\n"); },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "present pathname replacement"]),
+      (error) => /recovery required/i.test(String(error)) && /no retry is required/i.test(String(error)),
+    );
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.equal(fs.readFileSync(canonical, "utf8"), "foreign replacement\n");
+  assert.deepEqual(fs.readFileSync(parked), baseline);
+  assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+});
+
+test("public staged abort retains candidate, preserves baseline, and fails closed when abort authority is unavailable", async () => {
+  const session = makeSession("staged-abort-unavailable");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const baseline = fs.readFileSync(canonical);
+  const lock = path.join(session.sessionDir, "command-log.jsonl.lock.0");
+  fs.writeFileSync(lock, `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`);
+  setWorkflowEvidenceTransactionTestHooksForTest({ afterRecord: () => { throw new Error("unattached staged failure"); } });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--summary", "abort unavailable fixture"]),
+      /recovery required/i,
+    );
+  } finally { setWorkflowEvidenceTransactionTestHooksForTest(undefined); }
+  assert.deepEqual(fs.readFileSync(canonical), baseline);
+  assert.equal(fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), true);
+  assert.equal(fs.readFileSync(lock, "utf8"), `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`);
+});
+
+test("public prewrite validation has no residue while staged writer validation records a correlated abort", async () => {
+  const noEffects = makeSession("staged-prewrite-no-effects");
+  claimAmbientSessionAssignment(noEffects);
+  await startBuilderFlowSession({ sessionDir: noEffects.sessionDir });
+  const manifestFile = path.join(runDir(noEffects.slug, noEffects.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const manifestBefore = fs.readFileSync(manifestFile);
+  await assert.rejects(
+    () => workflowMain(["evidence", "--session-dir", noEffects.sessionDir, "--expectation", "selected-work", "--status", "not_verified"]),
+    /requires --summary/,
+  );
+  assert.deepEqual(fs.readFileSync(manifestFile), manifestBefore);
+  assert.equal(fs.readdirSync(noEffects.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")), false);
+
+  const staged = makeSession("staged-writer-validation-abort");
+  claimAmbientSessionAssignment(staged);
+  await startBuilderFlowSession({ sessionDir: staged.sessionDir });
+  await assert.rejects(
+    () => workflowMain(["evidence", "--session-dir", staged.sessionDir, "--expectation", "selected-work", "--status", "invalid", "--summary", "writer validation fixture"]),
+    /status must be one of/,
+  );
+  const residue = fs.readdirSync(staged.sessionDir).find((name) => name.startsWith(".workflow-evidence-transaction-"));
+  assert.ok(residue);
+  const transactionId = residue.slice(".workflow-evidence-transaction-".length);
+  const abort = readCommandLog(path.join(staged.sessionDir, "command-log.jsonl")).find((record) => record.transaction?.outcome === "aborted");
+  assert.equal(abort.transaction.id, transactionId);
+  assert.equal(fs.existsSync(path.join(staged.sessionDir, "trust.bundle")), false);
+});
 
 async function loadRuntimeTestSeams() {
   const source = new URL("../../build/src/builder-flow-runtime.js", import.meta.url);
@@ -238,6 +937,13 @@ function makeSession(slug = "runtime-projection") {
   return { projectRoot, artifactRoot, sessionDir, slug };
 }
 
+function replacePinnedSessionDirectoryForTest(session) {
+  const parked = `${session.sessionDir}-pinned`;
+  fs.renameSync(session.sessionDir, parked);
+  fs.mkdirSync(session.sessionDir);
+  fs.writeFileSync(path.join(session.sessionDir, "foreign-sentinel"), "foreign replacement namespace\n");
+}
+
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -253,6 +959,122 @@ function runWorkflowProcess(args, cwd) {
   });
 }
 
+async function workflowJson(args) {
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...values) => output.push(values.join(" "));
+  try {
+    const rc = await workflowMain([...args, "--json"]);
+    assert.equal(rc, 0);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(output.length, 1, "workflow JSON command emits exactly one report");
+  return JSON.parse(output[0]);
+}
+
+async function captureWorkflowPublicResult(args) {
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...values) => output.push(values.join(" "));
+  try {
+    return { rc: await workflowMain(args), output, error: null };
+  } catch (error) {
+    return { rc: null, output, error };
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+function assertPublicDiagnosticRedacted(result, sentinel, label) {
+  assert.doesNotMatch(`${result.output.join("\n")}\n${result.error ? String(result.error) : ""}`, new RegExp(sentinel), label);
+}
+
+test("public workflow evidence never echoes command or output sentinels in default diagnostics", async () => {
+  const sentinel = "FLOW_AGENTS_SECRET_SENTINEL_756";
+  const secretCommand = `sh -c 'printf ${sentinel}; exit 0'`;
+
+  const preflightSession = makeSession("public-evidence-redaction-preflight");
+  claimAmbientSessionAssignment(preflightSession);
+  await startBuilderFlowSession({ sessionDir: preflightSession.sessionDir });
+  const preflight = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", preflightSession.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+    "--command", `${sentinel} prose is not executable`, "--summary", "preflight redaction fixture",
+  ]);
+  assert.ok(preflight.error, "invalid command is rejected before writer execution");
+  assertPublicDiagnosticRedacted(preflight, sentinel, "preflight");
+
+  const writer = makeSession("public-evidence-redaction-writer");
+  claimAmbientSessionAssignment(writer);
+  await startBuilderFlowSession({ sessionDir: writer.sessionDir });
+  const writerFailure = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", writer.sessionDir, "--expectation", "selected-work", "--status", "pass",
+    "--command", `sh -c 'printf ${sentinel}; exit 1'`, "--summary", "writer redaction fixture",
+  ]);
+  assert.ok(writerFailure.error, "a requested pass still rejects a failed observed command");
+  assertPublicDiagnosticRedacted(writerFailure, sentinel, "writer failure");
+
+  const rollback = makeSession("public-evidence-redaction-rollback");
+  claimAmbientSessionAssignment(rollback);
+  await startBuilderFlowSession({ sessionDir: rollback.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ afterRecord: () => {
+    const state = readJson(path.join(rollback.sessionDir, "state.json"));
+    state.work_item_refs = ["local:work-item/redaction-rollback-mutation"];
+    writeJson(path.join(rollback.sessionDir, "state.json"), state);
+  } });
+  try {
+    const rolledBack = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", rollback.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "rollback redaction fixture",
+    ]);
+    assert.ok(rolledBack.error, "unattached mutation is rejected after rollback");
+    assertPublicDiagnosticRedacted(rolledBack, sentinel, "unattached rollback");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+
+  const jsonSession = makeSession("public-evidence-redaction-json");
+  claimAmbientSessionAssignment(jsonSession);
+  await startBuilderFlowSession({ sessionDir: jsonSession.sessionDir });
+  const jsonResult = await captureWorkflowPublicResult([
+    "evidence", "--session-dir", jsonSession.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+    "--command", secretCommand, "--summary", "JSON redaction fixture", "--json",
+  ]);
+  assert.equal(jsonResult.error, null);
+  assertPublicDiagnosticRedacted(jsonResult, sentinel, "JSON success");
+
+  const committed = makeSession("public-evidence-redaction-committed");
+  claimAmbientSessionAssignment(committed);
+  await startBuilderFlowSession({ sessionDir: committed.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforeSidecarRead: () => { throw new Error("post-sync presentation fault"); } });
+  try {
+    const recovered = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", committed.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "committed recovery redaction fixture",
+    ]);
+    assert.equal(recovered.error, null);
+    assert.match(recovered.output.join("\n"), /No retry is required/);
+    assertPublicDiagnosticRedacted(recovered, sentinel, "committed recovery text");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+
+  const recoveryFailure = makeSession("public-evidence-redaction-recovery-failure");
+  claimAmbientSessionAssignment(recoveryFailure);
+  await startBuilderFlowSession({ sessionDir: recoveryFailure.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforeSidecarRead: () => fs.writeFileSync(path.join(recoveryFailure.sessionDir, "trust.bundle"), "{}\n") });
+  try {
+    const failedRecovery = await captureWorkflowPublicResult([
+      "evidence", "--session-dir", recoveryFailure.sessionDir, "--expectation", "selected-work", "--status", "not_verified",
+      "--command", secretCommand, "--summary", "recovery failure redaction fixture",
+    ]);
+    assert.ok(failedRecovery.error, "a failed committed recovery remains recovery-required");
+    assertPublicDiagnosticRedacted(failedRecovery, sentinel, "recovery failure");
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
 test("shell output cannot spoof an executed-test count", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-count-"));
   fs.mkdirSync(path.join(root, "checks"), { recursive: true });
@@ -260,6 +1082,295 @@ test("shell output cannot spoof an executed-test count", () => {
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
   assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
   assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+});
+
+test("public workflow evidence retains an explicit non-pass verdict while reporting a successful command observation", async () => {
+  const session = makeSession("public-evidence-non-pass-observation");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const report = await workflowJson([
+    "evidence",
+    "--session-dir", session.sessionDir,
+    "--expectation", "selected-work",
+    "--status", "not_verified",
+    "--command", "true",
+    "--summary", "The command completed, but selected Work Item provenance remains unverified.",
+  ]);
+
+  assert.deepEqual(report.gate_verdict, {
+    requested_status: "not_verified",
+    persisted_value: "not_verified",
+    persisted_status: "proposed",
+  });
+  assert.deepEqual(report.command_observations, [{
+    ordinal: 1,
+    observation_id: report.command_observations[0].observation_id,
+    exit_code: 0,
+    output_sha256: report.command_observations[0].output_sha256,
+    outcome: "pass",
+  }]);
+  assert.match(report.command_observations[0].observation_id, /^command:[a-f0-9]{64}$/);
+  assert.match(report.command_observations[0].output_sha256, /^[a-f0-9]{64}$/);
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const gateClaim = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === "selected-work");
+  assert.equal(gateClaim.value, "not_verified");
+  assert.equal(gateClaim.status, "proposed");
+  assert.deepEqual(gateClaim.metadata.observed_commands.map((entry) => [entry.command, entry.exit_code]), [["true", 0]]);
+});
+
+test("public workflow evidence restores evidence bytes when synchronization fails before canonical attachment", async () => {
+  const session = makeSession("public-evidence-atomic-rollback");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const commandLogFile = path.join(session.sessionDir, "command-log.jsonl");
+  const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const beforeBundle = fs.readFileSync(bundleFile);
+  const beforeCommandLog = Buffer.from("pre-existing command-log bytes\\n");
+  fs.writeFileSync(commandLogFile, beforeCommandLog);
+  const beforeManifest = fs.readFileSync(manifestFile);
+  const breakSync = path.join(session.projectRoot, "break-sync-subject.mjs");
+  fs.writeFileSync(breakSync, `
+    import fs from "node:fs";
+    const file = ${JSON.stringify(path.join(session.sessionDir, "state.json"))};
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    state.work_item_refs = ["local:work-item/mutated-during-evidence"];
+    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\\n");
+  `);
+
+  await assert.rejects(
+    () => workflowMain([
+      "evidence",
+      "--session-dir", session.sessionDir,
+      "--expectation", "selected-work",
+      "--status", "not_verified",
+      "--command", "node break-sync-subject.mjs",
+      "--summary", "Exercise rollback after a failed synchronization.",
+    ]),
+    /selected Work Item|workflow_subject_ref/,
+  );
+
+  assert.deepEqual(fs.readFileSync(bundleFile), beforeBundle, "trust.bundle is restored byte-for-byte");
+  const afterCommandLog = fs.readFileSync(commandLogFile, "utf8");
+  assert.ok(afterCommandLog.startsWith(beforeCommandLog.toString("utf8")), "pre-existing command evidence is preserved");
+  assert.match(afterCommandLog, /"outcome":"aborted"/, "an append-only abort marker explains the rollback");
+  assert.deepEqual(fs.readFileSync(manifestFile), beforeManifest, "canonical manifest remains unchanged");
+});
+
+test("public workflow evidence preserves valid foreign command-log appends during unattached rollback", async () => {
+  for (const initialLog of [false, true]) {
+    const session = makeSession(`public-evidence-foreign-append-${initialLog ? "present" : "absent"}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeBundle(session.sessionDir, []);
+    const bundleFile = path.join(session.sessionDir, "trust.bundle");
+    const commandLogFile = path.join(session.sessionDir, "command-log.jsonl");
+    const beforeBundle = fs.readFileSync(bundleFile);
+    if (initialLog) appendChainedCommandLogRecord(commandLogFile, { source: "foreign", command: "before" });
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterRecord: () => {
+        appendChainedCommandLogRecord(commandLogFile, { source: "foreign", command: "after" });
+        const state = readJson(path.join(session.sessionDir, "state.json"));
+        state.work_item_refs = ["local:work-item/mutated-during-evidence"];
+        writeJson(path.join(session.sessionDir, "state.json"), state);
+      },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "force unattached rollback"]),
+        /selected Work Item|workflow_subject_ref/,
+      );
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.deepEqual(fs.readFileSync(bundleFile), beforeBundle, "only the transaction-owned bundle is restored");
+    const records = readCommandLog(commandLogFile);
+    assert.ok(records.some((record) => record.source === "foreign" && record.command === "after"), "foreign append survives");
+    assert.ok(records.some((record) => record.transaction?.outcome === "aborted"), "transaction is append-only journaled");
+    assertValidCommandLogChain(records);
+  }
+});
+
+test("public workflow evidence isolates overlapping transaction observations and abort journals", async () => {
+  const sessions = [makeSession("public-evidence-overlap-a"), makeSession("public-evidence-overlap-b")];
+  for (const session of sessions) {
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  }
+  const priorTransactionId = process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID;
+  const delays = [30, 120];
+  const attempts = sessions.map((session, index) => {
+    const mutator = path.join(session.projectRoot, "mutate-after-observation.mjs");
+    fs.writeFileSync(mutator, `
+      import fs from "node:fs";
+      await new Promise((resolve) => setTimeout(resolve, ${delays[index]}));
+      const stateFile = ${JSON.stringify(path.join(session.sessionDir, "state.json"))};
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      state.work_item_refs = ["local:work-item/concurrent-mutation-${index}"];
+      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\\n");
+    `);
+    return workflowMain([
+      "evidence", "--session-dir", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--command", `${process.execPath} ${mutator}`,
+      "--summary", "concurrent transaction isolation fixture",
+    ]);
+  });
+  try {
+    const outcomes = await Promise.allSettled(attempts);
+    assert.ok(outcomes.every((outcome) => outcome.status === "rejected"), "each intentionally mutated session must roll back");
+    for (const session of sessions) {
+      const records = readCommandLog(path.join(session.sessionDir, "command-log.jsonl"));
+      const observation = records.find((record) => record.source === "canonical-writer-execution");
+      const abort = records.find((record) => record.transaction?.outcome === "aborted");
+      assert.ok(observation, "the transaction records its writer observation");
+      assert.ok(abort, "the transaction records its abort journal entry");
+      assert.equal(observation.writer.transaction_id, abort.transaction.id, "observation and abort marker retain only this invocation's transaction id");
+      assertValidCommandLogChain(records);
+    }
+    assert.equal(process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID, priorTransactionId, "no transaction id leaks into ambient process state");
+  } finally {
+    if (priorTransactionId === undefined) delete process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID;
+    else process.env.FLOW_AGENTS_WORKFLOW_EVIDENCE_TRANSACTION_ID = priorTransactionId;
+  }
+});
+
+test("public workflow evidence refuses recovery after session replacement", async () => {
+  for (const mode of ["session-replacement"]) {
+    const session = makeSession(`public-evidence-${mode}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest({
+      afterRecord: () => {
+        if (mode === "session-replacement") {
+          const parked = `${session.sessionDir}-original`;
+          fs.renameSync(session.sessionDir, parked);
+          fs.mkdirSync(session.sessionDir);
+          writeJson(path.join(session.sessionDir, "state.json"), { task_slug: session.slug, work_item_refs: [SUBJECT] });
+          fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "replacement bundle\n");
+          return;
+        }
+      },
+    });
+    try {
+      await assert.rejects(
+        () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "exercise unsafe recovery refusal"]),
+        /recovery required|recovery refused|non-regular/i,
+      );
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+    assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), "replacement bundle\n");
+  }
+});
+
+test("public workflow evidence never overwrites a foreign regular trust.bundle replacement", async () => {
+  const session = makeSession("public-evidence-foreign-regular-trust");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  writeBundle(session.sessionDir, []);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const transactionFile = path.join(session.sessionDir, ".transaction-written-trust.bundle");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterRecord: () => {
+      fs.renameSync(bundleFile, transactionFile);
+      fs.writeFileSync(bundleFile, "foreign regular replacement\n");
+      const state = readJson(path.join(session.sessionDir, "state.json"));
+      state.work_item_refs = ["local:work-item/foreign-regular-trust-mutation"];
+      writeJson(path.join(session.sessionDir, "state.json"), state);
+    },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "foreign regular replacement fixture"]),
+      /recovery required|identity changed/i,
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+  assert.equal(fs.readFileSync(bundleFile, "utf8"), "foreign regular replacement\n");
+  assert.equal(fs.existsSync(transactionFile), true, "transaction-written evidence remains available for explicit recovery");
+});
+
+test("public workflow evidence returns committed recovery without rollback after post-sync faults", async () => {
+  for (const fault of ["manifest", "sidecar"]) {
+    const session = makeSession(`public-evidence-post-sync-${fault}`);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    setWorkflowEvidenceTransactionTestHooksForTest(fault === "manifest" ? { beforePostconditions: () => { throw new Error("manifest fault"); } }
+      : { beforeSidecarRead: () => { throw new Error("sidecar fault"); } });
+    try {
+      const report = await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "classify post-sync faults"]);
+      assert.deepEqual(report.recovery, { committed: true, retry: "none" });
+      assert.equal(report.attached, true, "the successful recovery reports the committed attachment");
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), true, "a committed attachment is retained");
+      assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)).evidence.length, 1);
+      assert.equal(readCommandLog(path.join(session.sessionDir, "command-log.jsonl")).some((record) => record.transaction?.outcome === "aborted"), false, "committed recovery never journals an abort");
+    } finally {
+      setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    }
+  }
+});
+
+test("public workflow evidence recovers an attached failing verify route-back without retry", async () => {
+  const session = makeSession("public-evidence-failed-verify-route-back");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  const verifying = await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  assert.equal(verifying.run.state.current_step, "verify");
+  writeBundle(session.sessionDir, verifiedTestsPrerequisites(session));
+
+  setWorkflowEvidenceTransactionTestHooksForTest({ beforePostconditions: () => { throw new Error("post-route receipt fixture"); } });
+  try {
+    const report = await workflowJson([
+      "evidence", "--session-dir", session.sessionDir,
+      "--expectation", "tests-evidence", "--status", "fail", "--route-reason", "implementation_defect",
+      "--summary", "Independent verification failed and routes back for implementation repair.",
+    ]);
+    assert.deepEqual(report.recovery, { committed: true, retry: "none" });
+    assert.equal(report.attached, true);
+    assert.equal(report.current_step, "execute");
+    const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+    const attached = manifest.evidence.at(-1);
+    assert.equal(attached.gate_id, "verify-gate");
+    assert.equal(attached.status, "failed");
+    assert.equal(attached.sha256, createHash("sha256").update(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"))).digest("hex"));
+    assert.equal(
+      fs.existsSync(path.join(session.sessionDir, "command-log.jsonl")),
+      false,
+      "committed recovery writes no abort marker when no observations exist",
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+});
+
+test("public workflow evidence leaves a committed attachment intact when recovery cannot complete", async () => {
+  const session = makeSession("public-evidence-post-sync-recovery-failure");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforeSidecarRead: () => { fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), "{}\n"); },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence", "--session-dir", session.sessionDir, "--expectation", "selected-work", "--status", "not_verified", "--command", "true", "--summary", "force recovery failure"]),
+      (error) => /recovery required/i.test(String(error)) && /no retry is required/i.test(String(error)),
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), true, "committed evidence is never rolled back");
+  assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)).evidence.length, 1);
+  assert.equal(readCommandLog(path.join(session.sessionDir, "command-log.jsonl")).some((record) => record.transaction?.outcome === "aborted"), false);
 });
 
 test("pre-chain critique migration is deterministic and never rewrites legacy reviewer attribution", () => {
@@ -288,6 +1399,32 @@ test("pre-chain critique migration is deterministic and never rewrites legacy re
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function readCommandLog(file) {
+  return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function appendChainedCommandLogRecord(file, record) {
+  const records = fs.existsSync(file) ? readCommandLog(file) : [];
+  const previous = records.at(-1)?._chain ?? { seq: -1, hash: commandLogChain.CHAIN_GENESIS };
+  const chained = structuredClone(record);
+  const hash = commandLogChain.computeChainHash(previous.hash, chained);
+  chained._chain = { seq: previous.seq + 1, prevHash: previous.hash, hash };
+  fs.appendFileSync(file, `${JSON.stringify(chained)}\n`);
+}
+
+function assertValidCommandLogChain(records) {
+  let previousHash = commandLogChain.CHAIN_GENESIS;
+  let sequence = 0;
+  for (const record of records) {
+    assert.equal(record._chain.seq, sequence++);
+    assert.equal(record._chain.prevHash, previousHash);
+    const copy = structuredClone(record);
+    delete copy._chain;
+    assert.equal(record._chain.hash, commandLogChain.computeChainHash(previousHash, copy));
+    previousHash = record._chain.hash;
+  }
 }
 
 function consumedAuthorizationRecords(session) {
@@ -1622,7 +2759,7 @@ test("direct sidecar gate recording cannot inject a head without an exact Flow p
   );
 });
 
-test("public evidence quarantines a committed bundle when producer durability reporting fails", async () => {
+test("public evidence retains non-authoritative staged residue when producer durability reporting fails", async () => {
   const session = makeSession("producer-durability-failure");
   claimAmbientSessionAssignment(session);
   await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -1632,7 +2769,9 @@ test("public evidence quarantines a committed bundle when producer durability re
   const realFsyncSync = fs.fsyncSync;
   let injectedFailure = false;
   fs.fsyncSync = (descriptor) => {
-    if (fs.fstatSync(descriptor).isDirectory() && fs.existsSync(bundleFile) && !injectedFailure) {
+    const stagedTransactionExists = fs.readdirSync(session.sessionDir)
+      .some((name) => name.startsWith(".workflow-evidence-transaction-"));
+    if (fs.fstatSync(descriptor).isDirectory() && stagedTransactionExists && !injectedFailure) {
       injectedFailure = true;
       throw Object.assign(new Error("fixture directory fsync failure"), { code: "EIO" });
     }
@@ -1653,8 +2792,11 @@ test("public evidence quarantines a committed bundle when producer durability re
   }
   assert.equal(fs.existsSync(bundleFile), false, "a producer-reported failure must not leave a live attachable bundle");
   assert.deepEqual(readJson(manifestFile), beforeManifest);
-  const quarantined = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".trust.bundle.failed-"));
-  assert.equal(quarantined.length, 1, "the committed bytes remain preserved as inert audit evidence");
+  const transactions = fs.readdirSync(session.sessionDir).filter((name) => name.startsWith(".workflow-evidence-transaction-"));
+  assert.equal(transactions.length, 1, "the correlated staged transaction remains as inert audit evidence");
+  const candidateFile = path.join(session.sessionDir, transactions[0], "trust.bundle.candidate");
+  assert.equal(fs.statSync(candidateFile).isFile(), true);
+  assert.doesNotThrow(() => JSON.parse(fs.readFileSync(candidateFile, "utf8")));
 });
 
 test("start rejects a requested Builder flow that differs from the existing run before projection mutation", async (t) => {
@@ -1808,6 +2950,513 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
     request: { reason: "test", authority: { kind: "operator_request", actor: "operator", request_ref: "fixture://legacy", requested_at: NOW } },
   });
   assert.equal(unsigned.assignment_actor.human, "operator");
+});
+
+test("verification evidence reseal authorization binds every atomic preimage", () => {
+  const fields = {
+    project_root: "/tmp/reseal-project", run_id: "run-1", subject: SUBJECT,
+    preimage_bundle_sha256: "1".repeat(64), candidate_bundle_sha256: "2".repeat(64),
+    candidate_transaction_id: "3".repeat(32),
+    preimage_ledger_sha256: "4".repeat(64), preimage_ledger_length: 5, preimage_ledger_tail_hash: "5".repeat(64),
+    current_completion_sha256: "6".repeat(64), current_completion_request_sha256: "7".repeat(64), current_completion_result_core_sha256: "8".repeat(64),
+    flow_definition_id: "builder.build", flow_step_id: "verify", flow_gate_id: "verify-gate", flow_run_head: "9".repeat(64), flow_manifest_sha256: "a".repeat(64),
+    critique_projection_sha256: "b".repeat(64), target_expectation_id: "tests-evidence",
+    predecessor_claim_id: "gate-tests", predecessor_claim_status: "disputed", predecessor_claim_sha256: "c".repeat(64), predecessor_claim_index: 4,
+    current_claim_id: "gate-tests", current_claim_status: "verified", current_claim_sha256: "d".repeat(64), current_claim_index: 4,
+    claim_delta: "replace", nonce: "reseal-once",
+    requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  const built = builderLifecycleAuthority.buildUnsignedVerificationEvidenceResealAuthorization(fields);
+  assert.equal(built.unsigned.operation, "reseal-verification-evidence");
+  assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
+  assert.equal(built.unsigned.candidate_transaction_id, fields.candidate_transaction_id);
+  assert.equal(built.unsigned.preimage_ledger_length, 5);
+  const malformed = { ...built.unsigned, signature: { algorithm: "ed25519", key_id: "operator", value: "AA==" } };
+  delete malformed.flow_manifest_sha256;
+  assert.throws(
+    () => builderLifecycleAuthority.validateVerificationEvidenceResealAuthorization(malformed, {
+      projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
+    }),
+    /unexpected or missing fields/i,
+  );
+});
+
+test("history-repair authorization is a distinct signed request bound to the exact missing authority edge", () => {
+  const buildUnsignedCritiqueResolutionHistoryRepairAuthorization = builderLifecycleAuthority.buildUnsignedCritiqueResolutionHistoryRepairAuthorization;
+  const critiqueResolutionHistoryRepairAuthorizationPayload = builderLifecycleAuthority.critiqueResolutionHistoryRepairAuthorizationPayload;
+  assert.equal(
+    typeof buildUnsignedCritiqueResolutionHistoryRepairAuthorization,
+    "function",
+    "RED: a separately signed history-repair authorization builder must exist; ordinary resolve-critique authorization cannot reconstruct missing history",
+  );
+  assert.equal(typeof critiqueResolutionHistoryRepairAuthorizationPayload, "function");
+  const fields = {
+    project_root: "/tmp/repair-history-project",
+    run_id: "run-1",
+    subject: SUBJECT,
+    prior_record_id: "critique:prior",
+    prior_record_hash: "a".repeat(64),
+    resolving_record_id: "critique:resolving",
+    resolving_record_hash: "b".repeat(64),
+    expected_resolver: "independent-reviewer",
+    prior_snapshot_sha256: "c".repeat(64),
+    resolving_snapshot_sha256: "d".repeat(64),
+    prior_head_sha: "none",
+    resolving_head_sha: "none",
+    preimage_bundle_sha256: "e".repeat(64),
+    preimage_ledger_sha256: "f".repeat(64),
+    preimage_ledger_length: 1,
+    preimage_ledger_tail_hash: "1".repeat(64),
+    current_completion_sha256: "2".repeat(64),
+    historical_completion_sha256: "6".repeat(64),
+    historical_completion_request_sha256: "7".repeat(64),
+    historical_completion_action: "resolve-critique",
+    historical_completion_result_core_sha256: "8".repeat(64),
+    historical_attachment_id: `lifecycle-authority:${"7".repeat(64)}`,
+    historical_manifest_entry_sha256: "9".repeat(64),
+    historical_stored_path: `evidence/lifecycle-authority:${"7".repeat(64)}.json`,
+    historical_stored_raw_sha256: "a".repeat(64),
+    historical_stored_bundle_sha256: "b".repeat(64),
+    historical_durable_operation_id: "operation:historical",
+    historical_durable_completion_record_sha256: "c".repeat(64),
+    historical_ledger_prefix_length: 1,
+    historical_ledger_prefix_raw_sha256: "d".repeat(64),
+    historical_ledger_prefix_canonical_sha256: "d".repeat(64),
+    historical_ledger_prefix_tail_hash: "e".repeat(64),
+    historical_critique_projection_version: "1.0",
+    historical_critique_projection_sha256: "1".repeat(64),
+    historical_critique_projection_length: 2,
+    historical_critique_projection_tail_hash: "2".repeat(64),
+    current_critique_projection_version: "1.0",
+    current_critique_projection_sha256: "3".repeat(64),
+    current_critique_projection_length: 3,
+    current_critique_projection_tail_hash: "4".repeat(64),
+    historical_resolution_edge_projection_sha256: "5".repeat(64),
+    historical_resolution_edge_projection_count: 1,
+    current_resolution_edge_projection_sha256: "5".repeat(64),
+    current_resolution_edge_projection_count: 1,
+    current_bundle_sha256: "6".repeat(64),
+    current_ledger_sha256: "7".repeat(64),
+    current_ledger_length: 1,
+    current_ledger_tail_hash: "e".repeat(64),
+    preserved_resolution_sha256: "3".repeat(64),
+    missing_resolution_event_id: `critique-resolution:${"4".repeat(64)}`,
+    missing_authorization_sha256: "5".repeat(64),
+    reason_code: "coordinator-external-ledger-overwrite-v1",
+    nonce: "repair-history-once",
+    requested_at: "2030-01-02T00:00:00.000Z",
+    expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  fields.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(fields);
+  const { unsigned, signingPayload } = buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields);
+  assert.equal(unsigned.operation, "repair-critique-resolution-history");
+  assert.deepEqual(unsigned, { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields });
+  assert.equal(signingPayload, critiqueResolutionHistoryRepairAuthorizationPayload(unsigned));
+  const missingBridgeField = structuredClone(fields);
+  delete missingBridgeField.historical_stored_raw_sha256;
+  assert.throws(
+    () => buildUnsignedCritiqueResolutionHistoryRepairAuthorization(missingBridgeField),
+    /requires every historical bridge field/i,
+    "the public builder rejects a legacy repair request before signing",
+  );
+  assert.notEqual(
+    buildUnsignedCritiqueResolutionAuthorization({
+      project_root: fields.project_root, run_id: fields.run_id, subject: fields.subject,
+      prior_bundle_sha256: fields.preimage_bundle_sha256, prior_record_id: fields.prior_record_id, prior_record_hash: fields.prior_record_hash,
+      resolving_record_id: fields.resolving_record_id, resolving_record_hash: fields.resolving_record_hash,
+      expected_resolver: fields.expected_resolver, resolved_lane_ids: [], resolved_finding_ids: [],
+      prior_snapshot_sha256: fields.prior_snapshot_sha256, resolving_snapshot_sha256: fields.resolving_snapshot_sha256,
+      prior_head_sha: "none", resolving_head_sha: "none", nonce: fields.nonce, requested_at: fields.requested_at, expires_at: fields.expires_at,
+    }).unsigned.operation,
+    unsigned.operation,
+    "ordinary resolve-critique authorization is not a private history-repair shortcut",
+  );
+});
+
+test("versioned critique projections are identical across package and installed runtime and enforce append-only history", () => {
+  const makeRecord = ({ sequence, predecessor, reviewer, verdict, status = "verified", reviewedAt }) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: reviewedAt,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status, fieldOrBehavior: base.summary, createdAt: reviewedAt, updatedAt: reviewedAt,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash, claim_status: status },
+    };
+  };
+  const first = makeRecord({ sequence: 1, predecessor: CRITIQUE_CHAIN_GENESIS, reviewer: "reviewer-a", verdict: "fail", reviewedAt: "2030-01-01T00:00:00.000Z" });
+  const second = makeRecord({ sequence: 2, predecessor: first.metadata.critique_record_hash, reviewer: "reviewer-b", verdict: "pass", reviewedAt: "2030-01-01T00:01:00.000Z" });
+  const edge = {
+    schema_version: "1.0", kind: "cross-reviewer", prior_record_id: first.metadata.critique_record_id,
+    resolving_record_id: second.metadata.critique_record_id, resolver: second.metadata.reviewer,
+    resolved_lane_ids: [], resolved_finding_ids: [], resolved_at: "2030-01-01T00:01:00.000Z",
+    authorization_sha256: "a".repeat(64), resolution_event_id: `critique-resolution:${"a".repeat(64)}`,
+  };
+  first.status = "superseded"; first.metadata.claim_status = "superseded"; first.metadata.superseded_by = second.metadata.critique_record_id; first.metadata.critique_resolution = edge;
+  const third = makeRecord({ sequence: 3, predecessor: second.metadata.critique_record_hash, reviewer: "reviewer-c", verdict: "pass", reviewedAt: "2030-01-01T00:02:00.000Z" });
+  const historical = [first, second];
+  const current = [...historical, third];
+
+  for (const functionName of ["critiqueHistoryProjectionSummary", "critiqueResolutionEdgeProjectionSummary"]) {
+    assert.deepEqual(
+      critiqueResolutionRuntime[functionName](current),
+      installedLifecycleRuntime[functionName](current),
+      `${functionName} must be byte-semantically identical across package and installed runtime`,
+    );
+  }
+  const continuity = critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, current);
+  assert.equal(continuity.historical.length, 2);
+  assert.equal(continuity.current.length, 3);
+  assert.equal(continuity.historical_edges.digest, continuity.current_historical_edges.digest);
+
+  const altered = structuredClone(current); altered[0].metadata.reviewer = "edited";
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, altered), /exact historical prefix/i);
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, current.slice(1)), /deletes|prefix/i);
+  const reordered = structuredClone(current);
+  [reordered[0].metadata.critique_sequence, reordered[1].metadata.critique_sequence] = [2, 1];
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, reordered), /prefix|noncontiguous/i);
+  const inserted = structuredClone(current); inserted[2].metadata.critique_sequence = 4;
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, inserted), /noncontiguous/i);
+  const edgeDrift = structuredClone(current); edgeDrift[0].metadata.critique_resolution.resolver = "other-reviewer";
+  assert.throws(() => critiqueResolutionRuntime.assertAppendOnlyCritiqueHistory(historical, edgeDrift), /prefix|resolution edges/i);
+});
+
+test("historical completion prefix selection requires one exact ordered prefix", () => {
+  const storedBundle = { schema_version: "1.0", claims: [] };
+  const events = [{ event_hash: "a".repeat(64) }, { event_hash: "b".repeat(64) }];
+  const target = lifecycleAuthorityResultDigest({ ...storedBundle, critique_resolution_events: events.slice(0, 1) });
+  const selected = critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target);
+  assert.equal(selected.length, 1);
+  assert.deepEqual(selected.events, events.slice(0, 1));
+  assert.equal(selected.tail_hash, events[0].event_hash);
+  assert.deepEqual(selected, installedLifecycleRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target));
+  assert.throws(() => critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, "f".repeat(64)), /exactly one.*found 0/i);
+  assert.throws(
+    () => critiqueResolutionRuntime.selectUniqueHistoricalLedgerPrefix(storedBundle, events, target, () => target),
+    /exactly one.*found 3/i,
+  );
+});
+
+test("public history-repair request deterministically derives every historical/current bridge binding", async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-public-bridge-"));
+  const slug = "history-repair-public-bridge";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", slug);
+  const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+  const makeRecord = ({ sequence, predecessor, reviewer, verdict, reviewedAt }) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: reviewedAt,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status: "verified", fieldOrBehavior: base.summary, createdAt: reviewedAt, updatedAt: reviewedAt,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash },
+    };
+  };
+  try {
+    const first = makeRecord({ sequence: 1, predecessor: CRITIQUE_CHAIN_GENESIS, reviewer: "reviewer-a", verdict: "fail", reviewedAt: "2030-01-01T00:00:00.000Z" });
+    const second = makeRecord({ sequence: 2, predecessor: first.metadata.critique_record_hash, reviewer: "reviewer-b", verdict: "pass", reviewedAt: "2030-01-01T00:01:00.000Z" });
+    const third = makeRecord({ sequence: 3, predecessor: second.metadata.critique_record_hash, reviewer: "reviewer-c", verdict: "pass", reviewedAt: "2030-01-01T00:02:00.000Z" });
+    const historicalBundle = { schema_version: "1.0", claims: [first, second] };
+    const currentBundle = { schema_version: "1.0", claims: [first, second, third] };
+    const historicalAuthorization = {
+      project_root: projectRoot, run_id: slug, nonce: "historical-nonce",
+      signature: { algorithm: "ed25519", key_id: "historical-key", value: "signed" },
+    };
+    const event = {
+      schema_version: "1.0", event_id: "historical-event", sequence: 1, predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+      operation: "resolve-critique", run_id: slug, subject: SUBJECT, event_hash: "a".repeat(64),
+      signed_authorization: historicalAuthorization,
+    };
+    const requestSha256 = "b".repeat(64);
+    const completion = {
+      schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
+      request_sha256: requestSha256, run_id: slug, operation_status: "applied",
+      result_core_sha256: lifecycleAuthorityResultDigest({ ...historicalBundle, critique_resolution_events: [event] }),
+      coordinator_runtime_sha256: "c".repeat(64), completed_at: "2030-01-01T00:01:30.000Z",
+      signature: { algorithm: "ed25519", value: "root-signed" },
+    };
+    const storedBytes = Buffer.from(`${JSON.stringify(historicalBundle, null, 2)}\n`);
+    const attachmentId = `lifecycle-authority:${requestSha256}`;
+    const entry = {
+      id: attachmentId, kind: "trust.bundle", gate_id: "verify-gate", attached_at: "2030-01-01T00:01:30.000Z",
+      original_path: `.kontourai/flow-agents/${slug}/trust.bundle`,
+      stored_path: `evidence/${attachmentId}.json`,
+      sha256: createHash("sha256").update(storedBytes).digest("hex"),
+    };
+    fs.mkdirSync(path.join(flowRoot, "evidence"), { recursive: true });
+    fs.mkdirSync(sessionDir, { recursive: true });
+    writeJson(path.join(sessionDir, "state.json"), {
+      schema_version: "1.0", task_slug: slug, work_item_refs: [SUBJECT],
+      status: "active", phase: "verification", updated_at: "2030-01-01T00:02:00.000Z",
+      next_action: { status: "continue", summary: "test fixture" },
+    });
+    fs.writeFileSync(path.join(flowRoot, "evidence", `${attachmentId}.json`), storedBytes, { mode: 0o644 });
+    writeJson(path.join(flowRoot, FLOW_RUN_EVIDENCE_MANIFEST_PATH), { schema_version: "1.0", evidence: [entry] });
+    const bundleBytes = Buffer.from(`${JSON.stringify(currentBundle, null, 2)}\n`);
+    const ledgerBytes = Buffer.from(`${JSON.stringify({ schema_version: "1.0", events: [event] }, null, 2)}\n`);
+    const bridge = workflowRuntime.discoverCritiqueResolutionHistoryRepairBridge({
+      sessionDir, slug, projectRoot, bundleBytes, bundle: currentBundle, ledgerBytes, events: [event], completion,
+    });
+    assert.equal(bridge.historical_attachment_id, attachmentId);
+    assert.equal(bridge.historical_ledger_prefix_length, 1);
+    assert.equal(bridge.historical_critique_projection_length, 2);
+    assert.equal(bridge.current_critique_projection_length, 3);
+    assert.equal(bridge.current_bundle_sha256, createHash("sha256").update(bundleBytes).digest("hex"));
+    assert.equal(bridge.current_ledger_sha256, createHash("sha256").update(ledgerBytes).digest("hex"));
+    assert.equal(bridge.historical_bridge_sha256, builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(bridge));
+
+    writeJson(path.join(flowRoot, FLOW_RUN_EVIDENCE_MANIFEST_PATH), { schema_version: "1.0", evidence: [entry, structuredClone(entry)] });
+    assert.throws(
+      () => workflowRuntime.discoverCritiqueResolutionHistoryRepairBridge({
+        sessionDir, slug, projectRoot, bundleBytes, bundle: currentBundle, ledgerBytes, events: [event], completion,
+      }),
+      /attachment must occur exactly once/i,
+    );
+    for (const [flag, value] of [
+      ["--historical-stored-path", "caller-selected.json"],
+      ["--historical-ledger-prefix-length", "0"],
+      ["--historical-completion-request-sha256", "f".repeat(64)],
+      ["--historical-flow-run", "other-run"],
+    ]) {
+      await assert.rejects(
+        workflowMain([
+          "repair-critique-resolution-history-request", "--session-dir", sessionDir,
+          "--prior-record-id", first.metadata.critique_record_id, "--resolving-record-id", second.metadata.critique_record_id,
+          flag, value,
+        ]),
+        new RegExp(`does not support.*${flag.slice(2)}`, "i"),
+      );
+    }
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("history-repair authorization parser rejects every missing bridge field and unknown fields", () => {
+  const fields = {
+    schema_version: "1.0", operation: "repair-critique-resolution-history", project_root: "/project", run_id: "run-1", subject: SUBJECT,
+    prior_record_id: "prior", prior_record_hash: "a".repeat(64), resolving_record_id: "resolving", resolving_record_hash: "b".repeat(64),
+    expected_resolver: "reviewer-b", prior_snapshot_sha256: "c".repeat(64), resolving_snapshot_sha256: "d".repeat(64), prior_head_sha: "none", resolving_head_sha: "none",
+    preimage_bundle_sha256: "e".repeat(64), preimage_ledger_sha256: "f".repeat(64), preimage_ledger_length: 0, preimage_ledger_tail_hash: "0".repeat(64),
+    current_completion_sha256: "1".repeat(64), historical_completion_sha256: "1".repeat(64), historical_completion_request_sha256: "2".repeat(64),
+    historical_completion_action: "resolve-critique", historical_completion_result_core_sha256: "3".repeat(64),
+    historical_attachment_id: "lifecycle-authority:historical", historical_manifest_entry_sha256: "4".repeat(64), historical_stored_path: "evidence/historical.json",
+    historical_stored_raw_sha256: "5".repeat(64), historical_stored_bundle_sha256: "6".repeat(64), historical_durable_operation_id: "operation:historical",
+    historical_durable_completion_record_sha256: "7".repeat(64), historical_ledger_prefix_length: 0, historical_ledger_prefix_raw_sha256: "8".repeat(64), historical_ledger_prefix_canonical_sha256: "8".repeat(64),
+    historical_ledger_prefix_tail_hash: "0".repeat(64), historical_critique_projection_version: "1.0", historical_critique_projection_sha256: "9".repeat(64),
+    historical_critique_projection_length: 2, historical_critique_projection_tail_hash: "a".repeat(64), current_critique_projection_sha256: "b".repeat(64),
+    current_critique_projection_version: "1.0", current_critique_projection_length: 3, current_critique_projection_tail_hash: "c".repeat(64), historical_resolution_edge_projection_sha256: "d".repeat(64),
+    historical_resolution_edge_projection_count: 1, current_resolution_edge_projection_sha256: "d".repeat(64), current_resolution_edge_projection_count: 1,
+    current_bundle_sha256: "e".repeat(64), current_ledger_sha256: "f".repeat(64), current_ledger_length: 0, current_ledger_tail_hash: "0".repeat(64),
+    preserved_resolution_sha256: "1".repeat(64), missing_resolution_event_id: "critique-resolution:missing", missing_authorization_sha256: "2".repeat(64),
+    reason_code: "coordinator-external-ledger-overwrite-v1", nonce: "nonce", requested_at: "2030-01-01T00:00:00.000Z", expires_at: "2030-01-01T00:10:00.000Z",
+    signature: { algorithm: "ed25519", key_id: "operator", value: "signed" },
+  };
+  fields.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(fields);
+  const expected = { projectRoot: "/project", runId: "run-1", subject: SUBJECT, now: "2030-01-01T00:01:00.000Z" };
+  const bridgeFields = Object.keys(fields).filter((field) => field.startsWith("historical_") || field.startsWith("current_"));
+  for (const field of bridgeFields) {
+    const missing = structuredClone(fields); delete missing[field];
+    assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization(missing, expected), /unexpected or missing fields/i, field);
+  }
+  assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization({ ...fields, caller_selected_prefix: 0 }, expected), /unexpected or missing fields/i);
+  assert.throws(() => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization({ ...fields, current_bundle_sha256: "0".repeat(64) }, expected), /bridge digest is invalid/i);
+  const staleProjection = { ...fields, current_critique_projection_sha256: "0".repeat(64) };
+  staleProjection.historical_bridge_sha256 = builderLifecycleAuthority.critiqueResolutionHistoryBridgeDigest(staleProjection);
+  assert.throws(
+    () => builderLifecycleAuthority.validateCritiqueResolutionHistoryRepairAuthorization(staleProjection, {
+      ...expected,
+      bindings: { current_critique_projection_sha256: fields.current_critique_projection_sha256, current_bundle_sha256: fields.current_bundle_sha256 },
+    }),
+    /current_critique_projection_sha256 does not match the expected bridge/i,
+  );
+});
+
+test("package graph rejects every coherently rehashed repair authorization missing a mandatory bridge field", () => {
+  const makeClaim = (sequence, predecessor, reviewer, verdict) => {
+    const base = {
+      critique_sequence: sequence, critique_predecessor_hash: predecessor, reviewer, reviewed_at: `2030-01-01T00:0${sequence}:00.000Z`,
+      verdict, summary: `${reviewer} review`, lanes: [], review_target: { artifacts: [] }, findings: [], workflow_subject_ref: SUBJECT,
+    };
+    const hash = critiqueRecordHash(base);
+    return {
+      id: `claim-${sequence}`, value: verdict, status: verdict === "pass" ? "verified" : "superseded", fieldOrBehavior: base.summary,
+      metadata: { ...base, origin: "critique", critique_record_id: `critique:${hash}`, critique_record_hash: hash },
+    };
+  };
+  const prior = makeClaim(1, CRITIQUE_CHAIN_GENESIS, "reviewer-a", "fail");
+  const resolving = makeClaim(2, prior.metadata.critique_record_hash, "reviewer-b", "pass");
+  const missingAuthorizationSha256 = "a".repeat(64);
+  const missingEventId = `critique-resolution:${missingAuthorizationSha256}`;
+  const edge = {
+    schema_version: "1.0", kind: "cross-reviewer", prior_record_id: prior.metadata.critique_record_id,
+    resolving_record_id: resolving.metadata.critique_record_id, resolver: resolving.metadata.reviewer,
+    resolved_lane_ids: [], resolved_finding_ids: [], resolved_at: "2030-01-01T00:02:00.000Z",
+    authorization_sha256: missingAuthorizationSha256, resolution_event_id: missingEventId,
+  };
+  prior.metadata = { ...prior.metadata, superseded_by: resolving.metadata.critique_record_id, critique_resolution: edge };
+  const bridgeFields = [
+    "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+    "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+    "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+    "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+    "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+    "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+    "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+    "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+    "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  ];
+  const bridgeValue = (field) => field.endsWith("_length") || field.endsWith("_count") ? 0
+    : field.endsWith("_version") ? "1.0"
+      : field.endsWith("_action") ? "resolve-critique"
+        : field.endsWith("_id") || field.endsWith("_path") ? `fixture:${field}`
+          : "b".repeat(64);
+  const signedAuthorization = {
+    schema_version: "1.0", operation: "repair-critique-resolution-history", project_root: "/project", run_id: "run-graph", subject: SUBJECT,
+    prior_record_id: prior.metadata.critique_record_id, prior_record_hash: prior.metadata.critique_record_hash,
+    resolving_record_id: resolving.metadata.critique_record_id, resolving_record_hash: resolving.metadata.critique_record_hash,
+    expected_resolver: resolving.metadata.reviewer, missing_resolution_event_id: missingEventId, missing_authorization_sha256: missingAuthorizationSha256,
+    preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
+    reason_code: "coordinator-external-ledger-overwrite-v1", nonce: "repair-nonce", signature: { algorithm: "ed25519", key_id: "fixture", value: "signed" },
+    ...Object.fromEntries(bridgeFields.map((field) => [field, bridgeValue(field)])),
+  };
+  signedAuthorization.historical_bridge_sha256 = critiqueResolutionRuntime.critiqueResolutionHistoryBridgeDigest(signedAuthorization);
+  const repairEvent = (authorization) => {
+    const authorizationSha256 = createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
+    const unsigned = {
+      schema_version: "1.0", event_id: `critique-resolution-history-repair:${authorizationSha256}`, sequence: 1, predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+      operation: "repair-critique-resolution-history", run_id: "run-graph", subject: SUBJECT, preimage_bundle_sha256: "c".repeat(64),
+      prior_record_id: prior.metadata.critique_record_id, prior_record_hash: prior.metadata.critique_record_hash,
+      resolving_record_id: resolving.metadata.critique_record_id, resolving_record_hash: resolving.metadata.critique_record_hash, resolver: resolving.metadata.reviewer,
+      authorization_sha256: authorizationSha256, authorization_key_id: "fixture", authorization_nonce: "repair-nonce", edge,
+      missing_resolution_event_id: missingEventId, missing_authorization_sha256: missingAuthorizationSha256,
+      reason_code: authorization.reason_code, current_completion_sha256: "d".repeat(64), verified_bridge_sha256: authorization.historical_bridge_sha256,
+      resulting_core_sha256: critiqueResolutionRuntime.critiqueResolutionResultCoreDigest(prior.metadata, resolving.metadata, edge), signed_authorization: authorization,
+    };
+    return { ...unsigned, event_hash: createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") };
+  };
+  const completeGraph = validateCritiqueResolutionGraph([prior, resolving], SUBJECT, [repairEvent(signedAuthorization)]);
+  assert.equal(completeGraph.valid, true, `the complete repair bridge is accepted by package graph validation: ${completeGraph.errors.join("; ")}`);
+  for (const field of bridgeFields) {
+    const missing = { ...signedAuthorization };
+    delete missing[field];
+    missing.historical_bridge_sha256 = critiqueResolutionRuntime.critiqueResolutionHistoryBridgeDigest(missing);
+    const graph = validateCritiqueResolutionGraph([prior, resolving], SUBJECT, [repairEvent(missing)]);
+    assert.equal(graph.valid, false, `missing ${field} must fail even when authorization, event, and bridge digests are coherently rehashed`);
+    assert.match(graph.errors.join("\n"), /verified historical bridge/i, field);
+  }
+});
+
+test("public history-repair request preimage reads protected exact bytes and treats only an absent ledger as empty", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  assert.equal(typeof readPreimage, "function");
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-preimage-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    const bundleBytes = Buffer.from('{\n  "schema_version": "1.0",\n  "claims": []\n}\n');
+    fs.writeFileSync(bundleFile, bundleBytes, { mode: 0o644 });
+
+    const absent = readPreimage(sessionDir);
+    assert.deepEqual(absent.bundleBytes, bundleBytes);
+    assert.equal(
+      createHash("sha256").update(absent.bundleBytes).digest("hex"),
+      createHash("sha256").update(bundleBytes).digest("hex"),
+      "the request signature preimage digest must bind the exact raw trust.bundle bytes",
+    );
+    assert.equal(absent.ledgerBytes.length, 0);
+    assert.equal(createHash("sha256").update(absent.ledgerBytes).digest("hex"), createHash("sha256").update(Buffer.alloc(0)).digest("hex"));
+    assert.deepEqual(absent.events, []);
+
+    const ledgerBytes = Buffer.from('{\n "events": [],\n "schema_version": "1.0"\n}\n');
+    fs.writeFileSync(ledgerFile, ledgerBytes, { mode: 0o644 });
+    const present = readPreimage(sessionDir);
+    assert.deepEqual(present.ledgerBytes, ledgerBytes);
+    assert.equal(
+      createHash("sha256").update(present.ledgerBytes).digest("hex"),
+      createHash("sha256").update(ledgerBytes).digest("hex"),
+      "the request signature preimage digest must bind the exact raw ledger bytes, not reserialized JSON",
+    );
+
+    fs.rmSync(ledgerFile);
+    fs.mkdirSync(ledgerFile);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file|EISDIR/i, "a non-ENOENT read failure is not treated as an absent ledger");
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed trust bundles", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-bundle-adversarial-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const target = path.join(sessionDir, "bundle-target.json");
+    fs.writeFileSync(target, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o644 });
+    fs.symlinkSync(target, bundleFile);
+    assert.throws(() => readPreimage(sessionDir), /ELOOP|symbolic link/i);
+    fs.unlinkSync(bundleFile);
+
+    fs.writeFileSync(bundleFile, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o666 });
+    fs.chmodSync(bundleFile, 0o666);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file/i);
+
+    fs.writeFileSync(bundleFile, Buffer.alloc(4 * 1024 * 1024 + 1), { mode: 0o644 });
+    fs.chmodSync(bundleFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file.*4194304 bytes/i);
+
+    fs.writeFileSync(bundleFile, "{malformed\n", { mode: 0o644 });
+    fs.chmodSync(bundleFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), SyntaxError);
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed ledgers", () => {
+  const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-adversarial-"));
+  try {
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    fs.writeFileSync(bundleFile, `${JSON.stringify({ schema_version: "1.0", claims: [] })}\n`, { mode: 0o644 });
+
+    const target = path.join(sessionDir, "ledger-target.json");
+    fs.writeFileSync(target, `${JSON.stringify({ schema_version: "1.0", events: [] })}\n`, { mode: 0o644 });
+    fs.symlinkSync(target, ledgerFile);
+    assert.throws(() => readPreimage(sessionDir), /ELOOP|symbolic link/i);
+    fs.unlinkSync(ledgerFile);
+
+    fs.writeFileSync(ledgerFile, `${JSON.stringify({ schema_version: "1.0", events: [] })}\n`, { mode: 0o666 });
+    fs.chmodSync(ledgerFile, 0o666);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file/i);
+
+    fs.writeFileSync(ledgerFile, Buffer.alloc(4 * 1024 * 1024 + 1), { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /protected regular file.*4194304 bytes/i);
+
+    fs.writeFileSync(ledgerFile, "{malformed\n", { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), SyntaxError);
+
+    fs.writeFileSync(ledgerFile, `${JSON.stringify({ schema_version: "1.0", events: [], extra: true })}\n`, { mode: 0o644 });
+    fs.chmodSync(ledgerFile, 0o644);
+    assert.throws(() => readPreimage(sessionDir), /exact external resolution event ledger shape/i);
+  } finally {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("ordinary resolution and history repair completion cores preserve the synthetic-ledger compatibility shape", () => {
+  const bundle = { schema_version: "1.0", claims: [{ id: "claim-1", value: "pass" }] };
+  for (const operation of ["resolve-critique", "repair-critique-resolution-history"]) {
+    const resolutionEvents = [{ operation, event_id: `${operation}:event`, event_hash: "a".repeat(64) }];
+    const exactCore = lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents });
+    assert.notEqual(exactCore, lifecycleAuthorityResultDigest({ bundle, resolution_events: resolutionEvents }), `${operation} completion must retain the established synthetic-ledger compatibility shape`);
+    assert.equal(exactCore, lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents }), `${operation} completion binds the exact current bundle and external ledger`);
+  }
 });
 
 test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {
@@ -3238,6 +4887,31 @@ test("upgrade rebuild preserves legacy critique identity until a versioned new r
   assert.notEqual(newReview.claims[0].id, beforeUpgrade.claims[0].id);
   assert.equal(rebuiltAfterUpgrade.claims[0].metadata.identity_version, undefined);
   assert.equal(newReview.claims[0].metadata.identity_version, 2);
+});
+
+test("resolved critique rebuild preserves the coordinator-issued physical claim id", async () => {
+  const historical = {
+    id: "resolved-review",
+    claim_id: "claim:coordinator-preserved",
+    critique_record_id: `critique:${"a".repeat(64)}`,
+    critique_record_hash: "a".repeat(64),
+    critique_sequence: 1,
+    critique_predecessor_hash: "0".repeat(64),
+    reviewer: "reviewer-a",
+    reviewed_at: "2026-07-01T00:00:00Z",
+    identity_version: 2,
+    verdict: "fail",
+    summary: "Resolved historical review",
+    findings: [{ id: "F-1", status: "open" }],
+    lanes: [{ id: "code", status: "fail" }],
+    review_target: { artifacts: [] },
+    artifact_refs: [],
+    superseded_by: `critique:${"b".repeat(64)}`,
+  };
+  const rebuilt = await buildTrustBundle("resolved-fixture", "2026-07-12T00:00:00Z", [], [], [historical]);
+  assert.equal(rebuilt.claims[0].id, historical.claim_id);
+  assert.equal(rebuilt.claims[0].metadata.critique_record_id, historical.critique_record_id);
+  assert.equal(rebuilt.claims[0].metadata.superseded_by, historical.superseded_by);
 });
 
 test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {

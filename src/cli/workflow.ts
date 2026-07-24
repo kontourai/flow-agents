@@ -5,23 +5,24 @@ import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type 
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
-import { flowRunHead, loadRun, validateDefinition } from "@kontourai/flow";
+import { expectationsForGate, flowRunHead, loadRun, openGates, validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization } from "../builder-lifecycle-authority.js";
+import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { normalizeCritiqueChainRecords } from "./critique-resolution.js";
-import { assertCurrentVerifiedWorkspaceEvidence, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustCheckpointSealResult, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
+import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -31,7 +32,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "resolve-critique-request", "resolve-critique", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -40,8 +41,10 @@ Public workflow verbs:
   start               Start or resume a workflow for a Work Item.
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
+  reseal-verification-evidence  Atomically publish a signed staged verification-evidence candidate.
   critique            Record review critique directly into the current trust bundle.
   resolve-critique    Resolve a repaired historical critique through a later review record.
+  repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
   drive               Continue the canonical run through an explicit runtime adapter.
   publish-delivery    Publish the current session's verified trust bundle for CI reconciliation.
   pause               Pause the current run as its assignment actor.
@@ -73,9 +76,13 @@ export async function main(argv: string[]): Promise<number> {
   const sessionDir = resolveSessionDir(parsed.flags);
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "reseal-verification-evidence-request") return resealVerificationEvidenceRequest(sessionDir, argv.slice(1));
+  if (verb === "reseal-verification-evidence") return resealVerificationEvidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "repair-critique-resolution-history-request") return repairCritiqueResolutionHistoryRequest(sessionDir, argv.slice(1));
+  if (verb === "repair-critique-resolution-history") return repairCritiqueResolutionHistory(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "publish-delivery") {
     assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
@@ -554,78 +561,894 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
   assertRunnableEvidenceCommands(commands, projectRoot, requiresTestEvidence);
-  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+  const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
     // session state cannot change mid-invocation.
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
-    const beforeEvidence = manifestEvidenceIdentity(repaired.run.manifest);
-    const bundleFile = path.join(sessionDir, "trust.bundle");
-    const beforeBundle = snapshotOptionalFile(bundleFile);
-    let writtenBundle: FileIdentity;
-    try {
-      await mainFromPublicWorkflow([
-        "record-gate-claim",
-        sessionDir,
-        ...forwarded,
-        "--actor",
-        caller.actorKey,
-        "--flow-run-head",
-        caller.expectedRunHead,
-      ]);
-      writtenBundle = regularFileIdentityNoFollow(bundleFile);
-    } catch (error) {
-      const afterProducer = optionalRegularFileIdentityNoFollow(bundleFile);
-      if (afterProducer && (!beforeBundle.file || !sameFileIdentity(afterProducer, beforeBundle.file))) {
-        restoreOptionalFile(bundleFile, beforeBundle, afterProducer);
-      }
-      throw error;
-    }
-
-    let synchronized: Awaited<ReturnType<typeof syncBuilderFlowSession>>;
-    try {
-      synchronized = await syncBuilderFlowSession({ sessionDir, expectedRunHead: caller.expectedRunHead });
-    } catch (error) {
-      let manifestUnchanged = false;
-      try {
-        const afterFailure = await loadRun(slug, repaired.projectRoot);
-        manifestUnchanged = isDeepStrictEqual(manifestEvidenceIdentity(afterFailure.manifest as JsonRecord), beforeEvidence);
-      } catch {
-        // Preserve the head-bound bundle when canonical Flow state cannot
-        // prove that no attachment committed; masking an unknown commit would
-        // lose audit data. Its flow_run_head stamp prevents later attachment.
-      }
-      if (manifestUnchanged) restoreOptionalFile(bundleFile, beforeBundle, writtenBundle);
-      throw error;
-    }
-
-    const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
-    const run = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
-    const afterEvidence = manifestEvidenceIdentity(run.manifest);
-    const beforeIds = new Set(beforeEvidence.map((entry) => entry.id));
-    const newEvidence = afterEvidence.filter((entry) => !beforeIds.has(entry.id));
-    if (synchronized.attached && (newEvidence.length !== 1 || newEvidence[0]?.sha256 !== digest)) {
-      throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
-    }
-    if (!synchronized.attached && newEvidence.length !== 0) {
-      throw new Error("workflow evidence changed the canonical manifest while synchronization reported no attachment");
-    }
-    const updatedSidecar = readBoundSession(sessionDir).sidecar;
-    return immutableReport({
-      run_id: run.runId,
-      status: run.state.status,
-      current_step: run.state.current_step,
-      attached: synchronized.attached,
-      awaiting_evidence: !synchronized.attached,
-      next_action: updatedSidecar.next_action ?? null,
+    return runEvidenceTransaction({
+      sessionDir,
+      slug,
+      projectRoot: repaired.projectRoot,
+      callerActor: caller.actorKey,
+      expectedRunHead: caller.expectedRunHead,
+      forwarded,
+      expectation,
+      requestedStatus: flagString(parsed.flags, "status")!,
+      beforeRun: repaired.run,
     });
   });
+  if ("error" in outcome) {
+    if (outcome.state === "safely_rolled_back") throw outcome.error;
+    throw new Error(`workflow evidence recovery required; inspect canonical workflow state: ${errorMessage(outcome.error)}`);
+  }
+  const report = outcome.report;
   if (json) console.log(JSON.stringify(report));
+  else if (outcome.state === "recovered") console.log(`Recovered committed evidence; canonical run is ${report.status} at ${report.current_step}. No retry is required.`);
   else console.log(report.attached
-    ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
-    : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
+    ? `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is ${report.status} at ${report.current_step}.`
+    : `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+async function resealVerificationEvidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow reseal-verification-evidence");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!authorizationFile) throw new Error("workflow reseal-verification-evidence requires a signed --authorization-file <path>");
+  const canonicalSessionDir = validateCanonicalSessionDir(sessionDir);
+  const projectRoot = path.dirname(path.dirname(path.dirname(canonicalSessionDir)));
+  const report = invokeExternalLifecycleAuthority({
+    action: "reseal-verification-evidence",
+    project_root: projectRoot,
+    session_dir: canonicalSessionDir,
+    authorization_file: path.resolve(authorizationFile),
+  });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Verification evidence reseal was already applied." : "Resealed verification evidence atomically.");
+  return 0;
+}
+
+async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  const flags = new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]);
+  assertOnlyFlags(parsed.flags, flags, "workflow reseal-verification-evidence-request");
+  const expectation = flagString(parsed.flags, "expectation");
+  const requestedStatus = flagString(parsed.flags, "status");
+  if (!expectation || !requestedStatus || !flagString(parsed.flags, "summary")) {
+    throw new Error("workflow reseal-verification-evidence-request requires --expectation, --status, and --summary");
+  }
+  const commands = flagList(parsed.flags, "command");
+  if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) throw new Error("workflow reseal-verification-evidence-request --command requires a shell command value");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]));
+  const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const repaired = await recoverBuilderFlowSession({ sessionDir });
+    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("verification evidence reseal is allowed only for the canonical builder.build verify gate");
+    const currentGates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
+    if (currentGates.length !== 1 || typeof currentGates[0]?.id !== "string") {
+      throw new Error("verification evidence reseal requires exactly one canonical current verify gate");
+    }
+    const currentGate = currentGates[0]!;
+    const currentRequirements = Array.isArray(currentGate.expects) ? currentGate.expects as JsonRecord[] : [];
+    const targetRequirements = currentRequirements.filter((requirement) => requirement.id === expectation);
+    if (targetRequirements.length !== 1) {
+      throw new Error("verification evidence reseal target must occur exactly once in the canonical current verify gate");
+    }
+    const targetRequirement = targetRequirements[0]!;
+    const targetBundleClaim = targetRequirement.bundle_claim as JsonRecord | undefined;
+    if (typeof targetBundleClaim?.claimType !== "string" || typeof targetBundleClaim.subjectType !== "string") {
+      throw new Error("verification evidence reseal target must declare canonical gate-claim metadata");
+    }
+    const operation = builderOperationForExpectation(repaired.run.definitionId, expectation);
+    if (operation) throw new Error(`verification evidence reseal cannot satisfy operation-bound expectation ${expectation}`);
+    assertExecuteFailureRouteBeforeMutation(repaired.run.definition as JsonRecord, repaired.run.state.current_step, requestedStatus, flagString(parsed.flags, "route-reason"));
+    assertRunnableEvidenceCommands(commands, repaired.projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
+    const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    const bundleFile = path.join(sessionDir, "trust.bundle");
+    const bundleBytes = readProtectedRegularFileBytes(bundleFile, "verification evidence reseal current trust bundle", 4 * 1024 * 1024);
+    if (!bundleBytes) throw new Error("verification evidence reseal requires a current trust.bundle");
+    const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    const ledgerBytes = readProtectedRegularFileBytes(ledgerFile, "verification evidence reseal resolution ledger", 4 * 1024 * 1024, true) ?? Buffer.alloc(0);
+    const events = ledgerBytes.length === 0 ? [] : ((JSON.parse(ledgerBytes.toString("utf8")) as JsonRecord).events as JsonRecord[]);
+    if (!Array.isArray(events)) throw new Error("verification evidence reseal resolution ledger is invalid");
+    const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "verification evidence reseal current completion", 256 * 1024);
+    if (!completionBytes) throw new Error("verification evidence reseal requires a current lifecycle completion");
+    const completion = verifyLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+    if (!lifecycleAuthorityCompletionBindsExactState(completion, slug, bundle, events)) throw new Error("verification evidence reseal current completion does not bind the exact bundle and resolution ledger");
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+    const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "verification evidence reseal Flow manifest", 16 * 1024 * 1024);
+    if (!manifestBytes) throw new Error("verification evidence reseal canonical Flow manifest is missing");
+    const staged = await stageWorkflowEvidenceCandidate(sessionDir, [
+      "record-gate-claim", sessionDir, ...forwarded, "--actor", caller.actorKey, "--flow-run-head", caller.expectedRunHead,
+    ]);
+    if (staged.bytes.length === 0) throw new Error("verification evidence reseal writer produced no candidate bytes");
+    if (!fs.readFileSync(bundleFile).equals(bundleBytes)
+        || !fs.readFileSync(path.join(flowRoot, "evidence", "manifest.json")).equals(manifestBytes)
+        || !(readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "verification evidence reseal current completion", 256 * 1024)?.equals(completionBytes))) {
+      throw new Error("verification evidence reseal preimage changed while staging the candidate");
+    }
+    const candidateBundle = JSON.parse(staged.bytes.toString("utf8")) as JsonRecord;
+    const currentClaims = Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [];
+    const candidateClaims = Array.isArray(candidateBundle.claims) ? candidateBundle.claims as JsonRecord[] : [];
+    const claimExpectation = (claim: JsonRecord): string | null => {
+      const metadata = claim.metadata as JsonRecord | undefined;
+      const gateClaim = metadata?.gate_claim as JsonRecord | undefined;
+      return typeof gateClaim?.expectation_id === "string" ? gateClaim.expectation_id : null;
+    };
+    const predecessorMatches = currentClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
+    const currentMatches = candidateClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
+    if (predecessorMatches.length !== 1 || currentMatches.length !== 1
+        || currentClaims.length !== candidateClaims.length
+        || predecessorMatches[0]!.index !== currentMatches[0]!.index) {
+      throw new Error("verification evidence reseal requires exactly one in-place target expectation claim replacement");
+    }
+    const predecessorClaim = predecessorMatches[0]!;
+    const currentClaim = currentMatches[0]!;
+    currentClaims.forEach((claim, index) => {
+      if (index !== predecessorClaim.index && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
+        throw new Error("verification evidence reseal writer changed the ordered claim set outside the target expectation");
+      }
+    });
+    for (const [label, claim] of [["predecessor", predecessorClaim.claim], ["current", currentClaim.claim]] as const) {
+      if (typeof claim.id !== "string" || !claim.id || typeof claim.status !== "string" || !claim.status) {
+        throw new Error(`verification evidence reseal ${label} claim identity or status is invalid`);
+      }
+      const metadata = claim.metadata as JsonRecord | undefined;
+      const gateClaim = metadata?.gate_claim as JsonRecord | undefined;
+      if (gateClaim?.expectation_id !== targetRequirement.id
+          || gateClaim?.step_id !== repaired.run.state.current_step
+          || gateClaim?.claim_type !== targetBundleClaim.claimType
+          || gateClaim?.subject_type !== targetBundleClaim.subjectType) {
+        throw new Error(`verification evidence reseal ${label} claim does not bind the canonical current verify gate requirement`);
+      }
+    }
+    const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+    if (!subject || subject !== repaired.run.state.subject) throw new Error("verification evidence reseal requires one matching canonical subject");
+    const now = new Date();
+    return buildUnsignedVerificationEvidenceResealAuthorization({
+      project_root: projectRoot,
+      run_id: slug,
+      subject,
+      preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+      candidate_bundle_sha256: staged.digest,
+      candidate_transaction_id: staged.transaction_id,
+      preimage_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"),
+      preimage_ledger_length: events.length,
+      preimage_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
+      current_completion_sha256: createHash("sha256").update(completionBytes).digest("hex"),
+      current_completion_request_sha256: String(completion.request_sha256),
+      current_completion_result_core_sha256: String(completion.result_core_sha256),
+      flow_definition_id: "builder.build",
+      flow_step_id: "verify",
+      flow_gate_id: currentGate.id as string,
+      flow_run_head: caller.expectedRunHead,
+      flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+      critique_projection_sha256: String(critiqueHistoryProjectionSummary(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []).digest),
+      target_expectation_id: expectation,
+      predecessor_claim_id: String(predecessorClaim.claim.id),
+      predecessor_claim_status: String(predecessorClaim.claim.status),
+      predecessor_claim_sha256: createHash("sha256").update(JSON.stringify(predecessorClaim.claim)).digest("hex"),
+      predecessor_claim_index: predecessorClaim.index,
+      current_claim_id: String(currentClaim.claim.id),
+      current_claim_status: String(currentClaim.claim.status),
+      current_claim_sha256: createHash("sha256").update(JSON.stringify(currentClaim.claim)).digest("hex"),
+      current_claim_index: currentClaim.index,
+      claim_delta: "replace",
+      nonce: `verification-reseal-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+    });
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
+type CommandObservationReport = { ordinal: number; observation_id: string; exit_code: number; output_sha256: string; outcome: "pass" | "fail" };
+type EvidenceReceipt = {
+  runId: string; subject: string | null; gateId: string; stepId: string | null; expectedRunHead: string;
+  expectationIds: string[]; expectation: string; visit: { enteredAt: number; initial: boolean };
+  recordedAt: string | null; digest: string; claimSubject: string | null; claimStepId: string | null;
+  claimExpectation: string | null; claimRunHead: string | null;
+};
+type EvidenceReport = { run_id: string; status: string; current_step: string; attached: boolean; awaiting_evidence: boolean; next_action: unknown; gate_verdict: { requested_status: string; persisted_value: string | null; persisted_status: string | null }; command_observations: CommandObservationReport[]; recovery?: { committed: boolean; retry: "none" } };
+type EvidenceTransactionSuccess = { state: "attached" | "recovered"; report: EvidenceReport };
+type EvidenceTransactionFailure = { state: "safely_rolled_back" | "recovery_required"; error: unknown };
+type EvidenceTransactionResult = EvidenceTransactionSuccess | EvidenceTransactionFailure;
+
+/** Test-only fault boundary for the otherwise atomic public-evidence transaction. */
+export let workflowEvidenceTransactionTestHooks: {
+  afterRecord?: () => void | Promise<void>; beforePostconditions?: () => void | Promise<void>; beforeSidecarRead?: () => void | Promise<void>;
+  afterCandidateResourceAcquired?: (resource: "artifact-directory" | "session-directory" | "trust-snapshot" | "abort-capability" | "candidate-directory" | "candidate-file") => void;
+  candidateWrite?: typeof fs.writeSync;
+  beforeCandidateReread?: (descriptor: number) => void;
+  beforeCandidateCommit?: () => void;
+  candidateCommitWrite?: typeof fs.writeSync;
+  beforeCanonicalCommitReread?: (descriptor: number) => void;
+  afterCanonicalCreate?: (canonicalFile: string) => void;
+  beforeCandidateCommitDirectoryFsync?: () => void;
+  afterCandidateCommitDirectoryFsync?: () => void;
+  candidateResourceClose?: (resource: "canonical-trust" | "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
+  candidateResourceClosed?: (resource: "canonical-trust" | "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory") => void;
+} | undefined;
+export function setWorkflowEvidenceTransactionTestHooksForTest(hooks: typeof workflowEvidenceTransactionTestHooks): void {
+  workflowEvidenceTransactionTestHooks = hooks;
+}
+
+export type StagedWorkflowEvidenceCandidate = { transaction_id: string; directory: string; file: string; digest: string; bytes: Buffer };
+type StagedWorkflowEvidenceContext = StagedWorkflowEvidenceCandidate & {
+  writerError: unknown | null;
+  abortCapability: WriterTransactionAbortCapability;
+  descriptor: number;
+  identity: { dev: number; ino: number };
+  sessionDescriptor: number;
+  sessionIdentity: { dev: number; ino: number };
+  baseline: { exists: boolean; descriptor: number | null; identity: { dev: number; ino: number } | null; bytes: Buffer | null; digest: string | null };
+};
+class StagedEvidenceSetupRecoveryRequiredError extends Error {}
+
+/** Wave-2 internal seam. Candidates are retained audit residue and never become authoritative here. */
+export async function stageWorkflowEvidenceCandidate(sessionDir: string, argv: string[]): Promise<StagedWorkflowEvidenceCandidate> {
+  return withStagedWorkflowEvidenceCandidate(sessionDir, argv, async ({ writerError, abortCapability: _abortCapability, descriptor: _descriptor, identity: _identity, sessionDescriptor: _sessionDescriptor, sessionIdentity: _sessionIdentity, baseline: _baseline, ...candidate }) => {
+    if (writerError) throw writerError;
+    return candidate;
+  });
+}
+
+async function withStagedWorkflowEvidenceCandidate<T>(
+  sessionDir: string,
+  argv: string[],
+  consume: (candidate: StagedWorkflowEvidenceContext) => Promise<T>,
+): Promise<T> {
+  const transactionId = randomBytes(16).toString("hex");
+  let artifactDescriptor: number | null = null;
+  let sessionDescriptor: number | null = null;
+  let trustDescriptor: number | null = null;
+  let trustBytes: Buffer | null = null;
+  let trustIdentity: { dev: number; ino: number } | null = null;
+  let candidateDirectoryDescriptor: number | null = null;
+  let candidateDescriptor: number | null = null;
+  let candidateDirectory = "";
+  let candidateFile = "";
+  let abortCapability: WriterTransactionAbortCapability | null = null;
+  let primaryError: unknown = null;
+  let result: T | undefined;
+  let hasResult = false;
+  try {
+    const artifactRoot = path.dirname(sessionDir);
+    artifactDescriptor = openStableDirectoryDescriptor(artifactRoot, "artifact root");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("artifact-directory");
+    sessionDescriptor = openStableDirectoryDescriptor(sessionDir, "session directory");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("session-directory");
+
+    const canonical = path.join(sessionDir, "trust.bundle");
+    try {
+      const current = fs.lstatSync(canonical);
+      if (current.isSymbolicLink() || !current.isFile()) {
+        throw new StagedEvidenceSetupRecoveryRequiredError("workflow evidence canonical trust entry is present or uncertain; no retry is required");
+      }
+      trustDescriptor = fs.openSync(canonical, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(trustDescriptor);
+      if (!stat.isFile() || stat.dev !== current.dev || stat.ino !== current.ino) throw new StagedEvidenceSetupRecoveryRequiredError("workflow evidence canonical trust identity is uncertain; no retry is required");
+      trustIdentity = { dev: stat.dev, ino: stat.ino };
+      trustBytes = readDescriptorBytes(trustDescriptor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        if (error instanceof StagedEvidenceSetupRecoveryRequiredError) throw error;
+        throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence canonical trust presence is uncertain; no retry is required: ${errorMessage(error)}`);
+      }
+      trustDescriptor = null;
+    }
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("trust-snapshot");
+
+    abortCapability = createWriterTransactionAbortCapability(sessionDir);
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("abort-capability");
+
+    candidateDirectory = path.join(sessionDir, `.workflow-evidence-transaction-${transactionId}`);
+    fs.mkdirSync(candidateDirectory, { mode: 0o700 });
+    candidateDirectoryDescriptor = openStableDirectoryDescriptor(candidateDirectory, "candidate directory");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("candidate-directory");
+
+    candidateFile = path.join(candidateDirectory, "trust.bundle.candidate");
+    candidateDescriptor = fs.openSync(candidateFile, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const candidateStat = fs.fstatSync(candidateDescriptor);
+    const candidateParentStat = fs.fstatSync(candidateDirectoryDescriptor);
+    const sessionStat = fs.fstatSync(sessionDescriptor);
+    if (!candidateStat.isFile() || !candidateParentStat.isDirectory()) throw new Error("workflow evidence candidate resources are not regular file/directory descriptors");
+    workflowEvidenceTransactionTestHooks?.afterCandidateResourceAcquired?.("candidate-file");
+
+    const writerTarget: TrustBundleWriterTarget = {
+      file: candidateFile,
+      descriptor: candidateDescriptor,
+      identity: { dev: candidateStat.dev, ino: candidateStat.ino },
+      parentDescriptor: candidateDirectoryDescriptor,
+      parentIdentity: { dev: candidateParentStat.dev, ino: candidateParentStat.ino },
+      write: workflowEvidenceTransactionTestHooks?.candidateWrite,
+      beforeReread: workflowEvidenceTransactionTestHooks?.beforeCandidateReread,
+    };
+    let writerError: unknown | null = null;
+    try { await mainFromPublicWorkflow(argv, { writerTransactionId: transactionId, writerTarget }); }
+    catch (error) { writerError = error; }
+    const bytes = readDescriptorBytes(candidateDescriptor);
+    if (bytes.length > 0) fs.fsyncSync(candidateDirectoryDescriptor);
+    result = await consume({
+      transaction_id: transactionId,
+      directory: candidateDirectory,
+      file: candidateFile,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      bytes,
+      writerError,
+      abortCapability,
+      descriptor: candidateDescriptor,
+      identity: { dev: candidateStat.dev, ino: candidateStat.ino },
+      sessionDescriptor,
+      sessionIdentity: { dev: sessionStat.dev, ino: sessionStat.ino },
+      baseline: {
+        exists: trustDescriptor !== null,
+        descriptor: trustDescriptor,
+        identity: trustIdentity,
+        bytes: trustBytes,
+        digest: trustBytes ? createHash("sha256").update(trustBytes).digest("hex") : null,
+      },
+    });
+    hasResult = true;
+  } catch (error) {
+    primaryError = error;
+    if (candidateDirectory && abortCapability) {
+      const aborted = appendWriterTransactionAbort(abortCapability, transactionId, new Date().toISOString());
+      if (!aborted) primaryError = new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence staged setup failed and its correlated abort could not be persisted: ${errorMessage(error)}`);
+    }
+  }
+  const cleanupFailures = closeCandidateResources([
+    [candidateDescriptor, "candidate-file"],
+    [candidateDirectoryDescriptor, "candidate-directory"],
+    [trustDescriptor, "trust-snapshot"],
+    [sessionDescriptor, "session-directory"],
+    [artifactDescriptor, "artifact-directory"],
+  ]);
+  if (primaryError !== null) {
+    if (cleanupFailures.length > 0) {
+      process.stderr.write("[workflow evidence] cleanup uncertainty retained recovery residue after the primary outcome\n");
+      throw cleanupUncertaintyError(primaryError, cleanupFailures);
+    }
+    throw primaryError;
+  }
+  if (!hasResult) throw new Error("workflow evidence staging completed without a transaction result");
+  const completedResult = result as T;
+  if (cleanupFailures.length === 0) return completedResult;
+  if (isEvidenceTransactionFailure(completedResult)) {
+    return { ...completedResult, error: cleanupUncertaintyError(completedResult.error, cleanupFailures) } as T;
+  }
+  throw new StagedEvidenceSetupRecoveryRequiredError(`workflow evidence cleanup uncertainty requires recovery; no retry is required (${cleanupFailures.join(", ")})`);
+}
+
+type CandidateResourceName = "canonical-trust" | "trust-snapshot" | "candidate-file" | "candidate-directory" | "session-directory" | "artifact-directory";
+
+function isEvidenceTransactionFailure(value: unknown): value is EvidenceTransactionFailure {
+  return typeof value === "object" && value !== null
+    && (value as { state?: unknown }).state !== "attached"
+    && (value as { state?: unknown }).state !== "recovered"
+    && ((value as { state?: unknown }).state === "safely_rolled_back" || (value as { state?: unknown }).state === "recovery_required")
+    && "error" in value;
+}
+
+function cleanupUncertaintyError(primary: unknown, cleanupFailures: readonly CandidateResourceName[]): Error {
+  const message = `${errorMessage(primary)}; workflow evidence cleanup uncertainty requires recovery; no retry is required (${cleanupFailures.join(", ")})`;
+  return primary instanceof StagedEvidenceSetupRecoveryRequiredError
+    ? new StagedEvidenceSetupRecoveryRequiredError(message, { cause: primary })
+    : new Error(message, { cause: primary });
+}
+
+/** Close every acquired descriptor even when a prior close is uncertain. */
+function closeCandidateResources(resources: readonly (readonly [number | null, CandidateResourceName])[]): CandidateResourceName[] {
+  const failures: CandidateResourceName[] = [];
+  for (const [descriptor, resource] of resources) {
+    if (descriptor === null) continue;
+    try {
+      workflowEvidenceTransactionTestHooks?.candidateResourceClose?.(resource);
+      fs.closeSync(descriptor);
+    } catch {
+      failures.push(resource);
+    } finally {
+      try { workflowEvidenceTransactionTestHooks?.candidateResourceClosed?.(resource); }
+      catch { if (!failures.includes(resource)) failures.push(resource); }
+    }
+  }
+  return failures;
+}
+
+function openStableDirectoryDescriptor(directory: string, label: string): number {
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const current = fs.lstatSync(directory);
+    if (!opened.isDirectory() || current.isSymbolicLink() || !current.isDirectory() || opened.dev !== current.dev || opened.ino !== current.ino) {
+      throw new Error(`workflow evidence ${label} must be a stable non-symlink directory`);
+    }
+    return descriptor;
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function commitStagedWorkflowEvidence(candidate: StagedWorkflowEvidenceContext, canonicalFile: string): void {
+  workflowEvidenceTransactionTestHooks?.beforeCandidateCommit?.();
+  assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
+  const candidateBytes = readDescriptorBytes(candidate.descriptor);
+  const digest = createHash("sha256").update(candidateBytes).digest("hex");
+  const candidateStat = fs.fstatSync(candidate.descriptor);
+  if (!candidateStat.isFile() || candidateStat.dev !== candidate.identity.dev || candidateStat.ino !== candidate.identity.ino || digest !== candidate.digest) {
+    throw new Error("workflow evidence candidate descriptor identity or bytes changed before commit");
+  }
+  if (candidate.baseline.exists) {
+    assertCanonicalBaselineUnchanged(candidate, canonicalFile);
+    const descriptor = candidate.baseline.descriptor!;
+    writeDescriptorFully(descriptor, candidateBytes);
+    fs.ftruncateSync(descriptor, candidateBytes.length);
+    fs.fsyncSync(descriptor);
+    if (!readDescriptorBytes(descriptor).equals(candidateBytes)) throw new Error("workflow evidence canonical trust reread did not match committed candidate bytes");
+    const current = fs.lstatSync(canonicalFile);
+    const identity = candidate.baseline.identity!;
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+      throw new Error("workflow evidence canonical trust pathname changed during pinned-descriptor commit");
+    }
+  } else {
+    assertCanonicalAbsent(canonicalFile);
+    let canonicalDescriptor: number | null = null;
+    let commitError: unknown = null;
+    try {
+      canonicalDescriptor = fs.openSync(canonicalFile, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+      const canonicalIdentity = descriptorIdentity(canonicalDescriptor, "workflow evidence exclusively-created canonical trust");
+      workflowEvidenceTransactionTestHooks?.afterCanonicalCreate?.(canonicalFile);
+      assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
+      writeDescriptorFully(canonicalDescriptor, candidateBytes, workflowEvidenceTransactionTestHooks?.candidateCommitWrite);
+      fs.ftruncateSync(canonicalDescriptor, candidateBytes.length);
+      fs.fsyncSync(canonicalDescriptor);
+      workflowEvidenceTransactionTestHooks?.beforeCanonicalCommitReread?.(canonicalDescriptor);
+      assertCanonicalDescriptorBytes(canonicalDescriptor, canonicalIdentity, candidateBytes, candidate.digest, canonicalFile);
+      assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
+      workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
+      fs.fsyncSync(candidate.sessionDescriptor);
+      workflowEvidenceTransactionTestHooks?.afterCandidateCommitDirectoryFsync?.();
+      assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
+      assertCanonicalDescriptorBytes(canonicalDescriptor, canonicalIdentity, candidateBytes, candidate.digest, canonicalFile);
+      assertCanonicalPathIdentity(canonicalFile, canonicalIdentity);
+    } catch (error) {
+      commitError = new Error(`workflow evidence exclusively-created canonical commit requires recovery without retry: ${errorMessage(error)}`, { cause: error });
+    } finally {
+      const cleanupFailures = closeCandidateResources([[canonicalDescriptor, "canonical-trust"]]);
+      if (cleanupFailures.length > 0) {
+        commitError = commitError === null
+          ? new Error(`workflow evidence exclusively-created canonical commit requires recovery without retry: cleanup uncertainty (${cleanupFailures.join(", ")})`)
+          : cleanupUncertaintyError(commitError, cleanupFailures);
+      }
+    }
+    if (commitError !== null) throw commitError;
+    return;
+  }
+  workflowEvidenceTransactionTestHooks?.beforeCandidateCommitDirectoryFsync?.();
+  fs.fsyncSync(candidate.sessionDescriptor);
+  workflowEvidenceTransactionTestHooks?.afterCandidateCommitDirectoryFsync?.();
+  assertPinnedSessionPathIdentity(candidate, path.dirname(canonicalFile));
+}
+
+/** Detects persistent cooperative pathname drift; it is not an atomic defense against hostile same-user ABA. */
+function assertPinnedSessionPathIdentity(candidate: StagedWorkflowEvidenceContext, sessionDir: string): void {
+  const descriptor = fs.fstatSync(candidate.sessionDescriptor);
+  let current: fs.Stats;
+  try {
+    current = fs.lstatSync(sessionDir);
+  } catch {
+    throw new Error("workflow evidence pinned session directory pathname changed");
+  }
+  if (!descriptor.isDirectory() || !current.isDirectory() || current.isSymbolicLink()
+    || descriptor.dev !== candidate.sessionIdentity.dev || descriptor.ino !== candidate.sessionIdentity.ino
+    || current.dev !== candidate.sessionIdentity.dev || current.ino !== candidate.sessionIdentity.ino) {
+    throw new Error("workflow evidence pinned session directory pathname changed");
+  }
+}
+
+function assertCanonicalBaselineUnchanged(candidate: StagedWorkflowEvidenceContext, canonicalFile: string): void {
+  if (!candidate.baseline.exists) {
+    assertCanonicalAbsent(canonicalFile);
+    return;
+  }
+  const identity = candidate.baseline.identity!;
+  const descriptor = fs.fstatSync(candidate.baseline.descriptor!);
+  const current = fs.lstatSync(canonicalFile);
+  if (!descriptor.isFile() || current.isSymbolicLink() || !current.isFile()
+    || descriptor.dev !== identity.dev || descriptor.ino !== identity.ino
+    || current.dev !== identity.dev || current.ino !== identity.ino
+    || createHash("sha256").update(readDescriptorBytes(candidate.baseline.descriptor!)).digest("hex") !== candidate.baseline.digest) {
+    throw new Error("workflow evidence canonical trust baseline changed");
+  }
+}
+
+function assertCanonicalAbsent(canonicalFile: string): void {
+  try {
+    fs.lstatSync(canonicalFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new Error(`workflow evidence canonical trust absence is uncertain: ${errorMessage(error)}`);
+  }
+  throw new Error("workflow evidence canonical trust appeared after absent baseline");
+}
+
+function descriptorIdentity(descriptor: number, label: string): { dev: number; ino: number } {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile()) throw new Error(`${label} is not a regular descriptor`);
+  return { dev: stat.dev, ino: stat.ino };
+}
+
+function assertCanonicalPathIdentity(canonicalFile: string, identity: { dev: number; ino: number }): void {
+  const current = fs.lstatSync(canonicalFile);
+  if (current.isSymbolicLink() || !current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) {
+    throw new Error("workflow evidence canonical trust pathname changed after exclusive creation");
+  }
+}
+
+function assertCanonicalDescriptorBytes(descriptor: number, identity: { dev: number; ino: number }, expected: Buffer, expectedDigest: string, canonicalFile: string): void {
+  const current = descriptorIdentity(descriptor, "workflow evidence canonical trust");
+  if (current.dev !== identity.dev || current.ino !== identity.ino) throw new Error("workflow evidence canonical trust descriptor identity changed after exclusive creation");
+  const bytes = readDescriptorBytes(descriptor);
+  if (!bytes.equals(expected) || createHash("sha256").update(bytes).digest("hex") !== expectedDigest) {
+    throw new Error("workflow evidence canonical trust reread did not match the staged candidate bytes");
+  }
+  assertCanonicalPathIdentity(canonicalFile, identity);
+}
+
+function writeDescriptorFully(descriptor: number, bytes: Buffer, write: typeof fs.writeSync = fs.writeSync): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = write(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error("workflow evidence canonical trust write returned zero or invalid byte count");
+    offset += count;
+  }
+}
+
+async function runEvidenceTransaction(input: {
+  sessionDir: string; slug: string; projectRoot: string; callerActor: string; expectedRunHead: string; forwarded: string[];
+  expectation: string; requestedStatus: string; beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"];
+}): Promise<EvidenceTransactionResult> {
+  const trustBundleFile = path.join(input.sessionDir, "trust.bundle");
+  const beforeEvidence = manifestEvidenceIdentity(input.beforeRun.manifest);
+  const preMutationReceipt = captureEvidenceReceipt(input.beforeRun, input.expectation, input.expectedRunHead);
+  try {
+    return await withStagedWorkflowEvidenceCandidate(input.sessionDir, [
+      "record-gate-claim", input.sessionDir, ...input.forwarded, "--actor", input.callerActor,
+      "--flow-run-head", input.expectedRunHead,
+    ], async (candidate) => {
+      let receipt: EvidenceReceipt | null = null;
+      let commitAttempted = false;
+      let commitSucceeded = false;
+      try {
+        if (candidate.writerError) throw candidate.writerError;
+        if (candidate.bytes.length === 0) throw new Error("workflow evidence staged writer produced no candidate bytes");
+        await workflowEvidenceTransactionTestHooks?.afterRecord?.();
+        receipt = receiptForGateClaim(candidate.file, preMutationReceipt, candidate.digest);
+        const synchronized = await syncBuilderFlowSession({
+          sessionDir: input.sessionDir,
+          expectedRunHead: input.expectedRunHead,
+          stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
+        });
+        if (synchronized.attached) {
+          receipt = { ...receipt, expectationIds: [...(synchronized.attachmentExpectationIds ?? [])] };
+        }
+        const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
+        await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
+        assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
+        commitAttempted = true;
+        commitStagedWorkflowEvidence(candidate, trustBundleFile);
+        commitSucceeded = true;
+        await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
+        const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
+        const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
+        return {
+          state: "attached",
+          report: immutableReport({
+            run_id: run.runId, status: run.state.status, current_step: run.state.current_step,
+            attached: synchronized.attached, awaiting_evidence: !synchronized.attached,
+            next_action: updatedSidecar.next_action ?? null,
+            gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
+            command_observations: gateVerdict.observations,
+          }),
+        } satisfies EvidenceTransactionSuccess;
+      } catch (error) {
+        const attachment = receipt
+          ? await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeEvidence)
+          : await canonicalManifestStillUnchanged(input.projectRoot, input.slug, beforeEvidence) ? "unattached" : "unknown";
+        if (attachment === "attached") {
+          if (commitAttempted && !commitSucceeded) return { state: "recovery_required", error: new Error(`workflow evidence is canonically attached; no retry is required, but candidate commit needs recovery: ${errorMessage(error)}`) };
+          try {
+            if (!commitSucceeded) {
+              commitAttempted = true;
+              commitStagedWorkflowEvidence(candidate, trustBundleFile);
+              commitSucceeded = true;
+            }
+            const recovered = await recoverBuilderFlowSession({ sessionDir: input.sessionDir });
+            const gateVerdict = readGateVerdict(trustBundleFile, receipt!.expectation);
+            return {
+              state: "recovered",
+              report: immutableReport({
+                run_id: recovered.run.runId, status: recovered.run.state.status, current_step: recovered.run.state.current_step,
+                attached: true, awaiting_evidence: false, next_action: recovered.projection.next_action ?? null,
+                gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
+                command_observations: gateVerdict.observations, recovery: { committed: true, retry: "none" },
+              }),
+            };
+          } catch (commitError) {
+            return { state: "recovery_required", error: new Error(`workflow evidence is canonically attached; no retry is required: ${errorMessage(commitError)}`) };
+          }
+        }
+        if (attachment !== "unattached") return { state: "recovery_required", error };
+        try {
+          assertCanonicalBaselineUnchanged(candidate, trustBundleFile);
+          if (!appendWriterTransactionAbort(candidate.abortCapability, candidate.transaction_id, new Date().toISOString())) {
+            return { state: "recovery_required", error: new Error(`workflow evidence retained staged candidate but could not append its correlated abort marker: ${errorMessage(error)}`) };
+          }
+          return { state: "safely_rolled_back", error };
+        } catch (abortError) {
+          return { state: "recovery_required", error: evidenceRollbackError(error, abortError) };
+        }
+      }
+    });
+  } catch (error) {
+    return error instanceof StagedEvidenceSetupRecoveryRequiredError
+      ? { state: "recovery_required", error }
+      : { state: "safely_rolled_back", error };
+  }
+}
+
+async function canonicalManifestStillUnchanged(projectRoot: string, slug: string, beforeEvidence: readonly JsonRecord[]): Promise<boolean> {
+  try {
+    const raw = await withFlowRunRecoveryFenceReadAsync(projectRoot, slug, () => loadRun(slug, projectRoot));
+    return isDeepStrictEqual(manifestEvidenceIdentity(raw.manifest as JsonRecord), beforeEvidence);
+  } catch { return false; }
+}
+
+function readDescriptorBytes(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error("workflow evidence expected a readable regular file descriptor");
+  const bytes = Buffer.alloc(stat.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const read = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (read === 0) throw new Error("workflow evidence encountered a short descriptor read");
+    offset += read;
+  }
+  return bytes;
+}
+
+function captureEvidenceReceipt(
+  beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"], expectation: string, expectedRunHead: string,
+): Omit<EvidenceReceipt, "recordedAt" | "digest" | "claimSubject" | "claimStepId" | "claimExpectation" | "claimRunHead"> {
+  if (flowRunHead(beforeRun.state) !== expectedRunHead) {
+    throw new Error("workflow evidence cannot bind a stale canonical Flow run head");
+  }
+  const gates = openGates(beforeRun.definition, beforeRun.state) as Array<JsonRecord>;
+  if (gates.length !== 1) throw new Error("workflow evidence requires exactly one canonical open gate before recording a claim");
+  const gate = gates[0]!;
+  const gateId = typeof gate.id === "string" ? gate.id : null;
+  const stepId = typeof gate.step === "string" ? gate.step : null;
+  if (!gateId || !stepId) throw new Error("workflow evidence cannot bind a canonical gate identifier and step");
+  const expectationIds = (expectationsForGate(gate as never, beforeRun.config) as Array<JsonRecord>)
+    .filter((candidate) => candidate.required === true || candidate.id === expectation)
+    .map((candidate) => typeof candidate.id === "string" ? candidate.id : null);
+  if (expectationIds.some((id) => !id) || new Set(expectationIds).size !== expectationIds.length || !expectationIds.includes(expectation)) {
+    throw new Error("workflow evidence cannot bind an exact canonical expectation set");
+  }
+  return {
+    runId: beforeRun.runId,
+    subject: typeof beforeRun.state.subject === "string" ? beforeRun.state.subject : null,
+    gateId,
+    stepId,
+    expectedRunHead,
+    expectationIds: (expectationIds as string[]).sort(),
+    expectation,
+    visit: currentGateVisit(beforeRun.state, stepId),
+  };
+}
+
+function receiptForGateClaim(
+  bundleFile: string,
+  canonical: Omit<EvidenceReceipt, "recordedAt" | "digest" | "claimSubject" | "claimStepId" | "claimExpectation" | "claimRunHead">,
+  digest: string,
+): EvidenceReceipt {
+  const gate = readGateClaim(bundleFile, canonical.expectation);
+  const metadata = gate.metadata as JsonRecord;
+  const gateClaim = metadata.gate_claim as JsonRecord;
+  return {
+    ...canonical,
+    recordedAt: typeof gateClaim.recorded_at === "string" ? gateClaim.recorded_at : null,
+    digest,
+    claimSubject: typeof metadata.workflow_subject_ref === "string" ? metadata.workflow_subject_ref : null,
+    claimStepId: typeof gateClaim.step_id === "string" ? gateClaim.step_id : null,
+    claimExpectation: typeof gateClaim.expectation_id === "string" ? gateClaim.expectation_id : null,
+    claimRunHead: typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null,
+  };
+}
+
+/**
+ * Exact, deliberately conservative classifier used after a failed public-evidence
+ * transaction.  It has no transition scan: the receipt's visit boundary was
+ * captured by the runtime before the writer was invoked.
+ */
+export function classifyCanonicalEvidenceAttachment(
+  receipt: EvidenceReceipt,
+  run: { runId: string; state: JsonRecord; manifest: JsonRecord },
+  beforeEvidence: readonly JsonRecord[],
+): "attached" | "unattached" | "unknown" {
+  if (!validReceipt(receipt) || run.runId !== receipt.runId || run.state.subject !== receipt.subject) return "unknown";
+  const evidence = Array.isArray(run.manifest.evidence) ? run.manifest.evidence : null;
+  if (!evidence) return "unknown";
+  const beforeById = new Map<string, JsonRecord>();
+  for (const entry of beforeEvidence) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.id !== "string" || beforeById.has(entry.id)) return "unknown";
+    beforeById.set(entry.id, entry);
+  }
+  const allIds = new Set<string>();
+  for (const entry of evidence) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "unknown";
+    const id = (entry as JsonRecord).id;
+    if (typeof id !== "string" || allIds.has(id)) return "unknown";
+    allIds.add(id);
+  }
+  const newEntries = evidence.filter((entry) => {
+    const id = (entry as JsonRecord).id;
+    return !beforeById.has(id as string);
+  });
+  if (newEntries.length === 0) {
+    return priorManifestEvidenceIsUnchanged(evidence as JsonRecord[], beforeById) ? "unattached" : "unknown";
+  }
+  if (newEntries.length !== 1) return "unknown";
+  const entry = newEntries[0];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "unknown";
+  const candidate = entry as JsonRecord;
+  if (typeof candidate.id !== "string" || (Object.hasOwn(candidate, "superseded_by") && candidate.superseded_by !== null)) return "unknown";
+  if (candidate.gate_id !== receipt.gateId || candidate.sha256 !== receipt.digest) return "unknown";
+  if (!sameStringSet(candidate.expectation_ids, receipt.expectationIds)) return "unknown";
+  const recordedAt = parseEvidenceTimestamp(receipt.recordedAt);
+  const attachedAt = parseEvidenceTimestamp(candidate.attached_at);
+  if (recordedAt === null || attachedAt === null || recordedAt < receipt.visit.enteredAt || attachedAt < recordedAt) return "unknown";
+  if (!priorManifestEvidenceMatchesAttachment(evidence as JsonRecord[], beforeById, candidate)) return "unknown";
+  return "attached";
+}
+
+function priorManifestEvidenceIsUnchanged(evidence: JsonRecord[], beforeById: ReadonlyMap<string, JsonRecord>): boolean {
+  if (evidence.length !== beforeById.size) return false;
+  return evidence.every((entry) => typeof entry.id === "string" && isDeepStrictEqual(stableManifestEvidenceIdentity(entry), beforeById.get(entry.id)));
+}
+
+function priorManifestEvidenceMatchesAttachment(evidence: JsonRecord[], beforeById: ReadonlyMap<string, JsonRecord>, candidate: JsonRecord): boolean {
+  const priorEntries = evidence.filter((entry) => entry.id !== candidate.id);
+  if (priorEntries.length !== beforeById.size || typeof candidate.id !== "string") return false;
+  return priorEntries.every((entry) => {
+    if (typeof entry.id !== "string") return false;
+    const before = beforeById.get(entry.id);
+    if (!before) return false;
+    const normalizedEntry = stableManifestEvidenceIdentity(entry);
+    const normalizedBefore = { ...before };
+    if (isDeepStrictEqual(normalizedEntry, normalizedBefore)) return true;
+    if (normalizedEntry.gate_id !== candidate.gate_id || normalizedEntry.superseded_by !== candidate.id) return false;
+    delete normalizedEntry.superseded_by;
+    if (normalizedBefore.superseded_by === null) delete normalizedBefore.superseded_by;
+    return isDeepStrictEqual(normalizedEntry, normalizedBefore);
+  });
+}
+
+function validReceipt(receipt: EvidenceReceipt): boolean {
+  return typeof receipt.runId === "string"
+    && (typeof receipt.subject === "string" || receipt.subject === null)
+    && typeof receipt.gateId === "string"
+    && typeof receipt.stepId === "string"
+    && typeof receipt.expectedRunHead === "string"
+    && typeof receipt.expectation === "string"
+    && Array.isArray(receipt.expectationIds)
+    && receipt.expectationIds.length > 0
+    && new Set(receipt.expectationIds).size === receipt.expectationIds.length
+    && receipt.expectationIds.includes(receipt.expectation)
+    && Number.isFinite(receipt.visit?.enteredAt)
+    && typeof receipt.digest === "string"
+    && receipt.claimSubject === receipt.subject
+    && receipt.claimStepId === receipt.stepId
+    && receipt.claimExpectation === receipt.expectation
+    && receipt.claimRunHead === receipt.expectedRunHead;
+}
+
+function sameStringSet(value: unknown, expected: readonly string[]): boolean {
+  return Array.isArray(value)
+    && value.every((entry) => typeof entry === "string")
+    && value.length === expected.length
+    && new Set(value).size === value.length
+    && value.every((entry) => expected.includes(entry));
+}
+
+function parseEvidenceTimestamp(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function assertEvidencePostconditions(attached: boolean, beforeEvidence: readonly JsonRecord[], run: { runId: string; state: JsonRecord; manifest: JsonRecord }, receipt: EvidenceReceipt): void {
+  const classification = classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
+  if (attached && classification !== "attached") {
+    throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
+  }
+  if (!attached && classification !== "unattached") {
+    throw new Error("workflow evidence changed the canonical manifest while synchronization reported no attachment");
+  }
+}
+
+async function canonicalEvidenceAttachment(projectRoot: string, slug: string, receipt: EvidenceReceipt | null, beforeEvidence: readonly JsonRecord[]): Promise<"attached" | "unattached" | "unknown"> {
+  if (!receipt) return "unknown";
+  try {
+    const run = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+    return classifyCanonicalEvidenceAttachment(receipt, run, beforeEvidence);
+  } catch {
+    // A valid but not-yet-shipped definition amendment makes the Builder adapter
+    // intentionally reject its own identity.  The raw Flow manifest can still
+    // prove a clean absence: any new entry remains uncertain for a later exact
+    // receipt classifier, but no new entry permits the transaction-owned bundle
+    // to be restored safely.
+    try {
+      const raw = await withFlowRunRecoveryFenceReadAsync(projectRoot, slug, () => loadRun(slug, projectRoot));
+      return classifyCanonicalEvidenceAttachment(receipt, { runId: slug, state: raw.state as JsonRecord, manifest: raw.manifest as JsonRecord }, beforeEvidence);
+    } catch {
+      return "unknown";
+    }
+  }
+}
+
+function evidenceRollbackError(operationError: unknown, rollbackError: unknown): Error {
+  return new Error(`workflow evidence failed and rollback was incomplete: ${errorMessage(operationError)}; rollback error: ${errorMessage(rollbackError)}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readGateClaim(bundleFile: string, expectationId: string): JsonRecord {
+  const bundle = readJsonFile(bundleFile, "workflow trust bundle");
+  const claims = Array.isArray(bundle.claims) ? bundle.claims : [];
+  const claim = claims.find((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const metadata = (candidate as JsonRecord).metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+    const gateClaim = (metadata as JsonRecord).gate_claim;
+    return Boolean(gateClaim && typeof gateClaim === "object" && !Array.isArray(gateClaim) && (gateClaim as JsonRecord).expectation_id === expectationId);
+  }) as JsonRecord | undefined;
+  if (!claim) throw new Error(`workflow evidence did not persist a gate claim for expectation ${expectationId}`);
+  return claim;
+}
+
+function readGateVerdict(bundleFile: string, expectationId: string): { value: string | null; status: string | null; observations: CommandObservationReport[] } {
+  const claim = readGateClaim(bundleFile, expectationId);
+  const metadata = claim.metadata as JsonRecord;
+  const observations = Array.isArray(metadata.observed_commands)
+    ? metadata.observed_commands.flatMap((entry): CommandObservationReport[] => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const observation = entry as JsonRecord;
+      if (typeof observation.command !== "string" || !Number.isInteger(observation.exit_code) || typeof observation.output_sha256 !== "string") return [];
+      const digest = createHash("sha256").update(observation.command).digest("hex");
+      return [{ ordinal: 0, observation_id: `command:${digest}`, exit_code: observation.exit_code as number, output_sha256: observation.output_sha256, outcome: observation.exit_code === 0 ? "pass" : "fail" }];
+    })
+    .map((observation, index) => ({ ...observation, ordinal: index + 1 }))
+    : [];
+  return {
+    value: typeof claim.value === "string" ? claim.value : null,
+    status: typeof claim.status === "string" ? claim.status : null,
+    observations,
+  };
+}
+
+function formatCommandOutcomes(observations: CommandObservationReport[]): string {
+  return observations.length === 0 ? "none" : observations.map((observation) => `${observation.outcome} (exit ${observation.exit_code})`).join(", ");
 }
 
 function assertExecuteFailureRouteBeforeMutation(
@@ -750,13 +1573,250 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
     prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash),
     resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash),
     expected_resolver: String(resolving.reviewer), resolved_lane_ids: unresolvedLaneIds, resolved_finding_ids: unresolvedFindingIds,
-    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest),
-    prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
     nonce: `critique-resolution-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
     requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
   });
   console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
   return 0;
+}
+
+async function repairCritiqueResolutionHistory(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow repair-critique-resolution-history");
+  const priorRecordId = flagString(parsed.flags, "prior-record-id");
+  const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!priorRecordId || !resolvingRecordId || !authorizationFile) throw new Error("workflow repair-critique-resolution-history requires both critique record ids and a signed --authorization-file <path>");
+  const { projectRoot } = readBoundSession(sessionDir);
+  const report = invokeExternalLifecycleAuthority({ action: "repair-critique-resolution-history", project_root: projectRoot, session_dir: path.resolve(sessionDir), authorization_file: path.resolve(authorizationFile), prior_record_id: priorRecordId, resolving_record_id: resolvingRecordId });
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Critique history repair was already recorded." : "Recorded a signed critique-resolution history repair.");
+  return 0;
+}
+
+async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), "workflow repair-critique-resolution-history-request");
+  const priorRecordId = flagString(parsed.flags, "prior-record-id");
+  const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
+  if (!priorRecordId || !resolvingRecordId) throw new Error("workflow repair-critique-resolution-history-request requires both critique record ids");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const { bundleBytes, bundle, ledgerBytes, events } = readCritiqueResolutionHistoryRepairPreimage(sessionDir);
+  if (Object.hasOwn(bundle, "critique_resolution_events")) throw new Error("workflow history repair refuses a Trust Bundle containing external authority events");
+  const claims = normalizedCritiqueClaims(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []);
+  const claimFor = (id: string): JsonRecord => {
+    const matches = claims.filter((claim) => (claim.metadata as JsonRecord | undefined)?.critique_record_id === id);
+    if (matches.length !== 1) throw new Error(`critique record ${id} is missing or ambiguous`);
+    return matches[0]!;
+  };
+  const priorClaim = claimFor(priorRecordId); const resolvingClaim = claimFor(resolvingRecordId);
+  const prior = priorClaim.metadata as JsonRecord; const resolving = resolvingClaim.metadata as JsonRecord;
+  const edge = prior.critique_resolution as JsonRecord | undefined;
+  if (priorClaim.status !== "superseded" || prior.superseded_by !== resolvingRecordId || !edge || edge.kind !== "cross-reviewer") throw new Error("workflow history repair requires an already-superseded cross-reviewer edge");
+  if (String(edge.prior_record_id) !== priorRecordId || String(edge.resolving_record_id) !== resolvingRecordId || String(edge.resolver) !== String(resolving.reviewer)) throw new Error("workflow history repair edge does not bind the selected critiques");
+  const originalEventId = String(edge.resolution_event_id); const originalAuthorization = String(edge.authorization_sha256);
+  if (events.some((event) => event.event_id === originalEventId || event.authorization_sha256 === originalAuthorization)) throw new Error("workflow history repair refuses an edge whose original signed event is already present");
+  if (events.some((event) => event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id === originalEventId || event.missing_authorization_sha256 === originalAuthorization))) throw new Error("workflow history repair already exists for the selected edge");
+  const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "workflow history repair lifecycle completion", 256 * 1024);
+  if (!completionBytes) throw new Error("workflow history repair lifecycle completion is missing");
+  const completion = verifyHistoricalLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+  if (!(["resolve-critique", "repair-critique-resolution-history"] as string[]).includes(String(completion.action)) || completion.run_id !== slug) throw new Error("workflow history repair requires an authenticated historical lifecycle completion for this run");
+  const bridge = discoverCritiqueResolutionHistoryRepairBridge({ sessionDir, slug, projectRoot, bundleBytes, bundle, ledgerBytes, events, completion });
+  const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+  if (!subject || subject !== prior.workflow_subject_ref || subject !== resolving.workflow_subject_ref) throw new Error("workflow history repair requires one matching bound subject");
+  const snapshot = (record: JsonRecord): JsonRecord => record.review_target && typeof record.review_target === "object" && (record.review_target as JsonRecord).workspace_snapshot && typeof (record.review_target as JsonRecord).workspace_snapshot === "object" ? (record.review_target as JsonRecord).workspace_snapshot as JsonRecord : {};
+  const priorWorkspace = snapshot(prior); const resolvingWorkspace = snapshot(resolving);
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const now = new Date(); const tail = events.at(-1);
+  const request = buildUnsignedCritiqueResolutionHistoryRepairAuthorization({
+    project_root: projectRoot, run_id: slug, subject,
+    prior_record_id: priorRecordId, prior_record_hash: String(prior.critique_record_hash), resolving_record_id: resolvingRecordId, resolving_record_hash: String(resolving.critique_record_hash), expected_resolver: String(resolving.reviewer),
+    prior_snapshot_sha256: String(priorWorkspace.digest), resolving_snapshot_sha256: String(resolvingWorkspace.digest), prior_head_sha: String(priorWorkspace.head_sha ?? "none"), resolving_head_sha: String(resolvingWorkspace.head_sha ?? "none"),
+    preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), preimage_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), preimage_ledger_length: events.length, preimage_ledger_tail_hash: String(tail?.event_hash ?? "0".repeat(64)),
+    current_completion_sha256: String(bridge.historical_completion_sha256), ...bridge, preserved_resolution_sha256: createHash("sha256").update(JSON.stringify(edge)).digest("hex"),
+    missing_resolution_event_id: originalEventId, missing_authorization_sha256: originalAuthorization, reason_code: "coordinator-external-ledger-overwrite-v1",
+    nonce: `critique-history-repair-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as JsonRecord;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalSha256(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+type HistoricalRepairBridgeInput = {
+  sessionDir: string;
+  slug: string;
+  projectRoot: string;
+  bundleBytes: Buffer;
+  bundle: JsonRecord;
+  ledgerBytes: Buffer;
+  events: JsonRecord[];
+  completion: JsonRecord;
+};
+
+type HistoricalCompletionIdentity = {
+  requestSha256: string;
+  resultCoreSha256: string;
+  action: "resolve-critique" | "repair-critique-resolution-history";
+};
+
+function historicalCompletionIdentity(completion: JsonRecord, slug: string): HistoricalCompletionIdentity {
+  if (completion.run_id !== slug || !(["resolve-critique", "repair-critique-resolution-history"] as unknown[]).includes(completion.action)) {
+    throw new Error("historical lifecycle completion does not bind the canonical repair run");
+  }
+  const requestSha256 = String(completion.request_sha256);
+  const resultCoreSha256 = String(completion.result_core_sha256);
+  if (!/^[a-f0-9]{64}$/.test(requestSha256) || !/^[a-f0-9]{64}$/.test(resultCoreSha256)) {
+    throw new Error("historical lifecycle completion identity is invalid");
+  }
+  return { requestSha256, resultCoreSha256, action: completion.action as HistoricalCompletionIdentity["action"] };
+}
+
+function readHistoricalRepairAttachment(input: HistoricalRepairBridgeInput, identity: HistoricalCompletionIdentity): {
+  attachmentId: string; entry: JsonRecord; storedPath: string; storedBytes: Buffer; historicalBundle: JsonRecord;
+} {
+  const { sessionDir, projectRoot, slug } = input;
+  const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+  const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "canonical Flow evidence manifest", 16 * 1024 * 1024);
+  if (!manifestBytes) throw new Error("canonical Flow evidence manifest is missing");
+  const manifest = JSON.parse(manifestBytes.toString("utf8")) as JsonRecord;
+  if (!Array.isArray(manifest.evidence)) throw new Error("canonical Flow evidence manifest is invalid");
+  const attachmentId = `lifecycle-authority:${identity.requestSha256}`;
+  const entries = (manifest.evidence as unknown[]).filter((entry): entry is JsonRecord =>
+    Boolean(entry) && typeof entry === "object" && !Array.isArray(entry) && (entry as JsonRecord).id === attachmentId,
+  );
+  if (entries.length !== 1) throw new Error("historical Flow attachment must occur exactly once");
+  const entry = entries[0]!;
+  const storedPath = `evidence/${attachmentId}.json`;
+  const expectedOriginalPath = path.relative(projectRoot, path.join(sessionDir, "trust.bundle"));
+  if (
+    entry.kind !== "trust.bundle"
+    || entry.stored_path !== storedPath
+    || (entry.original_path !== undefined && entry.original_path !== expectedOriginalPath)
+    || typeof entry.sha256 !== "string"
+    || (entry.superseded_by !== undefined && entry.superseded_by !== null)
+  ) {
+    throw new Error("historical Flow attachment does not match the deterministic repair anchor");
+  }
+  const storedFile = path.resolve(flowRoot, storedPath);
+  const evidenceRoot = path.join(flowRoot, "evidence");
+  if (path.dirname(storedFile) !== evidenceRoot || storedFile !== path.join(evidenceRoot, `${attachmentId}.json`)) {
+    throw new Error("historical Flow stored path escapes the canonical evidence directory");
+  }
+  const storedBytes = readProtectedRegularFileBytes(storedFile, "historical Flow stored trust bundle", 4 * 1024 * 1024);
+  if (!storedBytes || createHash("sha256").update(storedBytes).digest("hex") !== entry.sha256) {
+    throw new Error("historical Flow stored trust bundle digest does not match its manifest");
+  }
+  const historicalBundle = JSON.parse(storedBytes.toString("utf8")) as JsonRecord;
+  if (!historicalBundle || typeof historicalBundle !== "object" || Array.isArray(historicalBundle) || !Array.isArray(historicalBundle.claims)) {
+    throw new Error("historical Flow stored trust bundle is invalid");
+  }
+  return { attachmentId, entry, storedPath, storedBytes, historicalBundle };
+}
+
+function historicalRepairAuthorizationIdentity(input: HistoricalRepairBridgeInput, identity: HistoricalCompletionIdentity, historicalBundle: JsonRecord): {
+  prefix: ReturnType<typeof selectUniqueHistoricalLedgerPrefix>;
+  historicalAuthorization: JsonRecord;
+  signature: JsonRecord;
+} {
+  const prefix = selectUniqueHistoricalLedgerPrefix(historicalBundle, input.events, identity.resultCoreSha256);
+  const historicalEvent = prefix.events.at(-1) as JsonRecord | undefined;
+  const historicalAuthorization = historicalEvent?.signed_authorization as JsonRecord | undefined;
+  const signature = historicalAuthorization?.signature as JsonRecord | undefined;
+  if (
+    !historicalEvent || !historicalAuthorization || !signature
+    || historicalEvent.operation !== identity.action
+    || historicalEvent.run_id !== input.slug
+    || historicalAuthorization.project_root !== input.projectRoot
+    || typeof signature.key_id !== "string"
+    || typeof historicalAuthorization.nonce !== "string"
+  ) {
+    throw new Error("historical completion has no matching signed ledger authorization");
+  }
+  return { prefix, historicalAuthorization, signature };
+}
+
+function buildHistoricalRepairBridgeBindings(
+  input: HistoricalRepairBridgeInput,
+  identity: HistoricalCompletionIdentity,
+  attachment: ReturnType<typeof readHistoricalRepairAttachment>,
+  authority: ReturnType<typeof historicalRepairAuthorizationIdentity>,
+): CritiqueResolutionHistoryRepairBridgeBindings {
+  const { projectRoot, slug, bundleBytes, bundle, ledgerBytes, events, completion } = input;
+  const { attachmentId, entry, storedPath, storedBytes, historicalBundle } = attachment;
+  const { prefix, historicalAuthorization, signature } = authority;
+  const continuity = assertAppendOnlyCritiqueHistory(historicalBundle.claims as JsonRecord[], bundle.claims as JsonRecord[]);
+  const currentEdges = critiqueResolutionEdgeProjectionSummary(bundle.claims as JsonRecord[]);
+  const historicalAuthorizationSha256 = canonicalSha256(historicalAuthorization);
+  const historicalCompletionSha256 = createHash("sha256").update(JSON.stringify(completion)).digest("hex");
+  const operationId = canonicalSha256({
+    project: path.resolve(projectRoot),
+    run_id: slug,
+    action: identity.action,
+    key_id: signature.key_id,
+    nonce: historicalAuthorization.nonce,
+  });
+  const durableRecord = {
+    authorization_sha256: historicalAuthorizationSha256,
+    request_sha256: identity.requestSha256,
+    result_core_sha256: identity.resultCoreSha256,
+    completion,
+  };
+  const bridge = {
+    historical_completion_sha256: historicalCompletionSha256,
+    historical_completion_request_sha256: identity.requestSha256,
+    historical_completion_action: identity.action,
+    historical_completion_result_core_sha256: identity.resultCoreSha256,
+    historical_attachment_id: attachmentId,
+    historical_manifest_entry_sha256: canonicalSha256(entry),
+    historical_stored_path: storedPath,
+    historical_stored_raw_sha256: createHash("sha256").update(storedBytes).digest("hex"),
+    historical_stored_bundle_sha256: canonicalSha256(historicalBundle),
+    historical_durable_operation_id: operationId,
+    historical_durable_completion_record_sha256: canonicalSha256(durableRecord),
+    historical_ledger_prefix_length: prefix.length,
+    historical_ledger_prefix_raw_sha256: prefix.raw_sha256,
+    historical_ledger_prefix_canonical_sha256: prefix.canonical_sha256,
+    historical_ledger_prefix_tail_hash: prefix.tail_hash,
+    historical_critique_projection_version: continuity.historical.version,
+    historical_critique_projection_sha256: continuity.historical.digest,
+    historical_critique_projection_length: continuity.historical.length,
+    historical_critique_projection_tail_hash: continuity.historical.tail_hash,
+    current_critique_projection_version: continuity.current.version,
+    current_critique_projection_sha256: continuity.current.digest,
+    current_critique_projection_length: continuity.current.length,
+    current_critique_projection_tail_hash: continuity.current.tail_hash,
+    historical_resolution_edge_projection_sha256: continuity.historical_edges.digest,
+    historical_resolution_edge_projection_count: continuity.historical_edges.count,
+    current_resolution_edge_projection_sha256: currentEdges.digest,
+    current_resolution_edge_projection_count: currentEdges.count,
+    current_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
+    current_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"),
+    current_ledger_length: events.length,
+    current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
+  };
+  return { ...bridge, historical_bridge_sha256: critiqueResolutionHistoryBridgeDigest(bridge) };
+}
+
+export function discoverCritiqueResolutionHistoryRepairBridge(input: HistoricalRepairBridgeInput): CritiqueResolutionHistoryRepairBridgeBindings {
+  const identity = historicalCompletionIdentity(input.completion, input.slug);
+  const attachment = readHistoricalRepairAttachment(input, identity);
+  const authority = historicalRepairAuthorizationIdentity(input, identity, attachment.historicalBundle);
+  return buildHistoricalRepairBridgeBindings(input, identity, attachment, authority);
 }
 
 function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {
@@ -780,12 +1840,18 @@ function assertRunnableEvidenceCommands(commands: string[], projectRoot: string,
   }
   for (const command of commands) {
     if (!isRunnableCommandText(command)) {
-      throw new Error(`workflow evidence --command ${JSON.stringify(command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
+      throw new Error(`workflow evidence ${publicCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
     }
     if (requiresTestEvidence && !isMeaningfulTestCommand(command, projectRoot)) {
       throw new Error("workflow evidence tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
     }
   }
+}
+
+function publicCommandReference(commands: readonly string[], command: string): string {
+  const ordinal = commands.indexOf(command) + 1;
+  const digest = createHash("sha256").update(command).digest("hex");
+  return `command #${ordinal > 0 ? ordinal : "?"} (sha256:${digest})`;
 }
 
 function resolveSessionDir(flags: ReturnType<typeof parseArgs>["flags"]): string {
@@ -953,6 +2019,64 @@ function readJsonFile(file: string, label: string): JsonRecord {
   }
 }
 
+function readProtectedRegularFileBytes(file: string, label: string, maxBytes: number, optional = false): Buffer | null {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (error) {
+    if (optional && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maxBytes || (stat.mode & 0o022) !== 0) {
+      throw new Error(`${label} must be a protected regular file no larger than ${maxBytes} bytes`);
+    }
+    return fs.readFileSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+export function readCritiqueResolutionHistoryRepairPreimage(sessionDir: string): {
+  bundleBytes: Buffer;
+  bundle: JsonRecord;
+  ledgerBytes: Buffer;
+  events: JsonRecord[];
+} {
+  const bundleBytes = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "workflow history repair trust bundle", 4 * 1024 * 1024);
+  if (!bundleBytes) throw new Error("workflow history repair trust bundle is missing");
+  const bundle = JSON.parse(bundleBytes.toString("utf8")) as unknown;
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) throw new Error("workflow history repair trust bundle must be a JSON object");
+
+  const storedLedgerBytes = readProtectedRegularFileBytes(
+    path.join(sessionDir, "lifecycle-authority.resolution-events.json"),
+    "workflow history repair resolution event ledger",
+    4 * 1024 * 1024,
+    true,
+  );
+  const ledgerBytes = storedLedgerBytes ?? Buffer.alloc(0);
+  const ledger = storedLedgerBytes === null
+    ? { schema_version: "1.0", events: [] }
+    : JSON.parse(storedLedgerBytes.toString("utf8")) as unknown;
+  if (
+    !ledger
+    || typeof ledger !== "object"
+    || Array.isArray(ledger)
+    || JSON.stringify(Object.keys(ledger).sort()) !== JSON.stringify(["events", "schema_version"])
+    || (ledger as JsonRecord).schema_version !== "1.0"
+    || !Array.isArray((ledger as JsonRecord).events)
+  ) {
+    throw new Error("workflow history repair requires an exact external resolution event ledger shape");
+  }
+  return {
+    bundleBytes,
+    bundle: bundle as JsonRecord,
+    ledgerBytes,
+    events: (ledger as JsonRecord).events as JsonRecord[],
+  };
+}
+
 function readOptionalJson(file: string): JsonRecord | null {
   try { return readJsonFile(file, file); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -975,11 +2099,14 @@ function isSafeSlug(value: string): boolean {
 }
 
 function readBoundSession(sessionDir: string): { sidecar: JsonRecord; slug: string; projectRoot: string } {
-  const slug = path.basename(sessionDir);
+  const resolvedSessionDir = path.resolve(sessionDir);
+  const slug = path.basename(resolvedSessionDir);
   if (!isSafeSlug(slug)) throw new Error("workflow session basename must be a safe task slug");
-  const sidecar = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  const projectRoot = path.dirname(path.dirname(path.dirname(resolvedSessionDir)));
+  assertFlowRunRecoveryFenceOpen(projectRoot, slug);
+  const sidecar = readJsonFile(path.join(resolvedSessionDir, "state.json"), "workflow state");
   if (sidecar.task_slug !== slug) throw new Error("workflow state task_slug must exactly match the safe session basename");
-  return { sidecar, slug, projectRoot: path.dirname(path.dirname(path.dirname(sessionDir))) };
+  return { sidecar, slug, projectRoot };
 }
 
 function readAssignment(sessionDir: string, slug: string): JsonRecord {
@@ -1070,14 +2197,25 @@ function immutableReport<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function manifestEvidenceIdentity(manifest: JsonRecord): Array<{ id: string; sha256: string }> {
+function manifestEvidenceIdentity(manifest: JsonRecord): JsonRecord[] {
   const evidence = Array.isArray(manifest.evidence) ? manifest.evidence : [];
   return evidence
     .flatMap((entry) => entry && typeof entry === "object"
       && typeof (entry as JsonRecord).id === "string"
       && typeof (entry as JsonRecord).sha256 === "string"
-      ? [{ id: String((entry as JsonRecord).id), sha256: String((entry as JsonRecord).sha256) }]
+      ? [stableManifestEvidenceIdentity(entry as JsonRecord)]
       : []);
+}
+
+function stableManifestEvidenceIdentity(entry: JsonRecord): JsonRecord {
+  const identity = structuredClone(entry);
+  // Flow refreshes these two embedded projections on every attachment. They
+  // describe report folding, not the manifest receipt's identity. Every other
+  // field remains bound, including id, gate, digest, status, paths, timestamps,
+  // expectations, supersession, and route metadata.
+  delete identity.bundle_report;
+  delete identity.inquiry_records;
+  return identity;
 }
 
 function optionalFileDigest(file: string): string | null {
@@ -1085,114 +2223,6 @@ function optionalFileDigest(file: string): string | null {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-}
-
-type FileIdentity = { dev: number; ino: number };
-type OptionalFileSnapshot = { bytes: Buffer | null; file: FileIdentity | null; directory: FileIdentity; directoryRealpath: string };
-
-function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function directoryIdentity(directory: string): FileIdentity {
-  const stat = fs.lstatSync(directory);
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("workflow evidence bundle parent must remain a non-symlink directory");
-  return { dev: stat.dev, ino: stat.ino };
-}
-
-function regularFileIdentityNoFollow(file: string): FileIdentity {
-  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile()) throw new Error("workflow evidence bundle must remain a regular file");
-    return { dev: stat.dev, ino: stat.ino };
-  } finally {
-    fs.closeSync(descriptor);
-  }
-}
-
-function optionalRegularFileIdentityNoFollow(file: string): FileIdentity | null {
-  try {
-    return regularFileIdentityNoFollow(file);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-function snapshotOptionalFile(file: string): OptionalFileSnapshot {
-  const directory = path.dirname(file);
-  const identity = directoryIdentity(directory);
-  const directoryRealpath = fs.realpathSync(directory);
-  try {
-    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-      const before = fs.fstatSync(descriptor);
-      if (!before.isFile()) throw new Error("workflow evidence bundle must be a regular file");
-      const bytes = fs.readFileSync(descriptor);
-      const after = fs.fstatSync(descriptor);
-      if (!sameFileIdentity(before, after)) throw new Error("workflow evidence bundle identity changed while reading");
-      return { bytes, file: { dev: before.dev, ino: before.ino }, directory: identity, directoryRealpath };
-    } finally {
-      fs.closeSync(descriptor);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { bytes: null, file: null, directory: identity, directoryRealpath };
-    throw error;
-  }
-}
-
-function assertSnapshotDirectoryStable(file: string, snapshot: OptionalFileSnapshot): void {
-  const directory = path.dirname(file);
-  if (!sameFileIdentity(directoryIdentity(directory), snapshot.directory) || fs.realpathSync(directory) !== snapshot.directoryRealpath) {
-    throw new Error("workflow evidence bundle parent identity changed before rollback");
-  }
-}
-
-function fsyncSnapshotDirectory(file: string, snapshot: OptionalFileSnapshot): void {
-  const directory = path.dirname(file);
-  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isDirectory() || !sameFileIdentity(stat, snapshot.directory)) {
-      throw new Error("workflow evidence bundle parent identity changed before durability sync");
-    }
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  assertSnapshotDirectoryStable(file, snapshot);
-}
-
-function restoreOptionalFile(file: string, snapshot: OptionalFileSnapshot, written: FileIdentity): void {
-  assertSnapshotDirectoryStable(file, snapshot);
-  const suffix = `${process.pid}-${randomBytes(8).toString("hex")}`;
-  const quarantine = path.join(path.dirname(file), `.${path.basename(file)}.failed-${suffix}`);
-  fs.renameSync(file, quarantine);
-  assertSnapshotDirectoryStable(file, snapshot);
-  if (!sameFileIdentity(regularFileIdentityNoFollow(quarantine), written)) {
-    // The path was concurrently replaced. Restore that unexpected file with a
-    // creation-only hard link, retain the quarantine copy, and fail loudly.
-    fs.linkSync(quarantine, file);
-    fsyncSnapshotDirectory(file, snapshot);
-    throw new Error("workflow evidence bundle changed after this invocation before rollback");
-  }
-  // Retain the failed invocation under its unique quarantine name. This avoids
-  // destructive unlink races and preserves audit bytes while making them inert
-  // to canonical synchronization, which reads only trust.bundle.
-  fsyncSnapshotDirectory(file, snapshot);
-  if (snapshot.bytes === null) return;
-  const restoreSource = path.join(path.dirname(file), `.${path.basename(file)}.restore-${suffix}`);
-  const restoreDescriptor = fs.openSync(restoreSource, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-  try {
-    fs.writeFileSync(restoreDescriptor, snapshot.bytes);
-    fs.fsyncSync(restoreDescriptor);
-  } finally {
-    fs.closeSync(restoreDescriptor);
-  }
-  assertSnapshotDirectoryStable(file, snapshot);
-  fs.linkSync(restoreSource, file);
-  fsyncSnapshotDirectory(file, snapshot);
 }
 
 function stripPublicFlags(argv: string[], removed: Set<string>): string[] {

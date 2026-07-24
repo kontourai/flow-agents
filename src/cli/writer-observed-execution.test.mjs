@@ -97,6 +97,112 @@ test("mutating writer metadata after the fact breaks the entry's self-hash", (t)
   assert.equal(verifyCommandLogChain(dir).status, "broken");
 });
 
+test("shared raw verification gives identical legacy-prefix and mid-chain gap semantics", (t) => {
+  const dir = tempSession(t);
+  const { entry } = hookEntry(chain.CHAIN_GENESIS, 0, { command: "echo hi", observedResult: "pass", exitCode: 0, capturedAt: NOW });
+  const variants = ["not-json", "[]", "null", "42", JSON.stringify({ source: "legacy" })];
+  for (const prefix of variants) {
+    const raw = `${prefix}\n${JSON.stringify(entry)}\n`;
+    fs.writeFileSync(path.join(dir, "command-log.jsonl"), raw);
+    assert.equal(chain.verifyCommandLogRaw(raw).status, "ok", `${prefix} is a tolerated legacy prefix`);
+    assert.equal(verifyCommandLogChain(dir).status, "ok");
+
+    const gapRaw = `${JSON.stringify(entry)}\n${prefix}\n`;
+    fs.writeFileSync(path.join(dir, "command-log.jsonl"), gapRaw);
+    assert.equal(chain.verifyCommandLogRaw(gapRaw).status, "broken", `${prefix} is a mid-chain gap`);
+    assert.equal(verifyCommandLogChain(dir).status, "broken");
+  }
+});
+
+test("persistent generation locks fail closed on active malformed stale and replaced highest generations", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const first = chain.acquireGenerationLock(base);
+  assert.ok(first);
+  assert.equal(chain.acquireGenerationLock(base), null, "an active highest generation blocks the next generation");
+  const stale = new Date(Date.now() - 60_000);
+  fs.utimesSync(first.file, stale, stale);
+  assert.equal(chain.acquireGenerationLock(base), null, "a stale active generation is never stolen");
+  assert.equal(chain.releaseGenerationLock(first), true);
+
+  const second = chain.acquireGenerationLock(base);
+  assert.equal(second.generation, 1);
+  const parked = `${second.file}.parked`;
+  fs.renameSync(second.file, parked);
+  fs.writeFileSync(second.file, "foreign replacement\n");
+  assert.equal(chain.releaseGenerationLock(second), false, "descriptor release detects pathname replacement");
+  assert.equal(fs.readFileSync(second.file, "utf8"), "foreign replacement\n");
+  assert.equal(chain.acquireGenerationLock(base), null, "a malformed replaced highest generation fails closed");
+});
+
+test("persistent generation locks serialize the next generation without unlinking history", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const zero = chain.acquireGenerationLock(base);
+  assert.deepEqual(JSON.parse(fs.readFileSync(base, "utf8")), {
+    protocol: chain.GENERATION_FENCE_PROTOCOL,
+    version: chain.GENERATION_FENCE_VERSION,
+  }, "the legacy base pathname becomes a permanent versioned fence");
+  assert.throws(
+    () => fs.openSync(base, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600),
+    { code: "EEXIST" },
+    "a legacy O_EXCL writer cannot overlap the fenced generation writer",
+  );
+  assert.equal(chain.releaseGenerationLock(zero), true);
+  const one = chain.acquireGenerationLock(base);
+  assert.equal(one.generation, 1);
+  assert.equal(chain.acquireGenerationLock(base), null);
+  assert.equal(chain.releaseGenerationLock(one), true);
+  const two = chain.acquireGenerationLock(base);
+  assert.equal(two.generation, 2);
+  assert.equal(chain.releaseGenerationLock(two), true);
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.includes(".lock.")).sort(), [
+    "command-log.jsonl.lock.0", "command-log.jsonl.lock.1", "command-log.jsonl.lock.2",
+  ]);
+});
+
+test("malformed legacy-base entries fail closed without mutation or automatic takeover", (t) => {
+  const dir = tempSession(t);
+  const base = path.join(dir, "command-log.jsonl.lock");
+  const foreign = "foreign legacy lock bytes\n";
+  fs.writeFileSync(base, foreign);
+  assert.equal(chain.acquireGenerationLock(base, { wait: false }), null);
+  assert.equal(fs.readFileSync(base, "utf8"), foreign);
+  assert.equal(fs.existsSync(`${base}.0`), false, "no generation is created behind an untrusted base entry");
+});
+
+test("canonical writer authority denial leaves a broken command log byte-identical", (t) => {
+  const dir = tempSession(t);
+  const log = path.join(dir, "command-log.jsonl");
+  const broken = `${JSON.stringify({
+    command: "npm test",
+    source: "postToolUse-capture",
+    _chain: { seq: 0, prevHash: "f".repeat(64), hash: "e".repeat(64) },
+  })}\n`;
+  fs.writeFileSync(log, broken);
+  appendWriterObservedCommands(dir, [{ command: "npm test", exit_code: 0, output_sha256: "a".repeat(64) }], NOW);
+  assert.equal(fs.readFileSync(log, "utf8"), broken, "denied append authority must not manufacture an unchained fallback");
+});
+
+test("ordinary writer release uncertainty emits one immediate redacted diagnostic", (t) => {
+  const dir = tempSession(t);
+  const sentinel = "WRITER_RELEASE_SECRET_756";
+  const originalRelease = chain.releaseGenerationLock;
+  const originalWrite = process.stderr.write;
+  let stderr = "";
+  chain.releaseGenerationLock = () => false;
+  process.stderr.write = ((chunk) => { stderr += String(chunk); return true; });
+  try {
+    appendWriterObservedCommands(dir, [{ command: `echo ${sentinel}`, exit_code: 0, output_sha256: "a".repeat(64) }], NOW);
+  } finally {
+    process.stderr.write = originalWrite;
+    chain.releaseGenerationLock = originalRelease;
+  }
+  assert.equal(readEntries(dir).length, 1, "ordinary observation capture remains append-only and fail-open");
+  assert.match(stderr, /generation release uncertain.*operator recovery/i, "release uncertainty must not be silently ignored");
+  assert.doesNotMatch(stderr, new RegExp(sentinel), "release diagnostics must not expose raw command content");
+});
+
 test("append is fail-open: an unwritable session dir does not throw", () => {
   assert.doesNotThrow(() => appendWriterObservedCommands("/nonexistent/definitely-missing", [{ command: "x", exit_code: 0, output_sha256: "e".repeat(64) }], NOW));
 });

@@ -20,6 +20,7 @@ import { runObservedCommand } from "../lib/observed-command.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import { validateRunCorrelationPresence } from "../run-correlation.js";
 import {
@@ -36,6 +37,7 @@ import {
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 
 type AnyObj = Record<string, any>;
 
@@ -68,22 +70,92 @@ export function writeJson(file: string, payload: AnyObj): void {
   fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
-function writeTrustBundleAtomically(file: string, payload: AnyObj): void {
+function quarantineTrustBundle(file: string): void {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("trust.bundle changed to a non-regular file while quarantining an unflushed write");
+  const quarantine = path.join(path.dirname(file), `.trust.bundle.failed-${process.pid}-${Date.now()}`);
+  fs.renameSync(file, quarantine);
+}
+
+export type TrustBundleWriterTarget = {
+  file: string;
+  descriptor: number;
+  identity: { dev: number; ino: number };
+  parentDescriptor: number;
+  parentIdentity: { dev: number; ino: number };
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+};
+
+function writeBufferFully(descriptor: number, bytes: Buffer, write: typeof fs.writeSync = fs.writeSync): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = write(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error("trust.bundle candidate write returned zero or an invalid byte count");
+    offset += count;
+  }
+}
+
+function assertTrustBundleWriterTarget(target: TrustBundleWriterTarget): void {
+  const opened = fs.fstatSync(target.descriptor);
+  const current = fs.lstatSync(target.file);
+  const parent = fs.fstatSync(target.parentDescriptor);
+  if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
+    || opened.dev !== target.identity.dev || opened.ino !== target.identity.ino
+    || current.dev !== target.identity.dev || current.ino !== target.identity.ino
+    || !parent.isDirectory() || parent.dev !== target.parentIdentity.dev || parent.ino !== target.parentIdentity.ino) {
+    throw new Error("trust.bundle candidate target identity changed");
+  }
+}
+
+function writeTrustBundleAtomically(file: string, payload: AnyObj, target?: TrustBundleWriterTarget): void {
+  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`);
+  if (target) {
+    assertTrustBundleWriterTarget(target);
+    writeBufferFully(target.descriptor, bytes, target.write);
+    fs.ftruncateSync(target.descriptor, bytes.length);
+    fs.fsyncSync(target.descriptor);
+    target.beforeReread?.(target.descriptor);
+    assertTrustBundleWriterTarget(target);
+    const reread = readRegularFileDescriptor(target.descriptor);
+    if (!reread.equals(bytes)) throw new Error("trust.bundle candidate reread did not match the staged bytes");
+    fs.fsyncSync(target.parentDescriptor);
+    assertTrustBundleWriterTarget(target);
+    return;
+  }
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true });
   const temporary = path.join(directory, `.trust.bundle.${process.pid}.${Date.now()}.tmp`);
   const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try {
-    fs.writeFileSync(descriptor, `${JSON.stringify(payload, null, 2)}\n`);
+    fs.writeFileSync(descriptor, bytes);
     fs.fsyncSync(descriptor);
   } finally { fs.closeSync(descriptor); }
+  let renamed = false;
   try {
     fs.renameSync(temporary, file);
+    renamed = true;
     const directoryDescriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+  } catch (error) {
+    if (renamed) quarantineTrustBundle(file);
+    throw error;
   } finally {
     try { fs.rmSync(temporary, { force: true }); } catch { /* rename completed or cleanup best effort */ }
   }
+}
+
+function readRegularFileDescriptor(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error("trust.bundle candidate is not a readable regular file");
+  const bytes = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) throw new Error("trust.bundle candidate reread ended early");
+    offset += count;
+  }
+  return bytes;
 }
 // Single-line but readable "key": "value" form. Built by collapsing the
 // structural whitespace from an indented stringify — corruption-proof, unlike a
@@ -850,6 +922,23 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
 }
 
 /**
+ * Combine a caller's requested gate verdict with an independently observed command result.
+ *
+ * A command observation can prevent an unearned pass, but it must never upgrade or replace an
+ * explicitly reported failure or uncertainty.  The observation remains separately persisted in
+ * the claim metadata and command log for reviewers.
+ */
+export function composeGateVerdict(
+  requestedStatus: "pass" | "fail" | "not_verified",
+  observedResult?: "pass" | "fail" | "ambiguous",
+): "pass" | "fail" | "not_verified" {
+  if (requestedStatus !== "pass") return requestedStatus;
+  if (observedResult === "fail") return "fail";
+  if (observedResult === "ambiguous") return "not_verified";
+  return "pass";
+}
+
+/**
  * Build a Hachure trust.bundle from raw check/criterion/critique inputs.
  * trust.bundle is the PRIMARY artifact (ADR 0010 Phase 4a producer inversion).
  * Callers pass raw inputs directly — not bespoke-sidecar-shaped objects.
@@ -862,7 +951,7 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
  * @param critiques  Critique objects reconstructed from trust.bundle claims
  * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents: AnyObj[] = []): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents: AnyObj[] = [], capturedWorkflowSubjectRef?: string | null): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -899,7 +988,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       return null;
     }
   })();
-  const workflowSubjectRef: string | null = (() => {
+  const workflowSubjectRef: string | null = capturedWorkflowSubjectRef !== undefined ? capturedWorkflowSubjectRef : (() => {
     if (!flowAgentsDir) return null;
     try {
       const state = loadJson(path.join(flowAgentsDir, slug, "state.json"));
@@ -1145,7 +1234,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // checkStatusToEventStatus("not_verified") returns null — no verification event, and the
     // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
     // not an error).
-    const effectiveStatus = captured ? (captured.observedResult === "ambiguous" ? "not_verified" : captured.observedResult) : String(check.status ?? "");
+    const requestedStatus = String(check.status ?? "");
+    const effectiveStatus = ["pass", "fail", "not_verified"].includes(requestedStatus)
+      ? composeGateVerdict(requestedStatus as "pass" | "fail" | "not_verified", captured?.observedResult)
+      : requestedStatus;
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
@@ -1391,7 +1483,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
-    const critMeta: AnyObj = {
+    const reconstructedMetadata = c._source_claim_metadata
+      && typeof c._source_claim_metadata === "object"
+      && !Array.isArray(c._source_claim_metadata)
+      ? { ...c._source_claim_metadata }
+      : null;
+    const critMeta: AnyObj = reconstructedMetadata ?? {
       origin: "critique",
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
@@ -1418,7 +1515,14 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimIdSalt = critiqueIdentityVersion === 2
       ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
       : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
+    // Existing critique claims are reconstructed from trust.bundle before a
+    // compose-safe rebuild. Preserve their physical claim identity exactly:
+    // an externally resolved critique acquires supersession metadata without
+    // changing its claim id, and recomputing the historical salt here would
+    // make an unrelated gate-claim write drift the resolved critique.
+    const claimId = typeof c.claim_id === "string" && c.claim_id.length > 0
+      ? c.claim_id
+      : generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
     // A critique claim's physical id changes when it becomes history because its supersession
     // metadata is part of the claim identity. Preserve an immutable logical record id so an
     // authenticated resolver can refer to the original review without relying on a mutable
@@ -1473,7 +1577,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[]): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -1513,14 +1617,14 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
         effectiveResolutionEvents = Array.isArray(prior.critique_resolution_events) ? prior.critique_resolution_events : [];
       } catch { effectiveResolutionEvents = []; }
     }
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, effectiveResolutionEvents);
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, effectiveResolutionEvents, capturedWorkflowSubjectRef);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
     }
-    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle);
+    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle, writerTarget);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2910,9 +3014,9 @@ export function isNarrativeArtifactContent(fileBytes: Buffer | string): boolean 
       && Array.isArray(value.sources)) return true;
     return false;
   } catch {
-    return text.includes("flow-agents-narrative-composer")
-      && text.includes("# Grounded Execution Narrative")
-      && text.includes("## Authority provenance");
+    return /(?:^|\r?\n)# Grounded Execution Narrative(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)## Authority provenance(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)- Narrative composer:\s*flow-agents-narrative-composer(?:\s|$)/.test(text);
   }
 }
 
@@ -3232,12 +3336,19 @@ export function inferExecutedTestCount(command: string, projectRoot: string, out
 
 type ObservedCommand = { command: string; exit_code: number; output_sha256: string; test_count?: number; execution_proof?: TestExecutionProof };
 
+function observedCommandReference(commands: readonly string[], command: string, observation?: { exit_code: number | null; output_sha256: string }): string {
+  const ordinal = commands.indexOf(command) + 1;
+  const commandDigest = createHash("sha256").update(command).digest("hex");
+  const result = `command #${ordinal > 0 ? ordinal : "?"} (sha256:${commandDigest})`;
+  return observation ? `${result}; exit ${observation.exit_code}; outcome ${observation.exit_code === 0 ? "pass" : "fail"}; output_sha256:${observation.output_sha256}` : result;
+}
+
 async function normalizeObservedCommands(commands: string[], projectRoot: string, requireTestIntent: boolean, expectedStatus: string): Promise<ObservedCommand[]> {
   if (commands.length === 0) die("record-gate-claim requires at least one --command for observed command evidence");
   if (new Set(commands).size !== commands.length) die("record-gate-claim --command values must be unique");
   for (const command of commands) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
-    if (!isRunnableCommandText(command)) die(`record-gate-claim --command "${command}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
+    if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
     if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
   }
   // Passing test evidence is always executed exactly once by this canonical
@@ -3253,9 +3364,8 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   for (const entry of observed) {
     if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
     if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
-    if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence command failed (exit ${entry.exit_code}): ${entry.command}`);
-    if (expectedStatus === "fail" && entry.exit_code === 0) die(`record-gate-claim failing evidence command unexpectedly passed: ${entry.command}`);
-    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence command did not produce a local execution proof: ${entry.command}`);
+    if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
+    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
     if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
@@ -3275,61 +3385,42 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
 // gate-claim write itself. Decision record: docs/decisions/writer-observed-execution.md.
 export const WRITER_OBSERVATION_SOURCE = "canonical-writer-execution";
 const WRITER_LOCK_RETRY_MS = 5;
-const WRITER_LOCK_MAX_TRIES = 200;
-const WRITER_LOCK_STALE_MS = 10000;
+const WRITER_LOCK_MAX_TRIES = 2000;
 
-function loadCommandLogChain(): { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string } {
+type CommandLogGenerationLock = { fd: number; file: string; generation: number; nonce: string; identity: { dev: number; ino: number } };
+type CommandLogChain = {
+  CHAIN_GENESIS: string;
+  computeChainHash: (prevHash: string, record: AnyObj) => string;
+  verifyCommandLogRaw: (raw: string) => { status: "legacy" | "ok" | "forked" | "broken"; append: { seq: number; hash: string } | null };
+  readDescriptorFully: (descriptor: number) => string;
+  writeDescriptorFully: (descriptor: number, bytes: Buffer, position: number | null, write?: typeof fs.writeSync) => void;
+  acquireGenerationLock: (base: string, options?: { wait?: boolean; attempts?: number; retryMs?: number }) => CommandLogGenerationLock | null;
+  releaseGenerationLock: (lock: CommandLogGenerationLock) => boolean;
+};
+
+function loadCommandLogChain(): CommandLogChain {
   const _req = createRequire(import.meta.url);
   const chainPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/command-log-chain.js");
-  return _req(chainPath) as { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string };
+  return _req(chainPath) as CommandLogChain;
 }
 
-function writerSleepSync(ms: number): void {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
-  catch { /* SharedArrayBuffer/Atomics unavailable — skip the backoff */ }
-}
-
-function writerAcquireLock(lockFile: string): number | null {
-  for (let i = 0; i < WRITER_LOCK_MAX_TRIES; i++) {
-    try {
-      const fd = fs.openSync(lockFile, "wx");
-      try { fs.writeSync(fd, String(process.pid)); } catch { /* pid is advisory only */ }
-      return fd;
-    } catch (err) {
-      if (!err || (err as NodeJS.ErrnoException).code !== "EEXIST") return null;
-      try {
-        const st = fs.statSync(lockFile);
-        if (Date.now() - st.mtimeMs > WRITER_LOCK_STALE_MS) { fs.unlinkSync(lockFile); continue; }
-      } catch { continue; }
-      writerSleepSync(WRITER_LOCK_RETRY_MS);
-    }
-  }
-  return null;
-}
-
-function writerReadLastChainState(logFile: string, genesis: string): { seq: number; hash: string } {
-  let raw = "";
-  try { raw = fs.readFileSync(logFile, "utf8"); } catch { return { seq: -1, hash: genesis }; }
-  const lines = raw.split("\n").filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let entry: AnyObj;
-    try { entry = JSON.parse(lines[i]!); } catch { continue; }
-    if (entry && entry._chain && typeof entry._chain.hash === "string" && typeof entry._chain.seq === "number") {
-      return { seq: entry._chain.seq, hash: entry._chain.hash };
-    }
-  }
-  return { seq: -1, hash: genesis };
-}
-
-export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string): void {
+export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string, transactionId?: string): void {
   if (observed.length === 0) return;
   try {
     const chain = loadCommandLogChain();
     const logFile = path.join(dir, "command-log.jsonl");
     const lockFile = `${logFile}.lock`;
-    const fd = writerAcquireLock(lockFile);
+    const lock = chain.acquireGenerationLock(lockFile, { wait: true, attempts: WRITER_LOCK_MAX_TRIES, retryMs: WRITER_LOCK_RETRY_MS });
+    if (lock === null) {
+      process.stderr.write("[record-gate-claim] writer observation authority unavailable; command log left unchanged\n");
+      return;
+    }
     try {
-      let { seq, hash: prevHash } = writerReadLastChainState(logFile, chain.CHAIN_GENESIS);
+      let raw = "";
+      try { raw = fs.readFileSync(logFile, "utf8"); } catch { /* absent log has genesis authority */ }
+      const authority = chain.verifyCommandLogRaw(raw).append;
+      if (authority === null) throw new Error("command-log has no safe append authority");
+      let { seq, hash: prevHash } = authority;
       const lines: string[] = [];
       for (const entry of observed) {
         const record: AnyObj = {
@@ -3340,6 +3431,7 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
           source: WRITER_OBSERVATION_SOURCE,
           writer: {
             output_sha256: entry.output_sha256,
+            ...(transactionId ? { transaction_id: transactionId } : {}),
             ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
             ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
           },
@@ -3352,10 +3444,142 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
       }
       fs.appendFileSync(logFile, `${lines.join("\n")}\n`);
     } finally {
-      if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } try { fs.unlinkSync(lockFile); } catch { /* removed */ } }
+      if (!chain.releaseGenerationLock(lock)) {
+        process.stderr.write("[record-gate-claim] writer observation generation release uncertain; later capture may require operator recovery\n");
+      }
     }
   } catch (error) {
     process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+/**
+ * Journal an abandoned public-evidence transaction without rewriting the append-only capture
+ * log.  Unlike the ordinary writer append this fails closed: callers use the return value to
+ * decide whether they may honestly report a safe rollback.
+ */
+type WriterDirectoryIdentity = { dev: number; ino: number; realpath: string };
+export interface WriterTransactionAbortCapability {
+  readonly directory: string;
+  readonly parent: WriterDirectoryIdentity;
+  readonly session: WriterDirectoryIdentity;
+}
+
+/** Test-only fault boundary for the fail-closed abort journal. */
+export let writerTransactionAbortTestHooks: {
+  beforeExclusiveCreate?: () => void;
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+  beforeLockRelease?: (lockFile: string) => void;
+} | undefined;
+export function setWriterTransactionAbortTestHooksForTest(hooks: typeof writerTransactionAbortTestHooks): void {
+  writerTransactionAbortTestHooks = hooks;
+}
+
+function writerDirectoryIdentity(directory: string, label: string): WriterDirectoryIdentity {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} must be a non-symlink directory`);
+  return { dev: stat.dev, ino: stat.ino, realpath: fs.realpathSync.native(directory) };
+}
+
+function sameWriterDirectoryIdentity(left: WriterDirectoryIdentity, right: WriterDirectoryIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.realpath === right.realpath;
+}
+
+export function createWriterTransactionAbortCapability(directory: string): WriterTransactionAbortCapability {
+  const session = writerDirectoryIdentity(directory, "workflow evidence session directory");
+  const parent = writerDirectoryIdentity(path.dirname(directory), "workflow evidence artifact root");
+  if (path.dirname(session.realpath) !== parent.realpath) throw new Error("workflow evidence session directory is not canonically contained by its artifact root");
+  return { directory, parent, session };
+}
+
+function assertWriterTransactionAbortCapability(capability: WriterTransactionAbortCapability): void {
+  const current = createWriterTransactionAbortCapability(capability.directory);
+  if (!sameWriterDirectoryIdentity(current.parent, capability.parent) || !sameWriterDirectoryIdentity(current.session, capability.session)) {
+    throw new Error("workflow evidence abort journal refused: artifact-root or session-directory identity changed");
+  }
+}
+
+function writerOpenAbortLog(logFile: string): { fd: number; created: boolean; identity: { dev: number; ino: number } } | null {
+  let prior: fs.Stats | null = null;
+  try { prior = fs.lstatSync(logFile); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null; }
+  if (prior && (prior.isSymbolicLink() || !prior.isFile())) return null;
+  try {
+    if (prior) {
+      const fd = fs.openSync(logFile, fs.constants.O_RDWR | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.dev !== prior.dev || stat.ino !== prior.ino) { fs.closeSync(fd); return null; }
+      return { fd, created: false, identity: { dev: stat.dev, ino: stat.ino } };
+    }
+    writerTransactionAbortTestHooks?.beforeExclusiveCreate?.();
+    const fd = fs.openSync(logFile, fs.constants.O_RDWR | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) { fs.closeSync(fd); return null; }
+    return { fd, created: true, identity: { dev: stat.dev, ino: stat.ino } };
+  } catch { return null; }
+}
+
+function writerAssertAbortLogIdentity(logFile: string, identity: { dev: number; ino: number }): boolean {
+  try {
+    const current = fs.lstatSync(logFile);
+    return !current.isSymbolicLink() && current.isFile() && current.dev === identity.dev && current.ino === identity.ino;
+  } catch { return false; }
+}
+
+export function appendWriterTransactionAbort(capability: WriterTransactionAbortCapability, transactionId: string, timestamp: string): boolean {
+  try {
+    assertWriterTransactionAbortCapability(capability);
+    const chain = loadCommandLogChain();
+    const logFile = path.join(capability.directory, "command-log.jsonl");
+    const lockFile = `${logFile}.lock`;
+    const lock = chain.acquireGenerationLock(lockFile, { wait: false });
+    if (lock === null) return false;
+    let appendResult = false;
+    let releaseResult = false;
+    try {
+      appendResult = (() => {
+        const log = writerOpenAbortLog(logFile);
+        if (log === null) return false;
+        try {
+          assertWriterTransactionAbortCapability(capability);
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          const priorChain = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd)).append;
+          if (priorChain === null) return false;
+          const { seq, hash: prevHash } = priorChain;
+          const record: AnyObj = {
+            source: "workflow-evidence-transaction",
+            capturedAt: timestamp,
+            transaction: { id: transactionId, outcome: "aborted" },
+          };
+          const hash = chain.computeChainHash(prevHash, record);
+          record._chain = { seq: seq + 1, prevHash, hash };
+          const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
+          chain.writeDescriptorFully(log.fd, bytes, null, writerTransactionAbortTestHooks?.write);
+          fs.fsyncSync(log.fd);
+          writerTransactionAbortTestHooks?.beforeReread?.(log.fd);
+          const reread = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd));
+          if (reread.append?.hash !== hash) return false;
+          assertWriterTransactionAbortCapability(capability);
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          if (log.created) {
+            const directoryDescriptor = fs.openSync(capability.directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+            try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+            assertWriterTransactionAbortCapability(capability);
+          }
+          return true;
+        } finally { fs.closeSync(log.fd); }
+      })();
+    } finally {
+      writerTransactionAbortTestHooks?.beforeLockRelease?.(lock.file);
+      releaseResult = chain.releaseGenerationLock(lock);
+      if (!releaseResult) {
+        process.stderr.write("[record-gate-claim] transaction abort generation release uncertain; operator recovery required\n");
+      }
+    }
+    return appendResult && releaseResult;
+  } catch {
+    return false;
   }
 }
 
@@ -3479,6 +3703,61 @@ function critiqueWorkspaceSnapshotIsCurrent(dir: string, critique: AnyObj): bool
     const reviewedFiles = artifacts.map((artifact: AnyObj) => ({ file: String(artifact.file), sha256: String(artifact.sha256) }));
     return isDeepStrictEqual(expected, captureReviewWorkspaceSnapshot(projectRoot, reviewedFiles));
   } catch { return false; }
+}
+
+/** A current review is required, but older live PASS anchors need not be recaptured. */
+export function liveCritiqueFreshnessSatisfied(live: AnyObj[], byRecordId: Map<string, AnyObj>, isCurrent: (critique: AnyObj) => boolean): boolean {
+  return live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique));
+  }) && live.some((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique) && isCurrent(critique));
+  });
+}
+
+/**
+ * Critique resolution authority is intentionally outside the Hachure bundle.
+ * Read it through a no-follow descriptor and accept it only alongside the
+ * root-signed completion that binds the exact external-ledger snapshot.
+ */
+export function externalCritiqueAuthorityForGate(dir: string, bundle: AnyObj): { events: AnyObj[]; completionVerified: boolean } {
+  const ledgerFile = path.join(dir, "lifecycle-authority.resolution-events.json");
+  const completionFile = path.join(dir, "lifecycle-authority.completion.json");
+  const crossReviewerEdge = Array.isArray(bundle.claims) && bundle.claims.some((claim: AnyObj) =>
+    claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer",
+  );
+  if (!fs.existsSync(ledgerFile)) return { events: [], completionVerified: !crossReviewerEdge };
+  let events: AnyObj[];
+  try {
+    const descriptor = fs.openSync(ledgerFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > 4 * 1024 * 1024 || (stat.mode & 0o022) !== 0) return { events: [], completionVerified: false };
+      bytes = fs.readFileSync(descriptor);
+    } finally { fs.closeSync(descriptor); }
+    const ledger = JSON.parse(bytes.toString("utf8"));
+    if (!ledger || typeof ledger !== "object" || Array.isArray(ledger) || ledger.schema_version !== "1.0" || !Array.isArray(ledger.events)) return { events: [], completionVerified: false };
+    events = ledger.events;
+  } catch { return { events: [], completionVerified: false }; }
+  if (events.length === 0 && !crossReviewerEdge) return { events, completionVerified: true };
+  try {
+    const completionDescriptor = fs.openSync(completionFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(completionDescriptor);
+      if (!stat.isFile() || stat.size > 256 * 1024 || (stat.mode & 0o022) !== 0) return { events, completionVerified: false };
+      bytes = fs.readFileSync(completionDescriptor);
+    } finally { fs.closeSync(completionDescriptor); }
+    const completion = verifyLifecycleAuthorityCompletion(JSON.parse(bytes.toString("utf8")));
+    return {
+      events,
+      completionVerified: ["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(String(completion.action))
+        && completion.run_id === path.basename(dir)
+        && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events }),
+    };
+  } catch { return { events, completionVerified: false }; }
 }
 
 function critiqueSnapshotDigest(critique: AnyObj): string | null {
@@ -3779,11 +4058,13 @@ function requireStampedClaim(claim: AnyObj, dir: string): string {
 }
 
 function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
-  const bundleFile = path.join(dir, "trust.bundle");
-  if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
-    die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
-  }
-  return loadJson(bundleFile);
+  return withFlowSessionRecoveryFenceRead(dir, () => {
+    const bundleFile = path.join(dir, "trust.bundle");
+    if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
+      die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
+    }
+    return loadJson(bundleFile);
+  });
 }
 
 function checksFromBundle(dir: string): AnyObj[] {
@@ -4065,8 +4346,9 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
   const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && claimOrigin(c) === "critique");
   return critiqueClaims.map((c: AnyObj) => {
     const md = (c.metadata && typeof c.metadata === "object") ? c.metadata as AnyObj : {};
-    return {
+    const critique = {
       id: String(c.subjectId || "").split("/").pop() || c.id,
+      claim_id: c.id,
       verdict: c.value ?? "not_verified",
       summary: c.fieldOrBehavior || "",
       findings: Array.isArray(md.findings) ? md.findings : [],
@@ -4089,6 +4371,17 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
         ? { critique_resolution: md.critique_resolution }
         : {}),
     };
+    // Compose-safe writes may update an unrelated gate claim. Retain the
+    // original metadata insertion order privately so rebuilding that untouched
+    // critique is byte-stable even when an external resolution appended
+    // supersession metadata in a different order.
+    Object.defineProperty(critique, "_source_claim_metadata", {
+      value: md,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    return critique;
   });
 }
 
@@ -4386,7 +4679,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false, writerTransactionId?: string, writerTarget?: TrustBundleWriterTarget): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -4406,6 +4699,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const flowAgentsDir = path.dirname(dir);
   const gateClaimActorKey = resolveReadActorKey(p);
   const sidecarState = loadJson(path.join(dir, "state.json"));
+  const capturedWorkflowSubjectRef = Array.isArray(sidecarState.work_item_refs) && sidecarState.work_item_refs.length === 1 && typeof sidecarState.work_item_refs[0] === "string"
+    ? sidecarState.work_item_refs[0]
+    : null;
   const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
     ? sidecarState.flow_run as AnyObj
     : null;
@@ -4463,7 +4759,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     : [];
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
-  appendWriterObservedCommands(dir, observedCommands, ts);
+  appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
   const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
   let outputSha256: string | null = null;
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
@@ -4549,7 +4845,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
   return 0;
 }
 
@@ -6640,13 +6936,11 @@ function critiqueClean(dir: string): boolean {
     const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
       ? state.work_item_refs[0]
       : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
-    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+    const authority = externalCritiqueAuthorityForGate(dir, bundle);
+    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
     if (!graph.valid) return false;
     const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
-    return graph.live.every((record) => {
-      const critique = byRecordId.get(record.critique_record_id);
-      return critique && critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique);
-    });
+    return liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) => critiqueWorkspaceSnapshotIsCurrent(dir, critique));
   }
   return false;
 }
@@ -6674,14 +6968,12 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
   const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
     ? state.work_item_refs[0]
     : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
-  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, Array.isArray(bundle.critique_resolution_events) ? bundle.critique_resolution_events : [], canonicalProjectRootForSession(dir));
+  const authority = externalCritiqueAuthorityForGate(dir, bundle);
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
   if (!graph.valid) fail();
   const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
-  if (!graph.live.every((record) => {
-    const critique = byRecordId.get(record.critique_record_id);
-    return critique && critiqueIsSubstantivePass(critique)
-      && isDeepStrictEqual(critique.review_target?.workspace_snapshot, current);
-  })) fail();
+  if (!liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) =>
+    isDeepStrictEqual(critique.review_target?.workspace_snapshot, current))) fail();
   const testsClaims = Array.isArray(bundle.claims)
     ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
       && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
@@ -7796,9 +8088,11 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
+export type PublicWorkflowInvocation = { writerTransactionId?: string; writerTarget?: TrustBundleWriterTarget };
+
+export function mainFromPublicWorkflow(argv: string[], invocation?: PublicWorkflowInvocation): Promise<number> {
   if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
-  return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
+  return main(argv, PUBLIC_WORKFLOW_AUTHORITY, invocation);
 }
 
 /**
@@ -7854,7 +8148,7 @@ function printHelp(): void {
   console.log(lines.join("\n"));
 }
 
-export async function main(argv: string[] = process.argv.slice(2), authority?: symbol): Promise<number> {
+export async function main(argv: string[] = process.argv.slice(2), authority?: symbol, invocation?: PublicWorkflowInvocation): Promise<number> {
   const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
   // command to execute verbatim (never option-parsed: a command like `npm test -- --watch`
@@ -7912,7 +8206,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId, invocation?.writerTarget);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);

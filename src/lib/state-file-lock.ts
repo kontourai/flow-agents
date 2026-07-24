@@ -38,7 +38,15 @@ function captureStateParentIdentity(file: string): FileIdentity {
 
 function assertStateParentIdentity(file: string, expected: FileIdentity): void {
   const parent = path.dirname(file);
-  const current = fs.lstatSync(parent);
+  let current: fs.Stats;
+  try {
+    current = fs.lstatSync(parent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`state file parent changed during locked update: ${parent}`);
+    }
+    throw error;
+  }
   if (
     current.isSymbolicLink()
     || !current.isDirectory()
@@ -108,7 +116,7 @@ function assertLiveContendedLock(lockDir: string, ownerFile: string): void {
   }
 }
 
-function acquireStateLock(file: string): StateLock {
+function acquireStateLock(file: string, parentIdentity: FileIdentity): StateLock {
   const lockDir = `${file}.lockdir`;
   const ownerFile = path.join(lockDir, "owner.json");
   const token = randomBytes(16).toString("hex");
@@ -118,6 +126,10 @@ function acquireStateLock(file: string): StateLock {
       return createStateLock(lockDir, ownerFile, token);
     } catch (error) {
       const lockError = error as NodeJS.ErrnoException;
+      if (lockError.code === "ENOENT") {
+        assertStateParentIdentity(file, parentIdentity);
+        throw new Error(`state file lock changed during acquisition: ${lockDir}`);
+      }
       if (lockError.code !== "EEXIST") throw lockError;
       try {
         assertLiveContendedLock(lockDir, ownerFile);
@@ -168,7 +180,7 @@ export function withStateFileLock<T>(
   body: (parentIdentity: FileIdentity) => T,
 ): T {
   const parentIdentity = captureStateParentIdentity(file);
-  const lock = acquireStateLock(file);
+  const lock = acquireStateLock(file, parentIdentity);
   try {
     assertStateLockOwned(file, parentIdentity, lock);
     return body(parentIdentity);

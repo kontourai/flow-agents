@@ -12,7 +12,7 @@
 #   1. Every launched entry is present (capture never drops a record).
 #   2. seq values are unique and contiguous (no fork — the lock held).
 #   3. verifyCommandLogChain() returns "ok" (chain verifies end-to-end).
-#   4. No stale .lock file is left behind.
+#   4. Persistent generation locks all remain durably released.
 #
 # Usage: bash evals/integration/test_command_log_concurrency.sh
 set -uo pipefail
@@ -109,11 +109,67 @@ else
   _fail "expected ok, got $chain_status"
 fi
 
-# 4. No stale lock left behind.
-if [[ ! -e "$LOG.lock" ]]; then
-  _pass "lockfile cleaned up (no stale .lock)"
+# 4. Persistent generations are audit history, not pathnames to unlink. Every
+# generation must be parseable and durably released.
+lock_report=$(node - "$LOG.lock" <<'NODE'
+const fs = require('fs'), path = require('path');
+const base = process.argv[2], prefix = `${path.basename(base)}.`;
+const files = fs.readdirSync(path.dirname(base)).filter((name) => name.startsWith(prefix));
+let ok = files.length > 0;
+for (const name of files) {
+  try { if (JSON.parse(fs.readFileSync(path.join(path.dirname(base), name), 'utf8')).state !== 'released') ok = false; }
+  catch { ok = false; }
+}
+console.log(ok ? `OK:${files.length}` : 'BAD');
+NODE
+)
+if [[ "$lock_report" == OK:* ]]; then
+  _pass "all ${lock_report#OK:} persistent lock generations are released"
 else
-  _fail "stale lockfile remains: $LOG.lock"
+  _fail "persistent lock generation remains active or malformed: $lock_report"
+fi
+
+# ─── Test 2: permanent version fence excludes legacy writers and blocks bad generations ───
+echo ""
+echo "Test: permanent version fence serializes legacy/new writers and fails closed on malformed active state"
+
+# Use an isolated fixture so the assertion is about the protocol boundary rather
+# than the concurrent entries above. A new writer must establish a durable,
+# permanent base fence before immutable generations; legacy O_EXCL ownership then
+# cannot overlap it. Malformed fences and active crashed generations preserve the
+# log and return no authority with a visible blocked diagnostic.
+FENCE="$TMP/fence"
+mkdir -p "$FENCE"
+fence_result=$(node - "$ROOT" "$FENCE" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[2];
+const dir = process.argv[3];
+const chain = require(path.join(root, 'scripts/lib/command-log-chain.js'));
+const base = path.join(dir, 'command-log.jsonl.lock');
+const log = path.join(dir, 'command-log.jsonl');
+fs.writeFileSync(log, 'broken command-log bytes\n');
+const before = fs.readFileSync(log, 'utf8');
+const first = chain.acquireGenerationLock(base, { wait: false });
+if (!first) throw new Error('new writer could not establish a fence');
+if (!fs.existsSync(base)) throw new Error('missing permanent version fence at legacy lock pathname');
+const fence = JSON.parse(fs.readFileSync(base, 'utf8'));
+if (fence.protocol !== 'command-log-generation-fence-v1') throw new Error('malformed or wrong-version permanent fence');
+let legacyWon = false;
+try { fs.openSync(base, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600); legacyWon = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
+if (legacyWon) throw new Error('legacy writer acquired base lock after new fence');
+chain.releaseGenerationLock(first);
+const highest = `${base}.1`;
+fs.writeFileSync(highest, JSON.stringify({ generation: 1, nonce: 'crashed', state: 'active' }) + '\n');
+if (chain.acquireGenerationLock(base, { wait: false }) !== null) throw new Error('crashed active generation was silently superseded');
+if (fs.readFileSync(log, 'utf8') !== before) throw new Error('blocked authority mutated command log');
+console.log('OK: visible recovery_required authority block');
+NODE
+)
+if [[ "$fence_result" == "OK: visible recovery_required authority block" ]]; then
+  _pass "permanent version fence excludes legacy overlap and blocks malformed/crashed generations without mutation"
+else
+  _fail "version-fence protocol failure: $fence_result"
 fi
 
 echo ""

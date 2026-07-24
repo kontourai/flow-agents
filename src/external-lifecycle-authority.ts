@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, verify } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
@@ -8,7 +8,7 @@ export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flo
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
 export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
-const ACTIONS = new Set(["cancel", "archive", "resolve-critique"]);
+const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
 export interface ExternalLifecycleMutationResult {
@@ -36,6 +36,22 @@ export interface LifecycleAuthorityHelperHost {
   closeSync(descriptor: number): void;
 }
 
+/**
+ * The read-only filesystem boundary used while validating the immutable
+ * completion-verification key. It is deliberately separate from the helper
+ * boundary: only this fixed key path may use the narrow Darwin platform alias.
+ */
+export interface LifecycleAuthorityCompletionVerificationKeyHost {
+  platform: string;
+  lstatSync(file: string): { isSymbolicLink(): boolean; isFile(): boolean; uid: number; mode: number };
+  readlinkSync(file: string): string;
+  accessSync(file: string, mode: number): void;
+  openSync(file: string, flags: number): number;
+  fstatSync(descriptor: number): { isFile(): boolean; uid: number; mode: number; size: number };
+  readFileSync(descriptor: number): Buffer;
+  closeSync(descriptor: number): void;
+}
+
 const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
   platform: process.platform,
   getuid: typeof process.getuid === "function" ? () => process.getuid!() : undefined,
@@ -43,6 +59,17 @@ const lifecycleAuthorityHelperHost: LifecycleAuthorityHelperHost = {
   accessSync: (file, mode) => fs.accessSync(file, mode),
   openSync: (file, flags) => fs.openSync(file, flags),
   fstatSync: (descriptor) => fs.fstatSync(descriptor),
+  closeSync: (descriptor) => fs.closeSync(descriptor),
+};
+
+const lifecycleAuthorityCompletionVerificationKeyHost: LifecycleAuthorityCompletionVerificationKeyHost = {
+  platform: process.platform,
+  lstatSync: (file) => fs.lstatSync(file),
+  readlinkSync: (file) => fs.readlinkSync(file),
+  accessSync: (file, mode) => fs.accessSync(file, mode),
+  openSync: (file, flags) => fs.openSync(file, flags),
+  fstatSync: (descriptor) => fs.fstatSync(descriptor),
+  readFileSync: (descriptor) => fs.readFileSync(descriptor),
   closeSync: (descriptor) => fs.closeSync(descriptor),
 };
 
@@ -60,6 +87,23 @@ function canonical(value: unknown): string {
 export function lifecycleAuthorityResultDigest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
+
+/**
+ * Exact-current predicate for strict lifecycle consumers. Historical bridge
+ * evidence is deliberately not an input: callers first authenticate the
+ * completion, then require the complete current bundle and ledger core.
+ */
+export function lifecycleAuthorityCompletionBindsExactState(
+  completion: JsonRecord,
+  runId: string,
+  bundle: JsonRecord,
+  resolutionEvents: JsonRecord[],
+): boolean {
+  return completion.operation_status === "applied"
+    && ["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(String(completion.action))
+    && completion.run_id === runId
+    && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: resolutionEvents });
+}
 function digest(value: unknown): string { return createHash("sha256").update(canonical(value)).digest("hex"); }
 
 /**
@@ -73,49 +117,99 @@ function validateSignedCompletion(value: unknown, action: string, requestSha256:
   return completion;
 }
 
-/**
- * Verifies a coordinator completion without treating it as permission to mutate.
- * Consumers which already have an immutable completion (such as artifact
- * validation) use this to establish that the root-owned coordinator signed it.
- */
-export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
-  if (!record(value)) throw new Error("lifecycle authority completion is missing");
+function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operationStatuses: readonly string[], label: string): JsonRecord {
+  if (!record(value)) throw new Error(`${label} is missing`);
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   const observed = Object.keys(value).sort();
-  if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error("lifecycle authority completion contains unexpected or missing fields");
-  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !["applied", "replayed"].includes(String(value.operation_status))) throw new Error("lifecycle authority completion identity is invalid");
-  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`lifecycle authority completion ${key} is invalid`);
-  if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error("lifecycle authority completion timestamp is invalid");
-  if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error("lifecycle authority completion signature is invalid");
+  if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error(`${label} contains unexpected or missing fields`);
+  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
+  for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`${label} ${key} is invalid`);
+  if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error(`${label} timestamp is invalid`);
+  if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error(`${label} signature is invalid`);
   const signatureValue = value.signature.value;
   const { signature, ...unsigned } = value;
   if (!verify(null, Buffer.from(canonical(unsigned)), trustedCompletionVerificationKey(), Buffer.from(signatureValue, "base64"))) {
-    throw new Error("lifecycle authority completion signature is invalid");
+    throw new Error(`${label} signature is invalid`);
   }
   return value;
 }
 
-function trustedCompletionVerificationKey() {
-  if (process.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
-  const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
-  let cursor = path.parse(keyFile).root;
-  for (const component of keyFile.slice(cursor.length).split(path.sep).filter(Boolean)) {
-    cursor = path.join(cursor, component);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(cursor); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${keyFile}`); }
-    if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
-    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
-    try { fs.accessSync(cursor, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
-    catch (error) { if (error instanceof Error && error.message.includes("must not be writable")) throw error; }
+/**
+ * Verifies an applied coordinator completion without treating it as permission
+ * to mutate. Builder, sidecar/final-gate, artifact-validation, and helper
+ * response consumers use this strict current-authority verifier.
+ */
+export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
+  return verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied"], "lifecycle authority completion");
+}
+
+/**
+ * Authenticates legacy completion history only. A replayed historical receipt
+ * never establishes present lifecycle authority; it is accepted exclusively
+ * while deriving a signed history-repair bridge.
+ */
+export function verifyHistoricalLifecycleAuthorityCompletion(value: unknown): JsonRecord {
+  return verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied", "replayed"], "historical lifecycle authority completion");
+}
+
+function validateProtectedCompletionVerificationKeyPathComponent(file: string, host: LifecycleAuthorityCompletionVerificationKeyHost) {
+  let stat: ReturnType<LifecycleAuthorityCompletionVerificationKeyHost["lstatSync"]>;
+  try { stat = host.lstatSync(file); } catch { throw new Error(`pinned lifecycle authority completion verification key is not installed at ${LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH}`); }
+  if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("pinned lifecycle authority completion verification key and every parent must be OS-owned and non-writable by group or world");
+  try { host.accessSync(file, fs.constants.W_OK); throw new Error("pinned lifecycle authority completion verification key path must not be writable by the runtime user"); }
+  catch (error) {
+    if (error instanceof Error && error.message.includes("must not be writable")) throw error;
+    const code = (error as { code?: unknown })?.code;
+    if (code !== "EACCES" && code !== "EPERM" && code !== "EROFS") throw new Error("pinned lifecycle authority completion verification key path runtime-user write protection could not be verified");
   }
-  const descriptor = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  return stat;
+}
+
+/**
+ * Validate and load the immutable completion-verification key without treating
+ * it as authority to mutate. The injectable host exists solely for hermetic
+ * fixed-installation checks; production always supplies the real host below.
+ */
+export function validateLifecycleAuthorityCompletionVerificationKeyInstallation(host: LifecycleAuthorityCompletionVerificationKeyHost = lifecycleAuthorityCompletionVerificationKeyHost) {
+  if (host.platform === "win32") throw new Error("secure lifecycle authority completion verification is unavailable without a platform adapter");
+  const keyFile = LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH;
+  const root = path.posix.parse(keyFile).root;
+  let resolvedKeyFile = keyFile;
+  const rootStat = validateProtectedCompletionVerificationKeyPathComponent(root, host);
+  if (rootStat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
+  if (host.platform === "darwin") {
+    const etcStat = validateProtectedCompletionVerificationKeyPathComponent("/etc", host);
+    if (etcStat.isSymbolicLink()) {
+      let target: string;
+      try { target = host.readlinkSync("/etc"); } catch { throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias is unreadable"); }
+      if (path.posix.resolve(root, target) !== "/private/etc") throw new Error("pinned lifecycle authority completion verification key Darwin /etc platform alias must resolve exactly to /private/etc");
+      resolvedKeyFile = path.posix.join("/private/etc", keyFile.slice("/etc".length));
+    }
+  }
+  let cursor = root;
+  for (const component of resolvedKeyFile.slice(root.length).split(path.posix.sep).filter(Boolean)) {
+    cursor = path.posix.join(cursor, component);
+    const stat = validateProtectedCompletionVerificationKeyPathComponent(cursor, host);
+    if (stat.isSymbolicLink()) throw new Error("pinned lifecycle authority completion verification key path must not contain symlinks");
+  }
+  const descriptor = host.openSync(resolvedKeyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const stat = fs.fstatSync(descriptor);
+    const stat = host.fstatSync(descriptor);
     if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) !== 0 || stat.size === 0 || stat.size > 16 * 1024) throw new Error("pinned lifecycle authority completion verification key must be an OS-owned protected regular file");
-    const key = createPublicKey(fs.readFileSync(descriptor));
+    const keyMaterial = host.readFileSync(descriptor);
+    let privateKeyMaterial = false;
+    try { createPrivateKey(keyMaterial); privateKeyMaterial = true; } catch {
+      try { createPrivateKey({ key: keyMaterial, format: "der", type: "pkcs8" }); privateKeyMaterial = true; } catch { /* not private key material */ }
+    }
+    if (privateKeyMaterial) throw new Error("pinned lifecycle authority completion verification key must not contain private key material");
+    const key = createPublicKey(keyMaterial);
     if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") throw new Error("pinned lifecycle authority completion verification key must be an Ed25519 public key");
     return key;
-  } finally { fs.closeSync(descriptor); }
+  } finally { host.closeSync(descriptor); }
+}
+
+function trustedCompletionVerificationKey() {
+  return validateLifecycleAuthorityCompletionVerificationKeyInstallation();
 }
 
 /**
@@ -163,14 +257,17 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   exact(parsed.result, ["run_id", "operation_status", "completion"], "lifecycle authority mutation result");
   if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
   const completion = validateSignedCompletion(parsed.result.completion, action, requestSha256, parsed.result.run_id);
-  if (completion.operation_status !== parsed.result.operation_status) throw new Error("lifecycle authority completion status does not match the response");
+  // A replay returns the immutable completion from the original mutation.
+  // That completion is necessarily `applied`; the response itself reports
+  // `replayed` to describe this invocation. No replayed completion is valid.
+  if (completion.operation_status !== "applied") throw new Error("lifecycle authority completion status does not match the response");
   return parsed.result;
 }
 
 /** The external helper owns validation, locking, replay/CAS, and every write. */
 export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
   if (!ACTIONS.has(request.action)) throw new Error("unsupported lifecycle authority action");
-  const fields = request.action === "resolve-critique"
+  const fields = request.action === "resolve-critique" || request.action === "repair-critique-resolution-history"
       ? ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"]
       : ["action", "project_root", "session_dir", "authorization_file"];
   exact(request as JsonRecord, fields, "lifecycle authority request");
@@ -187,7 +284,7 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
     throw new Error(stderr || "external lifecycle authority rejected the request");
   }
   const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
-  const expectedRunId = request.action === "resolve-critique" ? path.basename(String(request.session_dir)) : path.basename(String(request.session_dir));
+  const expectedRunId = path.basename(String(request.session_dir));
   if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
   return result;
 }

@@ -27,7 +27,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const crypto = require('crypto');
 
 // Hash-chain primitives + the exit-code-laundering heuristic come from ONE shared
 // module, so this verifier can never drift from the writer (evidence-capture.js).
@@ -35,7 +34,7 @@ const crypto = require('crypto');
 // export name consumed by repair-command-log.js and the fork-classification eval.
 const {
   CHAIN_GENESIS: CHAIN_GENESIS_VERIFY,
-  canonicalJsonForChain,
+  verifyCommandLogRaw,
   hasLaunderingOperator,
 } = require('../lib/command-log-chain.js');
 const {
@@ -44,6 +43,7 @@ const {
   resolveSharedRepoRoot,
   warnIfFailingOpenInsideGitTree,
 } = require('./lib/local-artifact-paths');
+const { withFlowRecoveryFenceReadAsync } = require('./lib/flow-recovery-fence');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
@@ -945,86 +945,8 @@ function verifyCommandLogChain(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
   let raw = '';
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return { status: 'legacy', brokenAt: null, forkAt: null }; }
-
-  const lines = raw.split('\n').filter(l => l.trim());
-  if (lines.length === 0) return { status: 'legacy', brokenAt: null, forkAt: null };
-
-  // Parse all entries, tolerating unparseable lines (they count as legacy/unchained).
-  const entries = [];
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line);
-      if (entry && typeof entry === 'object') entries.push(entry);
-    } catch { /* skip malformed lines */ }
-  }
-  if (entries.length === 0) return { status: 'legacy', brokenAt: null, forkAt: null };
-
-  // Classify: are there any chained entries?
-  const hasAnyChain = entries.some(e => e._chain && typeof e._chain.hash === 'string');
-  if (!hasAnyChain) return { status: 'legacy', brokenAt: null, forkAt: null };
-
-  // Walk in file order. A chained entry is ACCEPTED when both:
-  //   (a) self-consistent: hash === sha256(prevHash + canonicalJson(record)),
-  //       so a content edit (e.g. flipping exitCode) without rehashing fails; and
-  //   (b) reachable: prevHash is genesis or the hash of any prior accepted entry.
-  // We track the SET of reachable hashes (not just the latest tip) so that
-  // concurrent-fork siblings — which share a still-reachable parent — are
-  // tolerated, while a reorder/deletion (parent not reachable) is caught.
-  const reachable = new Set([CHAIN_GENESIS_VERIFY]);
-  const parentSources = new Map(); // prevHash -> [source, ...] (fork detection)
-  let prevWasChained = false;
-  let forked = false;
-  let firstForkAt = null;
-
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const chain = entry._chain;
-    if (!chain || typeof chain.hash !== 'string') {
-      // Legacy entry without _chain. If we have already seen a chained entry,
-      // a gap in the chain (a legacy entry in the middle) counts as broken
-      // (it could indicate a removed chained entry was replaced by a legacy one).
-      if (prevWasChained) return { status: 'broken', brokenAt: i, forkAt: null };
-      // Before any chained entry: tolerate (legacy prefix).
-      continue;
-    }
-
-    // (a) Self-consistency. A content edit without rehashing fails here.
-    if (typeof chain.prevHash !== 'string') return { status: 'broken', brokenAt: i, forkAt: null };
-    const selfHash = crypto.createHash('sha256')
-      .update(chain.prevHash + canonicalJsonForChain(entry), 'utf8')
-      .digest('hex');
-    if (chain.hash !== selfHash) return { status: 'broken', brokenAt: i, forkAt: null };
-
-    // (b) Reachability. An unreachable parent means a reorder or a removed
-    // predecessor — structural tamper, not a benign concurrent append.
-    if (!reachable.has(chain.prevHash)) return { status: 'broken', brokenAt: i, forkAt: null };
-
-    // Fork detection: a parent claimed by more than one entry is a fork. It is
-    // benign only when EVERY sibling on that parent is a PostToolUse capture
-    // (two captures racing on the same tip). Any non-capture sibling on a
-    // shared parent is treated as tamper (conservative).
-    const sources = parentSources.get(chain.prevHash) || [];
-    sources.push(entry.source);
-    parentSources.set(chain.prevHash, sources);
-    if (sources.length > 1) {
-      // #634: the canonical writer's own execution observations
-      // ('canonical-writer-execution', appended by record-gate-claim under the
-      // same lockfile) legitimately race the PostToolUse capture on the same
-      // tip inside the lock's fail-open window. Both sources are benign fork
-      // siblings; any OTHER source on a shared parent stays tamper.
-      if (!sources.every(s => s === 'postToolUse-capture' || s === 'canonical-writer-execution')) {
-        return { status: 'broken', brokenAt: i, forkAt: null };
-      }
-      if (firstForkAt === null) firstForkAt = i;
-      forked = true;
-    }
-
-    reachable.add(chain.hash);
-    prevWasChained = true;
-  }
-
-  if (forked) return { status: 'forked', brokenAt: null, forkAt: firstForkAt };
-  return { status: 'ok', brokenAt: null, forkAt: null };
+  const { status, brokenAt, forkAt } = verifyCommandLogRaw(raw);
+  return { status, brokenAt, forkAt };
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2240,7 +2162,7 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
-async function analyze(root, now = Date.now()) {
+async function analyze(root, now = Date.now(), fencedRunId = null) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
   const activeTurnScope = validatedActiveTurnScope(root);
@@ -2325,6 +2247,21 @@ async function analyze(root, now = Date.now()) {
 
   const latest = artifacts[0];
   const latestArtifactDir = path.dirname(latest.file);
+  const selectedRunId = path.basename(latestArtifactDir);
+  if (fencedRunId === null) {
+    try {
+      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId));
+    } catch (error) {
+      return {
+        warnings: [`workflow recovery fence: ${String(error && error.message || error)}. Canonical workflow artifacts are unavailable until recovery completes.`],
+        blocking: true,
+        activeFlowRun: true,
+        latestArtifactDir,
+        gatePrefix: '[stop-gate]',
+      };
+    }
+  }
+  if (fencedRunId !== selectedRunId) throw new Error("workflow session selection changed during fenced read");
   const warnings = [];
   const relPath = relative(root, latest.file);
   const status = latest.status || 'unknown';

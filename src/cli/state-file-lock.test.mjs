@@ -24,6 +24,14 @@ function runHelper(source, args) {
   });
 }
 
+async function waitForPath(file, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(file)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for helper readiness: ${file}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 test("initial state write creates its destination directory", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-create-"));
   try {
@@ -154,6 +162,7 @@ test("state replacement rejects a parent directory swapped while lock acquisitio
     const outside = path.join(workspace, "outside");
     const file = path.join(session, "state.json");
     const outsideFile = path.join(outside, "state.json");
+    const readyFile = path.join(workspace, "parent-captured.ready");
     fs.mkdirSync(session);
     fs.mkdirSync(outside);
     fs.writeFileSync(file, '{"version":"inside"}\n');
@@ -175,11 +184,24 @@ test("state replacement rejects a parent directory swapped while lock acquisitio
     }
 
     const replacement = runHelper(
-      `import { replaceStateIfUnchanged } from ${JSON.stringify(helperUrl)};
+      `import { createRequire, syncBuiltinESMExports } from "node:module";
+       const mutableFs = createRequire(import.meta.url)("node:fs");
+       const originalLstatSync = mutableFs.lstatSync;
+       let signaled = false;
+       mutableFs.lstatSync = (target, ...args) => {
+         const result = originalLstatSync(target, ...args);
+         if (!signaled && target === process.argv[2]) {
+           mutableFs.writeFileSync(process.argv[3], "ready\\n", { flag: "wx" });
+           signaled = true;
+         }
+         return result;
+       };
+       syncBuiltinESMExports();
+       const { replaceStateIfUnchanged } = await import(${JSON.stringify(helperUrl)});
        replaceStateIfUnchanged(process.argv[1], '{"version":"inside"}\\n', '{"version":"projection"}\\n');`,
-      [file],
+      [file, session, readyFile],
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitForPath(readyFile);
     fs.renameSync(session, savedSession);
     fs.symlinkSync(outside, session, "dir");
     await assert.rejects(replacement, /state file parent changed during locked update/);

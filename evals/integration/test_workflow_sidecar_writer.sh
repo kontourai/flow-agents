@@ -3639,8 +3639,9 @@ if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
   --timestamp "2026-07-14T15:00:00Z" >"$TMPDIR_EVAL/wo-mismatch.out" 2>"$TMPDIR_EVAL/wo-mismatch.err"; then
   _fail "#634: record-gate-claim accepted a passing claim for a failing command"
 else
-  if grep -q "failed (exit" "$TMPDIR_EVAL/wo-mismatch.err"; then
-    _pass "#634: expected-status mismatch dies with the exit-code diagnostic"
+  if grep -Eq 'passing evidence command #[0-9?]+ \(sha256:[0-9a-f]{64}\); exit 1; outcome fail; output_sha256:[0-9a-f]{64} failed' "$TMPDIR_EVAL/wo-mismatch.err" \
+    && ! grep -q 'definitely-not-a-real-file-634' "$TMPDIR_EVAL/wo-mismatch.err"; then
+    _pass "#634: expected-status mismatch dies with the redacted exit-code diagnostic"
   else
     _fail "#634: mismatch died with an unexpected diagnostic: $(cat "$TMPDIR_EVAL/wo-mismatch.err")"
   fi

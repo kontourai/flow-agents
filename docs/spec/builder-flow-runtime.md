@@ -399,7 +399,8 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact `@kontourai/flow` 3.5.0 package (once published) and its runtime dependencies
+The script stages the exact published `@kontourai/flow` 3.8.1 package and the transitive runtime
+dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
 pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not
@@ -407,6 +408,82 @@ create registries, signing keys, or deployment-specific configuration. The coord
 administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
+
+### Canonical manifest and completion-key boundaries
+
+The coordinator permits at most 16 MiB only when it reads the canonical Flow evidence
+manifest (`.kontourai/flow/runs/<run-id>/evidence/manifest.json`) for a signed critique
+resolution. This is an isolated `MAX_CANONICAL_FLOW_MANIFEST_BYTES` boundary: canonical
+definition and state reads, trust bundles, authorizations, journals, keys, responses, and all
+other bounded inputs retain their smaller existing limits. The manifest is still opened with
+`O_NOFOLLOW`, must be a regular file with no group/world write bit, is read through the protected
+descriptor, and must parse as JSON. Raising this one size limit does not permit streaming,
+lossy parsing, writable files, or a broader input-size relaxation.
+
+Package-side completion verification always uses the fixed administrator-owned public-key path
+`/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem`; callers and
+environment variables cannot substitute a key path. On Darwin alone, the fixed root `/etc`
+component may be the standard protected alias that resolves exactly to `/private/etc`. Every
+resolved component, including `/`, `/private`, `/private/etc`, and the fixed descendants to the
+key, must be root-owned and group/world non-writable; after that one alias, every component must
+be non-symlinked. The final key is opened with `O_NOFOLLOW` and validated from its descriptor as
+a protected regular Ed25519 public key. Arbitrary alias targets, deeper symlinks, writable or
+non-root-owned components, and every symlink on non-Darwin hosts fail closed. This exception does
+not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
+every component.
+
+### Atomic verification-evidence reseal
+
+After a signed critique resolution or history repair, the exact-current lifecycle completion
+includes the full Trust Bundle plus external resolution ledger. Final verification evidence cannot
+use the ordinary package transaction because changing only `trust.bundle` would make that
+completion stale. The public runtime therefore exposes two separate operations:
+`reseal-verification-evidence-request` stages the normal writer-produced candidate exactly once and
+emits an unsigned authorization; `reseal-verification-evidence` accepts only a signed authorization
+and delegates to the fixed root-owned coordinator action.
+
+The authorization binds the raw current and candidate bundle digests, retained writer transaction
+identity, raw ledger digest/length/tail, raw and core current-completion identity, `builder.build`
+`verify` step and `verify-gate` identity, Flow run head and raw manifest digest, critique projection digest, project/run/subject,
+nonce, request time, and expiry. It also binds the exact target verify expectation and the
+predecessor/current claim id, status, raw-JSON digest, ordered index, and `replace` delta. The
+coordinator derives the candidate path from the signed transaction id; the protocol has no
+caller-selected candidate path.
+
+The unprivileged mutation worker reopens and validates every exact preimage. Its pure runtime
+transition requires a byte-semantically identical critique projection and complete ordered claim
+set except for the one authorized in-place target replacement. Unrelated verify claims cannot be
+modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
+`builder.build` verify gate. The protected policy derives the exact current gate requirements from
+the canonical Flow Definition, requires the target expectation exactly once there, and validates
+both predecessor and replacement `gate_claim` stamps against that requirement's expectation,
+step, claim type, and subject type. Inside Flow's native run-mutation lock, the coordinator
+revalidates the signed Flow head and exact old completion before capturing a closed transaction
+plan over exactly six fixed artifact identities: session bundle, Flow manifest, Flow state,
+request-keyed stored attachment, JSON report, and Markdown report. The root-authenticated signed
+plan contains no artifact paths and binds request/authorization/key/nonce, reducer identity,
+result core, and each artifact's exact pre/post presence, mode, size, and digest.
+
+The worker writes fixed old/new sibling stages, fsyncs and rereads them, then activates Flow's
+provider-neutral recovery fence before publishing the six enumerated postimages. Root durably
+records nonce and completion, issues the immutable full-bundle-plus-ledger evidence-core
+completion, and installs that exact receipt while the fence remains active. Finalization uses
+Flow's recovery-only native lock, verifies the exact postimages and receipt, then opens the fence.
+Flow's native writer assigns the active fence a unique generation and durably publishes it;
+the dedicated finalizer requires that exact generation before reopening. Readers bind the
+generation, exact fence fingerprint, and run-directory identity across the full supported read,
+and reject symlinked fixed Flow ancestry. The installed closure must expose the mutation lock,
+recovery lock, active writer, and generation-bound finalizer before root creates a nonce or the
+worker creates a plan or stage.
+Later legitimate Flow state/report transitions remain valid because the durable receipt binds the
+immutable evidence core rather than treating mutable state/report bytes as perpetual current
+state. Recovery accepts only an exact all-old or all-new generation; mixed or unknown generations
+are quarantined with the fence left active. Active legacy recursive reseal journals require
+offline quarantine regardless of their old request binding and are never auto-restored. Cleanup
+removes fixed stages before the signed plan; an open fence plus a retained plan is a valid
+cleanup-replay state, not a permanent rejection.
+Candidate, bundle, ledger, completion, Flow, signature, expiry, nonce, or claim-scope drift fails
+closed.
 
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and
@@ -431,6 +508,95 @@ Flow's canonical cancellation transition, then releases the exact bound local as
 requires a canceled or completed canonical Flow run and atomically relocates only the session to
 `.kontourai/flow-agents/archive/<slug>/`. Positive root-owned installation remains
 `NOT_VERIFIED` pending the root/container conformance lane.
+
+An administrator upgrade copies the direct coordinator source
+`packaging/lifecycle-authority/coordinator.mjs`; it is not generated package output. The signed
+`coordinator_runtime_sha256` field deliberately continues to identify the separately installed
+`runtime-v1.mjs`, so an upgrade proves coordinator source-to-installed byte equality and SHA-256
+separately. The installer keeps its prior coordinator, runtime, pin, and reducer closure for
+rollback. Neither the package caller nor an authorization record can override the helper, key, or
+installed source selected by this boundary.
+
+### External resolution ledger and legacy history repair
+
+`lifecycle-authority.resolution-events.json` is a protected, append-only,
+external ledger, not a field in the Hachure Trust Bundle. Before every ordinary
+resolution or repair, the coordinator requires a schema-valid, regular,
+group/world-non-writable ledger and validates its ordered sequence, predecessor/event
+hashes, unique event and authorization IDs, signed authorization bindings,
+run/subject bindings, and one-to-one graph coverage. The completion result core
+binds the Trust Bundle plus that separate ledger using the established
+synthetic-bundle compatibility shape; package validation and Builder consume
+the signed completion read-only.
+
+The narrow `repair-critique-resolution-history` operation addresses only the
+historical coordinator failure in which earlier external events were
+irrecoverably overwritten. It applies solely to an already-superseded
+cross-reviewer edge with its original resolution event absent. Its new,
+separately signed authorization must bind the exact raw Trust Bundle preimage,
+ledger digest/length/tail, current completion digest, preserved resolution-edge
+digest, missing original event ID and authorization digest, review records,
+reviewer, snapshots/heads, project/run/subject, nonce, time, expiry, and the
+explicit reason `coordinator-external-ledger-overwrite-v1`. The coordinator
+refuses a present original, a prior repair, a changed edge/preimage/completion,
+or any wrong subject, reviewer, snapshot, or ledger state.
+
+The bridge is deliberately narrower than accepting an old receipt. It requires
+all three historical anchors together: (1) the root-signed historical
+completion, (2) the Flow attachment selected by that completion request SHA-256
+and its protected stored Trust Bundle snapshot, and (3) the root-only durable
+operation, completion, and applied nonce records selected from the signed event
+in the one reproducing ledger prefix. Each anchor proves a different fact;
+none can stand in for either of the others. The coordinator finds exactly one
+current-ledger prefix whose events and stored snapshot reproduce the signed
+historical result core. Zero or multiple prefixes fail closed.
+
+A stale completion is continuity evidence for this one bridge only. It is not
+an exact-current completion and is therefore forbidden to Builder,
+artifact-validation, ordinary resolution, and final-gate consumers. A later
+critique may append after the historical completion without minting a new
+completion; that is precisely why strict consumers must continue to reject the
+stale receipt until the bridge produces a new exact-current one.
+
+Only the installed root-owned coordinator reads and verifies durable operation,
+completion, and nonce records. It verifies the complete bridge before issuing a
+mutation capability and repeats that verification immediately before handing
+the capability to the unprivileged worker. The worker independently performs
+the raw bundle and ledger preimage CAS checks before Flow synchronization and
+again before publication. A changed attachment, snapshot, critique/edge
+projection, bundle, ledger, or durable record fails without a partial bridge
+event or Flow attachment.
+
+A repair never fabricates or substitutes the lost original signature,
+timestamp, reviewer, or authorization. It appends one distinct repair event,
+discloses the missing-original identifiers and reason, emits a new signed
+completion, and leaves the protected `trust.bundle` bytes unchanged. Strict
+graph validation requires exactly one proof for each cross-reviewer edge:
+either the original `resolve-critique` event or one matching repair when the
+original is absent. Missing, duplicate, competing original-and-repair,
+unmatched, reconstruction-looking, invalid-signature, or broken-chain evidence
+is `FAIL`; without an installed root-owned helper and verification key, the
+positive mutation path remains `NOT_VERIFIED`.
+
+The durable operation lock serializes an operator's signed request with replay
+and prepared recovery. An exact completed request replays without rewriting the
+newer receipt; a prepared request resumes only after the same two root checks
+and transaction recovery. Session and canonical Flow artifacts are journaled as
+one transaction, so a Flow or publication fault restores both snapshots and
+does not append an event or attach a receipt. Before any recovery or rollback
+write, the coordinator validates both complete snapshot sets: every entry has
+the exact snapshot shape, a unique canonical contained relative POSIX path, a
+safe regular-file mode, and canonical base64 bytes. Flow's `.mutation.lock` is
+live coordination rather than transaction payload. NFC normalization followed
+by locale-independent ASCII case-folding defines protected and duplicate path
+identity, but an earlier UTF-16 code-unit check rejects every non-ASCII path
+before normalization, identity, or filesystem access. Case aliases fail closed
+while only the exact spelling is excluded; recovery never deletes or restores its tickets.
+Operators first run the read-only
+request command, sign its exact payload outside the worktree, invoke the
+installed helper once, and retain the resulting root-signed completion as the
+current receipt; no agent or package caller can substitute a durable anchor or
+choose a helper/key path.
 
 Runtime or harness adapters hold the private key and capture the signed record from a
 user/operator channel they trust; agent-authored prose or an unsigned model-written file is not

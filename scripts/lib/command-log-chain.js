@@ -13,6 +13,8 @@
 // invites. Importing from one module makes that divergence structurally impossible.
 //
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // The genesis prevHash is a FIXED ARBITRARY SENTINEL — NOT the SHA256 of any
 // specific input string. (An earlier comment incorrectly claimed it was
@@ -44,6 +46,252 @@ function computeChainHash(prevHash, record) {
     .digest('hex');
 }
 
+const BENIGN_FORK_SOURCES = new Set(['postToolUse-capture', 'canonical-writer-execution']);
+const GENERATION_FENCE_PROTOCOL = 'command-log-generation-fence-v1';
+const GENERATION_FENCE_VERSION = 1;
+
+/** Parse every non-blank physical line, retaining invalid JSON and non-record JSON as gaps. */
+function parseCommandLog(raw) {
+  return String(raw || '').split('\n').filter((line) => line.trim()).map((line) => {
+    try {
+      const value = JSON.parse(line);
+      return value && typeof value === 'object' && !Array.isArray(value)
+        ? { kind: 'record', value }
+        : { kind: 'gap' };
+    } catch {
+      return { kind: 'gap' };
+    }
+  });
+}
+
+/** Normative raw verifier and append authority for every command-log writer/reader. */
+function verifyCommandLogRaw(raw) {
+  const parsed = parseCommandLog(raw);
+  const hasAnyChain = parsed.some((item) => item.kind === 'record'
+    && item.value._chain && typeof item.value._chain.hash === 'string');
+  if (!hasAnyChain) return { status: 'legacy', brokenAt: null, forkAt: null, append: { seq: -1, hash: CHAIN_GENESIS } };
+
+  const reachable = new Set([CHAIN_GENESIS]);
+  const parentSources = new Map();
+  let previousWasChained = false;
+  let forked = false;
+  let firstForkAt = null;
+  let tip = null;
+  for (let index = 0; index < parsed.length; index++) {
+    const item = parsed[index];
+    const entry = item.kind === 'record' ? item.value : null;
+    const link = entry && entry._chain;
+    if (!link || typeof link.hash !== 'string') {
+      if (previousWasChained) return { status: 'broken', brokenAt: index, forkAt: null, append: null };
+      continue;
+    }
+    if (typeof link.prevHash !== 'string' || !Number.isSafeInteger(link.seq) || link.seq < 0
+      || link.hash !== computeChainHash(link.prevHash, entry) || !reachable.has(link.prevHash)) {
+      return { status: 'broken', brokenAt: index, forkAt: null, append: null };
+    }
+    const sources = parentSources.get(link.prevHash) || [];
+    sources.push(entry.source);
+    parentSources.set(link.prevHash, sources);
+    if (sources.length > 1) {
+      if (!sources.every((source) => BENIGN_FORK_SOURCES.has(source))) {
+        return { status: 'broken', brokenAt: index, forkAt: null, append: null };
+      }
+      if (firstForkAt === null) firstForkAt = index;
+      forked = true;
+    }
+    reachable.add(link.hash);
+    previousWasChained = true;
+    tip = { seq: link.seq, hash: link.hash };
+  }
+  return { status: forked ? 'forked' : 'ok', brokenAt: null, forkAt: firstForkAt, append: tip };
+}
+
+function readDescriptorFully(fd) {
+  const stat = fs.fstatSync(fd);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error('command-log descriptor is not a readable regular file');
+  const buffer = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < buffer.length) {
+    const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+    if (count === 0) throw new Error('command-log descriptor returned a short read');
+    offset += count;
+  }
+  return buffer.toString('utf8');
+}
+
+function writeDescriptorFully(fd, buffer, position, write = fs.writeSync) {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const count = write(fd, buffer, offset, buffer.length - offset, position === null ? null : position + offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error('command-log descriptor returned a zero or invalid write');
+    offset += count;
+  }
+}
+
+function lockGenerationFiles(lockBase) {
+  const directory = path.dirname(lockBase);
+  const prefix = `${path.basename(lockBase)}.`;
+  let names;
+  try { names = fs.readdirSync(directory); } catch { return []; }
+  return names.map((name) => {
+    if (!name.startsWith(prefix)) return null;
+    const suffix = name.slice(prefix.length);
+    if (!/^(0|[1-9][0-9]*)$/.test(suffix)) return null;
+    const generation = Number(suffix);
+    return Number.isSafeInteger(generation) ? { generation, file: path.join(directory, name) } : null;
+  }).filter(Boolean).sort((left, right) => left.generation - right.generation);
+}
+
+function readGeneration(file, generation) {
+  let prior;
+  try { prior = fs.lstatSync(file); } catch { return null; }
+  if (prior.isSymbolicLink() || !prior.isFile()) return null;
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== prior.dev || opened.ino !== prior.ino) return null;
+    const record = JSON.parse(readDescriptorFully(fd));
+    const current = fs.lstatSync(file);
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
+      || record.generation !== generation || typeof record.nonce !== 'string'
+      || !['active', 'released'].includes(record.state)) return null;
+    return { record, identity: { dev: opened.dev, ino: opened.ino } };
+  } catch { return null; }
+  finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+
+function generationFenceRecord() {
+  return { protocol: GENERATION_FENCE_PROTOCOL, version: GENERATION_FENCE_VERSION };
+}
+
+/**
+ * The old lock pathname is a permanent protocol fence, never a lease. Its
+ * exclusive creation makes an old O_EXCL writer and a generation writer
+ * mutually exclusive without trusting process liveness or deleting residue.
+ */
+function hasValidGenerationFence(lockBase) {
+  let before;
+  try { before = fs.lstatSync(lockBase); }
+  catch (error) { return error && error.code === 'ENOENT' ? null : false; }
+  if (before.isSymbolicLink() || !before.isFile()) return false;
+  let fd;
+  try {
+    fd = fs.openSync(lockBase, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) return false;
+    const record = JSON.parse(readDescriptorFully(fd));
+    const current = fs.lstatSync(lockBase);
+    if (current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) return false;
+    return record && record.protocol === GENERATION_FENCE_PROTOCOL && record.version === GENERATION_FENCE_VERSION;
+  } catch { return false; }
+  finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+
+function establishGenerationFence(lockBase) {
+  let fd;
+  try {
+    fd = fs.openSync(lockBase, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const bytes = Buffer.from(`${JSON.stringify(generationFenceRecord())}\n`);
+    writeDescriptorFully(fd, bytes, 0);
+    fs.ftruncateSync(fd, bytes.length);
+    fs.fsyncSync(fd);
+    const opened = fs.fstatSync(fd);
+    const current = fs.lstatSync(lockBase);
+    if (!opened.isFile() || current.isSymbolicLink() || !current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
+      || readDescriptorFully(fd) !== bytes.toString('utf8')) throw new Error('generation fence identity or durability check failed');
+    const directoryFd = fs.openSync(path.dirname(lockBase), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
+    return true;
+  } catch (error) {
+    if (error && error.code === 'EEXIST') return null;
+    return false;
+  } finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
+
+function waitForGenerationLock(retryMs) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryMs || 5); } catch {}
+}
+
+/**
+ * Acquire an immutable generation name. No generation is stolen or removed.
+ * `wait` is suitable for fail-open ordinary capture; fail-closed abort uses false.
+ */
+function acquireGenerationLock(lockBase, options = {}) {
+  const attempts = options.wait ? (options.attempts || 200) : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const fence = hasValidGenerationFence(lockBase);
+    if (fence === null) {
+      const established = establishGenerationFence(lockBase);
+      if (established !== true) {
+        if (established === null && options.wait) { waitForGenerationLock(options.retryMs); continue; }
+        return null;
+      }
+    } else if (fence !== true) {
+      // This may be a legacy owner in its critical section, or a malformed / foreign
+      // entry. We never replace it; a bounded ordinary caller may only observe whether
+      // a legacy owner releases it, while fail-closed callers stop immediately.
+      if (options.wait) { waitForGenerationLock(options.retryMs); continue; }
+      return null;
+    }
+    const generations = lockGenerationFiles(lockBase);
+    const highest = generations.at(-1);
+    if (highest) {
+      const prior = readGeneration(highest.file, highest.generation);
+      if (!prior || prior.record.state !== 'released') {
+        // A concurrently-created generation is briefly empty before its active
+        // record is fsynced. Ordinary writers may wait through that window;
+        // fail-closed callers never treat malformed/active state as authority.
+        if (options.wait && (!prior || prior.record.state === 'active')) {
+          waitForGenerationLock(options.retryMs);
+          continue;
+        }
+        return null;
+      }
+    }
+    const generation = highest ? highest.generation + 1 : 0;
+    const file = `${lockBase}.${generation}`;
+    let fd;
+    try {
+      fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+      const nonce = crypto.randomBytes(16).toString('hex');
+      const active = Buffer.from(`${JSON.stringify({ generation, nonce, state: 'active' })}\n`);
+      writeDescriptorFully(fd, active, 0);
+      fs.ftruncateSync(fd, active.length);
+      fs.fsyncSync(fd);
+      const stat = fs.fstatSync(fd);
+      const current = fs.lstatSync(file);
+      if (!stat.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino
+        || readDescriptorFully(fd) !== active.toString('utf8')) throw new Error('generation lock identity or durability check failed');
+      const directoryFd = fs.openSync(path.dirname(file), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+      try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
+      return { fd, file, generation, nonce, identity: { dev: stat.dev, ino: stat.ino } };
+    } catch (error) {
+      if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+      if (error && error.code === 'EEXIST' && options.wait) continue;
+      return null;
+    }
+  }
+  return null;
+}
+
+function releaseGenerationLock(lock) {
+  try {
+    const before = fs.lstatSync(lock.file);
+    const opened = fs.fstatSync(lock.fd);
+    if (before.isSymbolicLink() || !before.isFile() || before.dev !== opened.dev || before.ino !== opened.ino
+      || opened.dev !== lock.identity.dev || opened.ino !== lock.identity.ino) return false;
+    const released = Buffer.from(`${JSON.stringify({ generation: lock.generation, nonce: lock.nonce, state: 'released' })}\n`);
+    writeDescriptorFully(lock.fd, released, 0);
+    fs.ftruncateSync(lock.fd, released.length);
+    fs.fsyncSync(lock.fd);
+    if (readDescriptorFully(lock.fd) !== released.toString('utf8')) return false;
+    const after = fs.lstatSync(lock.file);
+    return !after.isSymbolicLink() && after.isFile() && after.dev === opened.dev && after.ino === opened.ino;
+  } catch { return false; }
+  finally { try { fs.closeSync(lock.fd); } catch {} }
+}
+
 /**
  * True when a claimed verification command contains an exit-code-laundering
  * operator. Legitimate verification commands never need these — their only
@@ -72,7 +320,16 @@ function hasLaunderingOperator(cmd) {
 
 module.exports = {
   CHAIN_GENESIS,
+  BENIGN_FORK_SOURCES,
+  GENERATION_FENCE_PROTOCOL,
+  GENERATION_FENCE_VERSION,
   canonicalJsonForChain,
   computeChainHash,
+  parseCommandLog,
+  verifyCommandLogRaw,
+  readDescriptorFully,
+  writeDescriptorFully,
+  acquireGenerationLock,
+  releaseGenerationLock,
   hasLaunderingOperator,
 };

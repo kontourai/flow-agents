@@ -171,6 +171,16 @@ test("narrative isolation canonicalizes aliases and rejects narrative content in
   try {
     assert.equal(isNarrativeNamespacePath(root, path.join(root, ".KONTOURAI", "NARRATIVE", "run", "n1", "envelope.json")), true);
     assert.equal(isNarrativeArtifactContent(bytes), true);
+    assert.equal(
+      isNarrativeArtifactContent('return text.includes("flow-agents-narrative-composer") && text.includes("# Grounded Execution Narrative") && text.includes("## Authority provenance");'),
+      false,
+      "source code containing the detector literals is not itself a rendered narrative",
+    );
+    assert.equal(
+      isNarrativeArtifactContent("# Grounded Execution Narrative\n\n## Authority provenance\n\n- Narrative composer: flow-agents-narrative-composer 3.12.1.\n"),
+      true,
+      "rendered Markdown narratives remain isolated by their line structure",
+    );
     for (const file of [envelope, relocated, hardlink, symlink]) {
       assert.throws(
         () => validateEvidenceRef({ kind: "artifact", file, summary: "must reject" }, "refs", root),

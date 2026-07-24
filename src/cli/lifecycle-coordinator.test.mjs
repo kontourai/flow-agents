@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assignmentActorsMatch, canonicalJson, recoverTransaction, restoreTree, rollbackCommittedTransaction, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { assertPreparedNonceRecord, assignmentActorsMatch, canonicalJson, inProjectTransaction, recoverMatchingTransaction, recoverTransaction, restoreTree, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const request = { action: "cancel", project_root: "/srv/project", session_dir: "/srv/project/.kontourai/flow-agents/run-1", authorization_file: "/etc/kontourai/request.json" };
 const envelope = { schema_version: "1.0", action: "cancel", request_sha256: sha256(request), request };
@@ -36,9 +36,9 @@ test("reference coordinator pins the published Flow reducer identity rather than
   const pin = JSON.parse(fs.readFileSync(new URL("../../packaging/lifecycle-authority/flow-reducer-v1.json", import.meta.url), "utf8"));
   assert.deepEqual(pin, {
     package: "@kontourai/flow",
-    package_version: "3.5.0",
-    release_commit: "871ed9c",
-    closure_sha256: "e2ed60d81adfb57acc2e774a50a9a24d4163327f9ee2d07397d63191826c7562",
+    package_version: "3.8.1",
+    release_commit: "1942c79",
+    closure_sha256: "c6ccb6c2c814812b9a52617c99e8c6a1fe16cbe8b5406b68bfb6cd1da7858f74",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
       version: "1.0.0",
@@ -62,6 +62,32 @@ test("transaction snapshot restores an interrupted unprivileged artifact update"
     assert.equal(fs.existsSync(path.join(root, "new.json")), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test("transaction snapshots preserve Flow's published lock and pending-ticket namespaces", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-flow-lock-namespace-"));
+  const pendingName = "..mutation.lock.pending-12345678-1234-4123-8123-123456789abc";
+  try {
+    fs.mkdirSync(path.join(root, ".mutation.lock"));
+    fs.writeFileSync(path.join(root, ".mutation.lock", "owner.json"), "published lock\n");
+    fs.mkdirSync(path.join(root, pendingName));
+    fs.writeFileSync(path.join(root, pendingName, "owner.json"), "pending ticket\n");
+    fs.writeFileSync(path.join(root, "state.json"), "before\n");
+    const before = snapshotTree(root, "", [".mutation.lock"]);
+    assert.deepEqual(before.map((entry) => entry.path), ["state.json"]);
+    fs.writeFileSync(path.join(root, "state.json"), "partial\n");
+    restoreTree(root, before, [".mutation.lock"]);
+    assert.equal(fs.readFileSync(path.join(root, ".mutation.lock", "owner.json"), "utf8"), "published lock\n");
+    assert.equal(fs.readFileSync(path.join(root, pendingName, "owner.json"), "utf8"), "pending ticket\n");
+    assert.equal(fs.readFileSync(path.join(root, "state.json"), "utf8"), "before\n");
+    assert.throws(
+      () => restoreTree(root, [{
+        path: "..MUTATION.lock.pending-12345678-1234-4123-8123-123456789abc/owner.json",
+        bytes: Buffer.from("alias\n").toString("base64"),
+        mode: 0o600,
+      }], [".mutation.lock"]),
+      /aliases the protected Flow mutation namespace/,
+    );
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test("prepared root retry rolls a committed child transaction back to its signed preimage", () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-committed-retry-"));
   try {
@@ -73,9 +99,54 @@ test("prepared root retry rolls a committed child transaction back to its signed
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "committed child mutation\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "committed flow mutation\n");
     const binding = { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) };
     fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding, session, flow }));
-    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, binding), true);
+    assert.equal(recoverMatchingTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, binding), true);
     assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "before\n");
     assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "before flow\n");
+  } finally { fs.rmSync(project, { recursive: true, force: true }); }
+});
+test("a committed journal from operation A is inert when ordinary operation B starts", async () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-successor-operation-"));
+  try {
+    const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
+    const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
+    fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(flowDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "after operation A\n");
+    fs.writeFileSync(path.join(flowDir, "state.json"), "after operation A flow\n");
+    const bindingA = { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) };
+    const bindingB = { request_sha256: "c".repeat(64), authorization_sha256: "d".repeat(64) };
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding: bindingA, session: [], flow: [] }));
+    await inProjectTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, bindingB, async () => {
+      fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "after operation B\n");
+      fs.writeFileSync(path.join(flowDir, "state.json"), "after operation B flow\n");
+    });
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "after operation B\n");
+    assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "after operation B flow\n");
+    const journal = JSON.parse(fs.readFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), "utf8"));
+    assert.equal(journal.status, "committed");
+    assert.deepEqual(journal.binding, bindingB, "operation B replaces operation A's inert committed journal");
+  } finally { fs.rmSync(project, { recursive: true, force: true }); }
+});
+test("crash-window recovery authenticates the exact prepared nonce before rolling back the matching commit", () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-crash-window-"));
+  try {
+    const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
+    const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
+    fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(flowDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "signed preimage\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "signed flow preimage\n");
+    const session = snapshotTree(sessionDir), flow = snapshotTree(flowDir);
+    const binding = { request_sha256: "1".repeat(64), authorization_sha256: "2".repeat(64) };
+    const prepared = { schema_version: "1.0", operation_id: "operation-1", authorization_sha256: binding.authorization_sha256, key_id: "operator", nonce: "nonce-1", request_sha256: binding.request_sha256, status: "prepared" };
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "child committed mutation\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "child committed flow mutation\n");
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding, session, flow }));
+    assert.throws(() => assertPreparedNonceRecord({ ...prepared, request_sha256: "3".repeat(64) }, prepared), /already been consumed/i);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "child committed mutation\n", "an unauthenticated prepared retry cannot reach rollback");
+    assert.deepEqual(assertPreparedNonceRecord(structuredClone(prepared), prepared), prepared);
+    assert.equal(recoverMatchingTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, binding), true);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "signed preimage\n");
+    assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "signed flow preimage\n");
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "later operation\n");
+    assert.equal(recoverMatchingTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, { request_sha256: "4".repeat(64), authorization_sha256: "5".repeat(64) }), false);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "later operation\n");
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("a later prepared operation never rolls back an earlier committed journal", () => {
@@ -88,7 +159,11 @@ test("a later prepared operation never rolls back an earlier committed journal",
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), "after A\n"); fs.writeFileSync(path.join(flowDir, "state.json"), "after A flow\n");
     fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "committed", binding: bindingA, session, flow }));
     const bindingB = { request_sha256: "c".repeat(64), authorization_sha256: "d".repeat(64) };
-    assert.equal(rollbackCommittedTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, bindingB), false);
+    assert.throws(() => recoverMatchingTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, bindingB), /another operation/i);
+    assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "after A\n");
+    assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "after A flow\n");
+    fs.writeFileSync(path.join(sessionDir, ".lifecycle-authority.transaction.json"), JSON.stringify({ status: "prepared", binding: bindingA, session, flow }));
+    assert.throws(() => recoverMatchingTransaction({ projectRoot: project, sessionDir, runId: "run-1" }, bindingB), /another operation/i);
     assert.equal(fs.readFileSync(path.join(sessionDir, "trust.bundle"), "utf8"), "after A\n");
     assert.equal(fs.readFileSync(path.join(flowDir, "state.json"), "utf8"), "after A flow\n");
   } finally { fs.rmSync(project, { recursive: true, force: true }); }

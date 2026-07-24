@@ -24,6 +24,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
+import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "./flow-recovery-fence.js";
 import {
   readRunCorrelation,
   validateRunCorrelationEnvelope,
@@ -224,7 +225,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
   }
 
   const cwd = input.cwd ?? process.cwd();
-  const run = await loadRun(input.runId, cwd);
+  const run = await withFlowRunRecoveryFenceReadAsync(cwd, input.runId, () => loadRun(input.runId, cwd));
   await assertCanonicalBuilderRunOrigin(input.runId, run);
 
   let attachedEvidence: FlowEvidenceEntry[] = [];
@@ -240,6 +241,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     const normalized = normalizeTrustBundle(JSON.parse(bytes.toString("utf8")));
     assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
     const expectedRunHead = input.expectedRunHead ?? flowRunHead(run.state);
+    assertFlowRunRecoveryFenceOpen(cwd, input.runId);
     const attached = await attachEvidence(
       input.runId,
       trustBundleAttachOptions(cwd, evidence, validatedSha256, expectedRunHead, correlationFromState(run.state, input.runId)),
@@ -250,6 +252,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     attachedEvidence = [attached];
   }
 
+  assertFlowRunRecoveryFenceOpen(cwd, input.runId);
   const evaluated = await evaluateRun(input.runId, { cwd });
   const result = resultFromRun(evaluated, input.runId);
   return {
@@ -268,7 +271,7 @@ export async function loadBuilderBuildRun(input: LoadBuilderBuildRunInput): Prom
 export async function loadBuilderFlowRun(input: LoadBuilderBuildRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   const cwd = input.cwd ?? process.cwd();
-  const run = await loadRun(input.runId, cwd);
+  const run = await withFlowRunRecoveryFenceReadAsync(cwd, input.runId, () => loadRun(input.runId, cwd));
   await assertCanonicalBuilderRunOrigin(input.runId, run);
   return resultFromRun(run, input.runId);
 }
@@ -307,6 +310,7 @@ async function changeBuilderFlowRunLifecycleResult(
   if (!isRecord(input.request)) throw new BuilderBuildRunInputError("request", "must be a lifecycle request object");
   const cwd = input.cwd ?? process.cwd();
   const before = await loadBuilderFlowRun({ runId: input.runId, cwd });
+  assertFlowRunRecoveryFenceOpen(cwd, input.runId);
   const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
   await assertCanonicalBuilderRunOrigin(input.runId, changed);
   if (changed.state.subject !== before.state.subject) {
@@ -340,7 +344,7 @@ async function loadCanonicalBuilderFlowRun(
   cwd: string,
   definition: { id: string; version: string },
 ): Promise<Awaited<ReturnType<typeof loadRun>>> {
-  const run = await loadRun(runId, cwd);
+  const run = await withFlowRunRecoveryFenceReadAsync(cwd, runId, () => loadRun(runId, cwd));
   assertCanonicalDefinition(runId, definition, run.startDefinition);
   return run;
 }

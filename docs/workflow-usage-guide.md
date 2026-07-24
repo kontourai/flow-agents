@@ -313,6 +313,75 @@ flow-agents workflow critique \
 ```
 
 Only the step skill declared for that Flow expectation should publish it.
+The requested gate verdict remains authoritative: a successful command never upgrades or replaces
+an explicit `fail` or `not_verified`; a failing or ambiguous command can prevent a requested
+`pass`. The JSON result reports that persisted gate verdict separately from redacted command
+observations (ordinal, command digest, exit code, output digest, and outcome), rather than
+echoing command text or command output. The same redaction applies to default command errors.
+
+The public evidence command first writes a transaction-unique, non-authoritative candidate under
+`.workflow-evidence-transaction-<id>/trust.bundle.candidate`. It verifies the candidate through its
+open descriptor, fsyncs the candidate and its pinned parent directory, and asks Flow to attach only
+that exact digest. The candidate directory and file are retained as correlated recovery residue;
+the command never automatically renames, unlinks, or cleans them up.
+
+Before staging, the command pins the canonical `trust.bundle` baseline. If synchronization fails
+and the exact attachment is proved absent, canonical trust remains at that baseline and the
+append-only `command-log.jsonl` receives a transaction-correlated abort record. The original error
+is then safe to correct and retry. If attachment or baseline identity is unknown, the command does
+not roll anything back: it returns `recovery required` and retains the candidate for inspection.
+If the exact candidate digest is proved attached, the operation is committed even when a later
+projection or presentation step fails; successful recovery reports
+`recovery.committed: true`, `recovery.retry: "none"` in JSON and `No retry is required` in text.
+Do not submit that evidence again.
+
+For an existing canonical bundle, commit writes the verified candidate bytes only through the
+pinned original descriptor and refuses a changed pathname. For an absent canonical bundle, only
+an exact `lstat` result of `ENOENT` proves absence. The command then creates the canonical
+descriptor with `O_CREAT | O_EXCL | O_NOFOLLOW`, copies complete bytes from the pinned staged
+descriptor, and fsyncs, rereads, identity-checks, and parent-directory-fsyncs that new descriptor.
+`EEXIST`, a non-`ENOENT` absence error, short copy, inode/digest mismatch, filesystem uncertainty,
+or directory-fsync uncertainty fail closed: no rename, hard-link, overwrite, or removal of a
+foreign target is permitted. Once exclusive creation has succeeded, any later uncertainty retains
+both the staged candidate and reachable owned canonical residue, returns `recovery required` with
+no retry, and requires explicit recovery rather than rollback.
+
+The transaction also pins the session-directory descriptor and checks its pathname identity before
+exclusive creation, immediately after it, and after the parent fsync. A persistent cooperative
+rename or replacement is therefore reported as `recovery required` with no retry and must not
+write a canonical bundle into the replacement namespace. Those checks detect ordinary local races;
+they do not claim atomic protection against replacement-and-restoration between checks.
+
+Flow and Flow Agents runtime state is local state writable by the invoking OS user. The protocol
+provides cooperative serialization, non-overwrite behavior, append-only observations, and visible
+recovery boundaries; it is not a privilege boundary against a malicious process running as that
+same user, which can directly rewrite runtime state, candidates, logs, locks, or executable code.
+Hostile same-user ABA namespace manipulation and direct same-user state forgery are explicitly
+out of scope and `NOT_VERIFIED`. No native helper is required for that excluded threat model.
+
+If Flow retains an evidence `*.candidate` receipt or the local transaction retains a staged
+candidate, treat it as recovery evidence rather than a retry instruction: do not promote, rename,
+replay, delete, or manually attach it. A prior no-retry result remains authoritative until an
+explicit recovery procedure is available.
+
+Command-log serialization likewise leaves audit residue. The legacy
+`command-log.jsonl.lock` pathname is a permanent versioned fence, created and validated
+exclusively with no-follow semantics and durable descriptor/parent checks before a generation can
+be acquired. Malformed, foreign, or wrong-version fence entries are never overwritten or removed.
+Behind the fence, persistent `command-log.jsonl.lock.<generation>` records serialize writers: the
+highest valid generation must be durably `released` before the next generation can be acquired.
+Active, malformed, stale, or replaced highest generations are never stolen, deleted, or
+automatically superseded. Ordinary capture denied append authority leaves the command log
+byte-for-byte unchanged and emits only a redacted diagnostic; transaction abort remains fail
+closed. A false generation-release result emits an immediate redacted diagnostic: ordinary hook
+and writer observation capture remain append-only/fail-open, while transaction abort returns false
+so public evidence becomes recovery-required with no retry. There is no automatic crashed-generation recovery or lock cleanup; authenticated recovery
+of that state is explicitly `NOT_VERIFIED` and outside #756, so retain the residue until an
+explicit artifact-lifecycle action is appropriate.
+
+Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
+the default report does not echo command text, command arguments remain local evidence; use a
+secure environment or file mechanism appropriate to the runner for secrets.
 Run authenticated critique before `tests-evidence`; the delegated reviewer
 invokes the public critique command under a runtime identity distinct from the
 active implementation actor. The command does not accept a caller-selected

@@ -5,6 +5,7 @@ type AnyRecord = Record<string, any>;
 
 const HASH_RE = /^[a-f0-9]{64}$/i;
 export const CRITIQUE_CHAIN_GENESIS = "0".repeat(64);
+export const CRITIQUE_HISTORY_PROJECTION_VERSION = "1.0";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -82,6 +83,142 @@ function critiqueFromClaim(claim: AnyRecord): AnyRecord {
   };
 }
 
+function projectionRecord(claim: AnyRecord): AnyRecord {
+  const record = critiqueFromClaim(claim);
+  return {
+    critique_record_id: record.critique_record_id,
+    critique_record_hash: record.critique_record_hash,
+    critique_predecessor_hash: record.critique_predecessor_hash,
+    critique_sequence: record.critique_sequence,
+    reviewer: record.reviewer,
+    verdict: record.verdict,
+    claim_status: record.claim_status,
+    summary: record.summary ?? null,
+    workflow_subject_ref: record.workflow_subject_ref,
+    review_target: record.review_target ?? { artifacts: [] },
+    findings: record.findings ?? [],
+    lanes: record.lanes ?? [],
+    reviewed_at: record.reviewed_at ?? null,
+    created_at: claim.createdAt ?? null,
+    updated_at: claim.updatedAt ?? null,
+    superseded_by: record.superseded_by ?? null,
+    critique_resolution: record.critique_resolution ?? null,
+  };
+}
+
+function sha256Canonical(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
+}
+
+export function critiqueHistoryProjection(claims: AnyRecord[]): AnyRecord {
+  const records = claims
+    .filter((claim) => claim?.metadata?.origin === "critique")
+    .map(projectionRecord)
+    .sort((left, right) => Number(left.critique_sequence) - Number(right.critique_sequence));
+  return { schema_version: CRITIQUE_HISTORY_PROJECTION_VERSION, kind: "kontourai.critique-history", records };
+}
+
+export function critiqueHistoryProjectionSummary(claims: AnyRecord[]): AnyRecord {
+  const projection = critiqueHistoryProjection(claims);
+  const records = projection.records as AnyRecord[];
+  return {
+    version: CRITIQUE_HISTORY_PROJECTION_VERSION,
+    digest: sha256Canonical(projection),
+    length: records.length,
+    tail_hash: records.at(-1)?.critique_record_hash ?? CRITIQUE_CHAIN_GENESIS,
+    projection,
+  };
+}
+
+export function critiqueResolutionEdgeProjection(claims: AnyRecord[]): AnyRecord {
+  const edges = (critiqueHistoryProjection(claims).records as AnyRecord[])
+    .filter((record) => record.superseded_by !== null || record.critique_resolution !== null)
+    .map((record) => ({
+      critique_record_id: record.critique_record_id,
+      superseded_by: record.superseded_by,
+      critique_resolution: record.critique_resolution,
+    }));
+  return { schema_version: CRITIQUE_HISTORY_PROJECTION_VERSION, kind: "kontourai.critique-resolution-edges", edges };
+}
+
+export function critiqueResolutionEdgeProjectionSummary(claims: AnyRecord[]): AnyRecord {
+  const projection = critiqueResolutionEdgeProjection(claims);
+  return {
+    version: CRITIQUE_HISTORY_PROJECTION_VERSION,
+    digest: sha256Canonical(projection),
+    count: (projection.edges as AnyRecord[]).length,
+    projection,
+  };
+}
+
+export function assertAppendOnlyCritiqueHistory(historicalClaims: AnyRecord[], currentClaims: AnyRecord[]): AnyRecord {
+  const historical = critiqueHistoryProjectionSummary(historicalClaims);
+  const current = critiqueHistoryProjectionSummary(currentClaims);
+  const historicalRecords = historical.projection.records as AnyRecord[];
+  const currentRecords = current.projection.records as AnyRecord[];
+  if (currentRecords.length < historicalRecords.length) throw new Error("current critique history deletes historical records");
+  for (const [index, historicalRecord] of historicalRecords.entries()) {
+    if (canonical(currentRecords[index]) !== canonical(historicalRecord)) throw new Error("current critique history is not an exact historical prefix");
+  }
+  for (const [index, record] of currentRecords.entries()) {
+    if (record.critique_sequence !== index + 1) throw new Error("current critique history append is noncontiguous");
+    const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : currentRecords[index - 1]!.critique_record_hash;
+    if (record.critique_predecessor_hash !== predecessor) throw new Error("current critique history append predecessor is invalid");
+    if (critiqueRecordHash(record) !== record.critique_record_hash) throw new Error("current critique history append record hash is invalid");
+  }
+  const historicalEdges = critiqueResolutionEdgeProjectionSummary(historicalClaims);
+  const currentHistoricalEdges = critiqueResolutionEdgeProjectionSummary(
+    currentClaims.filter((claim) => {
+      const sequence = claim?.metadata?.critique_sequence;
+      return Number.isSafeInteger(sequence) && sequence <= historicalRecords.length;
+    }),
+  );
+  if (historicalEdges.digest !== currentHistoricalEdges.digest || historicalEdges.count !== currentHistoricalEdges.count) {
+    throw new Error("historical critique resolution edges changed");
+  }
+  return { historical, current, historical_edges: historicalEdges, current_historical_edges: currentHistoricalEdges };
+}
+
+function syntheticCompletionCore(bundle: AnyRecord, events: AnyRecord[]): string {
+  return sha256Canonical({ ...bundle, critique_resolution_events: events });
+}
+
+export function selectUniqueHistoricalLedgerPrefix(
+  storedBundle: AnyRecord,
+  currentEvents: AnyRecord[],
+  historicalResultCoreSha256: string,
+  digestCandidate: (bundle: AnyRecord, events: AnyRecord[]) => string = syntheticCompletionCore,
+): AnyRecord {
+  if (!Array.isArray(currentEvents) || !HASH_RE.test(historicalResultCoreSha256)) throw new Error("historical ledger prefix inputs are invalid");
+  const matches = Array.from({ length: currentEvents.length + 1 }, (_, length) => currentEvents.slice(0, length))
+    .filter((events) => digestCandidate(storedBundle, events) === historicalResultCoreSha256);
+  if (matches.length !== 1) throw new Error(`historical completion requires exactly one reproducing ledger prefix; found ${matches.length}`);
+  const events = matches[0]!;
+  return {
+    length: events.length,
+    raw_sha256: createHash("sha256").update(JSON.stringify({ schema_version: "1.0", events })).digest("hex"),
+    canonical_sha256: sha256Canonical({ schema_version: "1.0", events }),
+    tail_hash: events.at(-1)?.event_hash ?? CRITIQUE_CHAIN_GENESIS,
+    events,
+  };
+}
+
+const HISTORY_REPAIR_BRIDGE_FIELDS = [
+  "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+  "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+  "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+  "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+  "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+  "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+  "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+  "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+] as const;
+
+export function critiqueResolutionHistoryBridgeDigest(value: AnyRecord): string {
+  return createHash("sha256").update(JSON.stringify(Object.fromEntries(HISTORY_REPAIR_BRIDGE_FIELDS.map((field) => [field, value[field]])))).digest("hex");
+}
+
 type GraphState = {
   records: AnyRecord[]; byId: Map<string, AnyRecord>; byHash: Map<string, AnyRecord>;
   errors: string[]; referencedEventIds: Set<string>; expectedSubject?: string;
@@ -117,14 +254,47 @@ function validateCoverage(prior: AnyRecord, resolving: AnyRecord, resolution: An
   if (canonical(findings) !== canonical(coveredFindings) || findings.some((id) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolverFindings.get(id)))) errors.push("critique resolution does not cover every open finding");
 }
 
+function validateResolverChain(resolving: AnyRecord, state: GraphState): void {
+  let cursor = resolving;
+  const visited = new Set<string>();
+  while (true) {
+    const id = String(cursor.critique_record_id);
+    if (visited.has(id)) { state.errors.push("critique resolution graph is circular or not forward ordered"); return; }
+    visited.add(id);
+    if (cursor.verdict !== "pass" || !["verified", "superseded"].includes(cursor.claim_status)) {
+      state.errors.push("critique resolver must be a verified PASS");
+      return;
+    }
+    const hasSuccessorEdge = Boolean(cursor.superseded_by || cursor.critique_resolution);
+    if (!hasSuccessorEdge) {
+      if (cursor.claim_status !== "verified") state.errors.push("critique resolver chain must terminate at a current verified PASS");
+      return;
+    }
+    if (cursor.claim_status !== "superseded") {
+      state.errors.push("critique resolver chain history must be superseded");
+      return;
+    }
+    const edge = cursor.critique_resolution;
+    const next = state.byId.get(cursor.superseded_by);
+    if (!edge || typeof edge !== "object" || !next || edge.prior_record_id !== cursor.critique_record_id || edge.resolving_record_id !== cursor.superseded_by) {
+      state.errors.push("critique resolver chain has a missing or mismatched resolution edge");
+      return;
+    }
+    if (next.critique_sequence <= cursor.critique_sequence) { state.errors.push("critique resolution graph is circular or not forward ordered"); return; }
+    cursor = next;
+  }
+}
+
 function validateResolution(prior: AnyRecord, state: GraphState): void {
   if (!prior.superseded_by && !prior.critique_resolution) return;
+  if (prior.claim_status !== "superseded") state.errors.push("critique resolver chain history must be superseded");
   const resolution = prior.critique_resolution;
   if (!prior.superseded_by || !resolution || typeof resolution !== "object") { state.errors.push(`critique record ${String(prior.critique_record_id)} has an incomplete resolution edge`); return; }
   const resolving = state.byId.get(resolution.resolving_record_id);
   if (!resolving || prior.superseded_by !== resolution.resolving_record_id || resolution.prior_record_id !== prior.critique_record_id) { state.errors.push(`critique record ${String(prior.critique_record_id)} has a missing or mismatched resolver`); return; }
   if (resolving === prior || resolving.critique_sequence <= prior.critique_sequence) state.errors.push("critique resolution graph is circular or not forward ordered");
-  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || resolving.superseded_by) state.errors.push("critique resolver must be a current verified PASS");
+  if (resolving.verdict !== "pass") state.errors.push("critique resolver must be a verified PASS");
+  else validateResolverChain(resolving, state);
   if (resolution.resolver !== resolving.reviewer || (resolution.kind === "cross-reviewer" && resolving.reviewer === prior.reviewer) || (resolution.kind === "same-reviewer-recheck" && resolving.reviewer !== prior.reviewer) || !["cross-reviewer", "same-reviewer-recheck"].includes(resolution.kind)) state.errors.push("critique resolution actor binding is invalid");
   if (resolving.workflow_subject_ref !== prior.workflow_subject_ref) state.errors.push("critique resolution crosses workflow subjects");
   validateResolutionSnapshots(prior, resolving, state); validateResolutionEvent(prior, resolving, resolution, state); validateDescendant(prior, resolving, state); validateCoverage(prior, resolving, resolution, state.errors);
@@ -138,11 +308,16 @@ function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, sta
 }
 
 function validateResolutionEvent(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {
-  const events = state.resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
-  if (resolution.kind === "cross-reviewer" && events.length !== 1) { state.errors.push("cross-reviewer critique resolution must link one append-only authorization event"); return; }
-  if (events.length !== 1) return;
-  const event = events[0]!; state.referencedEventIds.add(String(event.event_id));
-  if (event.subject !== prior.workflow_subject_ref || event.prior_record_id !== prior.critique_record_id || event.prior_record_hash !== prior.critique_record_hash || event.resolving_record_id !== resolving.critique_record_id || event.resolving_record_hash !== resolving.critique_record_hash || event.resolver !== resolving.reviewer || event.authorization_sha256 !== resolution.authorization_sha256 || canonical(event.edge) !== canonical(resolution)) state.errors.push("critique resolution authorization event does not bind the exact edge");
+  const originals = state.resolutionEvents.filter((event) => event.event_id === resolution.resolution_event_id);
+  const repairs = state.resolutionEvents.filter((event) => event.operation === "repair-critique-resolution-history" && event.missing_resolution_event_id === resolution.resolution_event_id && event.missing_authorization_sha256 === resolution.authorization_sha256);
+  if (resolution.kind === "cross-reviewer" && originals.length + repairs.length !== 1) { state.errors.push("cross-reviewer critique resolution requires exactly one original or repair authority proof"); return; }
+  if (originals.length + repairs.length !== 1) return;
+  const event = originals[0] ?? repairs[0]!;
+  state.referencedEventIds.add(String(event.event_id));
+  const bound = event.subject === prior.workflow_subject_ref && event.prior_record_id === prior.critique_record_id && event.prior_record_hash === prior.critique_record_hash && event.resolving_record_id === resolving.critique_record_id && event.resolving_record_hash === resolving.critique_record_hash && event.resolver === resolving.reviewer && canonical(event.edge) === canonical(resolution);
+  if (!bound) { state.errors.push("critique resolution authorization event does not bind the exact edge"); return; }
+  if (event.operation === "resolve-critique" && event.authorization_sha256 !== resolution.authorization_sha256) state.errors.push("critique resolution original authorization event does not bind the preserved edge");
+  if (event.operation === "repair-critique-resolution-history" && (event.missing_resolution_event_id !== resolution.resolution_event_id || event.missing_authorization_sha256 !== resolution.authorization_sha256 || event.signed_authorization?.preserved_resolution_sha256 !== createHash("sha256").update(JSON.stringify(resolution)).digest("hex"))) state.errors.push("critique resolution repair event does not bind the missing original authority edge");
 }
 
 function validateDescendant(prior: AnyRecord, resolving: AnyRecord, state: GraphState): void {
@@ -156,12 +331,25 @@ function validateEvents(state: GraphState): void {
   state.resolutionEvents.forEach((event, index) => {
     const { event_hash: hash, ...unsigned } = event; const predecessor = index === 0 ? CRITIQUE_CHAIN_GENESIS : state.resolutionEvents[index - 1]?.event_hash;
     if (event.sequence !== index + 1 || event.predecessor_hash !== predecessor || createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") !== hash) state.errors.push("critique resolution events must form one valid append-only hash chain");
-    if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== `critique-resolution:${String(event.authorization_sha256)}`) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
+    const expectedId = event.operation === "resolve-critique"
+      ? `critique-resolution:${String(event.authorization_sha256)}`
+      : event.operation === "repair-critique-resolution-history"
+        ? `critique-resolution-history-repair:${String(event.authorization_sha256)}`
+        : "";
+    if (typeof event.event_id !== "string" || !event.event_id || seen.has(event.event_id) || event.event_id !== expectedId) state.errors.push("critique resolution events must have unique authorization-bound ids"); else seen.add(event.event_id);
     if (!state.referencedEventIds.has(String(event.event_id))) state.errors.push("critique resolution event is not linked by exactly one cross-reviewer edge");
-    if (event.operation !== "resolve-critique" || !state.projectRoot || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
-    else if (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
+    if (!["resolve-critique", "repair-critique-resolution-history"].includes(event.operation) || !event.signed_authorization || typeof event.signed_authorization !== "object") state.errors.push("critique resolution event requires a verifiable signed authorization");
+    else if (state.projectRoot && (event.signed_authorization.project_root !== state.projectRoot || event.signed_authorization.run_id !== event.run_id)) state.errors.push("critique resolution signed authorization does not bind the trusted project and run");
     else if (createHash("sha256").update(JSON.stringify(event.signed_authorization)).digest("hex") !== event.authorization_sha256) state.errors.push("critique resolution signed authorization does not match its event");
-    else if (!state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    else if (state.projectRoot && !state.externalCompletionVerified) state.errors.push("critique resolution external authority attestation is NOT_VERIFIED by package-side validation");
+    if (event.operation === "repair-critique-resolution-history") {
+      if (event.signed_authorization.operation !== "repair-critique-resolution-history" || event.signed_authorization.missing_resolution_event_id !== event.missing_resolution_event_id || event.signed_authorization.missing_authorization_sha256 !== event.missing_authorization_sha256 || event.signed_authorization.reason_code !== "coordinator-external-ledger-overwrite-v1" || state.resolutionEvents.some((other) => other !== event && other.operation === "resolve-critique" && (other.event_id === event.missing_resolution_event_id || other.authorization_sha256 === event.missing_authorization_sha256))) state.errors.push("critique resolution repair event is incomplete or reconstructs an original authority event");
+      if (!HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(event.signed_authorization, field))
+        || event.verified_bridge_sha256 !== event.signed_authorization.historical_bridge_sha256
+        || event.verified_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(event.signed_authorization)) {
+        state.errors.push("critique resolution repair event does not bind the verified historical bridge");
+      }
+    }
     if (state.expectedSubject && event.subject !== state.expectedSubject) state.errors.push("critique resolution event has a mismatched workflow subject");
     const prior = state.byId.get(String(event.prior_record_id)); const resolving = state.byId.get(String(event.resolving_record_id));
     if (!prior || !resolving || event.resulting_core_sha256 !== critiqueResolutionResultCoreDigest(prior, resolving, event.edge)) state.errors.push("critique resolution event resulting bundle core digest is invalid");
