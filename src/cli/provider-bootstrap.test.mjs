@@ -18,6 +18,14 @@ function read(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function readArgvLog(file) {
+  return fs.readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(1).split("\x1f"));
+}
+
 async function waitForPath(file, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -63,6 +71,8 @@ test("offline project bootstrap writes all three schema-valid provider bindings"
   assert.equal(result.files.length, 3);
   assert.match(result.offlineRemediation, /'gh' auth status/);
   assert.match(result.offlineRemediation, /project view 7/);
+  assert.match(result.offlineRemediation, /label list --repo 'example\/product' '--search=agent:claimed'/);
+  assert.doesNotMatch(result.offlineRemediation, /github\.com\/example\/product/);
   const backlog = read(path.join(settings, "backlog-provider-settings.json"));
   const assignment = read(path.join(settings, "assignment-provider-settings.json"));
   const change = read(path.join(settings, "change-provider-settings.json"));
@@ -238,7 +248,8 @@ test("online bootstrap verifies auth, discovers a sole project, and creates a mi
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
 set -euo pipefail
-printf '%s|%s\\n' "$GH_HOST" "$*" >> "${log}"
+printf '\\x1f%s' "$@" >> "${log}"
+printf '\\n' >> "${log}"
 if [[ "$1 $2" == "project list" ]]; then
   printf '{"projects":[{"number":9,"title":"Delivery","url":"https://github.com/orgs/example/projects/9"}]}'
 elif [[ "$1 $2" == "label list" ]]; then
@@ -254,9 +265,19 @@ fi
     ghBin: gh,
   });
   assert.equal(result.project.number, 9);
-  const calls = fs.readFileSync(log, "utf8");
-  assert.match(calls, /github\.com\|auth status --hostname github\.com/);
-  assert.match(calls, /label create --repo github\.com\/example\/product .* -- -automation/);
+  const calls = readArgvLog(log);
+  assert.deepEqual(calls, [
+    ["auth", "status", "--hostname", "github.com"],
+    ["project", "list", "--owner", "example", "--limit", "100", "--format", "json"],
+    ["label", "list", "--repo", "example/product", "--search=-automation", "--limit", "100", "--json", "name"],
+    [
+      "label", "create",
+      "--repo", "example/product",
+      "--color", "5319E7",
+      "--description", "Work item currently claimed by an agent",
+      "--", "-automation",
+    ],
+  ]);
 });
 
 test("headless init can establish all provider settings in the installed project", () => {
