@@ -28,7 +28,13 @@ test("canonical gate projection preserves Flow verdicts without host reinterpret
           accepted_exception_id: "exception-1",
         },
       ],
-      exceptions: [{ id: "exception-1", gate_id: "pr-open-gate", reason: "fixture" }],
+      exceptions: [{
+        id: "exception-1",
+        gate_id: "pr-open-gate",
+        reason: "fixture",
+        authority: "test",
+        accepted_at: "2026-07-24T12:00:00.000Z",
+      }],
     },
   });
 
@@ -58,6 +64,12 @@ test("canonical gate projection preserves Flow verdicts without host reinterpret
         diagnostics: [],
       },
     ],
-    accepted_exceptions: [{ id: "exception-1", gate_id: "pr-open-gate", reason: "fixture" }],
+    accepted_exceptions: [{
+      id: "exception-1",
+      gate_id: "pr-open-gate",
+      reason: "fixture",
+      authority: "test",
+      accepted_at: "2026-07-24T12:00:00.000Z",
+    }],
   });
 });

@@ -371,6 +371,14 @@ turn marker is cleared. Signed workflow drives preflight the aggregate attestati
 capacity before launching an adapter when another bounded signed result cannot fit.
 Accepted request/result pairs and their measured progress are first stored in a
 durable idempotent journal while the active turn remains in `measured` phase.
+When the host provisions a protected evidence-checkpoint directory, the
+long-lived driver signs that exact accepted-turn record and its current canonical
+gate projection before completing the turn. Checkpoints are sequence- and
+predecessor-bound, atomically published without replacement, and independently
+verifiable with the public key pinned before launch. They authenticate only the
+accepted prefix and measured state at publication; they do not imply that a
+later turn or the overall drive completed. The signed payload states this as
+`evidence_scope: accepted_prefix` and `drive_completion: not_attested`.
 Only after journal and completion-event persistence does the driver clear that
 marker. Restart completes either write exactly once. Signed attestations reload
 the journal and fail closed if an accepted event lacks request/result coverage.
@@ -400,6 +408,8 @@ transformation. The final drive result also projects the synchronized Flow gate
 outcomes and accepted exceptions as `canonical_gate_projection`. The projection
 is captured under the continuation lock, stays out of adapter requests, and is
 authenticated only when the signed attestation covers the final outcome.
+The checkpoint verifier is exported for host consumers, while checkpoint
+creation remains internal to the Flow Agents driver authority.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may
