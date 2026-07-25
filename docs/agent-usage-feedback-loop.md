@@ -44,6 +44,48 @@ npm run usage-feedback -- compile-observation \
   --record-root .
 ```
 
+To inventory real local usage without crawling arbitrary home directories, pass
+each operator-configured record root explicitly:
+
+```bash
+npm run usage-feedback -- compile-corpus \
+  --record-root /path/to/runtime-or-repository-root \
+  --record-root /path/to/another-configured-root
+```
+
+`compile-corpus` inspects only known producer locations under those roots:
+`.kontourai/telemetry`, `.kontourai/flow-agents`, and
+`.kontourai/flow/runs`. It never joins records by path similarity, timestamps,
+working directory, or process ancestry. Records without an exact producer
+`run_correlation` remain counted as uncorrelated.
+
+Each configured source is parsed once per invocation. Explicitly correlated
+records and exact Flow/trust secondary records are retained in one bounded
+snapshot and reused across that invocation's per-run projections; report facts
+are not restored from an unsigned cache. JSONL producers may append while the
+inventory runs: the compiler double-hashes the opening-length prefix, records
+that accepted prefix in the watermark, and verifies it again before
+publication. Appends after the accepted prefix are deferred to the next
+generation. Prefix mutation, truncation, replacement, invalid UTF-8, and
+resource-limit exhaustion fail closed.
+
+The command writes:
+
+- `feedback/corpus/current.json`: the atomically replaced pointer to the current
+  complete generation;
+- `feedback/corpus/generations/<watermark>/watermark.json`: content hashes and stable root-local file
+  identities for the observed producer snapshot;
+- `feedback/corpus/generations/<watermark>/report.json`: coverage, correlation, compilation,
+  completeness, ambiguity, and quarantine counts;
+- `feedback/corpus/generations/<watermark>/manifests/*.json`: exact root-relative source declarations
+  for compiled runs;
+- `feedback/corpus/generations/<watermark>/observations/*.json`: privacy-safe per-run
+  observations.
+
+Reports always keep causal and quality effects `NOT_VERIFIED`. Observational
+coverage can generate hypotheses for Evals, but it cannot establish that a Kit
+caused an outcome.
+
 The manifest uses the
 `retrospective-observation-manifest/1.0` schema. Every individual source is
 optional so an incomplete historical run can still compile honestly, but at
@@ -55,8 +97,9 @@ a producer. Their directory chains must be non-group/world-writable, except for
 sticky shared ancestors such as the system temporary directory, and each final
 boundary directory must be owned by the current operator. Source files must be
 owned by the current operator or root and must not be group/world-writable.
-Concurrent mutation by another process running as the same OS principal is
-outside this local compiler's filesystem trust boundary:
+Concurrent replacement or mutation by another process running as the same OS
+principal is outside this local compiler's filesystem trust boundary; the
+accepted-prefix checks detect such changes during an invocation:
 
 ```json
 {
@@ -104,6 +147,11 @@ include the malformed record or an absolute path.
 Retrospective compiler diagnostics also classify schema-valid JSON that fails a
 producer contract as `ProducerValidationError`; counts remain separate from
 syntax failures and source bytes never enter the observation.
+
+Corpus compilation keeps malformed and producer-invalid counts on every
+affected source reference and in the corpus report, but does not copy the same
+source-level diagnostic into every observation that shares a multi-run source.
+Run-specific projection failures still appear on that run's observation.
 
 This tolerance applies only to source analysis. A destination that an import,
 sync, or upsert operation would rewrite remains strict: one malformed existing

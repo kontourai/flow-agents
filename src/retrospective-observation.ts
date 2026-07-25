@@ -16,6 +16,7 @@ import {
   verificationStatusFromFlowGateOutcomes,
 } from "./workflow-outcome.js";
 import {
+  assertPinnedFilePrefix,
   readPinnedFile,
 } from "./retrospective-observation-filesystem.js";
 import { validateRetrospectiveObservationValue } from "./retrospective-observation-validation.js";
@@ -131,6 +132,15 @@ export function compileRetrospectiveObservation(
   recordRoot: string,
 ): RetrospectiveObservation {
   const sources = loadRetrospectiveSources(manifest, recordRoot);
+  const observation = compileRetrospectiveObservationFromSources(manifest, sources);
+  assertRetrospectiveSourceSnapshotsCurrent(sources);
+  return observation;
+}
+
+export function compileRetrospectiveObservationFromSources(
+  manifest: RetrospectiveObservationManifest,
+  sources: LoadedSource[],
+): RetrospectiveObservation {
   const byKind = new Map(sources.map((source) => [source.kind, source]));
   const canonical = selectCanonicalEnvelope(byKind, manifest.correlation_id);
   if (!canonical) throw new Error("no producer record carries the manifest correlation_id");
@@ -152,7 +162,6 @@ export function compileRetrospectiveObservation(
     ...(economics.fact ? [economics.fact] : []),
     ...(terminal.fact ? [terminal.fact] : []),
   ];
-  assertSourceSnapshotsCurrent(sources);
   return projectObservation({
     manifest,
     sources,
@@ -343,6 +352,7 @@ function projectObservation(input: {
   const missingSources = SOURCE_KINDS.filter((kind) => !input.sources.some((source) => source.kind === kind));
   const complete = missingSources.length === 0
     && reconstructed.missing_kinds.length === 0
+    && input.sources.every((source) => source.malformed_records === 0 && source.invalid_records === 0)
     && diagnostics.length === 0;
   const core = observationCore(input, reconstructed, workflowOutcome, usage, missingSources, diagnostics, complete);
   const observation = { ...core, snapshot_sha256: sha256(stableStringify(core)) };
@@ -611,15 +621,25 @@ function usageMetricMatches(cost: JsonRecord, usage: JsonRecord, metric: string)
     && cost[metric] === usage[metric];
 }
 
-function assertSourceSnapshotsCurrent(sources: LoadedSource[]): void {
+export function assertRetrospectiveSourceSnapshotsCurrent(sources: LoadedSource[]): void {
   for (const source of sources) {
-    const bytes = readPinnedFile(
-      source.file,
-      `${source.kind} source`,
-      16 * 1024 * 1024,
-      source.directory_chain,
-    );
-    if (sha256(bytes) !== source.content_sha256) {
+    if (source.kind === "runtime_events" || source.kind === "economics") {
+      assertPinnedFilePrefix(
+        source.file,
+        `${source.kind} source`,
+        source.snapshot_bytes,
+        source.content_sha256,
+        source.directory_chain,
+      );
+      continue;
+    }
+    const contentSha256 = sha256(readPinnedFile(
+        source.file,
+        `${source.kind} source`,
+        16 * 1024 * 1024,
+        source.directory_chain,
+      ));
+    if (contentSha256 !== source.content_sha256) {
       throw new Error(`${source.kind} source changed during compilation`);
     }
   }
