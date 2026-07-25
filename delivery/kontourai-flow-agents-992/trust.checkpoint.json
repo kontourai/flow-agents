@@ -2,12 +2,12 @@
   "schema_version": "1.0",
   "slug": "kontourai-flow-agents-992",
   "work_item": null,
-  "status": "provisional",
-  "phase": "ci-readiness",
-  "sealed_at": "2026-07-25T13:06:56.319Z",
-  "commit_sha": "44fb799468a72870b4a81e2db93b21981cda0857",
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-25T13:38:39.198Z",
+  "commit_sha": "22dc429a45420364f45a9436926f1bd9df88f6c5",
   "checkpoint": {
-    "asOf": "2026-07-25T13:06:56.319Z",
+    "asOf": "2026-07-25T13:38:39.200Z",
     "statusByClaimId": {
       "kontourai-flow-agents-992-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-992-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-945f47c039e3bcdf900d991eae9c757b5e22b265fb87da2cd46494f3efcc043a-gate-visit-2026-07-25t12-58-07z": "verified",
       "kontourai-flow-agents-992-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-exact-current-goal-fit-gate-correct-acceptance-scope-risks-and-readiness-gate-visit-2026-07-25t12-58-16-522z": "verified",
@@ -16,20 +16,26 @@
       "kontourai-flow-agents-992-gate-claim-implementation-scope.flow-agents-workflow.evidence-only-execution-preserved-the-exact-clean-source-target-no-production-file-changed-and-the-single-criterion-remains-mapped-gate-visit-2026-07-25t13-01-55-494z": "verified",
       "kontourai-flow-agents-992-gate-claim-tests-evidence.flow-agents-workflow.fresh-manifest-declared-lifecycle-verification-passed-on-exact-head-44fb799-no-stale-950-or-989-result-is-reused-gate-visit-2026-07-25t13-04-47-581z": "verified",
       "kontourai-flow-agents-992-gate-claim-merge-readiness.flow-agents-workflow.exact-current-review-substantive-verification-clean-scope-provider-state-and-remaining-local-readiness-condition-are-recorded-gate-visit-2026-07-25t13-06-13-964z": "verified",
+      "kontourai-flow-agents-992-gate-claim-ci-merge-readiness.flow-agents-workflow.exact-current-source-and-delivery-transport-revisions-are-merge-ready-independent-review-and-focused-lifecycle-verification-pass-all-eight-hosted-checks-pass-at-22dc429a45420364f45a9436926f1bd9df88f6c5-both-full-local-manifest-lanes-pass-serially-and-pinned-veritas-evidence-readiness-completed-gate-visit-2026-07-25t13-36-44-373z": "verified",
+      "kontourai-flow-agents-992-gate-claim-decision-evidence.flow-agents-workflow.merge-and-scope-decisions-are-recorded-with-exact-revisions-evidence-rollback-and-explicit-separation-of-follow-up-corrections-gate-visit-2026-07-25t13-38-28-445z": "verified",
+      "kontourai-flow-agents-992-gate-claim-learning-evidence.flow-agents-workflow.observed-outcomes-and-six-correction-needs-are-recorded-and-routed-to-durable-flow-agents-backlog-issues-987-988-990-991-993-and-994-gate-visit-2026-07-25t13-38-28-903z": "verified",
       "kontourai-flow-agents-992-fa992-ac-01.flow-agents-workflow.fa992-ac-01-exact-source-head-44fb799468a72870b4a81e2db93b21981cda0857-receives-a-new-independent-critique-and-passes-bash-evals-integration-test-bundle-lifecycle-sh-with-no-stale-950-or-989-evidence-reused-verified-2026-07-25t13-04-47-581z": "verified",
       "kontourai-flow-agents-992-independent-closeout-review-44fb799.flow-agents-workflow.independent-exact-head-review-of-actor-bound-host-recovery-lifecycle-authority-ledger-and-fence-compatibility-found-no-open-defects-reviewed-2026-07-25t13-04-02-682z": "verified"
     },
-    "throughEventCreatedAt": "2026-07-25T13:06:13.964Z",
+    "throughEventCreatedAt": "2026-07-25T13:38:28.903Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-992-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-992-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-945f47c039e3bcdf900d991eae9c757b5e22b265fb87da2cd46494f3efcc043a-gate-visit-2026-07-25t12-58-07z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-exact-current-goal-fit-gate-correct-acceptance-scope-risks-and-readiness-gate-visit-2026-07-25t12-58-16-522z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-distinguish-verifiable-behavior-from-downstream-lifecycle-outcomes-no-behavior-evidence-gap-is-accepted-gate-visit-2026-07-25t12-58-17-237z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-implementation-plan.flow-agents-workflow.gate-correct-evidence-only-plan-records-one-verifiable-source-criterion-and-keeps-publication-merge-learning-and-cleanup-as-downstream-definition-of-done-outcomes-gate-visit-2026-07-25t13-01-22-756z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-implementation-scope.flow-agents-workflow.evidence-only-execution-preserved-the-exact-clean-source-target-no-production-file-changed-and-the-single-criterion-remains-mapped-gate-visit-2026-07-25t13-01-55-494z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-tests-evidence.flow-agents-workflow.fresh-manifest-declared-lifecycle-verification-passed-on-exact-head-44fb799-no-stale-950-or-989-result-is-reused-gate-visit-2026-07-25t13-04-47-581z": "2026-07-25T13:06:13.964Z",
-      "kontourai-flow-agents-992-gate-claim-merge-readiness.flow-agents-workflow.exact-current-review-substantive-verification-clean-scope-provider-state-and-remaining-local-readiness-condition-are-recorded-gate-visit-2026-07-25t13-06-13-964z": "2026-07-25T13:06:13.964Z",
+      "kontourai-flow-agents-992-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-992-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-945f47c039e3bcdf900d991eae9c757b5e22b265fb87da2cd46494f3efcc043a-gate-visit-2026-07-25t12-58-07z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-exact-current-goal-fit-gate-correct-acceptance-scope-risks-and-readiness-gate-visit-2026-07-25t12-58-16-522z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-distinguish-verifiable-behavior-from-downstream-lifecycle-outcomes-no-behavior-evidence-gap-is-accepted-gate-visit-2026-07-25t12-58-17-237z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-implementation-plan.flow-agents-workflow.gate-correct-evidence-only-plan-records-one-verifiable-source-criterion-and-keeps-publication-merge-learning-and-cleanup-as-downstream-definition-of-done-outcomes-gate-visit-2026-07-25t13-01-22-756z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-implementation-scope.flow-agents-workflow.evidence-only-execution-preserved-the-exact-clean-source-target-no-production-file-changed-and-the-single-criterion-remains-mapped-gate-visit-2026-07-25t13-01-55-494z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-tests-evidence.flow-agents-workflow.fresh-manifest-declared-lifecycle-verification-passed-on-exact-head-44fb799-no-stale-950-or-989-result-is-reused-gate-visit-2026-07-25t13-04-47-581z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-merge-readiness.flow-agents-workflow.exact-current-review-substantive-verification-clean-scope-provider-state-and-remaining-local-readiness-condition-are-recorded-gate-visit-2026-07-25t13-06-13-964z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-ci-merge-readiness.flow-agents-workflow.exact-current-source-and-delivery-transport-revisions-are-merge-ready-independent-review-and-focused-lifecycle-verification-pass-all-eight-hosted-checks-pass-at-22dc429a45420364f45a9436926f1bd9df88f6c5-both-full-local-manifest-lanes-pass-serially-and-pinned-veritas-evidence-readiness-completed-gate-visit-2026-07-25t13-36-44-373z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-decision-evidence.flow-agents-workflow.merge-and-scope-decisions-are-recorded-with-exact-revisions-evidence-rollback-and-explicit-separation-of-follow-up-corrections-gate-visit-2026-07-25t13-38-28-445z": "2026-07-25T13:38:28.903Z",
+      "kontourai-flow-agents-992-gate-claim-learning-evidence.flow-agents-workflow.observed-outcomes-and-six-correction-needs-are-recorded-and-routed-to-durable-flow-agents-backlog-issues-987-988-990-991-993-and-994-gate-visit-2026-07-25t13-38-28-903z": "2026-07-25T13:38:28.903Z",
       "kontourai-flow-agents-992-fa992-ac-01.flow-agents-workflow.fa992-ac-01-exact-source-head-44fb799468a72870b4a81e2db93b21981cda0857-receives-a-new-independent-critique-and-passes-bash-evals-integration-test-bundle-lifecycle-sh-with-no-stale-950-or-989-evidence-reused-verified-2026-07-25t13-04-47-581z": "2026-07-25T13:04:47.581Z",
-      "kontourai-flow-agents-992-independent-closeout-review-44fb799.flow-agents-workflow.independent-exact-head-review-of-actor-bound-host-recovery-lifecycle-authority-ledger-and-fence-compatibility-found-no-open-defects-reviewed-2026-07-25t13-04-02-682z": "2026-07-25T13:06:13.964Z"
+      "kontourai-flow-agents-992-independent-closeout-review-44fb799.flow-agents-workflow.independent-exact-head-review-of-actor-bound-host-recovery-lifecycle-authority-ledger-and-fence-compatibility-found-no-open-defects-reviewed-2026-07-25t13-04-02-682z": "2026-07-25T13:38:28.903Z"
     },
     "statusFunctionVersion": "2"
   }
