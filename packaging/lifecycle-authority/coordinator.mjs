@@ -493,7 +493,7 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.8.1" || pin.release_commit !== "1942c79" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.9.0" || pin.release_commit !== "a7c101f" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
