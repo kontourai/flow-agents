@@ -12,7 +12,7 @@ function slugPart(value: string, fallback: string): string {
 
 function parseGitHubWorkItemRef(ref: string): { owner: string; name: string; issueNumber: number } {
   const match = ref.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9]\d*)$/);
-  if (!match) throw new Error("--work-item must be an exact owner/repo#positive-numeric-id reference");
+  if (!match) throw new Error("--work-item must be an exact owner/repo#positive-numeric-id reference with a numeric issue number");
   const issueNumber = Number(match[3]);
   if (!Number.isSafeInteger(issueNumber)) throw new Error("--work-item issue number exceeds the safe integer range");
   return { owner: match[1]!, name: match[2]!, issueNumber };
