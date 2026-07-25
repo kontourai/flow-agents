@@ -60,6 +60,7 @@ const required = [
   "cancelBuilderFlowSession", "archiveBuilderFlowSession",
   "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
   "builderLifecycleAuthorizationPayload", "loadBuilderLifecycleAuthorization",
+  "orchestrateFlowMultiCursor", "FlowMultiCursorOrchestrationError", "orchestrateBuilderFlowMultiCursor",
   "statuses", "phases", "checkKinds", "checkStatuses", "verdicts",
 ];
 const missing = required.filter((name) => lib[name] === undefined);
