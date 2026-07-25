@@ -473,12 +473,57 @@ export function validateState(state: ContinuationDriverState): void {
   if (state.pending_barrier) validateBarrier(state.pending_barrier);
 }
 
-function validateAcceptedTurn(value: ContinuationAcceptedTurn): void {
-  if (!value || typeof value !== "object" || value.schema_version !== "1.0" || typeof value.turn_id !== "string" || !Number.isSafeInteger(value.iteration)
-    || value.iteration < 1 || value.request?.iteration !== value.iteration || typeof value.captured_at !== "string" || !Number.isFinite(Date.parse(value.captured_at))) throw new Error("continuation accepted-turn capture is malformed");
+export function validateAcceptedTurn(value: ContinuationAcceptedTurn): void {
+  if (!value || typeof value !== "object" || value.schema_version !== "1.0" || !Number.isSafeInteger(value.iteration)
+    || value.iteration < 1 || value.request?.iteration !== value.iteration
+    || value.turn_id !== `${value.request?.run_id}:${value.iteration}`
+    || !canonicalTimestamp(value.captured_at)) throw new Error("continuation accepted-turn capture is malformed");
+  if (!hasExactKeys(value, ["schema_version", "turn_id", "iteration", "request", "result", "progress", "captured_at"])) {
+    throw new Error("continuation accepted-turn capture has unsupported fields");
+  }
+  validateTurnRequest(value.request, value.iteration);
   validateTurnResult(value.result);
   if (value.request.context_strategy !== undefined) validateContextStrategy(value.request.context_strategy);
   if (value.progress !== null) validatePriorProgress(value.progress);
+}
+
+function canonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+function validateTurnRequest(value: ContinuationAcceptedTurn["request"], iteration: number): void {
+  if (!value || typeof value !== "object") throw new Error("continuation accepted-turn request is malformed");
+  const requestKeys = ["schema_version", "run_id", "definition_id", "current_step", "iteration", "max_turns", "next_action"];
+  for (const optional of ["definition_version", "definition_digest", "gate_action_envelope", "context_strategy"] as const) {
+    if (value[optional] !== undefined) requestKeys.push(optional);
+  }
+  if (!hasExactKeys(value, requestKeys)
+    || value.schema_version !== "1.0"
+    || typeof value.run_id !== "string" || value.run_id.length === 0
+    || typeof value.definition_id !== "string" || value.definition_id.length === 0
+    || typeof value.current_step !== "string" || value.current_step.length === 0
+    || value.iteration !== iteration
+    || !Number.isSafeInteger(value.max_turns) || value.max_turns < iteration || value.max_turns > MAX_CONTINUATION_TURNS
+    || (value.next_action !== null && (!value.next_action || typeof value.next_action !== "object" || Array.isArray(value.next_action)))
+    || (value.definition_version !== undefined && (typeof value.definition_version !== "string" || value.definition_version.length === 0))
+    || (value.definition_digest !== undefined && (typeof value.definition_digest !== "string" || !/^[a-f0-9]{64}$/.test(value.definition_digest)))) {
+    throw new Error("continuation accepted-turn request is malformed");
+  }
+  if (value.gate_action_envelope !== undefined) {
+    validateSnapshot({
+      run_id: value.run_id,
+      definition_id: value.definition_id,
+      ...(value.definition_version ? { definition_version: value.definition_version } : {}),
+      ...(value.definition_digest ? { definition_digest: value.definition_digest } : {}),
+      status: value.gate_action_envelope.flow.status,
+      disposition: "continue",
+      current_step: value.current_step,
+      next_action: value.next_action,
+      gate_action_envelope: value.gate_action_envelope,
+    });
+  }
 }
 
 function validateContextStrategy(value: unknown): void {
@@ -504,7 +549,10 @@ function validatePriorProgress(value: GateActionPriorProgress): void {
   if (!value || typeof value !== "object" || typeof value.step_advanced !== "boolean" || typeof value.no_progress !== "boolean"
     || !Array.isArray(value.evidence_added) || !value.evidence_added.every((entry) => typeof entry === "string")
     || !Array.isArray(value.artifact_changes) || !value.artifact_changes.every((entry) => typeof entry === "string")
-    || !Number.isSafeInteger(value.consecutive_no_progress) || value.consecutive_no_progress < 0 || !new Set(["none", "possible", "stagnant"]).has(value.stagnation)) throw new Error("continuation driver prior progress is malformed");
+    || !Number.isSafeInteger(value.consecutive_no_progress) || value.consecutive_no_progress < 0 || !new Set(["none", "possible", "stagnant"]).has(value.stagnation)
+    || !hasExactKeys(value, ["step_advanced", "evidence_added", "artifact_changes", "no_progress", "consecutive_no_progress", "stagnation"])) {
+    throw new Error("continuation driver prior progress is malformed");
+  }
 }
 
 export function assertMissionIdentity(state: Pick<ContinuationDriverState, "run_id" | "definition_id">, snapshot: ContinuationSnapshot): void {

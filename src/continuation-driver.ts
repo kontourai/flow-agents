@@ -180,7 +180,12 @@ export interface RunContinuationDriverInput {
   authorizeTurn?: () => Promise<void>;
   issueTurnAuthority?: (request: ContinuationTurnRequest) => Promise<ContinuationTurnAuthority>;
   preflightTurn?: (request: ContinuationTurnRequest) => void | Promise<void>;
-  onTurnAccepted?: (request: ContinuationTurnRequest, result: ContinuationTurnResult) => void | Promise<void>;
+  onTurnAccepted?: (
+    request: ContinuationTurnRequest,
+    result: ContinuationTurnResult,
+    capture: ContinuationAcceptedTurn,
+    snapshot: ContinuationSnapshot,
+  ) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -194,7 +199,12 @@ export interface DriveBuilderFlowSessionInput {
   authorizeTurn?: RunContinuationDriverInput["authorizeTurn"];
   issueTurnAuthority?: RunContinuationDriverInput["issueTurnAuthority"];
   preflightTurn?: RunContinuationDriverInput["preflightTurn"];
-  onTurnAccepted?: RunContinuationDriverInput["onTurnAccepted"];
+  onTurnAccepted?: (
+    request: ContinuationTurnRequest,
+    result: ContinuationTurnResult,
+    capture: ContinuationAcceptedTurn,
+    synchronizedSession: Awaited<ReturnType<typeof syncBuilderFlowSession>>,
+  ) => void | Promise<void>;
   now?: () => Date;
   store?: ContinuationStateStore;
 }
@@ -346,9 +356,11 @@ async function captureAcceptedTurn(
   callback: NonNullable<RunContinuationDriverInput["onTurnAccepted"]>,
   request: ContinuationTurnRequest,
   result: ContinuationTurnResult,
+  capture: ContinuationAcceptedTurn,
+  snapshot: ContinuationSnapshot,
 ): Promise<void> {
   try {
-    await callback(request, result);
+    await callback(request, result, capture, snapshot);
   } catch (cause) {
     const error = new Error(boundedErrorMessage(cause)) as TurnCaptureFailure;
     error.cause = cause;
@@ -393,7 +405,7 @@ async function recordAcceptedTurn(
   let measured = await synchronizeTurnMeasurement(input, state, previous, request, result, now);
   const capture = measured.state.active_turn_capture!;
   acceptedTurnJournal(input.store)?.captureAcceptedTurn(capture);
-  if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result);
+  if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result, capture, measured.snapshot);
   if (result.status === "wait") return parkAcceptedTurn(input, measured, result, now);
   appendEvent(input.store, measured.state, measured.snapshot, "turn_completed", now, {
     summary: result.summary,
@@ -507,9 +519,13 @@ function finishBudgetExhausted(store: ContinuationStateStore, state: Continuatio
 
 export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInput): Promise<ContinuationDriverOutcome> {
   const sessionDir = path.resolve(input.sessionDir);
+  let synchronizedSession: Awaited<ReturnType<typeof syncBuilderFlowSession>> | null = null;
   const runtime: ContinuationRuntimePort = {
     inspect: async () => builderSessionSnapshot(await inspectBuilderFlowSession({ sessionDir })),
-    synchronize: async () => builderSessionSnapshot(await syncBuilderFlowSession({ sessionDir })),
+    synchronize: async () => {
+      synchronizedSession = await syncBuilderFlowSession({ sessionDir });
+      return builderSessionSnapshot(synchronizedSession);
+    },
     execute: input.execute,
   };
   return runContinuationDriver({
@@ -522,9 +538,19 @@ export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInpu
     ...(input.authorizeTurn ? { authorizeTurn: input.authorizeTurn } : {}),
     ...(input.issueTurnAuthority ? { issueTurnAuthority: input.issueTurnAuthority } : {}),
     ...(input.preflightTurn ? { preflightTurn: input.preflightTurn } : {}),
-    ...(input.onTurnAccepted ? { onTurnAccepted: input.onTurnAccepted } : {}),
+    ...(input.onTurnAccepted ? { onTurnAccepted: async (request, result, capture, snapshot) => {
+      const exactSession = synchronizedSession;
+      if (!exactSession || !sameBuilderSnapshot(snapshot, builderSessionSnapshot(exactSession))) {
+        throw new Error("continuation accepted-turn callback lost its exact synchronized Builder session");
+      }
+      await input.onTurnAccepted!(request, result, capture, exactSession);
+    } } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
+}
+
+function sameBuilderSnapshot(left: ContinuationSnapshot, right: ContinuationSnapshot): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function builderSessionSnapshot(result: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): ContinuationSnapshot {

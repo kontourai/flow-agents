@@ -441,6 +441,7 @@ flow_agents workflow drive \
   --session-dir .kontourai/flow-agents/example \
   --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
   --evidence-signing-key-file /absolute/protected/one-time-ed25519-private.pem \
+  --evidence-checkpoint-dir /absolute/protected/empty-checkpoint-directory \
   --max-turns 6 \
   --json
 ```
@@ -452,6 +453,24 @@ payload containing the canonical outcome and ordered adapter requests/results, a
 signature over the exact payload bytes. Consumers must compare the public key with the key they
 pinned before launch, verify the signature, and then validate any evidence-specific schema. Without
 this optional flag, the outcome is not externally authenticated.
+
+An evidence checkpoint directory is optional and requires both the signing-key and JSON flags. It
+must be an absolute canonical, non-symlink, empty directory provisioned by the caller outside the
+model's writable workspace. After each accepted adapter result is canonically synchronized and
+measured, the driver publishes one bounded signed checkpoint there. Each checkpoint binds the exact
+accepted-turn journal record, the canonical gate projection at that point, its sequence, and the
+digest of its predecessor. Its machine-readable `evidence_scope: accepted_prefix` and
+`drive_completion: not_attested` fields prevent an accepted adapter result from being interpreted
+as proof that the drive returned. Publication uses an unpredictable same-directory staging file, fsync,
+and an atomic no-replace link to `checkpoint-NNNNNN.json`. Incomplete staging files are ignored.
+Consumers must pin the launch public key and verify the directory with the package's
+`verifyContinuationEvidenceCheckpoints` export.
+
+A verified checkpoint proves only the ordered accepted prefix and canonical state measured at its
+publication time. It does not prove that the whole drive completed. A later timeout or process
+termination may prevent a final aggregate attestation while leaving earlier checkpoints valid.
+Malformed final files, gaps, reordering, key mismatch, cross-run substitution, and signature or
+chain failures are rejected rather than projected as partial success.
 
 Every JSON outcome also carries `canonical_gate_projection`, a compact observation copied from the
 final synchronized Flow state while the continuation lock is still held. It identifies the run and
@@ -640,6 +659,9 @@ its recovery marker. Evidence-free canonical gate evaluation is limited to accep
 gates whose effective expectations are all optional; ordinary missing-required gates remain unevaluated.
 Signed drives reserve aggregate attestation capacity before adapter execution when another bounded
 signed result cannot fit.
+When a protected checkpoint directory is supplied, each accepted turn is also signed and published
+atomically after canonical measurement. These records prove an accepted prefix only; canonical
+terminality still comes from the final synchronized outcome.
 The complete serialized adapter result is capped at 74,000 bytes, and preflight reserves that exact
 maximum plus the actual request and JSON structure. Accepted request/result pairs and measured progress
 are journaled durably before the active marker is cleared. Restart idempotently completes missing audit
