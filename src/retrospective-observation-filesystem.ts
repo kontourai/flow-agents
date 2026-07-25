@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
+import { TextDecoder } from "node:util";
 
 export type DirectoryIdentity = {
   file: string;
@@ -90,6 +92,167 @@ export function readPinnedFile(
   }
 }
 
+export function scanPinnedJsonl(
+  file: string,
+  label: string,
+  maxLineBytes: number,
+  directoryChain: DirectoryIdentity[],
+  visit: (
+    line: string | null,
+    lineNumber: number,
+    error: "line_too_large" | "invalid_utf8" | null,
+    contentSha256: string,
+  ) => void,
+  maxFileBytes = Number.MAX_SAFE_INTEGER,
+): { contentSha256: string; size: number; mtimeMs: number } {
+  assertDirectoryChain(directoryChain, `${label} source`);
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  const digest = createHash("sha256");
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let lineChunks: Buffer[] = [];
+  let lineBytes = 0;
+  let lineDigest = createHash("sha256");
+  let oversized = false;
+  let lineNumber = 0;
+  let totalBytes = 0;
+  try {
+    const before = fs.fstatSync(descriptor);
+    assertSafeFile(before, label);
+    if (before.size > maxFileBytes) throw new Error(`${label} exceeds its byte limit`);
+    while (totalBytes < before.size) {
+      const requested = Math.min(buffer.length, before.size - totalBytes);
+      const read = fs.readSync(descriptor, buffer, 0, requested, totalBytes);
+      if (read === 0) throw new Error(`${label} truncated during read`);
+      totalBytes += read;
+      const bytes = buffer.subarray(0, read);
+      digest.update(bytes);
+      let start = 0;
+      for (let index = 0; index < bytes.length; index += 1) {
+        if (bytes[index] !== 0x0a) continue;
+        appendLineBytes(bytes.subarray(start, index));
+        emitLine();
+        start = index + 1;
+      }
+      appendLineBytes(bytes.subarray(start));
+    }
+    if (lineBytes > 0 || oversized) emitLine();
+    const contentSha256 = digest.digest("hex");
+    if (hashDescriptorPrefix(descriptor, before.size) !== contentSha256) {
+      throw new Error(`${label} prefix changed while reading`);
+    }
+    const after = fs.fstatSync(descriptor);
+    const lexical = fs.lstatSync(file);
+    if (lexical.isSymbolicLink()
+      || !lexical.isFile()
+      || before.dev !== after.dev
+      || before.ino !== after.ino
+      || after.size < before.size
+      || after.dev !== lexical.dev
+      || after.ino !== lexical.ino) {
+      throw new Error(`${label} changed while reading`);
+    }
+    assertSafeFile(lexical, label);
+    assertDirectoryChain(directoryChain, `${label} source`);
+    return { contentSha256, size: before.size, mtimeMs: before.mtimeMs };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+
+  function appendLineBytes(bytes: Buffer): void {
+    if (bytes.length === 0) return;
+    lineDigest.update(bytes);
+    lineBytes += bytes.length;
+    if (lineBytes > maxLineBytes) {
+      oversized = true;
+      lineChunks = [];
+    } else if (!oversized) {
+      lineChunks.push(Buffer.from(bytes));
+    }
+  }
+
+  function emitLine(): void {
+    lineNumber += 1;
+    const contentSha256 = lineDigest.digest("hex");
+    if (oversized) {
+      visit(null, lineNumber, "line_too_large", contentSha256);
+    } else {
+      let bytes = Buffer.concat(lineChunks);
+      if (bytes.at(-1) === 0x0d) bytes = bytes.subarray(0, -1);
+      try {
+        visit(decoder.decode(bytes), lineNumber, null, contentSha256);
+      } catch {
+        visit(null, lineNumber, "invalid_utf8", contentSha256);
+      }
+    }
+    lineChunks = [];
+    lineBytes = 0;
+    lineDigest = createHash("sha256");
+    oversized = false;
+  }
+}
+
+export function assertPinnedFilePrefix(
+  file: string,
+  label: string,
+  prefixBytes: number,
+  expectedSha256: string,
+  directoryChain: DirectoryIdentity[],
+): void {
+  assertDirectoryChain(directoryChain, `${label} source`);
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const lexical = fs.lstatSync(file);
+    if (!samePrefixIdentity(opened, lexical, prefixBytes)) {
+      throw new Error(`${label} accepted prefix changed`);
+    }
+    const actualSha256 = hashDescriptorPrefix(descriptor, prefixBytes);
+    const after = fs.fstatSync(descriptor);
+    const current = fs.lstatSync(file);
+    if (actualSha256 !== expectedSha256
+      || !samePrefixIdentity(after, current, prefixBytes)
+      || after.dev !== opened.dev
+      || after.ino !== opened.ino) {
+      throw new Error(`${label} accepted prefix changed`);
+    }
+    assertSafeFile(opened, label);
+    assertSafeFile(after, label);
+    assertSafeFile(current, label);
+    assertDirectoryChain(directoryChain, `${label} source`);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+export function decodeUtf8Fatal(bytes: Buffer): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function samePrefixIdentity(opened: fs.Stats, lexical: fs.Stats, prefixBytes: number): boolean {
+  return opened.isFile()
+    && opened.size >= prefixBytes
+    && !lexical.isSymbolicLink()
+    && lexical.isFile()
+    && opened.dev === lexical.dev
+    && opened.ino === lexical.ino;
+}
+
+function hashDescriptorPrefix(descriptor: number, length: number): string {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let offset = 0;
+  while (offset < length) {
+    const read = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, length - offset), offset);
+    if (read === 0) throw new Error("source truncated while hashing accepted prefix");
+    digest.update(buffer.subarray(0, read));
+    offset += read;
+  }
+  return digest.digest("hex");
+}
+
 export function capturePinnedDirectoryChain(directory: string): DirectoryIdentity[] {
   const absolute = path.resolve(directory);
   const parsed = path.parse(absolute);
@@ -105,6 +268,13 @@ export function capturePinnedDirectoryChain(directory: string): DirectoryIdentit
 
 export function assertPinnedDirectoryChain(chain: DirectoryIdentity[]): void {
   assertDirectoryChain(chain, "output directory");
+}
+
+export function assertOperatorPrivateDirectory(directory: string, label: string): void {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} must be a non-symlink directory`);
+  assertOperatorBoundary({ file: directory, dev: stat.dev, ino: stat.ino, mode: stat.mode, uid: stat.uid }, label);
+  if ((stat.mode & 0o022) !== 0) throw new Error(`${label} must not be group/world writable`);
 }
 
 function directoryIdentity(file: string, label: string): DirectoryIdentity {
