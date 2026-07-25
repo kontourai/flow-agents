@@ -164,8 +164,12 @@ authenticated stale same-run root completion, the raw current bundle and ledger 
 cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
 and canonical ordered gate-policy digests, Flow head/manifest,
 fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
-the coordinator adds one request-keyed canonical Flow `trust.bundle` attachment and installs one
-new exact-current completion. Replaying the same signed request returns that immutable completion
+the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
+plan, then adds one request-keyed canonical Flow `trust.bundle` attachment and installs one new
+exact-current completion. Prepared retry accepts exact all-new state, rolls exact all-old or mixed
+old/new state forward from the staged postimages, and rejects unknown or mismatched state without
+restoring foreign bytes. The plan only hashes the bundle, ledger, and stale receipt; it never
+snapshots or restores them. Replaying the same signed request returns the immutable completion
 without another attachment. Use it only after all final independent critique/resolution work is
 complete, and then use reseal for the final verification evidence.
 

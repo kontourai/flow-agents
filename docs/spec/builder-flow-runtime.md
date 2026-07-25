@@ -492,11 +492,18 @@ manifest, nonce, request time, and expiry.
 
 The coordinator repeats those checks while holding its durable per-run and
 Flow mutation locks. Its pure transition returns the current bundle and ledger
-unchanged. The generic crash-safe transaction writes only a request-keyed
-canonical Flow `trust.bundle` attachment, then rechecks the bundle, ledger,
-stale receipt, and Flow preimage before root signs one exact-current completion
-and installs it. A nonce replay returns the same completion and cannot add a
-second attachment; a prepared crash recovers all-old or all-new Flow artifacts.
+unchanged. Before any Flow postimage write, the unprivileged worker stages the
+fixed five Flow-only old/new images and root signs a request-, authorization-,
+nonce-, reducer-, and result-bound publication plan. The plan binds, but never
+stages or restores, `trust.bundle`, the resolution ledger, and the stale
+receipt. Under the canonical Flow lock, publication classifies each live
+artifact as exact old, exact new, or unknown; all-old and exact mixed states
+roll forward from staged new bytes, all-new succeeds idempotently, and unknown
+state fails closed without restoration. Only after exact postimages and
+protected preimages are revalidated does root persist and install the new
+exact-current completion. A nonce replay returns the same completion and cannot
+add a second attachment; a prepared crash after any or all Flow writes resumes
+from the signed plan and converges to all-new.
 It never appends/resolves a ledger event, rewrites evidence, accepts a missing
 or duplicate authority edge, or displaces a different newer exact-current
 receipt. This source protocol does not install or upgrade the live root helper;
