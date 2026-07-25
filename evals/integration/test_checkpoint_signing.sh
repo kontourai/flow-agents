@@ -306,11 +306,12 @@ else
   _fail "advance-state --status delivered exited $SEAL_EXIT (signing must not break the seal)"
 fi
 
-# #379: publishDelivery writes to the per-session path delivery/<slug>/trust.bundle.
-if [[ -f "$REPO_ROOT2/delivery/$SLUG2/trust.bundle" ]]; then
-  _pass "publish-delivery published into the explicit scratch --repo-root ($REPO_ROOT2/delivery/$SLUG2/trust.bundle, #379 per-session), not process.cwd()"
+# Terminal state projection may seal locally, but publication is exclusively owned
+# by the canonical public workflow after Builder learning completes.
+if [[ ! -e "$REPO_ROOT2/delivery/$SLUG2" ]]; then
+  _pass "advance-state sealed the checkpoint without bypassing canonical public delivery publication"
 else
-  _fail "publish-delivery did not write to the explicit scratch --repo-root ($REPO_ROOT2/delivery/$SLUG2/trust.bundle) — check the --repo-root plumbing in advanceState"
+  _fail "advance-state created delivery/$SLUG2 — terminal state projection must not publish delivery evidence"
 fi
 
 if [[ -f "$SESSION_DIR2/trust.checkpoint.json" ]]; then

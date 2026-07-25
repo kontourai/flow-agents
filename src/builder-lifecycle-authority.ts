@@ -144,6 +144,50 @@ export interface VerificationEvidenceResealAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
+/** Signed only by the external lifecycle authority registry. The package may
+ * construct this request but deliberately never verifies its signature. */
+export interface ProvisionalDeliveryAuthorization {
+  schema_version: "1.0";
+  operation: "publish-provisional-delivery";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  work_item: string;
+  assignment_actor_key: string;
+  assignment_generation: string;
+  published_head_sha: string;
+  provider_record_id: string;
+  provider_observation_sha256: string;
+  flow_definition_id: "builder.build";
+  flow_definition_version: string;
+  flow_definition_digest: string;
+  flow_run_head: string;
+  flow_gate_id: string;
+  flow_gate_visit: string;
+  workspace_snapshot: Record<string, unknown>;
+  checkpoint_slug: string;
+  checkpoint_commit_sha: string;
+  checkpoint_sha256: string;
+  bundle_sha256: string;
+  attestation_sha256: string;
+  companions: Array<{ path: string; sha256: string }>;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+export function provisionalDeliveryAuthorizationPayload(value: Omit<ProvisionalDeliveryAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedProvisionalDeliveryAuthorization(fields: Omit<ProvisionalDeliveryAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<ProvisionalDeliveryAuthorization, "signature">; signingPayload: string;
+} {
+  const unsigned = { schema_version: "1.0", operation: "publish-provisional-delivery", ...fields } as const;
+  return { unsigned, signingPayload: provisionalDeliveryAuthorizationPayload(unsigned) };
+}
+
 type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization | VerificationEvidenceResealAuthorization;
 
 const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [

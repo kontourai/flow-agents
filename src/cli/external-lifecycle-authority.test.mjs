@@ -16,6 +16,7 @@ const {
   validateLifecycleAuthorityResponse,
   verifyHistoricalLifecycleAuthorityCompletion,
   verifyLifecycleAuthorityCompletion,
+  verifyProvisionalDeliveryLifecycleCompletion,
 } = lifecycleAuthority;
 
 const action = "cancel";
@@ -393,6 +394,21 @@ test("strict current consumers reject a correctly signed replayed completion whi
     false,
     "a replayed completion cannot become exact-current authority even when its core digest matches",
   );
+}));
+
+test("purpose-specific provisional completion binds exact action run request and authority event", () => withCompletionVerificationKey(() => {
+  const provisional = signedCompletion({ action: "publish-provisional-delivery", run_id: "session-a", request_sha256: "e".repeat(64), result_core_sha256: "f".repeat(64) });
+  assert.deepEqual(verifyProvisionalDeliveryLifecycleCompletion(provisional, {
+    runId: "session-a", requestSha256: "e".repeat(64), resultCoreSha256: "f".repeat(64),
+  }), provisional);
+  for (const expected of [
+    { runId: "other", requestSha256: "e".repeat(64), resultCoreSha256: "f".repeat(64) },
+    { runId: "session-a", requestSha256: "0".repeat(64), resultCoreSha256: "f".repeat(64) },
+    { runId: "session-a", requestSha256: "e".repeat(64), resultCoreSha256: "0".repeat(64) },
+  ]) assert.throws(() => verifyProvisionalDeliveryLifecycleCompletion(provisional, expected), /exact request and authority event/);
+  assert.throws(() => verifyProvisionalDeliveryLifecycleCompletion(signedCompletion({ action: "archive", run_id: "session-a", request_sha256: "e".repeat(64), result_core_sha256: "f".repeat(64) }), {
+    runId: "session-a", requestSha256: "e".repeat(64), resultCoreSha256: "f".repeat(64),
+  }), /exact request and authority event/);
 }));
 
 test("Builder, sidecar/final-gate, and artifact validation retain the strict verifier while only history repair uses the historical verifier", () => {

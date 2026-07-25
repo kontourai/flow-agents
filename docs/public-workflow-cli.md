@@ -83,9 +83,41 @@ Item; do not manufacture a prior session, use a private writer, or use a `delive
 exemption for agent-delivered work.
 
 Follow the reported public `next_action` through planning, implementation, review, verification,
-and release readiness. After the final release-ready session bundle is sealed for the target
-checkout, publish the CI-visible delivery evidence through the primary public CLI, commit that
-delivery output with the change, and push the resulting head:
+and release readiness. A repository may make CI reconciliation of the session's delivery bundle
+a required pull-request check. In that case, publish a **provisional** delivery after the pull
+request is open and before recording `ci-merge-readiness`:
+
+```bash
+flow_agents workflow publish-provisional-delivery-request \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  > provisional-delivery-request.json
+
+# Sign provisional-delivery-request.json.authorization exactly as serialized with a
+# configured lifecycle-operator Ed25519 key. Add only the signature block and store
+# the resulting authorization outside the project checkout.
+flow_agents workflow publish-provisional-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --authorization-file /absolute/outside-project/provisional-delivery.authorization.json \
+  --json
+```
+
+This command is available only to the active bound `builder.build` run at `merge-ready-ci`. It
+first seals the already-reviewed and verified source checkpoint with `status: "provisional"` and
+`phase: "ci-readiness"`. The request binds the exact project/session/Work Item, live assignment
+generation, canonical definition version and digest, Flow head and gate visit, authenticated
+publish-change provider record and immutable head, source snapshot, checkpoint, bundle,
+attestation, and mutually exclusive companion digests. Publication transports those exact bytes;
+the root-owned coordinator rechecks every binding, appends a signed-authorization event under the
+Flow run lock, and installs a purpose-specific signed completion before the package records the
+delivery. It then writes only that session's `delivery/<slug>/` transport. Commit
+and push those companion files so the provider's Trust Verify check can reconcile the PR
+revision. It is not a release decision, does not add a `ci-merge-readiness` claim, and cannot
+complete or declare the run. `delivery/DECLARED` remains unavailable to agent work.
+
+After provider checks, the explicit readiness decision, and learning evidence are recorded and the
+canonical `builder.build` run has advanced through `learn` to completed `done`,
+publish the terminal CI-visible delivery evidence through the primary public CLI, commit that
+superseding delivery output, and push the resulting head:
 
 ```bash
 flow_agents workflow publish-delivery \
@@ -99,18 +131,26 @@ partial Builder run, an unreconciled bundle shape, a stale or non-holder actor, 
 identified checkpoint/checkout mismatch. Public test verification stamps the canonical Git
 workspace snapshot alongside its successful command observations. Before sealing, publishing
 requires both that stamped verification snapshot and the canonical live review graph to match the
-exact current workspace; a commit or worktree change must go back through canonical review and
-verification rather than rebinding either old evidence slice to a new checkpoint. Sessions whose
-older test evidence lacks this snapshot fail closed on public publishing until verification is
-rerun. The publisher holds the session subject lock and rechecks the identical snapshot after
-sealing, immediately before copying, and after the copy. A post-copy source change restores the
-exact prior `delivery/<session>/` destination (if any) and leaves every sibling delivery untouched
-before failing. It then seals against the derived target checkout's current
-`HEAD`, replaces stale
-companions with one newly emitted signed or in-toto companion, and verifies that companion binds
-both the checkpoint digest and current trust bundle before copying the set into
-`delivery/<session>/`. The committed delivery bundle is then available to the repository's Trust
-Verify check to reconcile against the pushed change.
+exact current workspace. The one supported continuation is a checkpoint-bound provisional
+delivery: terminal publication permits it only when the verification base is an ancestor of the
+current checkout, every committed and uncommitted change since that base is confined to the same
+`delivery/<slug>/` transport, and the provisional bundle and checkpoint still match their
+session-local digests. A missing, altered, stale, unrelated, or concurrent-session delivery fails
+closed; re-run review and verification instead of borrowing its evidence. Sessions whose older
+test evidence lacks this snapshot also fail closed. The publisher holds the session subject lock
+and rechecks the identical snapshot after sealing, immediately before copying, and after the
+copy. A post-copy source change restores the exact prior `delivery/<session>/` destination (if
+any) and leaves every sibling delivery untouched before failing. It then seals against the derived
+target checkout's current `HEAD`, replaces stale companions with one newly emitted signed or
+in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
+bundle before copying the set into `delivery/<session>/`. Trust Verify accepts a provisional
+candidate only when the checked PR revision differs from the authenticated published head by
+exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory. Ordinary
+ancestry, tree equivalence, inherited bundles, extra source changes, altered companions, and
+unrelated session bundles cannot satisfy the check.
+
+Terminal publication is unavailable while `learn` is active, even when a release decision is
+positive; provisional publication is the only CI-transport path before learning closes.
 
 `builder.shape` uses a caller-supplied, safe slug. Derive it from a selected
 title using lowercase ASCII words separated by single hyphens. Never inject raw

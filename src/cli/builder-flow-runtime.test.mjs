@@ -6,6 +6,7 @@ import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { pathToFileURL } from "node:url";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, withRunMutationLock } from "@kontourai/flow";
 import {
@@ -24,6 +25,7 @@ import {
 } from "../../build/src/builder-flow-runtime.js";
 import * as builderFlowRuntime from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
+import { buildUnsignedProvisionalDeliveryAuthorization } from "../../build/src/builder-lifecycle-authority.js";
 import * as builderLifecycleAuthority from "../../build/src/builder-lifecycle-authority.js";
 import { lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
@@ -37,8 +39,26 @@ import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, main as workflowMain, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
+
+test("provisional delivery request serialization preserves every exact lifecycle binding", () => {
+  const fields = {
+    project_root: "/project", run_id: "session-a", subject: "kontourai/flow-agents#957", work_item: "kontourai/flow-agents#957",
+    assignment_actor_key: "codex:test:host", assignment_generation: NOW, flow_definition_id: "builder.build",
+    published_head_sha: "a".repeat(40), provider_record_id: "provider-957", provider_observation_sha256: "9".repeat(64),
+    flow_definition_version: "1.3", flow_definition_digest: "1".repeat(64), flow_run_head: "2".repeat(64),
+    flow_gate_id: "merge-ready-ci-gate", flow_gate_visit: NOW,
+    workspace_snapshot: { kind: "git-worktree", head_sha: "a".repeat(40), digest: "3".repeat(64) },
+    checkpoint_slug: "session-a", checkpoint_commit_sha: "a".repeat(40), checkpoint_sha256: "4".repeat(64),
+    bundle_sha256: "5".repeat(64), attestation_sha256: "6".repeat(64),
+    companions: [{ path: "trust.bundle", sha256: "5".repeat(64) }],
+    nonce: "nonce", expires_at: NOW, requested_at: NOW,
+  };
+  const request = buildUnsignedProvisionalDeliveryAuthorization(fields);
+  assert.deepEqual(request.unsigned, { schema_version: "1.0", operation: "publish-provisional-delivery", ...fields });
+  assert.deepEqual(JSON.parse(request.signingPayload), request.unsigned);
+});
 import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
@@ -158,6 +178,93 @@ childProcess.execFileSync = ((file, args, options) => {
   return realExecFileSync(file, args, options);
 });
 
+async function loadHermeticProvisionalAuthority(projectRoot, registryFile, completionPrivateKey, completionPublicKey) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-public-authority-"));
+  const stateRoot = path.join(directory, "state");
+  fs.mkdirSync(stateRoot, { recursive: true });
+  fs.copyFileSync(path.resolve("packaging/lifecycle-authority/runtime-v1.mjs"), path.join(directory, "runtime-v1.mjs"));
+  fs.copyFileSync(path.resolve("packaging/lifecycle-authority/flow-reducer-v1.json"), path.join(directory, "flow-reducer-v1.json"));
+  let coordinatorSource = fs.readFileSync(path.resolve("packaging/lifecycle-authority/coordinator.mjs"), "utf8");
+  coordinatorSource = coordinatorSource
+    .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`)
+    .replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`)
+    .replace(/export const COMPLETION_PRIVATE_KEY_FILE = .*?;/, `export const COMPLETION_PRIVATE_KEY_FILE = ${JSON.stringify(completionPrivateKey)};`)
+    .replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionPublicKey)};`)
+    .replace(/const FLOW_REDUCER_PACKAGE_ROOT = .*?;/, `const FLOW_REDUCER_PACKAGE_ROOT = ${JSON.stringify(path.resolve("node_modules/@kontourai/flow"))};`);
+  fs.writeFileSync(
+    path.join(directory, "coordinator.mjs"),
+    `${coordinatorSource}\nexport { executeMutation, completion, installCompletionReceipt, assertCurrentLifecycleCompletionIdentity };\n`,
+  );
+  const nonce = `${Date.now()}-${Math.random()}`;
+  const coordinator = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${nonce}`);
+  let crashAfterMutationOnce = false;
+  let lastNonceFile = null;
+  return {
+    directory,
+    coverage: "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
+    armCrashAfterMutationOnce: () => {
+      crashAfterMutationOnce = true;
+    },
+    preparedNonce: () => lastNonceFile === null ? null : JSON.parse(fs.readFileSync(lastNonceFile, "utf8")),
+    digest: (value) => coordinator.sha256(value),
+    invoke: async (request) => {
+      const requestSha256 = coordinator.sha256(request);
+      const envelope = { schema_version: "1.0", action: request.action, request_sha256: requestSha256, request };
+      const authorization = JSON.parse(fs.readFileSync(request.authorization_file, "utf8"));
+      const paths = {
+        projectRoot: fs.realpathSync(request.project_root),
+        sessionDir: fs.realpathSync(request.session_dir),
+        runId: path.basename(request.session_dir),
+      };
+      const authorizationSha256 = coordinator.sha256(coordinator.canonicalJson(authorization));
+      const operationId = coordinator.sha256({
+        project: paths.projectRoot,
+        run_id: paths.runId,
+        action: envelope.action,
+        key_id: authorization.signature.key_id,
+        nonce: authorization.nonce,
+      });
+      lastNonceFile = path.join(stateRoot, "nonces", `${coordinator.sha256(`${authorization.signature.key_id}\u0000${authorization.nonce}`)}.json`);
+      const prepared = {
+        schema_version: "1.0",
+        operation_id: operationId,
+        authorization_sha256: authorizationSha256,
+        key_id: authorization.signature.key_id,
+        nonce: authorization.nonce,
+        request_sha256: requestSha256,
+        status: "prepared",
+      };
+      const resumePrepared = fs.existsSync(lastNonceFile);
+      if (!resumePrepared) {
+        fs.mkdirSync(path.dirname(lastNonceFile), { recursive: true });
+        fs.writeFileSync(lastNonceFile, `${JSON.stringify(prepared)}\n`, { mode: 0o600 });
+      } else {
+        assert.deepEqual(JSON.parse(fs.readFileSync(lastNonceFile, "utf8")), prepared);
+      }
+      const mutation = await coordinator.executeMutation(envelope, paths, authorization, null, null, resumePrepared);
+      if (crashAfterMutationOnce) {
+        crashAfterMutationOnce = false;
+        throw new Error("injected crash after provisional ledger append before root completion");
+      }
+      const completion = coordinator.completion(envelope, { runId: paths.runId }, "applied", mutation.result_core_sha256);
+      coordinator.installCompletionReceipt(paths, completion);
+      fs.writeFileSync(lastNonceFile, `${JSON.stringify({ ...prepared, status: "applied", result_core_sha256: mutation.result_core_sha256 })}\n`, { mode: 0o600 });
+      return { run_id: paths.runId, operation_status: "applied", completion };
+    },
+    verifyCompletion: (value, expected) => {
+      const canonicalRoot = fs.realpathSync(projectRoot);
+      const paths = { projectRoot: canonicalRoot, sessionDir: path.join(canonicalRoot, ".kontourai", "flow-agents", expected.runId), runId: expected.runId };
+      const verified = coordinator.assertCurrentLifecycleCompletionIdentity(paths, value);
+      if (verified.action !== "publish-provisional-delivery"
+        || verified.request_sha256 !== expected.requestSha256
+        || verified.result_core_sha256 !== expected.resultCoreSha256) {
+        throw new Error("hermetic provisional completion does not bind the exact request and authority event");
+      }
+      return verified;
+    },
+  };
+}
+
 test("public delivery refuses a concurrent source mutation during checkpoint sealing", async () => {
   let snapshot = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "1".repeat(40) };
   await assert.rejects(
@@ -222,6 +329,408 @@ test("public delivery restores the exact prior destination when source mutates d
   assert.equal(fs.readFileSync(path.join(destination, "trust.bundle"), "utf8"), "prior exact contents");
   assert.equal(fs.readFileSync(sibling, "utf8"), "unrelated sibling");
   assert.deepEqual(fs.readdirSync(session), []);
+});
+
+test("terminal delivery accepts only its own intact provisional CI transport as post-verification drift", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-delivery-"));
+  const run = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  fs.writeFileSync(path.join(root, ".gitignore"), ".kontourai/\n");
+  run(["init"]);
+  run(["config", "user.email", "test@example.invalid"]);
+  run(["config", "user.name", "Flow Agents Test"]);
+  run(["add", ".gitignore"]);
+  run(["commit", "-m", "base"]);
+  const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const slug = "provisional-session";
+  const session = path.join(root, ".kontourai", "flow-agents", slug);
+  const delivery = path.join(root, "delivery", slug);
+  fs.mkdirSync(session, { recursive: true });
+  fs.mkdirSync(delivery, { recursive: true });
+  const bundle = path.join(delivery, "trust.bundle");
+  const checkpoint = path.join(delivery, "trust.checkpoint.json");
+  const attestation = path.join(delivery, "trust.checkpoint.attestation.json");
+  const companion = path.join(delivery, "trust.checkpoint.intoto.json");
+  fs.writeFileSync(bundle, "provisional bundle");
+  fs.writeFileSync(checkpoint, JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: base }));
+  fs.writeFileSync(attestation, JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
+  fs.writeFileSync(companion, JSON.stringify({ subject: [] }));
+  const digest = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const canonical = (value) => Array.isArray(value)
+    ? `[${value.map(canonical).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+  const deliveryFiles = fs.readdirSync(delivery).sort().map((name) => ({ path: name, sha256: digest(path.join(delivery, name)) }));
+  const providerObservation = { change_ref: { head_sha: base, provider_record_id: "provider-957" } };
+  fs.writeFileSync(path.join(session, "publish-change.result.json"), JSON.stringify(providerObservation));
+  const signedAuthorization = {
+    project_root: root, run_id: slug, checkpoint_slug: slug, published_head_sha: base, provider_record_id: "provider-957",
+    provider_observation_sha256: digest(path.join(session, "publish-change.result.json")),
+    workspace_snapshot: { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: base },
+    companions: deliveryFiles, bundle_sha256: digest(bundle), checkpoint_sha256: digest(checkpoint), attestation_sha256: digest(attestation),
+  };
+  const authorizationSha256 = createHash("sha256").update(canonical(signedAuthorization)).digest("hex");
+  const unsignedEvent = {
+    schema_version: "1.0", kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: slug,
+    subject: "kontourai/flow-agents#957", authorization_sha256: authorizationSha256, predecessor_hash: "0".repeat(64),
+    signed_authorization: signedAuthorization,
+  };
+  const authorityEvent = { ...unsignedEvent, event_hash: createHash("sha256").update(canonical(unsignedEvent)).digest("hex") };
+  fs.writeFileSync(path.join(session, "lifecycle-authority.provisional-delivery-events.json"), JSON.stringify({ schema_version: "1.0", events: [authorityEvent] }));
+  const authorityCompletion = { fixture: "valid signed completion seam" };
+  fs.writeFileSync(path.join(session, "provisional-delivery.authority-completion.json"), JSON.stringify(authorityCompletion));
+  const requestSha256 = "b".repeat(64);
+  fs.writeFileSync(path.join(session, "provisional-delivery.json"), JSON.stringify({
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery",
+    session_slug: slug,
+    project_root: root,
+    verified_workspace_snapshot: { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: base },
+    delivery_bundle_sha256: digest(bundle),
+    delivery_checkpoint_sha256: digest(checkpoint),
+    delivery_attestation_sha256: digest(attestation),
+    delivery_files: deliveryFiles,
+    authority_completion: authorityCompletion,
+    authority_completion_sha256: createHash("sha256").update(canonical(authorityCompletion)).digest("hex"),
+    authority_request_sha256: requestSha256,
+    authority_event_hash: authorityEvent.event_hash,
+    authority_authorization_sha256: authorizationSha256,
+    checkpoint_commit_sha: base,
+    recorded_at: NOW,
+  }));
+  run(["add", "delivery"]);
+  run(["commit", "-m", "provisional delivery"]);
+
+  const verifyFixtureCompletion = (value, expected) => {
+    assert.deepEqual(value, authorityCompletion);
+    assert.deepEqual(expected, {
+      runId: slug, requestSha256,
+      resultCoreSha256: createHash("sha256").update(canonical(authorityEvent)).digest("hex"),
+    });
+    return value;
+  };
+  assert.deepEqual(assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion), {
+    version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: base,
+  });
+
+  fs.writeFileSync(bundle, "tampered provisional bundle");
+  assert.throws(
+    () => assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion),
+    /exact durable authority evidence|exact, unmodified provisional delivery transport/,
+  );
+  fs.writeFileSync(bundle, "provisional bundle");
+
+  fs.mkdirSync(path.join(root, "delivery", "other-session"), { recursive: true });
+  fs.writeFileSync(path.join(root, "delivery", "other-session", "trust.bundle"), "concurrent transport");
+  run(["add", "delivery/other-session"]);
+  run(["commit", "-m", "concurrent delivery"]);
+  assert.throws(
+    () => assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion),
+    /exactly this session's recorded provisional delivery companions/,
+  );
+});
+
+test("public provisional request uses hermetic unprivileged coordinator primitives and continues to terminal delivery", async () => {
+  const session = makeSession("public-provisional-terminal-e2e");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  const ambient = claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  initializePublishChangeGitRepository(session.projectRoot);
+  execFileSync("git", ["add", ".gitignore", "package.json", "context", "review-target"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed implementation"], { cwd: session.projectRoot, stdio: "ignore" });
+  await advanceSessionToPrOpen(session);
+  const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Provisional delivery E2E",
+    body: "Exercise the exact public request and publication path.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
+  const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  currentTests.claim.status = "verified";
+  currentTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
+  const currentPrerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of currentPrerequisites) entry.claim.status = "verified";
+  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites]);
+
+  const requestOutput = [];
+  const originalLog = console.log;
+  console.log = (...values) => requestOutput.push(values.join(" "));
+  try {
+    assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(requestOutput.length, 1);
+  const request = JSON.parse(requestOutput[0]);
+  assert.equal(request.authorization.operation, "publish-provisional-delivery");
+  assert.equal(request.authorization.published_head_sha, action.head_sha);
+
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const authorityRoot = fs.mkdtempSync(path.join(os.tmpdir(), "public-provisional-keys-"));
+  const registryFile = path.join(authorityRoot, "authority-keys.json");
+  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
+  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
+  writeJson(registryFile, {
+    schema_version: "1.0",
+    keys: [{ id: "public-provisional-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
+  });
+  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
+  writeJson(authorizationFile, {
+    ...request.authorization,
+    signature: {
+      algorithm: "ed25519",
+      key_id: "public-provisional-e2e",
+      value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
+    },
+  });
+  const authority = await loadHermeticProvisionalAuthority(
+    session.projectRoot,
+    registryFile,
+    completionPrivateKey,
+    completionPublicKey,
+  );
+  assert.equal(
+    authority.coverage,
+    "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
+    "this hermetic E2E intentionally does not claim root-process, sudo, or installed verifier coverage",
+  );
+  authority.armCrashAfterMutationOnce();
+  await assert.rejects(
+    () => publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority),
+    /injected crash after provisional ledger append before root completion/,
+  );
+  const appendedBeforeCompletion = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
+  assert.equal(appendedBeforeCompletion.events.length, 1, "the crash boundary occurs after the authority event append");
+  assert.equal(authority.preparedNonce()?.status, "prepared", "root-mode simulation retains the exact prepared nonce");
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "provisional-delivery.authority-completion.json")), false);
+  assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
+  const ledger = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
+  const completion = readJson(path.join(session.sessionDir, "provisional-delivery.authority-completion.json"));
+  const record = readJson(path.join(session.sessionDir, "provisional-delivery.json"));
+  assert.equal(ledger.events.length, 1, "the prepared retry recovers the exact tail event without appending a duplicate");
+  assert.deepEqual(ledger.events[0], appendedBeforeCompletion.events[0], "the prepared retry preserves the original authority event");
+  assert.equal(completion.action, "publish-provisional-delivery");
+  assert.equal(completion.result_core_sha256, authority.digest(ledger.events[0]));
+  assert.equal(authority.preparedNonce()?.status, "applied", "completion advances the exact prepared nonce");
+  assert.equal(record.authority_event_hash, ledger.events[0].event_hash);
+  assert.deepEqual(record.authority_completion, completion);
+
+  const destination = path.join(session.projectRoot, "delivery", session.slug);
+  const retainedBackup = path.join(session.sessionDir, ".delivery-publish-backup-completed-crash");
+  const recoveryJournal = path.join(session.sessionDir, ".provisional-delivery.transaction.json");
+  fs.mkdirSync(retainedBackup);
+  fs.writeFileSync(path.join(retainedBackup, "trust.bundle"), "prior destination");
+  writeJson(recoveryJournal, {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery-transaction",
+    session_slug: session.slug,
+    project_root: session.projectRoot,
+    destination,
+    backup_path: retainedBackup,
+    had_destination: true,
+    prepared_at: NOW,
+  });
+  const durabilityEvents = [];
+  setProvisionalDeliveryDurabilityTestHooksForTest({
+    afterDirectoryFsync: (directory) => durabilityEvents.push(["fsync", directory]),
+    beforeUnlink: (target) => durabilityEvents.push(["unlink", target]),
+  });
+  try {
+    recoverProvisionalDeliveryTransactionWithAuthorityVerifier(
+      session.sessionDir,
+      session.projectRoot,
+      session.slug,
+      authority.verifyCompletion,
+    );
+  } finally {
+    setProvisionalDeliveryDurabilityTestHooksForTest(null);
+  }
+  const journalUnlink = durabilityEvents.findIndex(([kind, target]) => kind === "unlink" && target === recoveryJournal);
+  assert.ok(journalUnlink > 1, "completed recovery removes the journal only after durable parent updates");
+  assert.ok(durabilityEvents.slice(0, journalUnlink).some(([kind, target]) => kind === "fsync" && target === path.dirname(destination)));
+  assert.ok(durabilityEvents.slice(0, journalUnlink).some(([kind, target]) => kind === "fsync" && target === session.sessionDir));
+  assert.equal(fs.existsSync(retainedBackup), false);
+  assert.equal(fs.existsSync(recoveryJournal), false);
+  assert.equal(readJson(path.join(destination, "trust.checkpoint.json")).status, "provisional");
+
+  execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "exact provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+  const learning = await writeAndSync(session, [
+    bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
+  ]);
+  assert.equal(learning.run.state.current_step, "learn");
+  const learningEntries = [
+    bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
+    bundleClaim({ expectation: "learning-evidence", claimType: "builder.learn.evidence", subjectType: "release" }),
+  ];
+  const completed = await writeAndSync(session, learningEntries);
+  assert.equal(completed.run.state.status, "completed");
+  assert.equal(completed.run.state.current_step, "learn", "Flow closes the terminal learn gate in place");
+  for (const entry of learningEntries) entry.claim.status = "verified";
+  writeBundle(session.sessionDir, learningEntries);
+  assert.equal(await publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authority), 0);
+  const terminalCheckpoint = readJson(path.join(session.projectRoot, "delivery", session.slug, "trust.checkpoint.json"));
+  assert.equal(terminalCheckpoint.status, "delivered");
+  assert.equal(terminalCheckpoint.phase, "release");
+  assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events[0].event_hash);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("provisional delivery journals interrupted replacement until it can deterministically restore or finish", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-journal-"));
+  const slug = "provisional-session";
+  const session = path.join(root, ".kontourai", "flow-agents", slug);
+  const destination = path.join(root, "delivery", slug);
+  const backup = path.join(session, ".delivery-publish-backup-fixture");
+  const journal = path.join(session, ".provisional-delivery.transaction.json");
+  fs.mkdirSync(session, { recursive: true });
+  fs.mkdirSync(destination, { recursive: true });
+  fs.writeFileSync(path.join(destination, "trust.bundle"), "exact prior delivery");
+  writeJson(journal, {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery-transaction",
+    session_slug: slug,
+    project_root: root,
+    destination,
+    backup_path: backup,
+    had_destination: true,
+    prepared_at: NOW,
+  });
+  recoverProvisionalDeliveryTransaction(session, root, slug);
+  assert.equal(fs.readFileSync(path.join(destination, "trust.bundle"), "utf8"), "exact prior delivery", "a crash after journal fsync but before destination rename preserves the original");
+  assert.equal(fs.existsSync(journal), false);
+
+  fs.renameSync(destination, backup);
+  fs.mkdirSync(destination, { recursive: true });
+  fs.writeFileSync(path.join(destination, "trust.bundle"), "unrecorded replacement");
+  writeJson(journal, {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery-transaction",
+    session_slug: slug,
+    project_root: root,
+    destination,
+    backup_path: backup,
+    had_destination: true,
+    prepared_at: NOW,
+  });
+
+  const durabilityEvents = [];
+  setProvisionalDeliveryDurabilityTestHooksForTest({
+    afterDirectoryFsync: (directory) => durabilityEvents.push(["fsync", directory]),
+    beforeUnlink: (target) => durabilityEvents.push(["unlink", target]),
+  });
+  try {
+    recoverProvisionalDeliveryTransaction(session, root, slug);
+  } finally {
+    setProvisionalDeliveryDurabilityTestHooksForTest(null);
+  }
+  const journalUnlink = durabilityEvents.findIndex(([kind, target]) => kind === "unlink" && target === journal);
+  assert.ok(journalUnlink > 1, "rollback recovery durably publishes the restored destination before removing its journal");
+  assert.ok(durabilityEvents.slice(0, journalUnlink).some(([kind, target]) => kind === "fsync" && target === path.dirname(destination)));
+  assert.ok(durabilityEvents.slice(0, journalUnlink).some(([kind, target]) => kind === "fsync" && target === session));
+  assert.equal(fs.readFileSync(path.join(destination, "trust.bundle"), "utf8"), "exact prior delivery", "an interruption before record publication restores the prior exact destination");
+  assert.equal(fs.existsSync(journal), false, "recovery leaves no unrecorded delivery journal behind");
+
+  const retainedBackup = path.join(session, ".delivery-publish-backup-recorded");
+  fs.renameSync(destination, retainedBackup);
+  fs.mkdirSync(destination, { recursive: true });
+  const bundle = path.join(destination, "trust.bundle");
+  const checkpoint = path.join(destination, "trust.checkpoint.json");
+  const attestation = path.join(destination, "trust.checkpoint.attestation.json");
+  const companion = path.join(destination, "trust.checkpoint.intoto.json");
+  fs.writeFileSync(bundle, "recorded provisional delivery");
+  fs.writeFileSync(checkpoint, JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: "a".repeat(40) }));
+  fs.writeFileSync(attestation, JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
+  fs.writeFileSync(companion, JSON.stringify({ subject: [] }));
+  const digest = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  writeJson(path.join(session, "provisional-delivery.json"), {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery",
+    session_slug: slug,
+    project_root: root,
+    delivery_bundle_sha256: digest(bundle),
+    delivery_checkpoint_sha256: digest(checkpoint),
+    delivery_attestation_sha256: digest(attestation),
+    delivery_files: fs.readdirSync(destination).sort().map((name) => ({ path: name, sha256: digest(path.join(destination, name)) })),
+  });
+  writeJson(journal, {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery-transaction",
+    session_slug: slug,
+    project_root: root,
+    destination,
+    backup_path: retainedBackup,
+    had_destination: true,
+    prepared_at: NOW,
+  });
+
+  recoverProvisionalDeliveryTransaction(session, root, slug);
+  assert.equal(fs.readFileSync(bundle, "utf8"), "exact prior delivery", "an unsigned record cannot authorize recovery to discard the prior exact destination");
+  assert.equal(fs.existsSync(retainedBackup), false, "recovery restores this transaction's retained backup");
+  assert.equal(fs.existsSync(journal), false, "completed recovery removes its journal");
+});
+
+test("public terminal delivery refuses an active learn step even after a positive CI readiness claim", async () => {
+  const session = makeSession("terminal-delivery-requires-completed-learning");
+  claimAmbientSessionAssignment(session);
+  await advanceSessionToPrOpen(session);
+  const prOpened = await writeAndSync(session, [bundleClaim({ expectation: "pull-request-opened", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" })]);
+  assert.equal(prOpened.run.state.current_step, "merge-ready-ci");
+  const learning = await writeAndSync(session, [bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" })]);
+  assert.equal(learning.run.state.status, "active");
+  assert.equal(learning.run.state.current_step, "learn");
+  await assert.rejects(
+    () => workflowMain(["publish-delivery", "--session-dir", session.sessionDir]),
+    /completed canonical builder\.build run after passing learning/,
+  );
+});
+
+test("Trust Verify accepts provisional delivery only at the exact companion-only checked revision", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Flow Agents Test");
+  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
+  git("add", "."); git("commit", "-m", "reviewed source");
+  const publishedHead = git("rev-parse", "HEAD");
+  const directory = path.join(root, "delivery", "session-a");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
+  git("add", "delivery"); git("commit", "-m", "exact provisional transport");
+  const exactCheckedRevision = git("rev-parse", "HEAD");
+  const reconcile = require("../../scripts/ci/trust-reconcile.js");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(fs.realpathSync(root), fs.realpathSync(path.join(directory, "trust.bundle")), publishedHead, exactCheckedRevision), true);
+  git("switch", "-c", "mode-trick");
+  fs.chmodSync(path.join(directory, "trust.checkpoint.intoto.json"), 0o755);
+  git("add", "delivery"); git("commit", "-m", "executable companion trick");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
+  git("switch", "--detach", exactCheckedRevision);
+  fs.writeFileSync(path.join(root, "source.txt"), "unreviewed source change\n");
+  git("add", "source.txt"); git("commit", "-m", "extra source change");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
+  git("switch", "--orphan", "unrelated");
+  fs.rmSync(path.join(root, "source.txt"), { force: true });
+  fs.rmSync(path.join(root, "delivery"), { recursive: true, force: true });
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
+  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
+  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
+  git("add", "."); git("commit", "-m", "unrelated same tree");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
@@ -1645,6 +2154,8 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
     "tests-evidence": "verify",
     "verified-criterion": "verify",
     "merge-readiness": "merge-ready",
+    "decision-evidence": "learn",
+    "learning-evidence": "learn",
   };
   const claimId = `claim.${expectation}`;
   return {
@@ -1704,10 +2215,7 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
   const implementationFile = path.relative(session.projectRoot, implementation);
   const implementationBytes = fs.readFileSync(implementation);
   const implementationSha256 = createHash("sha256").update(implementationBytes).digest("hex");
-  const workspaceDigest = createHash("sha256")
-    .update("flow-agents:reviewed-files:v1\0")
-    .update(implementationFile).update("\0").update(implementationBytes).update("\0")
-    .digest("hex");
+  const workspaceSnapshot = captureReviewWorkspaceSnapshot(session.projectRoot, [{ file: implementationFile, sha256: implementationSha256 }]);
   const critique = bundleClaim({ expectation: "clean-critique", claimType: "workflow.critique.review", subjectType: "workflow-critique", timestamp });
   critique.claim.metadata = {
     workflow_subject_ref: SUBJECT,
@@ -1717,13 +2225,7 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
     lanes: [{ id: "code", status: "pass" }],
     review_target: {
       artifacts: [{ file: path.relative(session.projectRoot, reviewArtifact), sha256: createHash("sha256").update(fs.readFileSync(reviewArtifact)).digest("hex") }],
-      workspace_snapshot: {
-        version: 1,
-        kind: "reviewed-files",
-        algorithm: "sha256",
-        digest: workspaceDigest,
-        files: [{ file: implementationFile, sha256: implementationSha256 }],
-      },
+      workspace_snapshot: workspaceSnapshot,
     },
   };
   const critiqueRecord = {

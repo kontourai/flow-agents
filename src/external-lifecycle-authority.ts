@@ -8,7 +8,7 @@ export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flo
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
 export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
-const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"]);
+const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "publish-provisional-delivery"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
 export interface ExternalLifecycleMutationResult {
@@ -141,6 +141,20 @@ function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operatio
  */
 export function verifyLifecycleAuthorityCompletion(value: unknown): JsonRecord {
   return verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied"], "lifecycle authority completion");
+}
+
+export function verifyProvisionalDeliveryLifecycleCompletion(
+  value: unknown,
+  expected: { runId: string; requestSha256: string; resultCoreSha256: string },
+): JsonRecord {
+  const completion = verifyLifecycleAuthorityCompletionWithStatuses(value, ["applied"], "provisional delivery lifecycle authority completion");
+  if (completion.action !== "publish-provisional-delivery"
+    || completion.run_id !== expected.runId
+    || completion.request_sha256 !== expected.requestSha256
+    || completion.result_core_sha256 !== expected.resultCoreSha256) {
+    throw new Error("provisional delivery lifecycle authority completion does not bind the exact request and authority event");
+  }
+  return completion;
 }
 
 /**

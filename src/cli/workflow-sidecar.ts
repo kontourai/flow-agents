@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -5087,6 +5087,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
  *       An explicit, auditable no-residue promotion (R3).
  */
 async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
+  if (p.flags.has("publish")) die("promote --publish is disabled; use `flow-agents workflow publish-delivery` so canonical Builder lifecycle and learning gates are enforced");
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", now());
@@ -5261,22 +5262,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Trust checkpoint: when advancing to a terminal delivered status, seal the checkpoint.
   if (status === "delivered") {
     await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
-    // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-    // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
-    // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir
-    // with no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures
-    // are visible (stderr warning), not silently swallowed.
-    // #356 AC6: an InvalidBundleShapeError refusal is NOT one of those best-effort failure
-    // modes — it must be LOUD and cause advance-state itself to fail (rethrown here so the
-    // outer command surfaces a non-zero exit), never silently swallowed alongside a genuine
-    // repo-root-resolution/I-O failure.
-    const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
-    await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
-      if (err instanceof InvalidBundleShapeError) throw err;
-      if (err instanceof NotFreshHolderError) throw err;
-      if (err instanceof RepoHeadMismatchError) throw err;
-      process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
-    });
+    process.stderr.write("[advance-state] delivery publication is disabled on the sidecar surface; use `flow-agents workflow publish-delivery` after canonical Builder learning completes.\n");
   }
   return 0;
 }
@@ -5641,22 +5627,7 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
   // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
   await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
-  // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-  // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
-  // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir with
-  // no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures are
-  // visible (stderr warning), not silently swallowed.
-  // #356 AC6: an InvalidBundleShapeError refusal is NOT best-effort — rethrow so record-release
-  // itself fails loudly (non-zero exit) rather than silently publishing nothing while reporting
-  // success. This is the crux of AC6: record-release is one of the auto-publish paths that must
-  // never let a shape-invalid bundle slip past unnoticed.
-  const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
-  await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
-    if (err instanceof InvalidBundleShapeError) throw err;
-    if (err instanceof NotFreshHolderError) throw err;
-    if (err instanceof RepoHeadMismatchError) throw err;
-    process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
-  });
+  process.stderr.write("[record-release] delivery publication is disabled on the sidecar surface; use `flow-agents workflow publish-delivery` after canonical Builder learning completes.\n");
   return 0;
 }
 
@@ -7006,13 +6977,16 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
   const sessionDeliveryDir = path.join(deliveryDir, slug);
 
   fs.mkdirSync(deliveryDir, { recursive: true });
+  const deliveryRootStat = fs.lstatSync(deliveryDir);
+  if (!deliveryRootStat.isDirectory() || deliveryRootStat.isSymbolicLink()) throw new Error("publish-delivery requires a non-symlink delivery root");
   // #413 Facet B: prune only THIS session's own prior seal (never another slug's) before
   // freshly rewriting delivery/<slug>/ below.
   pruneSupersededSeals(deliveryDir, slug);
-  fs.mkdirSync(sessionDeliveryDir, { recursive: true });
+  const stagingDir = path.join(deliveryDir, `.${slug}.publish-${randomBytes(16).toString("hex")}`);
+  fs.mkdirSync(stagingDir, { mode: 0o700 });
 
   // Required: trust.bundle (the CI anchor)
-  fs.copyFileSync(bundleSrc, path.join(sessionDeliveryDir, "trust.bundle"));
+  fs.copyFileSync(bundleSrc, path.join(stagingDir, "trust.bundle"), fs.constants.COPYFILE_EXCL);
 
   // Optional companions: checkpoint + signing artifacts
   const companions = [
@@ -7025,10 +6999,21 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
   for (const filename of companions) {
     const src = path.join(dir, filename);
     if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(sessionDeliveryDir, filename));
+      fs.copyFileSync(src, path.join(stagingDir, filename), fs.constants.COPYFILE_EXCL);
       copiedCompanions.push(filename);
     }
   }
+
+  for (const filename of ["trust.bundle", ...copiedCompanions]) {
+    const descriptor = fs.openSync(path.join(stagingDir, filename), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  }
+  const stagingDescriptor = fs.openSync(stagingDir, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(stagingDescriptor); } finally { fs.closeSync(stagingDescriptor); }
+  if (fs.existsSync(sessionDeliveryDir)) throw new Error("publish-delivery destination appeared during atomic staging");
+  fs.renameSync(stagingDir, sessionDeliveryDir);
+  const deliveryDescriptor = fs.openSync(deliveryDir, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(deliveryDescriptor); } finally { fs.closeSync(deliveryDescriptor); }
 
   const writtenFiles = ["trust.bundle", ...copiedCompanions].join(", ");
   process.stderr.write(`[publish-delivery] published ${writtenFiles} to ${sessionDeliveryDir} (per-session path, #379)\n`);
@@ -7037,21 +7022,14 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
 /**
  * publish-delivery <artifact-dir> [--repo-root <path>]
  *
- * Explicit publish of the session trust bundle to the committed delivery/ path.
- * Equivalent to the publish that fires automatically at record-release /
- * advance-state to delivered. Useful for the deliver skill or a human to
- * publish explicitly.
+ * Legacy sidecar entrypoint retained only to direct callers to the canonical
+ * public workflow lifecycle.
  *
  * Usage: workflow-sidecar publish-delivery <artifactDir> [--repo-root <path>]
  */
 async function publishDeliveryCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
-  // Fail-closed: an explicit --repo-root always wins; otherwise resolve strictly (no
-  // process.cwd() fallback) so a scratch/test artifact dir cannot accidentally publish
-  // into whichever repo happens to be the current working directory.
-  const repoRoot = opt(p, "repo-root") || findRepoRootFromDirStrict(dir);
-  await publishDelivery(dir, repoRoot);
-  return 0;
+  void p;
+  die("workflow-sidecar publish-delivery is disabled; use `flow-agents workflow publish-delivery` so canonical Builder lifecycle and learning gates are enforced");
 }
 
 export function validateLearningCorrection(record: AnyObj): void {

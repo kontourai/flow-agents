@@ -139,7 +139,7 @@
 
 'use strict';
 
-const { spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -967,12 +967,13 @@ function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
  * dependabot PR whose stale main-authored trust.checkpoint.json otherwise satisfied Step 2
  * trivially) must NOT be treated as owned by this change.
  *
- * "Attests this change" = the bundle's commit_sha equals this change's own sha, OR is an
- * ancestor of it (the bundle was sealed earlier in the SAME open PR's own linear commit
- * history, before a later delivery commit — the normal, legitimate shape; sealTrustCheckpoint
- * necessarily stamps a commit that precedes its own delivery commit, so exact equality alone
- * would reject every legitimate delivery). Reuses the same `git merge-base --is-ancestor`
- * primitive `commit:` scope ranges already use (isAncestorCommit()) rather than a new check.
+ * "Attests this change" requires exact commit equality, except for a provisional
+ * `ci-readiness` or terminal `release` checkpoint whose publication itself creates
+ * the checked revision. That narrow case requires the checkpoint commit to be an ancestor
+ * of the checked revision and the complete commit delta to contain exactly the fixed
+ * bundle/checkpoint/attestation/one-companion set. Broad ancestry and tree equivalence are not
+ * ownership proof: any source change, unrelated history, extra path, or altered checkout bytes
+ * fails closed.
  *
  * FAIL CLOSED on ambiguity: no extractable commit_sha (bundle/checkpoint carries none, or
  * this change's own sha is unresolvable) → never treated as fresh/owned.
@@ -1000,8 +1001,51 @@ function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
 function bundleAttestsThisChange(repoRoot, bundlePath, bundleJson, changeSha) {
   const bundleSha = extractBundleCommitSha(repoRoot, bundlePath, bundleJson);
   if (!bundleSha || !changeSha) return { fresh: false, bundleSha };
-  const fresh = bundleSha === changeSha || isAncestorCommit(repoRoot, bundleSha, changeSha);
+  const fresh = bundleSha === changeSha
+    || provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleSha, changeSha);
   return { fresh, bundleSha };
+}
+
+function provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleSha, changeSha) {
+  try {
+    if (!isAncestorCommit(repoRoot, bundleSha, changeSha)) return false;
+    const canonicalRoot = fs.realpathSync(repoRoot);
+    const directory = path.dirname(fs.realpathSync(bundlePath));
+    const relativeDirectory = path.relative(canonicalRoot, directory).replaceAll(path.sep, '/');
+    if (!/^delivery(?:\/[^/]+)?$/.test(relativeDirectory)) return false;
+    const checkpointPath = path.join(directory, 'trust.checkpoint.json');
+    const attestationPath = path.join(directory, 'trust.checkpoint.attestation.json');
+    const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
+    const attestation = JSON.parse(fs.readFileSync(attestationPath, 'utf8'));
+    const exactDeliveryCheckpoint = (checkpoint.status === 'provisional' && checkpoint.phase === 'ci-readiness')
+      || (checkpoint.status === 'delivered' && checkpoint.phase === 'release');
+    if (!exactDeliveryCheckpoint || checkpoint.commit_sha !== bundleSha) return false;
+    const companion = attestation.status === 'signed' ? 'trust.checkpoint.sig.json' : attestation.status === 'unsigned' ? 'trust.checkpoint.intoto.json' : null;
+    if (!companion || attestation.path !== companion) return false;
+    const names = fs.readdirSync(directory).sort();
+    const expectedNames = ['trust.bundle', 'trust.checkpoint.attestation.json', 'trust.checkpoint.json', companion].sort();
+    if (JSON.stringify(names) !== JSON.stringify(expectedNames)) return false;
+    const expectedPaths = expectedNames.map((name) => `${relativeDirectory}/${name}`).sort();
+    const changed = execFileSync('git', ['diff', '--name-only', `${bundleSha}..${changeSha}`, '--'], {
+      cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').filter(Boolean).sort();
+    if (JSON.stringify(changed) !== JSON.stringify(expectedPaths)) return false;
+    for (const file of expectedPaths) {
+      const treeEntry = execFileSync('git', ['ls-tree', changeSha, '--', file], { cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (!/^100644 blob [a-f0-9]{40,64}\t/.test(treeEntry) || !treeEntry.endsWith(`\t${file}`)) return false;
+      const committed = execFileSync('git', ['show', `${changeSha}:${file}`], { cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'] });
+      const local = path.join(canonicalRoot, file);
+      const descriptor = fs.openSync(local, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      try {
+        if (!fs.fstatSync(descriptor).isFile() || !Buffer.from(committed).equals(fs.readFileSync(descriptor))) return false;
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,6 +1498,7 @@ module.exports.normalizeManifestEntries = normalizeManifestEntries;
 module.exports.slugifyLabel = slugifyLabel;
 module.exports.normalizeCmd = normalizeCmd;
 module.exports.isAncestorCommit = isAncestorCommit;
+module.exports.provisionalDeliveryIsExactCheckedRevision = provisionalDeliveryIsExactCheckedRevision;
 // #356: resolveManifest's legacy fallback tier (tier 5, "legacy:fresh-verify-commands")
 // folds the CANONICAL verify commands into the manifest when no dedicated manifest source
 // resolves. Exporting resolveCanonicalCommands too so the local preflight's manifest
