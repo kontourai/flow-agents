@@ -758,9 +758,39 @@ const hostAuthorityKeyFile = path.join(os.tmpdir(), `flow-agents-builder-host-au
 fs.writeFileSync(hostAuthorityKeyFile, hostAuthorityPublic);
 const fsCjsForHostAuthority = require("node:fs");
 const realHostAuthorityOpen = fsCjsForHostAuthority.openSync;
+const realHostAuthorityLstat = fsCjsForHostAuthority.lstatSync;
+const realHostAuthorityAccess = fsCjsForHostAuthority.accessSync;
 const realHostAuthorityFstat = fsCjsForHostAuthority.fstatSync;
 const realHostAuthorityClose = fsCjsForHostAuthority.closeSync;
 const hostAuthorityDescriptors = new Set();
+const protectedHostAuthorityPaths = new Set([
+  "/etc/kontourai",
+  "/etc/kontourai/flow-agents-lifecycle-authority-v1",
+  "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem",
+  "/private/etc/kontourai",
+  "/private/etc/kontourai/flow-agents-lifecycle-authority-v1",
+  "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem",
+]);
+const mockHostAuthorityLstat = (file, ...args) => {
+  if (protectedHostAuthorityPaths.has(file)) {
+    const stat = realHostAuthorityLstat(file.endsWith(".pem") ? hostAuthorityKeyFile : "/etc", ...args);
+    return new Proxy(stat, {
+      get: (target, property) => {
+        if (property === "uid") return 0;
+        if (property === "mode") return target.mode & ~0o022;
+        if (property === "isSymbolicLink") return () => false;
+        return Reflect.get(target, property);
+      },
+    });
+  }
+  return realHostAuthorityLstat(file, ...args);
+};
+const mockHostAuthorityAccess = (file, mode, ...args) => {
+  if (protectedHostAuthorityPaths.has(file) && mode === fs.constants.W_OK) {
+    throw Object.assign(new Error("fixture path is protected"), { code: "EACCES" });
+  }
+  return realHostAuthorityAccess(file, mode, ...args);
+};
 const mockHostAuthorityOpen = (file, flags, ...rest) => {
   if (typeof file === "string" && file.endsWith("/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem")) {
     const descriptor = realHostAuthorityOpen(hostAuthorityKeyFile, flags, ...rest);
@@ -780,6 +810,8 @@ const mockHostAuthorityClose = (descriptor) => {
   return realHostAuthorityClose(descriptor);
 };
 function installHostAuthorityFsMock() {
+  fsCjsForHostAuthority.lstatSync = mockHostAuthorityLstat;
+  fsCjsForHostAuthority.accessSync = mockHostAuthorityAccess;
   fsCjsForHostAuthority.openSync = mockHostAuthorityOpen;
   fsCjsForHostAuthority.fstatSync = mockHostAuthorityFstat;
   fsCjsForHostAuthority.closeSync = mockHostAuthorityClose;
@@ -793,6 +825,8 @@ assert.deepEqual(
 );
 releaseRuntimeTestSeams();
 process.once("exit", () => {
+  fsCjsForHostAuthority.lstatSync = realHostAuthorityLstat;
+  fsCjsForHostAuthority.accessSync = realHostAuthorityAccess;
   fsCjsForHostAuthority.openSync = realHostAuthorityOpen;
   fsCjsForHostAuthority.fstatSync = realHostAuthorityFstat;
   fsCjsForHostAuthority.closeSync = realHostAuthorityClose;
