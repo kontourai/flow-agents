@@ -3637,6 +3637,70 @@ test("exact-current completion recovery authorization fixes every refresh bindin
   );
 });
 
+test("exact-current completion recovery accepts the coordinator's raw resolution-ledger hashes", () => {
+  const projectRoot = "/tmp/recovery-ledger-project";
+  const runId = "run-ledger";
+  const subject = "kontourai/flow-agents#940";
+  const signedAuthorization = {
+    schema_version: "1.0",
+    operation: "resolve-critique",
+    project_root: projectRoot,
+    run_id: runId,
+    subject,
+    nonce: "raw-ledger-hash",
+    signature: { algorithm: "ed25519", key_id: "operator", value: "fixture" },
+  };
+  const authorizationSha256 = createHash("sha256").update(JSON.stringify(signedAuthorization)).digest("hex");
+  const eventId = `critique-resolution:${authorizationSha256}`;
+  const edge = {
+    schema_version: "1.0",
+    kind: "cross-reviewer",
+    prior_record_id: "critique:prior",
+    resolving_record_id: "critique:resolving",
+    resolver: "reviewer-b",
+    resolved_lane_ids: ["code-review"],
+    resolved_finding_ids: ["ledger-hash-mismatch"],
+    resolved_at: NOW,
+    authorization_sha256: authorizationSha256,
+    resolution_event_id: eventId,
+  };
+  const unsignedEvent = {
+    schema_version: "1.0",
+    event_id: eventId,
+    sequence: 1,
+    predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+    operation: "resolve-critique",
+    run_id: runId,
+    subject,
+    authorization_sha256: authorizationSha256,
+    edge,
+    signed_authorization: signedAuthorization,
+  };
+  const event = {
+    ...unsignedEvent,
+    event_hash: createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex"),
+  };
+  const bundle = {
+    claims: [{
+      metadata: {
+        origin: "critique",
+        critique_resolution: edge,
+      },
+    }],
+  };
+
+  assert.doesNotThrow(
+    () => workflowRuntime.assertRecoveryLedgerCoverage(bundle, [event], projectRoot, runId, subject),
+    "the public recovery request must verify the coordinator's raw JSON.stringify hash contract",
+  );
+
+  assert.throws(
+    () => workflowRuntime.assertRecoveryLedgerCoverage(bundle, [{ ...event, event_hash: "0".repeat(64) }], projectRoot, runId, subject),
+    /complete strict resolution ledger/,
+    "tampered raw ledger bytes must still fail closed",
+  );
+});
+
 test("history-repair authorization is a distinct signed request bound to the exact missing authority edge", () => {
   const buildUnsignedCritiqueResolutionHistoryRepairAuthorization = builderLifecycleAuthority.buildUnsignedCritiqueResolutionHistoryRepairAuthorization;
   const critiqueResolutionHistoryRepairAuthorizationPayload = builderLifecycleAuthority.critiqueResolutionHistoryRepairAuthorizationPayload;
