@@ -59,6 +59,29 @@ test("Flow Agents recovery adapter allows absence/open and rejects active or unk
   }
 });
 
+test("all fence readers accept a finalized open generation and reject it on an active fence", () => {
+  for (const [name, reader] of [
+    ["Flow Agents", (root, runId) => assertFlowRunRecoveryFenceOpen(root, runId)],
+    ["narrative", (root, runId) => withNarrativeFlowRunRecoveryFenceRead(root, runId, () => null)],
+    ["source hook", (root, runId) => hookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+    ["context hook", (root, runId) => contextHookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+  ]) {
+    const value = fixture();
+    try {
+      const finalized = {
+        ...fence(value.runId),
+        previous_generation: "22222222-2222-4222-8222-222222222222",
+      };
+      fs.writeFileSync(value.file, `${JSON.stringify(finalized)}\n`, { mode: 0o600 });
+      assert.doesNotThrow(() => reader(value.projectRoot, value.runId), name);
+      fs.writeFileSync(value.file, `${JSON.stringify({ ...finalized, status: "active" })}\n`, { mode: 0o600 });
+      assert.throws(() => reader(value.projectRoot, value.runId), /malformed or unsupported/, name);
+    } finally {
+      fs.rmSync(value.projectRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test("Flow Agents recovery adapter rejects a fence generation change during a read", () => {
   const value = fixture();
   try {
