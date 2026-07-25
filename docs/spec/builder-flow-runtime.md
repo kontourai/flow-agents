@@ -465,6 +465,38 @@ non-root-owned components, and every symlink on non-Darwin hosts fail closed. Th
 not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
 every component.
 
+### Exact-current completion recovery
+
+`recover-exact-current-completion-request` and
+`recover-exact-current-completion` are the completion-only route for a valid
+same-run root receipt that became stale after a later public critique or gate
+claim. They are not history repair and are not a claim writer. Request creation
+is read-only and requires the canonical `builder.build` `verify` gate, one
+matching session/Flow subject, an authenticated stale applied receipt, and a
+complete, valid external resolution ledger. The signed authorization binds the
+stale receipt's raw digest/action/request/core/runtime identity, exact raw
+bundle and ledger identities, critique and resolution-edge projections, raw
+Flow-definition and canonical ordered gate-policy digests, fixed
+`exact-current-completion-only` transition, Flow definition/step/gate/head/
+manifest, nonce, request time, and expiry.
+
+The coordinator repeats those checks while holding its durable per-run and
+Flow mutation locks. Its pure transition returns the current bundle and ledger
+unchanged. The generic crash-safe transaction writes only a request-keyed
+canonical Flow `trust.bundle` attachment, then rechecks the bundle, ledger,
+stale receipt, and Flow preimage before root signs one exact-current completion
+and installs it. A nonce replay returns the same completion and cannot add a
+second attachment; a prepared crash recovers all-old or all-new Flow artifacts.
+It never appends/resolves a ledger event, rewrites evidence, accepts a missing
+or duplicate authority edge, or displaces a different newer exact-current
+receipt. This source protocol does not install or upgrade the live root helper;
+that remains a separately authorized operator action.
+
+Normal ordering is: record all independent final critiques; resolve or repair
+eligible authority edges; if that legitimate public work made the receipt stale,
+recover the exact-current completion; then reseal final verification evidence
+when a gate claim itself must change.
+
 ### Atomic verification-evidence reseal
 
 After a signed critique resolution or history repair, the exact-current lifecycle completion

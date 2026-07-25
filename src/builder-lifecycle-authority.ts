@@ -144,7 +144,89 @@ export interface VerificationEvidenceResealAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
-type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization | VerificationEvidenceResealAuthorization;
+/** A signed, completion-only refresh after legitimate later public evidence. */
+export interface ExactCurrentCompletionRecoveryAuthorization {
+  schema_version: "1.0";
+  operation: "recover-exact-current-completion";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  permitted_transition: "exact-current-completion-only";
+  stale_completion_sha256: string;
+  stale_completion_action: "resolve-critique" | "repair-critique-resolution-history" | "reseal-verification-evidence" | "recover-exact-current-completion";
+  stale_completion_request_sha256: string;
+  stale_completion_result_core_sha256: string;
+  stale_completion_coordinator_runtime_sha256: string;
+  current_bundle_sha256: string;
+  current_ledger_sha256: string;
+  current_ledger_length: number;
+  current_ledger_tail_hash: string;
+  critique_projection_sha256: string;
+  resolution_edge_projection_sha256: string;
+  resolution_edge_projection_count: number;
+  flow_definition_id: "builder.build";
+  flow_definition_sha256: string;
+  flow_step_id: "verify";
+  flow_gate_id: string;
+  flow_gate_policy_sha256: string;
+  flow_run_head: string;
+  flow_manifest_sha256: string;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization | VerificationEvidenceResealAuthorization | ExactCurrentCompletionRecoveryAuthorization;
+
+const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "permitted_transition",
+  "stale_completion_sha256", "stale_completion_action", "stale_completion_request_sha256", "stale_completion_result_core_sha256", "stale_completion_coordinator_runtime_sha256",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  "critique_projection_sha256", "resolution_edge_projection_sha256", "resolution_edge_projection_count",
+  "flow_definition_id", "flow_definition_sha256", "flow_step_id", "flow_gate_id", "flow_gate_policy_sha256", "flow_run_head", "flow_manifest_sha256",
+  "nonce", "expires_at", "requested_at", "signature",
+] as const;
+
+export function exactCurrentCompletionRecoveryAuthorizationPayload(value: Omit<ExactCurrentCompletionRecoveryAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedExactCurrentCompletionRecoveryAuthorization(
+  fields: Omit<ExactCurrentCompletionRecoveryAuthorization, "schema_version" | "operation" | "signature">,
+): { unsigned: Omit<ExactCurrentCompletionRecoveryAuthorization, "signature">; signingPayload: string } {
+  const unsigned = { schema_version: "1.0", operation: "recover-exact-current-completion", ...fields } as const;
+  return { unsigned, signingPayload: exactCurrentCompletionRecoveryAuthorizationPayload(unsigned) };
+}
+
+export function validateExactCurrentCompletionRecoveryAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): ExactCurrentCompletionRecoveryAuthorization {
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS].sort())) {
+    throw new Error("exact-current completion recovery authorization contains unexpected or missing fields");
+  }
+  if (value.schema_version !== "1.0" || value.operation !== "recover-exact-current-completion") throw new Error("exact-current completion recovery authorization identity is invalid");
+  if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("exact-current completion recovery authorization does not bind the canonical project, run, and subject");
+  if (value.permitted_transition !== "exact-current-completion-only") throw new Error("exact-current completion recovery authorization transition is invalid");
+  if (!["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(String(value.stale_completion_action))) throw new Error("exact-current completion recovery authorization stale completion action is invalid");
+  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("exact-current completion recovery authorization must bind the builder.build verify gate");
+  for (const field of EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`exact-current completion recovery authorization ${field} must be a SHA-256 digest`);
+  }
+  for (const field of ["current_ledger_length", "resolution_edge_projection_count"]) {
+    if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`exact-current completion recovery authorization ${field} must be a non-negative safe integer`);
+  }
+  for (const field of ["flow_gate_id", "nonce"]) boundedText(value[field], `authorization.${field}`, 4096);
+  for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`exact-current completion recovery authorization ${field} does not match the current preimage`);
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt || (now > expiresAt && !expected.allowExpired) || requestedAt > now + 5 * 60_000) throw new Error("exact-current completion recovery authorization time window is invalid");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as ExactCurrentCompletionRecoveryAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, exactCurrentCompletionRecoveryAuthorizationPayload);
+  return authorization;
+}
 
 const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject",

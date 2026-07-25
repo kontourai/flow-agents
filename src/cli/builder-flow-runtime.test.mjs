@@ -3003,6 +3003,31 @@ test("verification evidence reseal authorization binds every atomic preimage", (
   );
 });
 
+test("exact-current completion recovery authorization fixes every refresh binding", () => {
+  const fields = {
+    project_root: "/tmp/recovery-project", run_id: "run-1", subject: SUBJECT, permitted_transition: "exact-current-completion-only",
+    stale_completion_sha256: "1".repeat(64), stale_completion_action: "resolve-critique", stale_completion_request_sha256: "2".repeat(64), stale_completion_result_core_sha256: "3".repeat(64), stale_completion_coordinator_runtime_sha256: "4".repeat(64),
+    current_bundle_sha256: "5".repeat(64), current_ledger_sha256: "6".repeat(64), current_ledger_length: 2, current_ledger_tail_hash: "7".repeat(64),
+    critique_projection_sha256: "8".repeat(64), resolution_edge_projection_sha256: "9".repeat(64), resolution_edge_projection_count: 1,
+    flow_definition_id: "builder.build", flow_definition_sha256: "a".repeat(64), flow_step_id: "verify", flow_gate_id: "verify-gate", flow_gate_policy_sha256: "b".repeat(64), flow_run_head: "c".repeat(64), flow_manifest_sha256: "d".repeat(64),
+    nonce: "recover-once", requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  const built = builderLifecycleAuthority.buildUnsignedExactCurrentCompletionRecoveryAuthorization(fields);
+  assert.equal(built.unsigned.operation, "recover-exact-current-completion");
+  assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
+  const malformed = { ...built.unsigned, signature: { algorithm: "ed25519", key_id: "operator", value: "AA==" }, permitted_transition: "rewrite-evidence" };
+  assert.throws(
+    () => builderLifecycleAuthority.validateExactCurrentCompletionRecoveryAuthorization(malformed, { projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z" }),
+    /transition is invalid/i,
+  );
+  const missing = { ...built.unsigned, signature: malformed.signature };
+  delete missing.stale_completion_sha256;
+  assert.throws(
+    () => builderLifecycleAuthority.validateExactCurrentCompletionRecoveryAuthorization(missing, { projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z" }),
+    /unexpected or missing fields/i,
+  );
+});
+
 test("history-repair authorization is a distinct signed request bound to the exact missing authority edge", () => {
   const buildUnsignedCritiqueResolutionHistoryRepairAuthorization = builderLifecycleAuthority.buildUnsignedCritiqueResolutionHistoryRepairAuthorization;
   const critiqueResolutionHistoryRepairAuthorizationPayload = builderLifecycleAuthority.critiqueResolutionHistoryRepairAuthorizationPayload;

@@ -12,6 +12,7 @@ import {
   critiqueHistoryProjectionSummary,
   critiqueResolutionEdgeProjectionSummary,
   critiqueResolutionHistoryBridgeDigest,
+  recoverExactCurrentCompletionTransition,
   repairCritiqueResolutionHistoryTransition,
   resealVerificationEvidenceTransition,
   resolveCritiqueTransition,
@@ -36,7 +37,16 @@ const ACTION_FIELDS = {
   "resolve-critique": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "reseal-verification-evidence": ["action", "project_root", "session_dir", "authorization_file"],
+  "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
 };
+const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "permitted_transition",
+  "stale_completion_sha256", "stale_completion_action", "stale_completion_request_sha256", "stale_completion_result_core_sha256", "stale_completion_coordinator_runtime_sha256",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  "critique_projection_sha256", "resolution_edge_projection_sha256", "resolution_edge_projection_count",
+  "flow_definition_id", "flow_definition_sha256", "flow_step_id", "flow_gate_id", "flow_gate_policy_sha256", "flow_run_head", "flow_manifest_sha256",
+  "nonce", "expires_at", "requested_at", "signature",
+];
 const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash",
   "expected_resolver", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha",
@@ -131,11 +141,23 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
   return authorization;
 }
+function assertExactCurrentRecoveryTimeWindow(authorization, { allowExpiredReplay = false } = {}) {
+  const requestedAt = Date.parse(String(authorization.requested_at));
+  const expiresAt = Date.parse(String(authorization.expires_at));
+  const now = Date.now();
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt < requestedAt
+      || requestedAt > now + 5 * 60_000 || expiresAt - requestedAt > 8760 * 3_600_000
+      || (!allowExpiredReplay && now > expiresAt)) {
+    throw new Error("exact-current completion recovery authorization time window is invalid");
+  }
+}
 function assertPrivilegedAuthorizationShape(authorization) {
   const fields = authorization.operation === "repair-critique-resolution-history"
     ? HISTORY_REPAIR_AUTHORIZATION_FIELDS
     : authorization.operation === "reseal-verification-evidence"
       ? VERIFICATION_RESEAL_AUTHORIZATION_FIELDS
+      : authorization.operation === "recover-exact-current-completion"
+        ? EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS
       : null;
   if (!fields) return authorization;
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
@@ -340,7 +362,7 @@ function loadResolutionEventLedger(paths, bundle, authorization, action = author
   const ledger = JSON.parse(bytes.toString("utf8"));
   exact(ledger, ["schema_version", "events"], "lifecycle authority resolution event ledger");
   if (ledger.schema_version !== PROTOCOL_VERSION || !Array.isArray(ledger.events)) throw new Error("lifecycle authority resolution event ledger is invalid");
-  validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" });
+  validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" || action === "recover-exact-current-completion" });
   for (const event of ledger.events) verifySignedAuthorization(event.signed_authorization, { projectRoot: paths.projectRoot, requireCurrentExpiry: false });
   return { events: ledger.events, bytes, absent: false };
 }
@@ -379,7 +401,7 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   exact(completion, fields, label);
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
@@ -407,6 +429,54 @@ function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
 function verifyHistoricalLifecycleCompletion(paths, completion) {
   return assertLifecycleCompletionIdentity(paths, completion, ["applied", "replayed"], "historical lifecycle completion");
 }
+async function assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope, expected = null, verifyFlow = true) {
+  const bundleFile = path.join(paths.sessionDir, "trust.bundle");
+  const bundleBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+  const bundle = JSON.parse(bundleBytes.toString("utf8"));
+  const ledger = loadResolutionEventLedger(paths, bundle, authorization, envelope.action);
+  const completionBytes = protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "stale lifecycle completion", 256 * 1024);
+  const stale = assertLifecycleCompletionIdentity(paths, JSON.parse(completionBytes.toString("utf8")), ["applied"], "stale lifecycle completion");
+  if (stale.result_core_sha256 === lifecycleAuthorityResultDigest(bundle, ledger.events)) throw new Error("exact-current completion recovery requires a stale completion");
+  if (sha256(completionBytes) !== authorization.stale_completion_sha256
+      || stale.action !== authorization.stale_completion_action
+      || stale.request_sha256 !== authorization.stale_completion_request_sha256
+      || stale.result_core_sha256 !== authorization.stale_completion_result_core_sha256
+      || stale.coordinator_runtime_sha256 !== authorization.stale_completion_coordinator_runtime_sha256) {
+    throw new Error("exact-current completion recovery authorization does not bind the authenticated stale completion");
+  }
+  if (!verifyFlow) {
+    if (expected && (!bundleBytes.equals(expected.bundleBytes) || !ledger.bytes.equals(expected.ledger.bytes) || !completionBytes.equals(expected.completionBytes))) {
+      throw new Error("exact-current completion recovery protected preimage changed during publication");
+    }
+    return { bundleFile, bundleBytes, bundle, ledger, completionBytes, stale };
+  }
+  const files = canonicalFlowPaths(paths);
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+  const gatePolicy = currentGatePolicy(definition, state);
+  const { flow } = await loadPinnedFlowReducer();
+  const preimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
+  const definitionSha256 = sha256(protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024));
+  const gatePolicySha256 = flowGatePolicyDigest(gatePolicy);
+  if (authorization.permitted_transition !== "exact-current-completion-only"
+      || authorization.subject !== sessionSubject(paths) || authorization.subject !== state.subject
+      || definition.id !== authorization.flow_definition_id || state.current_step !== authorization.flow_step_id
+      || (state.definition_digest !== undefined && state.definition_digest !== flow.definitionDigest(definition))
+      || definitionSha256 !== authorization.flow_definition_sha256 || gatePolicySha256 !== authorization.flow_gate_policy_sha256
+      || gatePolicy.gate_id !== authorization.flow_gate_id || preimage.run_head !== authorization.flow_run_head
+      || preimage.manifest_sha256 !== authorization.flow_manifest_sha256) {
+    throw new Error("exact-current completion recovery canonical Flow preimage no longer matches the signed authorization");
+  }
+  const reduced = recoverExactCurrentCompletionTransition({
+    bundle, resolution_events: ledger.events, authorization, bundle_bytes: bundleBytes, ledger_bytes: ledger.bytes,
+    flow: { definition_id: definition.id, definition_sha256: definitionSha256, step_id: state.current_step, gate_policy_sha256: gatePolicySha256, ...gatePolicy },
+  });
+  if (expected && (!bundleBytes.equals(expected.bundleBytes) || !ledger.bytes.equals(expected.ledger.bytes) || !completionBytes.equals(expected.completionBytes))) {
+    throw new Error("exact-current completion recovery protected preimage changed during publication");
+  }
+  return { bundleFile, bundleBytes, bundle, ledger, completionBytes, stale, files, preimage, reduced };
+}
 function sha256File(file, label) { return sha256(protectedRegularFile(file, label, 16 * 1024 * 1024)); }
 function exactObject(value, expected, label) {
   if (canonicalJson(value) !== canonicalJson(expected)) throw new Error(`${label} does not match the pinned Flow reducer identity`);
@@ -420,7 +490,7 @@ async function loadPinnedFlowReducer() {
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "definitionDigest", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
@@ -732,6 +802,9 @@ function currentGatePolicy(definition, state) {
   const gate = definition.gates?.[gateId];
   if (!record(gate) || !Array.isArray(gate.expects)) throw new Error("canonical Flow current gate has no protected expectation requirements");
   return { gate_id: gateId, requirements: structuredClone(gate.expects) };
+}
+function flowGatePolicyDigest(policy) {
+  return sha256(canonicalJson({ gate_id: policy.gate_id, requirements: policy.requirements }));
 }
 async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null) {
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
@@ -1179,9 +1252,54 @@ export function cleanupVerificationResealTransaction(paths, plan, hooks = {}) {
   hooks.before_unlink?.(planFile);
   if (fs.existsSync(planFile)) fs.unlinkSync(planFile);
 }
+async function recoveryFlowPostimageCas(synchronized, action) {
+  const before = synchronized.postimages.map((postimage) => ({
+    postimage,
+    existed: fs.existsSync(postimage.file),
+    bytes: fs.existsSync(postimage.file) ? protectedRegularFile(postimage.file, postimage.label, postimage.max_bytes) : null,
+    mode: fs.existsSync(postimage.file) ? (fs.statSync(postimage.file).mode & 0o777) : null,
+  }));
+  try { return await action(); }
+  catch (error) {
+    let drifted = false;
+    for (const entry of before) {
+      const current = fs.existsSync(entry.postimage.file) ? protectedRegularFile(entry.postimage.file, entry.postimage.label, entry.postimage.max_bytes) : null;
+      // Restore only an artifact still equal to this operation's own exact
+      // postimage. Unknown concurrent state is preserved and fails closed.
+      if ((current === null) !== false || !current.equals(entry.postimage.bytes)) { drifted = true; continue; }
+      if (entry.existed) atomicWrite(entry.postimage.file, entry.bytes, entry.mode);
+      else fs.unlinkSync(entry.postimage.file);
+    }
+    if (drifted) throw new Error("exact-current completion recovery encountered concurrent Flow artifact drift; no foreign state was restored", { cause: error });
+    throw error;
+  }
+}
 async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null) {
     if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
     if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
+    if (envelope.action === "recover-exact-current-completion") {
+      return withCanonicalFlowRunMutationLock(paths, async () => {
+        const initial = await assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope);
+        const resultCoreSha256 = lifecycleAuthorityResultDigest(initial.reduced.bundle, initial.reduced.resolution_events);
+        const synchronized = await prepareCanonicalFlowSynchronization(paths, initial.reduced.bundle, envelope, {
+          definition_id: authorization.flow_definition_id, step_id: authorization.flow_step_id, gate_id: authorization.flow_gate_id,
+          subject: authorization.subject, run_head: authorization.flow_run_head, manifest_sha256: authorization.flow_manifest_sha256,
+        });
+        await recoveryFlowPostimageCas(synchronized, async () => {
+          await assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope, initial, false);
+          for (const postimage of synchronized.postimages) atomicWrite(postimage.file, postimage.bytes, 0o644);
+          await assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope, initial, false);
+          assertCanonicalFlowPostimages(synchronized);
+          // No trust.bundle, ledger, or stale receipt write is permitted here.
+          if (!protectedRegularFile(initial.bundleFile, "trust bundle", 4 * 1024 * 1024).equals(initial.bundleBytes)
+              || !protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "stale lifecycle completion", 256 * 1024).equals(initial.completionBytes)) {
+            throw new Error("exact-current completion recovery attempted to rewrite protected evidence");
+          }
+          assertResolutionEventLedgerPreimage(paths, initial.ledger);
+        });
+        return { result_core_sha256: resultCoreSha256, run_id: paths.runId };
+      });
+    }
     if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
@@ -1352,7 +1470,7 @@ async function processRootOperation(envelope) {
       const prior = durableJson(completionFile, "completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
       reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
-      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
@@ -1363,12 +1481,13 @@ async function processRootOperation(envelope) {
       const prior = durableJson(nonceFile, "nonce record");
       assertPreparedNonceRecord(prior, prepared);
       resumePrepared = true;
-      if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
+      if (["resolve-critique", "repair-critique-resolution-history", "recover-exact-current-completion"].includes(envelope.action)) {
         const recovery = childInvocation({ kind: "rollback", capability: signedCapability("rollback-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
         if (!record(recovery) || recovery.run_id !== identity.runId || typeof recovery.rolled_back !== "boolean") throw new Error("unprivileged lifecycle transaction recovery returned an invalid response");
       }
     } else {
       verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
+      if (envelope.action === "recover-exact-current-completion") assertExactCurrentRecoveryTimeWindow(authorization);
       // Reject a stale or mismatched live holder before creating any durable
       // nonce state. A prepared nonce is intentionally exempt: it may be
       // recovering a cancel whose child mutation already completed, and the
@@ -1377,6 +1496,7 @@ async function processRootOperation(envelope) {
         assertLiveAssignmentHolder(canonicalMutationPaths(envelope.request), authorization);
       }
       if (envelope.action === "repair-critique-resolution-history") verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+      if (envelope.action === "recover-exact-current-completion") await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
       if (envelope.action === "reseal-verification-evidence") {
         const preflight = childInvocation({
           kind: "preflight-reseal",
@@ -1389,6 +1509,7 @@ async function processRootOperation(envelope) {
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+    if (envelope.action === "recover-exact-current-completion") await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
     // The child rechecks all worktree inputs immediately before publication. Do
     // the matching root-only completion/nonce read immediately before handing
     // it the mutation capability, so a changed durable anchor cannot be used
@@ -1437,7 +1558,7 @@ async function processRootOperation(envelope) {
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.
-    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
   });

@@ -29,6 +29,14 @@ if (!/(?:lifecycle-authority\.resolution-events\.json[\s\S]{0,800}protectedJson|
 if (!/validat\w*Resolution\w*(?:Event|Ledger)/i.test(source)) {
   throw new Error('coordinator must validate the external resolution-event ledger before mutation');
 }
+if (!/recover-exact-current-completion/.test(source)
+    || !/recoverExactCurrentCompletionTransition/.test(source)
+    || !/assertExactCurrentCompletionRecoveryPreimages/.test(source)) {
+  throw new Error('coordinator must retain the fixed exact-current completion recovery protocol');
+}
+if (!/assertResolutionEventLedgerPreimage\(paths, initial\.ledger\)/.test(source)) {
+  throw new Error('completion recovery must preserve the protected resolution ledger bytes');
+}
 NODE
 # The privileged coordinator is pinned to the audited Flow 3.8.1 reducer closure.
 # npm installs the package's declared transitive dependencies; callers do not

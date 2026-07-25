@@ -247,6 +247,51 @@ export function resealVerificationEvidenceTransition(input) {
   return { bundle: structuredClone(candidateBundle), resolution_events: structuredClone(resolutionEvents) };
 }
 
+/**
+ * Pure policy for refreshing a stale, authenticated completion.  It is
+ * deliberately not a claim or ledger transition: the coordinator owns the
+ * byte-preserving I/O boundary and may only attach the already-current bundle
+ * to Flow before minting a new completion.
+ */
+export function recoverExactCurrentCompletionTransition(input) {
+  exact(input, ["bundle", "resolution_events", "authorization", "bundle_bytes", "ledger_bytes", "flow"], "exact-current completion recovery input");
+  const { bundle, resolution_events: resolutionEvents, authorization, bundle_bytes: bundleBytes, ledger_bytes: ledgerBytes, flow } = input;
+  if (!record(bundle) || !Array.isArray(bundle.claims) || Object.hasOwn(bundle, "critique_resolution_events")) throw new Error("exact-current completion recovery requires a stripped Trust Bundle with claims");
+  if (!record(authorization) || authorization.schema_version !== "1.0" || authorization.operation !== "recover-exact-current-completion" || authorization.permitted_transition !== "exact-current-completion-only") {
+    throw new Error("exact-current completion recovery authorization identity is invalid");
+  }
+  if (!Buffer.isBuffer(bundleBytes) || !Buffer.isBuffer(ledgerBytes)) throw new Error("exact-current completion recovery requires exact byte preimages");
+  if (!record(flow) || flow.definition_id !== "builder.build" || flow.step_id !== "verify" || typeof flow.gate_id !== "string"
+      || authorization.flow_definition_id !== flow.definition_id || authorization.flow_step_id !== flow.step_id || authorization.flow_gate_id !== flow.gate_id) {
+    throw new Error("exact-current completion recovery is authorized only for the builder.build verify gate");
+  }
+  if (typeof flow.definition_sha256 !== "string" || typeof flow.gate_policy_sha256 !== "string"
+      || authorization.flow_definition_sha256 !== flow.definition_sha256
+      || authorization.flow_gate_policy_sha256 !== flow.gate_policy_sha256) {
+    throw new Error("exact-current completion recovery Flow definition or ordered gate policy changed");
+  }
+  if (crypto.createHash("sha256").update(bundleBytes).digest("hex") !== authorization.current_bundle_sha256
+      || crypto.createHash("sha256").update(ledgerBytes).digest("hex") !== authorization.current_ledger_sha256) {
+    throw new Error("exact-current completion recovery preimage bytes changed");
+  }
+  const ledger = validateResolutionEventLedger(resolutionEvents, {
+    run_id: authorization.run_id, subject: authorization.subject, project_root: authorization.project_root, bundle, strict_coverage: true,
+  });
+  if (authorization.current_ledger_length !== ledger.length || authorization.current_ledger_tail_hash !== ledger.tail_hash) {
+    throw new Error("exact-current completion recovery ledger identity changed");
+  }
+  const critique = critiqueHistoryProjectionSummary(bundle.claims);
+  const edges = critiqueResolutionEdgeProjectionSummary(bundle.claims);
+  if (authorization.critique_projection_sha256 !== critique.digest
+      || authorization.resolution_edge_projection_sha256 !== edges.digest
+      || authorization.resolution_edge_projection_count !== edges.count) {
+    throw new Error("exact-current completion recovery critique or resolution-edge projection changed");
+  }
+  // Return the current values directly. Serializing a semantically equivalent
+  // copy would violate the protocol's exact-evidence promise at the I/O layer.
+  return { bundle, resolution_events: resolutionEvents };
+}
+
 export function assertAppendOnlyCritiqueHistory(historicalClaims, currentClaims) {
   const historical = critiqueHistoryProjectionSummary(historicalClaims);
   const current = critiqueHistoryProjectionSummary(currentClaims);

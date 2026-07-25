@@ -145,6 +145,30 @@ flow_agents workflow evidence \
 
 When a current root-signed lifecycle completion already binds a Trust Bundle and its external
 resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
+If a legitimate later public critique or gate claim has already made that receipt stale, do not
+rewrite or delete it, append a resolution event, or use history repair. First request and sign the
+completion-only refresh (the authorization file must remain outside the project):
+
+```bash
+flow_agents workflow recover-exact-current-completion-request \
+  --session-dir .kontourai/flow-agents/example > completion-recovery-request.json
+
+# Sign completion-recovery-request.json.authorization with the configured operator key.
+flow_agents workflow recover-exact-current-completion \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/completion-recovery-authorization.json
+```
+
+This narrow action is available only at the one open `builder.build` `verify` gate. It binds an
+authenticated stale same-run root completion, the raw current bundle and ledger bytes, complete
+cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
+and canonical ordered gate-policy digests, Flow head/manifest,
+fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
+the coordinator adds one request-keyed canonical Flow `trust.bundle` attachment and installs one
+new exact-current completion. Replaying the same signed request returns that immutable completion
+without another attachment. Use it only after all final independent critique/resolution work is
+complete, and then use reseal for the final verification evidence.
+
 Use the two-stage reseal only for the final `builder.build` verify evidence after critique
 resolution:
 
