@@ -43,10 +43,6 @@ import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvid
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 
-const runtimeTestSeams = await loadRuntimeTestSeams();
-const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
-const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
-
 test("provisional delivery request serialization preserves every exact lifecycle binding", () => {
   const fields = {
     project_root: "/project", run_id: "session-a", subject: "kontourai/flow-agents#957", work_item: "kontourai/flow-agents#957",
@@ -785,6 +781,9 @@ assert.deepEqual(
   hostAuthorityKeys.publicKey.export({ type: "spki", format: "der" }),
   "host-authority tests use the independently provisioned mock completion verification key",
 );
+const runtimeTestSeams = await loadRuntimeTestSeams();
+const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
+const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
 process.once("exit", () => {
   fsCjsForHostAuthority.openSync = realHostAuthorityOpen;
   fsCjsForHostAuthority.fstatSync = realHostAuthorityFstat;
