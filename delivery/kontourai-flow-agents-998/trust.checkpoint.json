@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-998",
+  "work_item": null,
+  "status": "provisional",
+  "phase": "ci-readiness",
+  "sealed_at": "2026-07-25T15:15:58.176Z",
+  "commit_sha": "c5983f1cfa6d360a9c243085b3d7b560ac5787c1",
+  "checkpoint": {
+    "asOf": "2026-07-25T15:15:58.177Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-998-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-998-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8b86ec49b610dffbe769ac131a767899bf13d65cfe75f85452ccc1d61e26a8e9-gate-visit-2026-07-25t14-58-50z": "verified",
+      "kontourai-flow-agents-998-gate-claim-pickup-probe-readiness.flow-agents-workflow.exact-committed-scope-current-assignment-provider-head-and-canonical-manifest-command-make-the-publication-recovery-ready-gate-visit-2026-07-25t14-58-51-166z": "verified",
+      "kontourai-flow-agents-998-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.preserve-prior-failures-use-the-literal-manifest-command-and-accept-no-evidence-gaps-gate-visit-2026-07-25t14-58-51-463z": "verified",
+      "kontourai-flow-agents-998-gate-claim-implementation-plan.flow-agents-workflow.plan-binds-exact-head-independent-review-literal-manifest-evidence-provisional-delivery-checks-learning-merge-and-terminal-delivery-gate-visit-2026-07-25t14-58-51-872z": "verified",
+      "kontourai-flow-agents-998-gate-claim-implementation-scope.flow-agents-workflow.no-source-implementation-was-added-the-exact-committed-three-file-pr-scope-is-unchanged-and-clean-gate-visit-2026-07-25t14-58-52-284z": "verified",
+      "kontourai-flow-agents-998-gate-claim-acceptance-criteria.flow-agents-workflow.goal-fit-and-current-head-recovery-acceptance-pass-with-exact-critique-preserved-failed-closed-histories-and-literal-manifest-aligned-test-evidence-gate-visit-2026-07-25t15-04-27-638z": "verified",
+      "kontourai-flow-agents-998-gate-claim-tests-evidence.flow-agents-workflow.the-literal-canonical-bundle-install-manifest-command-passed-121-of-121-checks-at-the-exact-committed-head-the-anti-gaming-manifest-suite-also-passed-26-components-gate-visit-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-gate-claim-merge-readiness.flow-agents-workflow.exact-scope-independent-critique-writer-observed-manifest-evidence-provider-head-and-preserved-prior-failures-support-publication-merge-remains-gated-on-provisional-delivery-checks-gate-visit-2026-07-25t15-13-54-937z": "verified",
+      "kontourai-flow-agents-998-exact-head-and-provider-head-match.flow-agents-workflow.exact-head-and-provider-head-match-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-prior-failed-closed-histories-preserved.flow-agents-workflow.prior-failed-closed-histories-preserved-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-independent-exact-current-critique-passes.flow-agents-workflow.independent-exact-current-critique-passes-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-manifest-aligned-test-command-passes-and-is-recorded.flow-agents-workflow.manifest-aligned-test-command-passes-and-is-recorded-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-provisional-delivery-and-provider-checks-pass.flow-agents-workflow.provisional-delivery-and-provider-checks-pass-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-merge-learning-and-terminal-delivery-complete.flow-agents-workflow.merge-learning-and-terminal-delivery-complete-verified-2026-07-25t15-10-58-590z": "verified",
+      "kontourai-flow-agents-998-review.flow-agents-workflow.reviewed-exact-head-c5983f1cfa6d360a9c243085b3d7b560ac5787c1-against-base-5a3cc2aa3b1c8a3a489264d9d3d1442f3b3b8c92-the-terminal-exact-three-path-exception-remains-fail-closed-release-only-status-exact-ancestry-and-path-set-raw-descriptor-identity-at-both-revisions-regular-100644-blobs-and-checkout-byte-equality-are-enforced-adversarial-signed-unsigned-source-path-extra-path-missing-mode-symlink-checkout-and-unrelated-history-cases-are-covered-public-documentation-matches-the-implemented-lifecycle-the-literal-manifest-command-bash-evals-ci-antigaming-suite-sh-is-present-in-the-canonical-manifest-and-is-suitable-reconciliable-evidence-its-prior-26-component-passing-run-is-verification-evidence-not-asserted-by-this-critique-reviewed-2026-07-25t15-03-21-420z": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-25T15:13:54.937Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-998-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-998-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8b86ec49b610dffbe769ac131a767899bf13d65cfe75f85452ccc1d61e26a8e9-gate-visit-2026-07-25t14-58-50z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-pickup-probe-readiness.flow-agents-workflow.exact-committed-scope-current-assignment-provider-head-and-canonical-manifest-command-make-the-publication-recovery-ready-gate-visit-2026-07-25t14-58-51-166z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.preserve-prior-failures-use-the-literal-manifest-command-and-accept-no-evidence-gaps-gate-visit-2026-07-25t14-58-51-463z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-implementation-plan.flow-agents-workflow.plan-binds-exact-head-independent-review-literal-manifest-evidence-provisional-delivery-checks-learning-merge-and-terminal-delivery-gate-visit-2026-07-25t14-58-51-872z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-implementation-scope.flow-agents-workflow.no-source-implementation-was-added-the-exact-committed-three-file-pr-scope-is-unchanged-and-clean-gate-visit-2026-07-25t14-58-52-284z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-acceptance-criteria.flow-agents-workflow.goal-fit-and-current-head-recovery-acceptance-pass-with-exact-critique-preserved-failed-closed-histories-and-literal-manifest-aligned-test-evidence-gate-visit-2026-07-25t15-04-27-638z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-tests-evidence.flow-agents-workflow.the-literal-canonical-bundle-install-manifest-command-passed-121-of-121-checks-at-the-exact-committed-head-the-anti-gaming-manifest-suite-also-passed-26-components-gate-visit-2026-07-25t15-10-58-590z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-gate-claim-merge-readiness.flow-agents-workflow.exact-scope-independent-critique-writer-observed-manifest-evidence-provider-head-and-preserved-prior-failures-support-publication-merge-remains-gated-on-provisional-delivery-checks-gate-visit-2026-07-25t15-13-54-937z": "2026-07-25T15:13:54.937Z",
+      "kontourai-flow-agents-998-exact-head-and-provider-head-match.flow-agents-workflow.exact-head-and-provider-head-match-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-prior-failed-closed-histories-preserved.flow-agents-workflow.prior-failed-closed-histories-preserved-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-independent-exact-current-critique-passes.flow-agents-workflow.independent-exact-current-critique-passes-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-manifest-aligned-test-command-passes-and-is-recorded.flow-agents-workflow.manifest-aligned-test-command-passes-and-is-recorded-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-provisional-delivery-and-provider-checks-pass.flow-agents-workflow.provisional-delivery-and-provider-checks-pass-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-merge-learning-and-terminal-delivery-complete.flow-agents-workflow.merge-learning-and-terminal-delivery-complete-verified-2026-07-25t15-10-58-590z": "2026-07-25T15:10:58.590Z",
+      "kontourai-flow-agents-998-review.flow-agents-workflow.reviewed-exact-head-c5983f1cfa6d360a9c243085b3d7b560ac5787c1-against-base-5a3cc2aa3b1c8a3a489264d9d3d1442f3b3b8c92-the-terminal-exact-three-path-exception-remains-fail-closed-release-only-status-exact-ancestry-and-path-set-raw-descriptor-identity-at-both-revisions-regular-100644-blobs-and-checkout-byte-equality-are-enforced-adversarial-signed-unsigned-source-path-extra-path-missing-mode-symlink-checkout-and-unrelated-history-cases-are-covered-public-documentation-matches-the-implemented-lifecycle-the-literal-manifest-command-bash-evals-ci-antigaming-suite-sh-is-present-in-the-canonical-manifest-and-is-suitable-reconciliable-evidence-its-prior-26-component-passing-run-is-verification-evidence-not-asserted-by-this-critique-reviewed-2026-07-25t15-03-21-420z": "2026-07-25T15:13:54.937Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
