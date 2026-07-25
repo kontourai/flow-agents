@@ -124,7 +124,7 @@ function validateLabelName(value: unknown): string {
 }
 
 function ensureClaimLabel(ghBin: string, repo: Repo, labelName: string): void {
-  const repository = `github.com/${repo.owner}/${repo.name}`;
+  const repository = `${repo.owner}/${repo.name}`;
   const labels = ghJson(ghBin, ["label", "list", "--repo", repository, `--search=${labelName}`, "--limit", "100", "--json", "name"]) as unknown[];
   const exists = Array.isArray(labels) && labels.some((label) => label && typeof label === "object" && (label as Record<string, unknown>).name === labelName);
   if (exists) return;
@@ -376,7 +376,7 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
     const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
     if (options.online) ensureClaimLabel(ghBin, repo, labelName);
-    else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`github.com/${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
+    else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
     publishDocuments(root, lock, rootStat, pending);
     const files = pending.map((item) => item.file);
     return { repo, project, files, offlineRemediation };
