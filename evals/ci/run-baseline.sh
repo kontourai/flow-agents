@@ -21,6 +21,7 @@ CHECKS=(
   "Static eval suite|bash evals/run.sh static"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
+  "Evidence command serialization integration|bash evals/integration/test_evidence_command_serialization.sh"
   "Fixture retirement audit integration|bash evals/integration/test_fixture_retirement_audit.sh"
   "Reviewed grounding reference integration|bash evals/integration/test_reviewed_grounding_workflow.sh"
   "Publish-change helper integration|bash evals/integration/test_publish_change_helper.sh"
@@ -141,6 +142,7 @@ LANE_SOURCE_AND_STATIC=(
 LANE_WORKFLOW_CONTRACTS=(
   "Workflow artifact integration"
   "Workflow artifact cleanup audit integration"
+  "Evidence command serialization integration"
   "Fixture retirement audit integration"
   "Reviewed grounding reference integration"
   "Narrative source contract integration"
