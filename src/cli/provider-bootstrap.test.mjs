@@ -26,6 +26,15 @@ function readArgvLog(file) {
     .map((line) => line.slice(1).split("\x1f"));
 }
 
+function snapshotTree(root) {
+  if (!fs.existsSync(root)) return [];
+  const visit = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(dir, entry.name);
+    return entry.isDirectory() ? visit(file) : [[path.relative(root, file), fs.readFileSync(file).toString("base64")]];
+  });
+  return visit(root).sort(([left], [right]) => left.localeCompare(right));
+}
+
 async function waitForPath(file, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -152,6 +161,16 @@ test("provider pickup derives one exact branch-bound claim and start plan withou
       path.join(pickup.session_dir, `${pickup.slug}--pull-work.md`),
       `# Pull Work\n\nSelected Work Item: ${pickup.work_item_ref}\n`,
     );
+    const beforeBranchSwitch = snapshotTree(path.join(repo, ".kontourai"));
+    execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/branch-switch"]);
+    const switched = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.start_workflow.argv.slice(1),
+    ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+    assert.notEqual(switched.status, 0);
+    assert.match(switched.stderr, /actual Git worktree branch .* disagrees with validated provider assignment branch/);
+    assert.deepEqual(snapshotTree(path.join(repo, ".kontourai")), beforeBranchSwitch, "branch disagreement must not mirror ownership or create session state");
+    execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/provider-pickup"]);
     const started = spawnSync(process.execPath, [
       "build/src/cli.js",
       ...pickup.operations.start_workflow.argv.slice(1),
@@ -198,8 +217,51 @@ test("provider pickup rejects ref, branch, actor, and artifact-root ambiguity be
     );
     rejectWithoutMutation(
       { workItemRef: "example/product#44", artifactRoot: path.join(repo, "..", "outside") },
-      /must stay inside the repository/,
+      /canonical <repository>\/\.kontourai\/flow-agents/,
     );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", artifactRoot: path.join(repo, "custom-artifacts") },
+      /canonical <repository>\/\.kontourai\/flow-agents/,
+    );
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("incompatible provider pickup rejects before settings or online provider commands mutate", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const session = path.join(repo, ".kontourai", "flow-agents", "example-product-44");
+  fs.mkdirSync(session, { recursive: true });
+  fs.writeFileSync(path.join(session, "provider-pickup.json"), `${JSON.stringify({
+    schema_version: "1.0",
+    role: "ProviderPickupPlan",
+    work_item_ref: "example/product#44",
+    provider_branch: "agent/provider-pickup",
+    actor: { actorKey: "different-actor" },
+    claim: { record: { claimed_at: "2026-07-25T00:00:00.000Z" } },
+  })}\n`);
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-rejection-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
+  fs.chmodSync(gh, 0o755);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+    }), /existing provider pickup plan does not match/);
+    assert.equal(fs.existsSync(settings), false, "rejected pickup must not publish provider settings");
+    assert.equal(fs.existsSync(log), false, "rejected pickup must not invoke remote provider commands");
   } finally {
     if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
     else process.env.FLOW_AGENTS_ACTOR = previousActor;
@@ -444,6 +506,7 @@ test("headless init can establish all provider settings in the installed project
   const workItem = "example/product#44";
   const slug = "example-product-44";
   const providerBranch = "provider/authorized-example-product-44";
+  execFileSync("git", ["-C", dest, "symbolic-ref", "HEAD", `refs/heads/${providerBranch}`]);
   const actorFile = path.join(dest, "bootstrap-actor.json");
   const inputFile = path.join(dest, "bootstrap-claim-input.json");
   const issueFile = path.join(dest, "bootstrap-issue.json");
@@ -550,7 +613,7 @@ test("headless init can establish all provider settings in the installed project
   assert.match(callerBranch.stderr, /workflow start.*--branch|unknown flag/i);
 
   // A later provider result that claims a different branch cannot silently rewrite a resumed
-  // session or its local mirror. It is rejected before any session artifact is mutated.
+  // session or its local mirror. The actual checkout check rejects it before any mutation.
   const mismatchedStatus = JSON.parse(status.stdout);
   mismatchedStatus.assignment.record.branch = "provider/conflicting-branch";
   const mismatchedFile = path.join(dest, "bootstrap-status-mismatched-branch.json");
@@ -564,7 +627,7 @@ test("headless init can establish all provider settings in the installed project
     "--effective-state-json", mismatchedFile,
   ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
   assert.notEqual(mismatched.status, 0);
-  assert.match(mismatched.stderr, /provider state evidence conflicts with the existing immutable snapshot/i);
+  assert.match(mismatched.stderr, /actual Git worktree branch .* disagrees with validated provider assignment branch/i);
   assert.equal(read(path.join(sessionDir, "state.json")).branch, providerBranch);
 
   // A provider-backed start fails closed when the claimed record omits its branch. The failed

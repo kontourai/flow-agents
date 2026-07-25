@@ -2329,6 +2329,25 @@ function assertProviderBranchAgreement(
   }
 }
 
+function assertCurrentProviderWorktreeBranch(root: string, providerBranch: string): void {
+  const projectRoot = path.dirname(path.dirname(root));
+  let actualBranch: string;
+  try {
+    actualBranch = execFileSync("git", ["-C", projectRoot, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    die("ensure-session requires a named Git worktree branch for a provider-backed AssignmentStatus record");
+  }
+  if (!actualBranch || actualBranch === "HEAD") {
+    die("ensure-session requires a named Git worktree branch for a provider-backed AssignmentStatus record");
+  }
+  if (actualBranch !== providerBranch) {
+    die(`ensure-session refused: actual Git worktree branch ${JSON.stringify(actualBranch)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+  }
+}
+
 /** Read a `--*-json` flag's value as a file path (or `-` for stdin), mirroring
  * assignment-provider.ts's own `loadJsonInput` convention — this file's OTHER `--*-json` flags
  * (e.g. `--check-json`) instead take a literal inline JSON string via parseJson(), a DIFFERENT
@@ -2458,6 +2477,9 @@ function enforceEnsureSessionOwnership(
     if (assignmentProviderKind !== "local-file" && workItemRef) {
       providerBranch = record!.branch as string;
       validateBranchValue(providerBranch, "validated provider assignment branch");
+      // The provider claim authenticates a branch, but the checkout is the source mutation
+      // authority. Compare them before any local mirror, session, or current-pointer write.
+      assertCurrentProviderWorktreeBranch(root, providerBranch);
       // The immutable provider snapshot is part of the read-only resume preflight, not the
       // later session-artifact staging phase. If it already exists, compare its exact bytes
       // before performLocalClaim can create a local assignment mirror. A conflicting retry must

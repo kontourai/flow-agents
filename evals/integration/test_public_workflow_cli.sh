@@ -186,11 +186,13 @@ node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.build
 pass "documented provider-neutral Work Item refs start without GitHub identity inference"
 seed_pull_work provider:externally-owned-456
 PROVIDER_STATE="$CONSUMER/provider-assignment-state.json"
-node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" <<'NODE'
+CONSUMER_BRANCH="$(git -C "$CONSUMER" branch --show-current)"
+node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" "$CONSUMER_BRANCH" <<'NODE'
 const fs = require('node:fs');
 const local = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const branch = process.argv[4];
 const subject = 'provider-externally-owned-456';
-const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456' };
+const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456', branch };
 fs.writeFileSync(process.argv[2], `${JSON.stringify({ role: 'AssignmentStatus', provider: 'example-provider', assignment: { subject_id: subject, provider: 'example-provider', assignee: local.actor_key, record }, effective: { effective_state: 'held', reason: 'self_is_holder', holder: { actor: local.actor_key } } }, null, 2)}\n`);
 NODE
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:externally-owned-456 --assignment-provider example-provider --effective-state-json "$PROVIDER_STATE" --summary "Externally assigned fixture" >/dev/null

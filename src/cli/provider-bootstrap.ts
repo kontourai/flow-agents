@@ -31,7 +31,7 @@ type ProviderPickupPreflight = {
   identity: ReturnType<typeof githubWorkItemIdentity>;
   branch: string;
   actor: ReturnType<typeof resolveCurrentAssignmentActor>;
-  login: string;
+  login?: string;
   requestedArtifactRoot: string;
 };
 
@@ -58,6 +58,21 @@ export type ProviderPickupPlan = {
     observe_issue: { argv: string[]; stdout_file: string };
     derive_effective_state: { argv: string[]; stdout_file: string };
     start_workflow: { argv: string[] };
+  };
+};
+
+type PreparedProviderPickup = {
+  plan: ProviderPickupPlan;
+  claimInput: {
+    repo: { owner: string; name: string };
+    issue_number: number;
+    assignee_login: string;
+    label_name: string;
+    claim_comment_marker: string;
+    actor_key: string;
+    work_item_ref: string;
+    branch: string;
+    artifact_dir: string;
   };
 };
 
@@ -152,6 +167,14 @@ function writeJsonIfAbsentOrExact(file: string, value: unknown): void {
   fs.writeFileSync(file, bytes, { encoding: "utf8", mode: 0o600, flag: "wx" });
 }
 
+function assertJsonAbsentOrExact(file: string, value: unknown): void {
+  if (!fs.existsSync(file)) return;
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: provider pickup artifact must be a regular file`);
+  const bytes = `${JSON.stringify(value, null, 2)}\n`;
+  if (fs.readFileSync(file, "utf8") !== bytes) throw new Error(`${file}: existing provider pickup artifact does not match the exact canonical inputs`);
+}
+
 function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPreflight | null {
   if (!options.workItemRef) return null;
   const identity = githubWorkItemIdentity(options.workItemRef);
@@ -163,11 +186,12 @@ function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo):
     throw new Error(`provider branch ${JSON.stringify(options.providerBranch)} does not match the actual Git worktree branch ${JSON.stringify(branch)}`);
   }
   const actor = resolveCurrentAssignmentActor();
-  const ghBin = options.ghBin ?? "gh";
-  const login = options.providerLogin ?? (options.online ? currentGitHubLogin(ghBin) : undefined);
-  if (!login) throw new Error("provider pickup requires --provider-login when --online is not enabled");
   const requestedArtifactRoot = path.resolve(options.artifactRoot ?? path.join(options.repoPath, ".kontourai", "flow-agents"));
   const repository = path.resolve(options.repoPath);
+  const canonicalArtifactRoot = path.join(repository, ".kontourai", "flow-agents");
+  if (requestedArtifactRoot !== canonicalArtifactRoot) {
+    throw new Error("provider pickup artifact root must be the canonical <repository>/.kontourai/flow-agents path");
+  }
   const relative = path.relative(repository, requestedArtifactRoot);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("provider pickup artifact root must stay inside the repository");
@@ -178,21 +202,39 @@ function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo):
     if (!fs.existsSync(cursor)) break;
     if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`provider pickup artifact path contains a symbolic link: ${cursor}`);
   }
-  return { identity, branch, actor, login, requestedArtifactRoot };
-}
-
-function persistProviderPickup(options: ProviderBootstrapOptions, repo: Repo, preflight: ProviderPickupPreflight | null): ProviderPickupPlan | null {
-  if (!preflight) return null;
-  const { identity, branch, actor, login } = preflight;
-  if (currentGitBranch(options.repoPath) !== branch) throw new Error("Git worktree branch changed during provider pickup preparation");
-  const artifactRoot = assertProjectSettingsRoot(options.repoPath, preflight.requestedArtifactRoot);
-  const sessionDir = path.join(artifactRoot, identity.slug);
+  const sessionDir = path.join(requestedArtifactRoot, identity.slug);
   if (fs.existsSync(sessionDir)) {
     const stat = fs.lstatSync(sessionDir);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("provider pickup session target must be a regular directory");
-  } else {
-    fs.mkdirSync(sessionDir);
   }
+  const existingPlan = path.join(sessionDir, "provider-pickup.json");
+  if (fs.existsSync(existingPlan)) {
+    const stat = fs.lstatSync(existingPlan);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${existingPlan}: provider pickup artifact must be a regular file`);
+    const existing = JSON.parse(fs.readFileSync(existingPlan, "utf8")) as Partial<ProviderPickupPlan>;
+    if (existing.role !== "ProviderPickupPlan"
+        || existing.work_item_ref !== identity.ref
+        || existing.provider_branch !== branch
+        || existing.actor?.actorKey !== actor.actorKey
+        || typeof existing.claim?.record?.claimed_at !== "string") {
+      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+    }
+  }
+  return { identity, branch, actor, login: options.providerLogin, requestedArtifactRoot };
+}
+
+function completeProviderPickupPreflight(options: ProviderBootstrapOptions, preflight: ProviderPickupPreflight | null): ProviderPickupPreflight | null {
+  if (!preflight) return null;
+  const login = preflight.login ?? (options.online ? currentGitHubLogin(options.ghBin ?? "gh") : undefined);
+  if (!login) throw new Error("provider pickup requires --provider-login when --online is not enabled");
+  return { ...preflight, login };
+}
+
+function providerPickupPlan(repo: Repo, preflight: ProviderPickupPreflight): PreparedProviderPickup {
+  const { identity, branch, actor, login } = preflight;
+  if (!login) throw new Error("provider pickup requires a resolved provider login");
+  const artifactRoot = preflight.requestedArtifactRoot;
+  const sessionDir = path.join(artifactRoot, identity.slug);
   const artifacts = {
     plan_file: path.join(sessionDir, "provider-pickup.json"),
     actor_file: path.join(sessionDir, "provider-pickup.actor.json"),
@@ -213,17 +255,7 @@ function persistProviderPickup(options: ProviderBootstrapOptions, repo: Repo, pr
     artifact_dir: `.kontourai/flow-agents/${identity.slug}`,
   };
   let claimedAt: string | undefined;
-  if (fs.existsSync(artifacts.plan_file)) {
-    const existing = JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as Partial<ProviderPickupPlan>;
-    if (existing.role !== "ProviderPickupPlan"
-        || existing.work_item_ref !== identity.ref
-        || existing.provider_branch !== branch
-        || existing.actor?.actorKey !== actor.actorKey
-        || typeof existing.claim?.record?.claimed_at !== "string") {
-      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
-    }
-    claimedAt = existing.claim.record.claimed_at;
-  }
+  if (fs.existsSync(artifacts.plan_file)) claimedAt = (JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as ProviderPickupPlan).claim.record.claimed_at;
   const claim = renderGithubClaim(identity.slug, claimInput, actor.actor, claimedAt);
   const flowAgents = "flow-agents";
   const plan: ProviderPickupPlan = {
@@ -267,7 +299,23 @@ function persistProviderPickup(options: ProviderBootstrapOptions, repo: Repo, pr
       },
     },
   };
-  writeJsonIfAbsentOrExact(artifacts.actor_file, actor.actor);
+  return { plan, claimInput };
+}
+
+function assertProviderPickupArtifactCompatibility(prepared: PreparedProviderPickup): void {
+  const { plan, claimInput } = prepared;
+  assertJsonAbsentOrExact(plan.artifacts.actor_file, plan.actor.actor);
+  assertJsonAbsentOrExact(plan.artifacts.claim_input_file, claimInput);
+  assertJsonAbsentOrExact(plan.artifacts.liveness_events_file, []);
+  assertJsonAbsentOrExact(plan.artifacts.plan_file, plan);
+}
+
+function persistProviderPickup(prepared: PreparedProviderPickup | null): ProviderPickupPlan | null {
+  if (!prepared) return null;
+  const { plan, claimInput } = prepared;
+  const { session_dir: sessionDir, artifacts } = plan;
+  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+  writeJsonIfAbsentOrExact(artifacts.actor_file, plan.actor.actor);
   writeJsonIfAbsentOrExact(artifacts.claim_input_file, claimInput);
   writeJsonIfAbsentOrExact(artifacts.liveness_events_file, []);
   writeJsonIfAbsentOrExact(artifacts.plan_file, plan);
@@ -275,7 +323,10 @@ function persistProviderPickup(options: ProviderBootstrapOptions, repo: Repo, pr
 }
 
 export function prepareProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPlan | null {
-  return persistProviderPickup(options, repo, preflightProviderPickup(options, repo));
+  const preflight = completeProviderPickupPreflight(options, preflightProviderPickup(options, repo));
+  const prepared = preflight ? providerPickupPlan(repo, preflight) : null;
+  if (prepared) assertProviderPickupArtifactCompatibility(prepared);
+  return persistProviderPickup(prepared);
 }
 
 function discoverProject(ghBin: string, owner: string, requested?: number): Project {
@@ -536,6 +587,9 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
   const repoPath = path.resolve(options.repoPath);
   const repo = detectGitHubRepo(repoPath);
   const ghBin = options.ghBin ?? "gh";
+  // Validate pickup identity and any already-present pickup plan before settings roots,
+  // provider labels, or other mutable setup state are touched.
+  const pickupIdentityPreflight = preflightProviderPickup(options, repo);
   let project: Project;
   let offlineRemediation: string | undefined;
   if (options.online) {
@@ -547,9 +601,9 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     }
     project = { number: options.projectNumber };
   }
-  // Validate every pickup identity before provider settings or remote labels
-  // are mutated. Claim operations themselves remain render-only.
-  const pickupPreflight = preflightProviderPickup(options, repo);
+  const pickupPreflight = completeProviderPickupPreflight(options, pickupIdentityPreflight);
+  const preparedPickup = pickupPreflight ? providerPickupPlan(repo, pickupPreflight) : null;
+  if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
 
   const requestedRoot = options.scope === "global"
     ? path.resolve(options.globalSettingsRoot ?? path.join(os.homedir(), ".config", "flow-agents"))
@@ -578,7 +632,7 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
     publishDocuments(root, lock, rootStat, pending);
     const files = pending.map((item) => item.file);
-    const pickup = persistProviderPickup(options, repo, pickupPreflight);
+    const pickup = persistProviderPickup(preparedPickup);
     return { repo, project, files, offlineRemediation, ...(pickup ? { pickup } : {}) };
   } finally {
     try {

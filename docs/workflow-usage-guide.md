@@ -167,7 +167,10 @@ The command derives the canonical session slug and structured runtime actor
 through the same helpers used by `workflow start` and the assignment provider.
 It refuses a Work Item from another repository, a detached checkout, a branch
 that differs from the actual worktree branch, an unresolved actor, or an
-artifact root outside the repository. The result contains:
+artifact root other than `<repository>/.kontourai/flow-agents`. The public
+`workflow start` operation rechecks that the validated provider branch is still
+the current named Git worktree branch before it mirrors ownership or creates a
+session. The result contains:
 
 - exact `gh` argv arrays for the rendered assignment claim, but does not run
   those mutations;
