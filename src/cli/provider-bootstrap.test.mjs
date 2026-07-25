@@ -356,6 +356,55 @@ fi
   }
 });
 
+test("pickup transaction rejects a late foreign write, preserves it, and restores earlier committed preimages", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const backlog = path.join(settings, "backlog-provider-settings.json");
+  const assignment = path.join(settings, "assignment-provider-settings.json");
+  const foreignBytes = "FOREIGN-WRITE\\n";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const backlogPreimage = fs.readFileSync(backlog);
+    let injected = false;
+    setProviderBootstrapTestHooksForTest({
+      beforeCommit(file, index) {
+        if (index === 1) {
+          fs.writeFileSync(file, foreignBytes);
+          injected = true;
+        }
+      },
+    });
+
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 8,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /publication target changed while the transaction lock was held/);
+    assert.equal(injected, true, "the late write must occur after the first transaction-owned commit");
+    assert.deepEqual(fs.readFileSync(backlog), backlogPreimage, "rollback must restore the earlier transaction-owned commit");
+    assert.equal(fs.readFileSync(assignment, "utf8"), foreignBytes, "rollback must preserve the foreign current target");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
 test("bootstrap, public workflow start, and sidecar share the GitHub Work Item reference corpus", () => {
   const repo = repoFixture();
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);

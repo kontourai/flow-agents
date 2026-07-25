@@ -709,6 +709,7 @@ function publishLocalTransaction(items: PublicationItem[], beforeCommit?: () => 
     items.forEach((item, index) => {
       assertPublicationRoot(item.guard);
       providerBootstrapTestHooks?.beforeCommit?.(item.file, index);
+      assertPublicationPreimagesUnchanged([item], preimages);
       fs.renameSync(staged.get(item.file)!, item.file);
       staged.delete(item.file);
       committed.push({ item, postimage: postimages.get(item.file)!, mode: 0o600 });
