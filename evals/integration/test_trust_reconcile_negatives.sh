@@ -617,9 +617,9 @@ else
   _fail "fresh-matching-bundle: expected 'RECONCILED' in output -- output: $out7p"
 fi
 
-# 7q/7r. REAL-GIT-REPO coverage for the ancestor branch of bundleAttestsThisChange()
-#   (iteration-4 MEDIUM finding: the ancestor path had zero coverage -- 7i/7p above only
-#   exercise exact-sha equality, never a real `git merge-base --is-ancestor` resolution).
+# 7q/7r. REAL-GIT-REPO coverage for fail-closed ancestor handling.
+#   Broad ancestry is no longer ownership: only an exact revision or an exact,
+#   companion-only delivery revision may reconcile an earlier checkpoint.
 #   Both cases below use an ACTUAL git repo (not synthetic sha strings) with a real
 #   parent -> child commit pair.
 
@@ -637,11 +637,9 @@ git -C "$GIT_ORIGIN" add file.txt
 git -C "$GIT_ORIGIN" commit -q -m "child commit"
 CHILD_SHA="$(git -C "$GIT_ORIGIN" rev-parse HEAD)"
 
-# 7q. TRUE-POSITIVE ancestor coverage: checkpoint sealed at the PARENT commit (not equal
-#     to this change's own sha), full-history repo, change sha = the CHILD commit ->
-#     the ancestor branch of bundleAttestsThisChange() (real `git merge-base
-#     --is-ancestor`, not the exact-equality shortcut) resolves FRESH; Step 2 still
-#     reconciles the claimed-pass command normally.
+# 7q. A generic source-changing child of the checkpoint is stale even when the
+#     checkpoint is a real ancestor. This is the anti-gaming boundary that keeps
+#     later unreviewed source commits from inheriting an earlier green bundle.
 CASE7Q="$GIT_ORIGIN"
 FRESH_LABEL_Q="node -e 'process.exit(0)'"
 write_fresh_bundle "$CASE7Q" "$FRESH_LABEL_Q"
@@ -649,20 +647,20 @@ write_stale_checkpoint "$CASE7Q" "$PARENT_SHA"
 out7q="$(TRUST_RECONCILE_SHA="$CHILD_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_Q" \
   node "$RECONCILE" --repo-root "$CASE7Q" 2>&1)"
 code7q=$?
-if [[ $code7q -eq 0 ]]; then
-  _pass "git-ancestor-fresh: reconciler exits 0 (parent-sha checkpoint resolves as an ancestor of the child change sha)"
+if [[ $code7q -ne 0 ]]; then
+  _pass "git-ancestor-stale: reconciler exits non-zero ($code7q) for a generic source-changing child"
 else
-  _fail "git-ancestor-fresh: expected exit 0, got $code7q -- output: $out7q"
+  _fail "git-ancestor-stale: expected non-zero exit, got 0 -- output: $out7q"
 fi
 if echo "$out7q" | grep -qF "stale bundle ignored"; then
-  _fail "git-ancestor-fresh: must NOT emit the stale-bundle line -- the parent IS a real ancestor of the child"
+  _pass "git-ancestor-stale: emits the stale-bundle line"
 else
-  _pass "git-ancestor-fresh: does not emit the stale-bundle line (true ancestor resolution, not equality)"
+  _fail "git-ancestor-stale: expected stale-bundle line -- output: $out7q"
 fi
-if echo "$out7q" | grep -qF "RECONCILED"; then
-  _pass "git-ancestor-fresh: Step 2 reconciled the claimed-pass command (RECONCILED shown)"
+if echo "$out7q" | grep -qF "bundle-required-no-declared-marker"; then
+  _pass "git-ancestor-stale: falls through to the ordinary missing-bundle policy"
 else
-  _fail "git-ancestor-fresh: expected 'RECONCILED' in output -- output: $out7q"
+  _fail "git-ancestor-stale: expected bundle-required-no-declared-marker -- output: $out7q"
 fi
 
 # 7r. DEGRADED-BUT-SAFE shallow-clone coverage: a `git clone --depth 1` of the SAME repo
@@ -935,13 +933,8 @@ else
   _fail "flat-owner-coexist: expected RECONCILED -- output: $out8c"
 fi
 
-# 8d. PREFER-NEWEST among multiple OWNING candidates (the merge-commit-repo / concurrent-PR
-#   coexistence case). An inherited FLAT bundle can attest a REAL ANCESTOR of this change
-#   (committed on the trunk before this branch), AND this session's per-session bundle attests
-#   a NEWER ancestor. "First-fresh-wins" would wrongly pick the stale flat bundle because it
-#   sorts first; the reconciler must instead pick the NEWEST-owning candidate (the per-session
-#   one). Uses a REAL git repo so `git merge-base --is-ancestor` resolves the parent→child
-#   relationship (synthetic shas cannot exercise the ancestor comparison).
+# 8d. Multiple generic ancestor candidates do not become owners merely because
+#   one is newer. Neither revision is an exact companion-only delivery revision.
 NEWEST_REPO="$PERSESSION_TMPROOT/prefer-newest-git"
 mkdir -p "$NEWEST_REPO"
 git -C "$NEWEST_REPO" init -q
@@ -960,20 +953,20 @@ write_session_seal "$NEWEST_REPO" "this-session" "$FRESH_LABEL_8" "$PERSESSION_O
 out8d="$(TRUST_RECONCILE_SHA="$NEWEST_HEAD_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_8" \
   node "$RECONCILE" --repo-root "$NEWEST_REPO" 2>&1)"
 code8d=$?
-if [[ $code8d -eq 0 ]]; then
-  _pass "prefer-newest: reconciler exits 0 (both flat and per-session own; newest selected)"
+if [[ $code8d -ne 0 ]]; then
+  _pass "ancestor-candidates-no-owner: reconciler exits non-zero ($code8d)"
 else
-  _fail "prefer-newest: expected exit 0, got $code8d -- output: $out8d"
+  _fail "ancestor-candidates-no-owner: expected non-zero exit, got 0 -- output: $out8d"
 fi
-if echo "$out8d" | grep -qF "selected delivery candidate delivery/this-session/trust.bundle"; then
-  _pass "prefer-newest: selected the NEWER per-session bundle over the older inherited flat bundle"
+if echo "$out8d" | grep -qF "none attests this change"; then
+  _pass "ancestor-candidates-no-owner: reports that no candidate owns the exact revision"
 else
-  _fail "prefer-newest: expected the per-session bundle to be selected (newest-owning) -- output: $out8d"
+  _fail "ancestor-candidates-no-owner: expected no-owner diagnostic -- output: $out8d"
 fi
-if echo "$out8d" | grep -qF "owning, newest wins"; then
-  _pass "prefer-newest: emitted the 'owning, newest wins' selection detail"
+if echo "$out8d" | grep -qF "bundle-required-no-declared-marker"; then
+  _pass "ancestor-candidates-no-owner: remains fail-closed under bundle-required policy"
 else
-  _fail "prefer-newest: expected 'owning, newest wins' in the selection line -- output: $out8d"
+  _fail "ancestor-candidates-no-owner: expected bundle-required-no-declared-marker -- output: $out8d"
 fi
 
 # 9. [iteration-1 F1 CRITICAL regression guard] CI trust-reconcile.js MUST stay fail-closed

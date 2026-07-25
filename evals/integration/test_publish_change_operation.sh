@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
 flow_agents_build_ts
+node scripts/build-test-support.mjs
 
 # This is the public-command composition: it advances a real canonical Builder
 # run through an existing exact fake-gh PR, without accepting a caller result.
