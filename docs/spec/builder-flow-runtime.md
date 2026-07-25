@@ -762,3 +762,46 @@ For legacy persisted assignments, an actor that omits only `human` is treated as
 `human: null` identity during lifecycle authorization construction and live-holder comparison.
 This compatibility rule does not rewrite the persisted assignment and does not relax any other
 actor field or non-null human identity.
+
+## Multi-cursor host dispatch
+
+Flow Agents can host a Flow definition that explicitly opts into Flow's
+`execution.mode: "multi-cursor"` / claim-contract version `1`. The definition,
+ready frontier, mutable-resource declarations, durable claims, leases, recovery,
+and settlement remain Flow-owned. A host calls `orchestrateFlowMultiCursor` with
+its authenticated actor identity and a callback. The callback receives only a
+Flow-issued claim; it must not write a run state or infer resource overlap.
+
+```ts
+const schedule = await orchestrateFlowMultiCursor({
+  runId,
+  actor: { key: "station:local", kind: "station" },
+  execute: async ({ claim, signal }) => runtime.dispatch(claim.step_id, { signal }),
+});
+```
+
+The host attempts Flow claims for the current ready frontier. It may continue
+after only Flow's typed `flow.multi_cursor.claim.resource_conflict`, allowing a
+disjoint declaration to run while the conflicting declaration waits. Every other
+claim, actor, lease, stale-head, recovery, callback, or cleanup failure fails the
+orchestration; it is never reported as a successful schedule. Long callbacks renew
+their exact Flow lease. If renewal fails, the host aborts the callback and waits for
+it to stop before releasing the exact claim through Flow; runtime adapters must
+honor the supplied `AbortSignal`.
+
+`FlowScheduleObservation` is the bounded schedule artifact for the existing
+workflow evidence path. It includes the exact Flow definition identity, initial
+and successfully captured final Flow heads, host actor, Flow-issued claim/liveness ids, admissions,
+typed deferrals, and settlements/releases. Persist that JSON as an ordinary
+workflow artifact and reference it with the existing `workflow evidence`
+artifact-reference mechanism. It explains host dispatch; it is not a second gate
+truth source and does not advance a Flow run on its own. A failed final capture
+leaves `finalRunHead` null and makes orchestration fail closed.
+
+Builder hosts use `orchestrateBuilderFlowMultiCursor({ sessionDir, ... })`. The
+wrapper proves the canonical Builder session did not change during dispatch and
+atomically writes an immutable
+`<session>/<slug>--multi-cursor-schedule-<sha256>.json`. Its returned
+`evidenceRef` is already shaped for `workflow evidence --evidence-ref-json`, so
+the schedule and typed mutable-resource deferral travel with the gate's ordinary
+test or acceptance evidence instead of becoming a parallel gate truth source.

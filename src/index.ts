@@ -83,6 +83,23 @@ export type {
   WorkflowVerificationStatus,
 } from "./workflow-outcome.js";
 export {
+  FlowMultiCursorOrchestrationError,
+  orchestrateFlowMultiCursor,
+} from "./multi-cursor-flow-orchestrator.js";
+export type {
+  FlowMultiCursorExecution,
+  FlowScheduleEvent,
+  FlowScheduleObservation,
+  OrchestrateFlowMultiCursorInput,
+} from "./multi-cursor-flow-orchestrator.js";
+export { orchestrateBuilderFlowMultiCursor } from "./builder-multi-cursor-flow-orchestrator.js";
+export type {
+  BuilderFlowMultiCursorResult,
+  BuilderFlowScheduleArtifactRef,
+  BuilderFlowScheduleEvidence,
+  OrchestrateBuilderFlowMultiCursorInput,
+} from "./builder-multi-cursor-flow-orchestrator.js";
+export {
   compileRetrospectiveObservation,
   readRetrospectiveObservationManifest,
   validateRetrospectiveObservation,
