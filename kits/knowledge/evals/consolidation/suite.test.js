@@ -1038,6 +1038,278 @@ describe("Gate telemetry — consolidate emits events at each gate", () => {
 // Input validation
 // ---------------------------------------------------------------------------
 
+describe("exact consolidation source scope", () => {
+  test("a topic category excludes records from its parent and descendant categories", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = makeStore(dir);
+      const exactId = await store.create({
+        type: "compiled",
+        title: "Exact grounded extraction decision",
+        body: "Only the exact topic belongs in this snapshot.",
+        category: "decision.grounded-extraction",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      await store.create({
+        type: "compiled",
+        title: "Unrelated provider routing decision",
+        body: "This parent-category record must not be selected.",
+        category: "decision",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      await store.create({
+        type: "compiled",
+        title: "Child experiment",
+        body: "Descendants require an explicit source selection.",
+        category: "decision.grounded-extraction.experiment",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      const snapshotId = await store.create({
+        type: "snapshot",
+        title: "Snapshot: decision.grounded-extraction",
+        body: "Prior body.",
+        category: "decision.grounded-extraction",
+        tags: ["topic:decision.grounded-extraction"],
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+
+      const result = await makeRunner(store, dir).consolidate(snapshotId, {
+        proposedBody: "Exact grounded extraction decision.",
+        rationale: "Prove exact-category source selection.",
+        decision: "apply",
+      });
+
+      assert.deepEqual(result.cluster, [exactId]);
+      const snapshot = await store.get(result.newSnapshotId);
+      assert.deepEqual(snapshot.provenance.source_ids, [exactId]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("sourceRecordIds is an exact ordered allowlist even within one category", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, compiledId1, compiledId2, priorSnapshotId } = await buildFixture(dir);
+      const thirdId = await store.create({
+        type: "compiled",
+        title: "Decision not selected",
+        body: "This same-category record is intentionally outside the source set.",
+        category: "ops.decisions",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+
+      const result = await makeRunner(store, dir).consolidate(priorSnapshotId, {
+        sourceRecordIds: [compiledId2, compiledId1],
+        proposedBody: "Only the two explicitly selected decisions.",
+        rationale: "Prove exact source selection.",
+        decision: "apply",
+      });
+
+      assert.deepEqual(result.cluster, [compiledId2, compiledId1]);
+      assert.ok(!result.cluster.includes(thirdId));
+      const snapshot = await store.get(result.newSnapshotId);
+      assert.deepEqual(snapshot.provenance.source_ids, [compiledId2, compiledId1]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid explicit source sets fail before snapshot or proposal mutation", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, compiledId1, priorSnapshotId } = await buildFixture(dir);
+      const runner = makeRunner(store, dir);
+      const before = JSON.stringify(await store.get(priorSnapshotId));
+
+      for (const sourceRecordIds of [
+        [],
+        [compiledId1, compiledId1],
+        ["missing-compiled-record"],
+      ]) {
+        await assert.rejects(
+          () => runner.consolidate(priorSnapshotId, {
+            sourceRecordIds,
+            proposedBody: "Must not apply.",
+            rationale: "Invalid exact selection.",
+            decision: "apply",
+          }),
+          (err) => {
+            assert.equal(err.code, "MISSING_EVIDENCE");
+            assert.match(err.message, /sourceRecordIds/);
+            return true;
+          }
+        );
+        assert.equal(JSON.stringify(await store.get(priorSnapshotId)), before);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a topic selector cannot adopt an existing snapshot from another category", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = makeStore(dir);
+      await store.create({
+        type: "compiled",
+        title: "Parent decision",
+        body: "Parent-category content.",
+        category: "decision",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      const mismatchedSnapshotId = await store.create({
+        type: "snapshot",
+        title: "Misfiled child snapshot",
+        body: "Must remain unchanged.",
+        category: "decision",
+        tags: ["topic:decision.child"],
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      const before = JSON.stringify(await store.get(mismatchedSnapshotId));
+
+      await assert.rejects(
+        () => makeRunner(store, dir).consolidate(
+          { topic: "decision.child", category: "decision.child" },
+          {
+            proposedBody: "Must not apply.",
+            rationale: "Reject category confusion.",
+            decision: "apply",
+          }
+        ),
+        (err) => {
+          assert.equal(err.code, "MISSING_EVIDENCE");
+          assert.match(err.message, /different snapshot category/);
+          return true;
+        }
+      );
+
+      assert.equal(JSON.stringify(await store.get(mismatchedSnapshotId)), before);
+      assert.equal((await store.listByType("snapshot")).length, 1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a custom detector cannot return an out-of-category record", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, priorSnapshotId } = await buildFixture(dir);
+      const parentId = await store.create({
+        type: "compiled",
+        title: "Parent record",
+        body: "Must not cross the category boundary.",
+        category: "ops",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      const before = JSON.stringify(await store.get(priorSnapshotId));
+
+      await assert.rejects(
+        () => makeRunner(store, dir).consolidate(priorSnapshotId, {
+          proposedBody: "Must not apply.",
+          rationale: "Reject detector escape.",
+          decision: "apply",
+          similarityDetector: async () => [parentId],
+        }),
+        (err) => {
+          assert.equal(err.code, "MISSING_EVIDENCE");
+          assert.match(err.message, /out-of-category/);
+          return true;
+        }
+      );
+
+      assert.equal(JSON.stringify(await store.get(priorSnapshotId)), before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a noncanonical explicit id cannot leave a new-topic placeholder", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = makeStore(dir);
+      const sourceId = await store.create({
+        type: "compiled",
+        title: "Canonical source",
+        body: "Only the full id is accepted.",
+        category: "decision.exact",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      const sourcePrefix = sourceId.slice(0, 8);
+
+      await assert.rejects(
+        () => makeRunner(store, dir).consolidate(
+          { topic: "decision.exact", category: "decision.exact" },
+          {
+            sourceRecordIds: [sourcePrefix],
+            proposedBody: "Must not apply.",
+            rationale: "Reject aliases and prefixes.",
+            decision: "apply",
+          }
+        ),
+        (err) => {
+          assert.equal(err.code, "MISSING_EVIDENCE");
+          assert.match(err.message, /canonical record ids/);
+          return true;
+        }
+      );
+
+      assert.equal((await store.listByType("snapshot")).length, 0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("implemented records are excluded from automatic and explicit selection", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = makeStore(dir);
+      const implementedId = await store.create({
+        type: "compiled",
+        title: "Implemented historical decision",
+        body: "No longer part of the active consolidation set.",
+        category: "decision.exact",
+        provenance: { agent: "fixture", source_ids: [] },
+      });
+      await store.retire(implementedId, "implemented", {
+        agent: "fixture",
+        rationale: "Decision was implemented.",
+        implementedByRef: "commit:implemented",
+      });
+      const runner = makeRunner(store, dir);
+
+      for (const options of [
+        {
+          proposedBody: "Must not apply automatically.",
+          rationale: "Only active records are eligible.",
+          decision: "apply",
+        },
+        {
+          sourceRecordIds: [implementedId],
+          proposedBody: "Must not apply explicitly.",
+          rationale: "Only active records are eligible.",
+          decision: "apply",
+        },
+      ]) {
+        await assert.rejects(
+          () => runner.consolidate(
+            { topic: "decision.exact", category: "decision.exact" },
+            options
+          ),
+          (err) => {
+            assert.equal(err.code, "MISSING_EVIDENCE");
+            assert.match(err.message, /no compiled records|not active/);
+            return true;
+          }
+        );
+        assert.equal((await store.listByType("snapshot")).length, 0);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("consolidate — input validation", () => {
   test("rejects missing snapshotIdOrTopic", async () => {
     const dir = makeTempDir();
