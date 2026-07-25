@@ -442,7 +442,7 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.8.1 package and the transitive runtime
+The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
 dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
@@ -474,6 +474,58 @@ a protected regular Ed25519 public key. Arbitrary alias targets, deeper symlinks
 non-root-owned components, and every symlink on non-Darwin hosts fail closed. This exception does
 not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
 every component.
+
+### Exact-current completion recovery
+
+`recover-exact-current-completion-request` and
+`recover-exact-current-completion` are the completion-only route for a valid
+same-run root receipt that became stale after a later public critique or gate
+claim. They are not history repair and are not a claim writer. Request creation
+is read-only and requires the canonical `builder.build` `verify` gate, one
+matching session/Flow subject, an authenticated stale applied receipt, and a
+complete, valid external resolution ledger. The signed authorization binds the
+stale receipt's raw digest/action/request/core/runtime identity, exact raw
+bundle and ledger identities, critique and resolution-edge projections, raw
+Flow-definition and canonical ordered gate-policy digests, fixed
+`exact-current-completion-only` transition, Flow definition/step/gate/head/
+manifest, nonce, request time, and expiry.
+
+The coordinator repeats those checks while holding its durable per-run and
+Flow mutation locks. Its pure transition returns the current bundle and ledger
+unchanged. Before any Flow postimage write, the unprivileged worker stages the
+fixed five Flow-only old/new images and root signs a request-, authorization-,
+nonce-, reducer-, and result-bound publication plan. The plan binds, but never
+stages or restores, `trust.bundle`, the resolution ledger, and the stale
+receipt. Before the first postimage, the worker activates Flow's native
+generation-bound recovery fence for the signed plan `recovery_id`. The fence
+remains active while root persists completion and nonce state and installs the
+exact receipt, so ordinary Flow writers cannot observe or mutate the
+intermediate generation. Prepared recovery uses the matching native recovery
+lock. It classifies each live artifact as exact old, exact new, or unknown;
+all-old and exact mixed states roll forward from staged new bytes, all-new
+succeeds idempotently, and unknown state fails closed without restoration.
+Finalization verifies the exact active fence generation, receipt, and all-new
+postimages, opens the fence through Flow's finalizer, and only then removes the
+stages and plan. Completion replay safely resumes receipt installation or
+cleanup.
+
+The recovery attachment and stored filename include both the durable envelope
+request digest and the signed authorization digest. The completion continues
+to bind the envelope digest. Therefore two legitimate recoveries that reuse the
+same authorization-file path and request shape but carry distinct signed
+authorization generations publish distinct attachments without colliding. An
+exact nonce replay returns the same completion and cannot add a second
+attachment; a prepared crash after any or all Flow writes resumes from the
+signed plan and converges to all-new.
+It never appends/resolves a ledger event, rewrites evidence, accepts a missing
+or duplicate authority edge, or displaces a different newer exact-current
+receipt. This source protocol does not install or upgrade the live root helper;
+that remains a separately authorized operator action.
+
+Normal ordering is: record all independent final critiques; resolve or repair
+eligible authority edges; if that legitimate public work made the receipt stale,
+recover the exact-current completion; then reseal final verification evidence
+when a gate claim itself must change.
 
 ### Atomic verification-evidence reseal
 
