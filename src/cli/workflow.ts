@@ -1295,6 +1295,11 @@ async function runHostAuthorizedEvidence(input: {
       if (Date.now() > Date.parse(authority.expires_at)) {
         throw new Error("host workflow evidence authorization expired before canonical mutation");
       }
+      const currentPreimage = hostEvidencePreimage(sessionDir, repaired.projectRoot, slug);
+      if (currentPreimage.bundleSha256 !== authority.trust_bundle_sha256
+          || currentPreimage.manifestSha256 !== authority.flow_manifest_sha256) {
+        throw new Error("host workflow evidence signed preimage changed before canonical mutation");
+      }
     });
   }) as Promise<Awaited<ReturnType<typeof runEvidenceTransaction>>>;
 }

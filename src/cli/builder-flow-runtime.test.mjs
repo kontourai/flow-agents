@@ -2090,7 +2090,7 @@ test("host evidence cannot inject a completion or replace the immutable producti
     assert.match(workflowSource, /verifyLifecycleAuthorityCompletion\(authorized\.completion\)/);
     assert.match(
       workflowSource,
-      /return run\(\(\) => \{\s*assertCurrent\(\);\s*if \(Date\.now\(\) > Date\.parse\(authority\.expires_at\)\)/,
+      /return run\(\(\) => \{\s*assertCurrent\(\);\s*if \(Date\.now\(\) > Date\.parse\(authority\.expires_at\)\)[\s\S]*?hostEvidencePreimage\(sessionDir, repaired\.projectRoot, slug\)[\s\S]*?authority\.trust_bundle_sha256[\s\S]*?authority\.flow_manifest_sha256/,
       "host binding identity and authority lifetime are rechecked after evidence execution",
     );
     assert.match(
