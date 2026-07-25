@@ -76,6 +76,22 @@ type PreparedProviderPickup = {
   };
 };
 
+type ProviderBootstrapTestHooks = {
+  afterLocksAcquired?: () => void;
+  beforeStageWrite?: (file: string, index: number) => void;
+  beforeCommit?: (file: string, index: number) => void;
+};
+
+let providerBootstrapTestHooks: ProviderBootstrapTestHooks | null = null;
+
+export function setProviderBootstrapTestHooksForTest(hooks: ProviderBootstrapTestHooks | null): void {
+  providerBootstrapTestHooks = hooks;
+}
+
+type PublicationRoot = { root: string; lock: string; rootStat: fs.Stats };
+type PublicationItem = { file: string; value: unknown; guard: PublicationRoot };
+type FilePreimage = { bytes: Buffer; mode: number } | null;
+
 const SETTINGS = [
   ["backlog-provider-settings.json", "backlog-provider-settings.schema.json"],
   ["assignment-provider-settings.json", "assignment-provider-settings.schema.json"],
@@ -156,17 +172,6 @@ function currentGitHubLogin(ghBin: string): string {
   return value.login;
 }
 
-function writeJsonIfAbsentOrExact(file: string, value: unknown): void {
-  const bytes = `${JSON.stringify(value, null, 2)}\n`;
-  if (fs.existsSync(file)) {
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: provider pickup artifact must be a regular file`);
-    if (fs.readFileSync(file, "utf8") !== bytes) throw new Error(`${file}: existing provider pickup artifact does not match the exact canonical inputs`);
-    return;
-  }
-  fs.writeFileSync(file, bytes, { encoding: "utf8", mode: 0o600, flag: "wx" });
-}
-
 function assertJsonAbsentOrExact(file: string, value: unknown): void {
   if (!fs.existsSync(file)) return;
   const stat = fs.lstatSync(file);
@@ -207,19 +212,6 @@ function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo):
     const stat = fs.lstatSync(sessionDir);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("provider pickup session target must be a regular directory");
   }
-  const existingPlan = path.join(sessionDir, "provider-pickup.json");
-  if (fs.existsSync(existingPlan)) {
-    const stat = fs.lstatSync(existingPlan);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${existingPlan}: provider pickup artifact must be a regular file`);
-    const existing = JSON.parse(fs.readFileSync(existingPlan, "utf8")) as Partial<ProviderPickupPlan>;
-    if (existing.role !== "ProviderPickupPlan"
-        || existing.work_item_ref !== identity.ref
-        || existing.provider_branch !== branch
-        || existing.actor?.actorKey !== actor.actorKey
-        || typeof existing.claim?.record?.claimed_at !== "string") {
-      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
-    }
-  }
   return { identity, branch, actor, login: options.providerLogin, requestedArtifactRoot };
 }
 
@@ -228,6 +220,21 @@ function completeProviderPickupPreflight(options: ProviderBootstrapOptions, pref
   const login = preflight.login ?? (options.online ? currentGitHubLogin(options.ghBin ?? "gh") : undefined);
   if (!login) throw new Error("provider pickup requires --provider-login when --online is not enabled");
   return { ...preflight, login };
+}
+
+function assertExistingProviderPickupPlanIdentity(preflight: ProviderPickupPreflight): void {
+  const planFile = path.join(preflight.requestedArtifactRoot, preflight.identity.slug, "provider-pickup.json");
+  if (!fs.existsSync(planFile)) return;
+  const stat = fs.lstatSync(planFile);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${planFile}: provider pickup artifact must be a regular file`);
+  const existing = JSON.parse(fs.readFileSync(planFile, "utf8")) as Partial<ProviderPickupPlan>;
+  if (existing.role !== "ProviderPickupPlan"
+      || existing.work_item_ref !== preflight.identity.ref
+      || existing.provider_branch !== preflight.branch
+      || existing.actor?.actorKey !== preflight.actor.actorKey
+      || typeof existing.claim?.record?.claimed_at !== "string") {
+    throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+  }
 }
 
 function providerPickupPlan(repo: Repo, preflight: ProviderPickupPreflight): PreparedProviderPickup {
@@ -255,7 +262,19 @@ function providerPickupPlan(repo: Repo, preflight: ProviderPickupPreflight): Pre
     artifact_dir: `.kontourai/flow-agents/${identity.slug}`,
   };
   let claimedAt: string | undefined;
-  if (fs.existsSync(artifacts.plan_file)) claimedAt = (JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as ProviderPickupPlan).claim.record.claimed_at;
+  if (fs.existsSync(artifacts.plan_file)) {
+    const stat = fs.lstatSync(artifacts.plan_file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${artifacts.plan_file}: provider pickup artifact must be a regular file`);
+    const existing = JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as Partial<ProviderPickupPlan>;
+    if (existing.role !== "ProviderPickupPlan"
+        || existing.work_item_ref !== identity.ref
+        || existing.provider_branch !== branch
+        || existing.actor?.actorKey !== actor.actorKey
+        || typeof existing.claim?.record?.claimed_at !== "string") {
+      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+    }
+    claimedAt = existing.claim.record.claimed_at;
+  }
   const claim = renderGithubClaim(identity.slug, claimInput, actor.actor, claimedAt);
   const flowAgents = "flow-agents";
   const plan: ProviderPickupPlan = {
@@ -310,23 +329,41 @@ function assertProviderPickupArtifactCompatibility(prepared: PreparedProviderPic
   assertJsonAbsentOrExact(plan.artifacts.plan_file, plan);
 }
 
-function persistProviderPickup(prepared: PreparedProviderPickup | null): ProviderPickupPlan | null {
-  if (!prepared) return null;
+function pickupPublicationItems(prepared: PreparedProviderPickup, guard: PublicationRoot): PublicationItem[] {
   const { plan, claimInput } = prepared;
-  const { session_dir: sessionDir, artifacts } = plan;
-  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
-  writeJsonIfAbsentOrExact(artifacts.actor_file, plan.actor.actor);
-  writeJsonIfAbsentOrExact(artifacts.claim_input_file, claimInput);
-  writeJsonIfAbsentOrExact(artifacts.liveness_events_file, []);
-  writeJsonIfAbsentOrExact(artifacts.plan_file, plan);
-  return plan;
+  return [
+    { file: plan.artifacts.actor_file, value: plan.actor.actor, guard },
+    { file: plan.artifacts.claim_input_file, value: claimInput, guard },
+    { file: plan.artifacts.liveness_events_file, value: [], guard },
+    { file: plan.artifacts.plan_file, value: plan, guard },
+  ];
+}
+
+function pickupTransactionTargets(preflight: ProviderPickupPreflight, guard: PublicationRoot): PublicationItem[] {
+  const sessionDir = path.join(preflight.requestedArtifactRoot, preflight.identity.slug);
+  return ["provider-pickup.actor.json", "provider-pickup.claim-input.json", "provider-pickup.liveness.json", "provider-pickup.json"]
+    .map((name) => ({ file: path.join(sessionDir, name), value: null, guard }));
 }
 
 export function prepareProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPlan | null {
-  const preflight = completeProviderPickupPreflight(options, preflightProviderPickup(options, repo));
-  const prepared = preflight ? providerPickupPlan(repo, preflight) : null;
-  if (prepared) assertProviderPickupArtifactCompatibility(prepared);
-  return persistProviderPickup(prepared);
+  const initial = preflightProviderPickup(options, repo);
+  if (!initial) return null;
+  const createdDirectories = publicationDirectoryCandidates(options.repoPath, initial.requestedArtifactRoot, path.join(initial.requestedArtifactRoot, initial.identity.slug));
+  const sessionGuard = acquireProviderLock(path.join(initial.requestedArtifactRoot, initial.identity.slug));
+  const targets = pickupTransactionTargets(initial, sessionGuard);
+  const preimages = capturePublicationPreimages(targets);
+  try {
+    providerBootstrapTestHooks?.afterLocksAcquired?.();
+    assertPublicationPreimagesUnchanged(targets, preimages);
+    const preflight = completeProviderPickupPreflight(options, initial)!;
+    const prepared = providerPickupPlan(repo, preflight);
+    assertProviderPickupArtifactCompatibility(prepared);
+    publishLocalTransaction(pickupPublicationItems(prepared, sessionGuard), undefined, preimages);
+    return prepared.plan;
+  } finally {
+    releaseProviderLock(sessionGuard);
+    removeEmptyPublicationDirectories(createdDirectories);
+  }
 }
 
 function discoverProject(ghBin: string, owner: string, requested?: number): Project {
@@ -370,11 +407,14 @@ function validateLabelName(value: unknown): string {
   return value;
 }
 
-function ensureClaimLabel(ghBin: string, repo: Repo, labelName: string): void {
+function claimLabelExists(ghBin: string, repo: Repo, labelName: string): boolean {
   const repository = `${repo.owner}/${repo.name}`;
   const labels = ghJson(ghBin, ["label", "list", "--repo", repository, `--search=${labelName}`, "--limit", "100", "--json", "name"]) as unknown[];
-  const exists = Array.isArray(labels) && labels.some((label) => label && typeof label === "object" && (label as Record<string, unknown>).name === labelName);
-  if (exists) return;
+  return Array.isArray(labels) && labels.some((label) => label && typeof label === "object" && (label as Record<string, unknown>).name === labelName);
+}
+
+function createClaimLabel(ghBin: string, repo: Repo, labelName: string): void {
+  const repository = `${repo.owner}/${repo.name}`;
   try {
     execFileSync(ghBin, [
       "label", "create",
@@ -534,7 +574,7 @@ function assertProjectSettingsRoot(repoPath: string, requestedRoot: string): str
   return canonicalRoot;
 }
 
-function acquireProviderLock(root: string): { lock: string; rootStat: fs.Stats } {
+function acquireProviderLock(root: string): PublicationRoot {
   fs.mkdirSync(root, { recursive: true });
   const rootStat = fs.lstatSync(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error(`provider settings root must be a regular directory: ${root}`);
@@ -544,42 +584,146 @@ function acquireProviderLock(root: string): { lock: string; rootStat: fs.Stats }
   } catch {
     throw new Error(`provider settings are locked by another setup or an interrupted run: ${lock}`);
   }
-  return { lock, rootStat };
+  return { root, lock, rootStat };
 }
 
-function publishDocuments(root: string, lock: string, rootStat: fs.Stats, pending: Array<{ file: string; document: Record<string, unknown> }>): void {
-  const backups = new Map<string, { bytes: Buffer; mode: number } | null>();
-  const published: string[] = [];
+function releaseProviderLock(guard: PublicationRoot): void {
   try {
-    for (const item of pending) {
-      if (fs.existsSync(item.file)) {
-        const stat = fs.lstatSync(item.file);
-        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${item.file}: settings target must be a regular file`);
-        backups.set(item.file, { bytes: fs.readFileSync(item.file), mode: stat.mode & 0o777 });
-      } else {
-        backups.set(item.file, null);
-      }
-      const staged = path.join(lock, `${path.basename(item.file)}.${randomUUID()}`);
-      fs.writeFileSync(staged, `${JSON.stringify(item.document, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      const currentRoot = fs.lstatSync(root);
-      if (!currentRoot.isDirectory() || currentRoot.isSymbolicLink() || currentRoot.dev !== rootStat.dev || currentRoot.ino !== rootStat.ino) {
-        throw new Error("provider settings root identity changed during publication");
-      }
-      fs.renameSync(staged, item.file);
-      published.push(item.file);
+    const currentRoot = fs.lstatSync(guard.root);
+    if (currentRoot.isDirectory() && !currentRoot.isSymbolicLink()
+        && currentRoot.dev === guard.rootStat.dev && currentRoot.ino === guard.rootStat.ino) {
+      fs.rmSync(guard.lock, { recursive: true, force: true });
     }
-  } catch (error) {
-    for (const file of published.reverse()) {
-      const backup = backups.get(file);
-      if (backup) {
-        const restore = path.join(lock, `${path.basename(file)}.restore.${randomUUID()}`);
-        fs.writeFileSync(restore, backup.bytes, { mode: backup.mode, flag: "wx" });
-        fs.renameSync(restore, file);
-      } else {
-        try { fs.unlinkSync(file); } catch {}
+  } catch {}
+}
+
+function publicationDirectoryCandidates(repoPath: string, ...leafDirectories: string[]): string[] {
+  const repository = path.resolve(repoPath);
+  const candidates = new Set<string>();
+  for (const leaf of leafDirectories) {
+    let cursor = path.resolve(leaf);
+    const relative = path.relative(repository, cursor);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      if (!fs.existsSync(cursor)) candidates.add(cursor);
+      continue;
+    }
+    while (cursor !== repository && path.dirname(cursor) !== cursor) {
+      if (!fs.existsSync(cursor)) candidates.add(cursor);
+      cursor = path.dirname(cursor);
+    }
+  }
+  return [...candidates].sort((left, right) => right.length - left.length);
+}
+
+function removeEmptyPublicationDirectories(candidates: string[]): void {
+  for (const directory of candidates) {
+    try { fs.rmdirSync(directory); } catch {}
+  }
+}
+
+function assertPublicationRoot(guard: PublicationRoot): void {
+  const currentRoot = fs.lstatSync(guard.root);
+  if (!currentRoot.isDirectory() || currentRoot.isSymbolicLink()
+      || currentRoot.dev !== guard.rootStat.dev || currentRoot.ino !== guard.rootStat.ino) {
+    throw new Error(`provider publication root identity changed: ${guard.root}`);
+  }
+}
+
+function capturePublicationPreimages(items: PublicationItem[]): Map<string, FilePreimage> {
+  const preimages = new Map<string, FilePreimage>();
+  for (const item of items) {
+    if (preimages.has(item.file)) throw new Error(`provider publication target is duplicated: ${item.file}`);
+    if (!fs.existsSync(item.file)) {
+      preimages.set(item.file, null);
+      continue;
+    }
+    const stat = fs.lstatSync(item.file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${item.file}: provider publication target must be a regular file`);
+    preimages.set(item.file, { bytes: fs.readFileSync(item.file), mode: stat.mode & 0o777 });
+  }
+  return preimages;
+}
+
+function assertPublicationPreimagesUnchanged(items: PublicationItem[], preimages: Map<string, FilePreimage>): void {
+  for (const item of items) {
+    const preimage = preimages.get(item.file);
+    if (!preimages.has(item.file)) throw new Error(`provider publication target was not included in the transaction: ${item.file}`);
+    if (!preimage) {
+      if (fs.existsSync(item.file)) throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+      continue;
+    }
+    if (!fs.existsSync(item.file)) throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+    const stat = fs.lstatSync(item.file);
+    if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o777) !== preimage.mode
+        || !fs.readFileSync(item.file).equals(preimage.bytes)) {
+      throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+    }
+  }
+}
+
+function rollbackPublication(
+  committed: Array<{ item: PublicationItem; postimage: Buffer; mode: number }>,
+  preimages: Map<string, FilePreimage>,
+): void {
+  const incomplete: string[] = [];
+  for (const { item, postimage, mode } of [...committed].reverse()) {
+    const preimage = preimages.get(item.file);
+    try {
+      if (!fs.existsSync(item.file)) throw new Error("committed postimage is missing");
+      const current = fs.lstatSync(item.file);
+      if (current.isSymbolicLink() || !current.isFile() || (current.mode & 0o777) !== mode
+          || !fs.readFileSync(item.file).equals(postimage)) {
+        throw new Error("current file no longer equals this transaction's postimage");
       }
+      if (preimage) {
+        const restore = path.join(item.guard.lock, `${path.basename(item.file)}.restore.${randomUUID()}`);
+        fs.writeFileSync(restore, preimage.bytes, { mode: preimage.mode, flag: "wx" });
+        fs.renameSync(restore, item.file);
+      } else {
+        fs.unlinkSync(item.file);
+      }
+    } catch (error) {
+      incomplete.push(`${item.file}: ${(error as Error).message}`);
+    }
+  }
+  if (incomplete.length > 0) throw new Error(`provider publication rollback incomplete; preserved conflicting current files: ${incomplete.join("; ")}`);
+}
+
+function publishLocalTransaction(items: PublicationItem[], beforeCommit?: () => void, suppliedPreimages?: Map<string, FilePreimage>): void {
+  const preimages = suppliedPreimages ?? capturePublicationPreimages(items);
+  const staged = new Map<string, string>();
+  const postimages = new Map<string, Buffer>();
+  const committed: Array<{ item: PublicationItem; postimage: Buffer; mode: number }> = [];
+  try {
+    assertPublicationPreimagesUnchanged(items, preimages);
+    items.forEach((item, index) => {
+      assertPublicationRoot(item.guard);
+      providerBootstrapTestHooks?.beforeStageWrite?.(item.file, index);
+      const candidate = path.join(item.guard.lock, `${path.basename(item.file)}.${randomUUID()}`);
+      const postimage = Buffer.from(`${JSON.stringify(item.value, null, 2)}\n`, "utf8");
+      fs.writeFileSync(candidate, postimage, { mode: 0o600, flag: "wx" });
+      staged.set(item.file, candidate);
+      postimages.set(item.file, postimage);
+    });
+    beforeCommit?.();
+    items.forEach((item, index) => {
+      assertPublicationRoot(item.guard);
+      providerBootstrapTestHooks?.beforeCommit?.(item.file, index);
+      fs.renameSync(staged.get(item.file)!, item.file);
+      staged.delete(item.file);
+      committed.push({ item, postimage: postimages.get(item.file)!, mode: 0o600 });
+    });
+  } catch (error) {
+    try {
+      rollbackPublication(committed, preimages);
+    } catch (rollbackError) {
+      throw new Error(`${(error as Error).message}; ${(rollbackError as Error).message}`, { cause: error });
     }
     throw error;
+  } finally {
+    for (const candidate of staged.values()) {
+      try { fs.unlinkSync(candidate); } catch {}
+    }
   }
 }
 
@@ -587,60 +731,89 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
   const repoPath = path.resolve(options.repoPath);
   const repo = detectGitHubRepo(repoPath);
   const ghBin = options.ghBin ?? "gh";
-  // Validate pickup identity and any already-present pickup plan before settings roots,
-  // provider labels, or other mutable setup state are touched.
   const pickupIdentityPreflight = preflightProviderPickup(options, repo);
-  let project: Project;
-  let offlineRemediation: string | undefined;
-  if (options.online) {
-    ensureGhAuth(ghBin);
-    project = discoverProject(ghBin, repo.owner, options.projectNumber);
-  } else {
-    if (!options.projectNumber || options.projectNumber < 1) {
-      throw new Error("offline provider setup requires --provider-project NUMBER; use --online to discover accessible projects");
-    }
-    project = { number: options.projectNumber };
-  }
-  const pickupPreflight = completeProviderPickupPreflight(options, pickupIdentityPreflight);
-  const preparedPickup = pickupPreflight ? providerPickupPlan(repo, pickupPreflight) : null;
-  if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
-
   const requestedRoot = options.scope === "global"
     ? path.resolve(options.globalSettingsRoot ?? path.join(os.homedir(), ".config", "flow-agents"))
     : path.resolve(options.projectSettingsRoot ?? path.join(repoPath, "context", "settings"));
-  const root = options.scope === "project"
-    ? assertProjectSettingsRoot(repoPath, requestedRoot)
-    : requestedRoot;
-  if (options.scope === "global") fs.mkdirSync(root, { recursive: true });
-  const { lock, rootStat } = acquireProviderLock(root);
+  const pickupSessionDir = pickupIdentityPreflight
+    ? path.join(pickupIdentityPreflight.requestedArtifactRoot, pickupIdentityPreflight.identity.slug)
+    : null;
+  const createdDirectories = publicationDirectoryCandidates(
+    repoPath,
+    requestedRoot,
+    ...(pickupIdentityPreflight ? [pickupIdentityPreflight.requestedArtifactRoot, pickupSessionDir!] : []),
+  );
+  let sessionGuard: PublicationRoot | null = null;
+  let settingsGuard: PublicationRoot | null = null;
   try {
-    const entries = [projectEntry(repo, project), assignmentEntry(repo), changeEntry(repo)];
-    const pending: Array<{ file: string; document: Record<string, unknown> }> = [];
-    for (let index = 0; index < SETTINGS.length; index += 1) {
-      const [name, schema] = SETTINGS[index]!;
-      const file = path.join(root, name);
-      const document = mergeProject(readDocument(file), entries[index]!, repo, name);
-      validateDocument(file, schema, document);
-      pending.push({ file, document });
-    }
-    // Validate every local document before the explicit online mutation so a
-    // malformed existing settings file cannot create remote state on a failed run.
-    const assignmentDocument = pending.find((item) => path.basename(item.file) === "assignment-provider-settings.json")!.document;
-    const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
-    const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
-    if (options.online) ensureClaimLabel(ghBin, repo, labelName);
-    else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
-    publishDocuments(root, lock, rootStat, pending);
-    const files = pending.map((item) => item.file);
-    const pickup = persistProviderPickup(preparedPickup);
-    return { repo, project, files, offlineRemediation, ...(pickup ? { pickup } : {}) };
-  } finally {
-    try {
-      const currentRoot = fs.lstatSync(root);
-      if (currentRoot.isDirectory() && !currentRoot.isSymbolicLink() && currentRoot.dev === rootStat.dev && currentRoot.ino === rootStat.ino) {
-        fs.rmSync(lock, { recursive: true, force: true });
+    if (pickupSessionDir) sessionGuard = acquireProviderLock(pickupSessionDir);
+    const root = options.scope === "project"
+      ? assertProjectSettingsRoot(repoPath, requestedRoot)
+      : requestedRoot;
+    if (options.scope === "global") fs.mkdirSync(root, { recursive: true });
+    settingsGuard = acquireProviderLock(root);
+
+    const settingsTargets: PublicationItem[] = SETTINGS.map(([name]) => ({ file: path.join(root, name), value: null, guard: settingsGuard! }));
+    const pickupTargets = pickupIdentityPreflight && sessionGuard ? pickupTransactionTargets(pickupIdentityPreflight, sessionGuard) : [];
+    const transactionTargets = [...settingsTargets, ...pickupTargets];
+    const preimages = capturePublicationPreimages(transactionTargets);
+    providerBootstrapTestHooks?.afterLocksAcquired?.();
+      assertPublicationPreimagesUnchanged(transactionTargets, preimages);
+      if (pickupIdentityPreflight) assertExistingProviderPickupPlanIdentity(pickupIdentityPreflight);
+
+      let project: Project;
+      if (options.online) {
+        ensureGhAuth(ghBin);
+        project = discoverProject(ghBin, repo.owner, options.projectNumber);
+      } else {
+        if (!options.projectNumber || options.projectNumber < 1) {
+          throw new Error("offline provider setup requires --provider-project NUMBER; use --online to discover accessible projects");
+        }
+        project = { number: options.projectNumber };
       }
-    } catch {}
+      const pickupPreflight = completeProviderPickupPreflight(options, pickupIdentityPreflight);
+      const preparedPickup = pickupPreflight ? providerPickupPlan(repo, pickupPreflight) : null;
+      if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
+
+      const entries = [projectEntry(repo, project), assignmentEntry(repo), changeEntry(repo)];
+      const pending: Array<{ file: string; document: Record<string, unknown> }> = [];
+      for (let index = 0; index < SETTINGS.length; index += 1) {
+        const [name, schema] = SETTINGS[index]!;
+        const file = path.join(root, name);
+        const document = mergeProject(readDocument(file), entries[index]!, repo, name);
+        validateDocument(file, schema, document);
+        pending.push({ file, document });
+      }
+      // Validate every local document before the explicit online mutation so a
+      // malformed existing settings file cannot create remote state on a failed run.
+      const assignmentDocument = pending.find((item) => path.basename(item.file) === "assignment-provider-settings.json")!.document;
+      const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
+      const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
+      const createRemoteLabel = options.online ? !claimLabelExists(ghBin, repo, labelName) : false;
+      const offlineRemediation = options.online
+        ? undefined
+        : `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
+
+      // Remote reads above can run arbitrary provider executables. Revalidate every exact
+      // preimage and pickup contract afterward, then stage every local write before the one
+      // allowed remote mutation. After label creation, local commit is rollback-capable only.
+      assertPublicationPreimagesUnchanged(transactionTargets, preimages);
+      if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
+      const items: PublicationItem[] = [
+        ...pending.map((item) => ({ file: item.file, value: item.document, guard: settingsGuard! })),
+        ...(preparedPickup && sessionGuard ? pickupPublicationItems(preparedPickup, sessionGuard) : []),
+      ];
+      publishLocalTransaction(
+        items,
+        createRemoteLabel ? () => createClaimLabel(ghBin, repo, labelName) : undefined,
+        preimages,
+      );
+      const files = pending.map((item) => item.file);
+      return { repo, project, files, offlineRemediation, ...(preparedPickup ? { pickup: preparedPickup.plan } : {}) };
+  } finally {
+    if (settingsGuard) releaseProviderLock(settingsGuard);
+    if (sessionGuard) releaseProviderLock(sessionGuard);
+    removeEmptyPublicationDirectories(createdDirectories);
   }
 }
 
