@@ -222,6 +222,13 @@ function completeProviderPickupPreflight(options: ProviderBootstrapOptions, pref
   return { ...preflight, login };
 }
 
+function assertCurrentProviderWorktreeBranch(repoPath: string, expectedBranch: string): void {
+  const actualBranch = currentGitBranch(repoPath);
+  if (actualBranch !== expectedBranch) {
+    throw new Error(`actual Git worktree branch ${JSON.stringify(actualBranch)} no longer matches provider pickup branch ${JSON.stringify(expectedBranch)}`);
+  }
+}
+
 function assertExistingProviderPickupPlanIdentity(preflight: ProviderPickupPreflight): void {
   const planFile = path.join(preflight.requestedArtifactRoot, preflight.identity.slug, "provider-pickup.json");
   if (!fs.existsSync(planFile)) return;
@@ -352,13 +359,15 @@ export function prepareProviderPickup(options: ProviderBootstrapOptions, repo: R
   const sessionGuard = acquireProviderLock(path.join(initial.requestedArtifactRoot, initial.identity.slug));
   const targets = pickupTransactionTargets(initial, sessionGuard);
   const preimages = capturePublicationPreimages(targets);
+  const assertCurrentBranch = () => assertCurrentProviderWorktreeBranch(options.repoPath, initial.branch);
   try {
     providerBootstrapTestHooks?.afterLocksAcquired?.();
+    assertCurrentBranch();
     assertPublicationPreimagesUnchanged(targets, preimages);
     const preflight = completeProviderPickupPreflight(options, initial)!;
     const prepared = providerPickupPlan(repo, preflight);
     assertProviderPickupArtifactCompatibility(prepared);
-    publishLocalTransaction(pickupPublicationItems(prepared, sessionGuard), undefined, preimages);
+    publishLocalTransaction(pickupPublicationItems(prepared, sessionGuard), undefined, preimages, assertCurrentBranch);
     return prepared.plan;
   } finally {
     releaseProviderLock(sessionGuard);
@@ -689,7 +698,12 @@ function rollbackPublication(
   if (incomplete.length > 0) throw new Error(`provider publication rollback incomplete; preserved conflicting current files: ${incomplete.join("; ")}`);
 }
 
-function publishLocalTransaction(items: PublicationItem[], beforeCommit?: () => void, suppliedPreimages?: Map<string, FilePreimage>): void {
+function publishLocalTransaction(
+  items: PublicationItem[],
+  beforeCommit?: () => void,
+  suppliedPreimages?: Map<string, FilePreimage>,
+  validateBeforeRename?: () => void,
+): void {
   const preimages = suppliedPreimages ?? capturePublicationPreimages(items);
   const staged = new Map<string, string>();
   const postimages = new Map<string, Buffer>();
@@ -709,6 +723,7 @@ function publishLocalTransaction(items: PublicationItem[], beforeCommit?: () => 
     items.forEach((item, index) => {
       assertPublicationRoot(item.guard);
       providerBootstrapTestHooks?.beforeCommit?.(item.file, index);
+      validateBeforeRename?.();
       assertPublicationPreimagesUnchanged([item], preimages);
       fs.renameSync(staged.get(item.file)!, item.file);
       staged.delete(item.file);
@@ -758,7 +773,11 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     const pickupTargets = pickupIdentityPreflight && sessionGuard ? pickupTransactionTargets(pickupIdentityPreflight, sessionGuard) : [];
     const transactionTargets = [...settingsTargets, ...pickupTargets];
     const preimages = capturePublicationPreimages(transactionTargets);
+    const assertCurrentBranch = pickupIdentityPreflight
+      ? () => assertCurrentProviderWorktreeBranch(repoPath, pickupIdentityPreflight.branch)
+      : undefined;
     providerBootstrapTestHooks?.afterLocksAcquired?.();
+      assertCurrentBranch?.();
       assertPublicationPreimagesUnchanged(transactionTargets, preimages);
       if (pickupIdentityPreflight) assertExistingProviderPickupPlanIdentity(pickupIdentityPreflight);
 
@@ -808,6 +827,7 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
         items,
         createRemoteLabel ? () => createClaimLabel(ghBin, repo, labelName) : undefined,
         preimages,
+        assertCurrentBranch,
       );
       const files = pending.map((item) => item.file);
       return { repo, project, files, offlineRemediation, ...(preparedPickup ? { pickup: preparedPickup.plan } : {}) };

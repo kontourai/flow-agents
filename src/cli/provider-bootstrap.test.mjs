@@ -309,6 +309,120 @@ test("pickup transaction rejects an injected race before remote commands and pre
   }
 });
 
+test("provider pickup rejects a branch change after locks before publishing local state", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  setProviderBootstrapTestHooksForTest({
+    afterLocksAcquired() {
+      execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/changed-after-lock"]);
+    },
+  });
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.equal(fs.existsSync(settings), false, "branch rejection must not publish provider settings");
+    assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "branch rejection must not publish pickup artifacts");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rejects a branch change by the remote label callback before local commit", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-branch-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash
+set -eu
+printf '\\x1f%s' "$@" >> ${JSON.stringify(log)}
+printf '\\n' >> ${JSON.stringify(log)}
+if [[ "$1 $2" == "project list" ]]; then printf '{"projects":[{"number":7}]}'
+elif [[ "$1 $2" == "label list" ]]; then printf '[]'
+elif [[ "$1 $2" == "label create" ]]; then git -C ${JSON.stringify(repo)} symbolic-ref HEAD refs/heads/agent/changed-by-provider
+fi
+`);
+  fs.chmodSync(gh, 0o755);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      projectNumber: 7,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.ok(readArgvLog(log).some((argv) => argv[0] === "label" && argv[1] === "create"));
+    assert.equal(fs.existsSync(settings), false, "provider branch mutation must not publish settings");
+    assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "provider branch mutation must not publish pickup artifacts");
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rechecks branch after each commit hook and rolls back earlier commits", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const settingsPreimage = snapshotTree(path.join(repo, "context"));
+    const pickupPreimage = snapshotTree(path.join(repo, ".kontourai"));
+    setProviderBootstrapTestHooksForTest({
+      beforeCommit(_file, index) {
+        if (index === 1) {
+          execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/changed-before-rename"]);
+        }
+      },
+    });
+
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 8,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.deepEqual(snapshotTree(path.join(repo, "context")), settingsPreimage, "rollback must restore the earlier settings commit");
+    assert.deepEqual(snapshotTree(path.join(repo, ".kontourai")), pickupPreimage, "branch rejection must not partially publish pickup artifacts");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
 test("pickup transaction restores exact local preimages when commit fails after label creation", () => {
   const repo = repoFixture();
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
