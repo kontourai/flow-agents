@@ -1847,6 +1847,48 @@ test("public workflow evidence requires one-time coordinator authorization for a
     assert.equal(fs.existsSync(path.join(recovered.sessionDir, "trust.bundle")), false);
     assert.equal((await loadRun(recovered.slug, recovered.projectRoot)).manifest.evidence.length, 0);
 
+    const firstRequestResult = await captureWorkflowPublicResult([
+      "evidence-request", ...evidenceArgs(recovered).slice(1),
+    ]);
+    assert.equal(firstRequestResult.error, null, String(firstRequestResult.error));
+    const firstRequest = JSON.parse(firstRequestResult.output[0]);
+    assert.equal(
+      firstRequest.authorization.trust_bundle_sha256,
+      createHash("sha256").update("kontourai.host-workflow.absent-trust-bundle.v1").digest("hex"),
+      "the signed preimage distinguishes an absent initial bundle from every valid bundle",
+    );
+    const firstSignature = sign(
+      null,
+      Buffer.from(firstRequest.signing_payload),
+      AUTHORITY_KEYS.privateKey,
+    ).toString("base64");
+    const firstAuthorizationFile = path.join(
+      os.tmpdir(),
+      `host-first-evidence-${recovered.slug}-${Date.now()}-${Math.random()}.json`,
+    );
+    fs.writeFileSync(firstAuthorizationFile, `${JSON.stringify({
+      ...firstRequest.authorization,
+      signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: firstSignature },
+    })}\n`, { mode: 0o600 });
+    const firstCoordinator = makeLifecycleCoordinatorFixture();
+    try {
+      const firstAuthorization = invokeCoordinator(firstCoordinator.coordinatorFile, {
+        action: "authorize-workflow-evidence",
+        project_root: recovered.projectRoot,
+        session_dir: recovered.sessionDir,
+        authorization_file: firstAuthorizationFile,
+      });
+      assert.equal(firstAuthorization.status, 0, firstAuthorization.stderr);
+      assert.equal(
+        fs.existsSync(path.join(recovered.sessionDir, "trust.bundle")),
+        false,
+        "authorization remains read-only before the evidence transaction creates the first bundle",
+      );
+    } finally {
+      fs.rmSync(firstCoordinator.directory, { recursive: true, force: true });
+      fs.rmSync(firstAuthorizationFile, { force: true });
+    }
+
     const rejected = async (slug, configure, actorKey = boundKey) => {
       const session = await prepare(slug, async (prepared) => {
         const afterPrepare = await configure(prepared);

@@ -1170,19 +1170,30 @@ function validateEvidenceArguments(parsed: ReturnType<typeof parseArgs>, project
   return { expectation, requestedStatus, commands, requestSha256: canonicalSha256(evidenceAuthorizationRequest(parsed)) };
 }
 
+const ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256 = createHash("sha256")
+  .update("kontourai.host-workflow.absent-trust-bundle.v1")
+  .digest("hex");
+
 function hostEvidencePreimage(sessionDir: string, projectRoot: string, slug: string): {
   bundleSha256: string;
   manifestSha256: string;
 } {
-  const bundle = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "host workflow evidence trust bundle", 4 * 1024 * 1024);
+  const bundle = readProtectedRegularFileBytes(
+    path.join(sessionDir, "trust.bundle"),
+    "host workflow evidence trust bundle",
+    4 * 1024 * 1024,
+    true,
+  );
   const manifest = readProtectedRegularFileBytes(
     path.join(projectRoot, ".kontourai", "flow", "runs", slug, "evidence", "manifest.json"),
     "host workflow evidence Flow manifest",
     16 * 1024 * 1024,
   );
-  if (!bundle || !manifest) throw new Error("host workflow evidence requires current trust and Flow evidence preimages");
+  if (!manifest) throw new Error("host workflow evidence requires the current Flow evidence preimage");
   return {
-    bundleSha256: createHash("sha256").update(bundle).digest("hex"),
+    bundleSha256: bundle
+      ? createHash("sha256").update(bundle).digest("hex")
+      : ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256,
     manifestSha256: createHash("sha256").update(manifest).digest("hex"),
   };
 }

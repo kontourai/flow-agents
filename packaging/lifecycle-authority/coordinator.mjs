@@ -153,6 +153,15 @@ function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
     return fs.readFileSync(descriptor);
   } finally { fs.closeSync(descriptor); }
 }
+const ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256 = sha256("kontourai.host-workflow.absent-trust-bundle.v1");
+function hostEvidenceTrustBundleSha256(file) {
+  try {
+    return sha256(protectedRegularFile(file, "trust bundle", 4 * 1024 * 1024));
+  } catch (error) {
+    if (error?.code === "ENOENT") return ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256;
+    throw error;
+  }
+}
 function canonicalMutationPaths(request) {
   const projectRoot = fs.realpathSync(request.project_root);
   const sessionDir = fs.realpathSync(request.session_dir);
@@ -2091,14 +2100,14 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const files = canonicalFlowPaths(paths);
       const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
       const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-      const bundleBytes = protectedRegularFile(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
+      const bundleSha256 = hostEvidenceTrustBundleSha256(path.join(paths.sessionDir, "trust.bundle"));
       const { flow } = await loadPinnedFlowReducer();
       if (authorization.run_id !== paths.runId
           || authorization.subject !== sessionSubject(paths)
           || authorization.subject !== state.subject
           || authorization.flow_run_head !== flow.flowRunHead(state)
           || authorization.flow_manifest_sha256 !== sha256(manifestBytes)
-          || authorization.trust_bundle_sha256 !== sha256(bundleBytes)) {
+          || authorization.trust_bundle_sha256 !== bundleSha256) {
         throw new Error("host workflow authorization canonical evidence preimage changed");
       }
       return {
