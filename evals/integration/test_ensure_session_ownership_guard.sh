@@ -479,6 +479,8 @@ GITHUB_PROJECT="$TMPDIR_EVAL/github-builder-project"
 GITHUB_ROOT="$GITHUB_PROJECT/.kontourai/flow-agents"
 mkdir -p "$GITHUB_ROOT/$GITHUB_SLUG"
 printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$GITHUB_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+git -C "$GITHUB_PROJECT" init -q
+git -C "$GITHUB_PROJECT" symbolic-ref HEAD "refs/heads/agent/$GITHUB_ACTOR_KEY/$GITHUB_SLUG"
 
 node - "$TMPDIR_EVAL/github-actor.json" <<'NODE'
 const fs = require('node:fs');

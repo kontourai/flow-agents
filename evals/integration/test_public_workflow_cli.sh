@@ -24,6 +24,92 @@ npm install --silent --prefix "$TOOL_ROOT" --no-save "$TARBALL"
 FLOW_AGENTS_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents"
 WORKFLOW_SIDECAR_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents-workflow-sidecar"
 [[ -x "$FLOW_AGENTS_BIN" && -x "$WORKFLOW_SIDECAR_BIN" ]] || fail "packed install did not expose the expected binaries"
+
+PICKUP_CONSUMER="$TMP/provider-pickup-consumer"
+PICKUP_ROOT="$PICKUP_CONSUMER/.kontourai/flow-agents"
+PICKUP_BRANCH="agent/installed-provider-pickup"
+PICKUP_RUNTIME_ID="raw-codex-thread-id-must-not-leak"
+mkdir -p "$PICKUP_CONSUMER"
+git -C "$PICKUP_CONSUMER" init -q
+git -C "$PICKUP_CONSUMER" remote add origin git@github.com:acme/widgets.git
+git -C "$PICKUP_CONSUMER" checkout -qb "$PICKUP_BRANCH"
+PICKUP_JSON="$(env -u FLOW_AGENTS_ACTOR CODEX_THREAD_ID="$PICKUP_RUNTIME_ID" "$FLOW_AGENTS_BIN" provider-bootstrap \
+  --scope project \
+  --repo-path "$PICKUP_CONSUMER" \
+  --provider-project 4 \
+  --work-item acme/widgets#44 \
+  --provider-login provider-login \
+  --provider-branch "$PICKUP_BRANCH" \
+  --json)"
+node - "$PICKUP_JSON" "$PICKUP_RUNTIME_ID" "$PICKUP_BRANCH" <<'NODE'
+const result = JSON.parse(process.argv[2]);
+const rawRuntimeId = process.argv[3];
+const branch = process.argv[4];
+if (result.pickup.work_item_ref !== "acme/widgets#44"
+    || result.pickup.slug !== "acme-widgets-44"
+    || result.pickup.provider_branch !== branch
+    || result.pickup.actor.actorKey === rawRuntimeId
+    || JSON.stringify(result).includes(rawRuntimeId)
+    || !result.pickup.actor.actor.session_id.startsWith("thread-")) process.exit(1);
+NODE
+PICKUP_SESSION="$PICKUP_ROOT/acme-widgets-44"
+PICKUP_PLAN="$PICKUP_SESSION/provider-pickup.json"
+node - "$PICKUP_PLAN" <<'NODE'
+const fs = require("node:fs");
+const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+fs.writeFileSync(plan.artifacts.issue_snapshot_file, `${JSON.stringify({
+  number: 44,
+  state: "OPEN",
+  assignees: [{ login: "provider-login" }],
+  labels: [{ name: "agent:claimed" }],
+  comments: [{
+    id: "IC_installed_pickup_44",
+    createdAt: plan.claim.record.claimed_at,
+    author: { login: "provider-login" },
+    body: plan.claim.claim_comment_body,
+  }],
+}, null, 2)}\n`);
+NODE
+PICKUP_ACTOR="$(node -p "require(process.argv[1]).actor.actorKey" "$PICKUP_PLAN")"
+"$FLOW_AGENTS_BIN" assignment-provider status \
+  --provider github \
+  --repo acme/widgets \
+  --issue-json "$PICKUP_SESSION/provider-pickup.issue.json" \
+  --subject-id acme-widgets-44 \
+  --liveness-events-json "$PICKUP_SESSION/provider-pickup.liveness.json" \
+  --self-actor "$PICKUP_ACTOR" > "$PICKUP_SESSION/provider-pickup.effective-state.json"
+printf 'Selected Work Item: acme/widgets#44\n' > "$PICKUP_SESSION/acme-widgets-44--pull-work.md"
+env -u FLOW_AGENTS_ACTOR CODEX_THREAD_ID="$PICKUP_RUNTIME_ID" "$FLOW_AGENTS_BIN" workflow start \
+  --artifact-root "$PICKUP_ROOT" \
+  --flow builder.build \
+  --work-item acme/widgets#44 \
+  --assignment-provider github \
+  --effective-state-json "$PICKUP_SESSION/provider-pickup.effective-state.json" >/dev/null
+node - "$PICKUP_ROOT" "$PICKUP_BRANCH" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const branch = process.argv[3];
+const session = path.join(root, "acme-widgets-44");
+const files = [
+  path.join(root, "assignment", "acme-widgets-44.json"),
+  path.join(session, "state.json"),
+  path.join(root, "current.json"),
+  path.join(session, "assignment-provider-state.json"),
+];
+const actorCurrent = fs.readdirSync(path.join(root, "current"));
+files.push(path.join(root, "current", actorCurrent[0]));
+for (const file of files) {
+  const document = JSON.parse(fs.readFileSync(file, "utf8"));
+  const observed = file.endsWith("assignment-provider-state.json")
+    ? document.assignment.record.branch
+    : document.branch;
+  if (observed !== branch) process.exit(1);
+}
+if (!fs.readFileSync(path.join(session, "acme-widgets-44--deliver.md"), "utf8").includes(`branch: ${branch}`)) process.exit(1);
+NODE
+pass "packed provider bootstrap hides raw runtime identity and preserves the actual provider branch across every workflow projection"
+
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$CONSUMER/checks/check-public-workflow.sh"
 chmod +x "$CONSUMER/checks/check-public-workflow.sh"
 printf '#!/usr/bin/env bash\nset -eu\ntouch "$1"\nsleep 1\n' > "$CONSUMER/checks/check-command-lock.sh"
@@ -100,11 +186,13 @@ node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.build
 pass "documented provider-neutral Work Item refs start without GitHub identity inference"
 seed_pull_work provider:externally-owned-456
 PROVIDER_STATE="$CONSUMER/provider-assignment-state.json"
-node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" <<'NODE'
+CONSUMER_BRANCH="$(git -C "$CONSUMER" branch --show-current)"
+node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" "$CONSUMER_BRANCH" <<'NODE'
 const fs = require('node:fs');
 const local = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const branch = process.argv[4];
 const subject = 'provider-externally-owned-456';
-const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456' };
+const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456', branch };
 fs.writeFileSync(process.argv[2], `${JSON.stringify({ role: 'AssignmentStatus', provider: 'example-provider', assignment: { subject_id: subject, provider: 'example-provider', assignee: local.actor_key, record }, effective: { effective_state: 'held', reason: 'self_is_holder', holder: { actor: local.actor_key } } }, null, 2)}\n`);
 NODE
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:externally-owned-456 --assignment-provider example-provider --effective-state-json "$PROVIDER_STATE" --summary "Externally assigned fixture" >/dev/null

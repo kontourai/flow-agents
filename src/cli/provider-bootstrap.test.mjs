@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 
-import { bootstrapProviders, detectGitHubRepo } from "../../build/src/cli/provider-bootstrap.js";
+import { bootstrapProviders, detectGitHubRepo, setProviderBootstrapTestHooksForTest } from "../../build/src/cli/provider-bootstrap.js";
 
 function repoFixture(owner = "example", name = "product") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-repo-"));
@@ -24,6 +24,15 @@ function readArgvLog(file) {
     .split("\n")
     .filter(Boolean)
     .map((line) => line.slice(1).split("\x1f"));
+}
+
+function snapshotTree(root) {
+  if (!fs.existsSync(root)) return [];
+  const visit = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(dir, entry.name);
+    return entry.isDirectory() ? visit(file) : [[path.relative(root, file), fs.readFileSync(file).toString("base64")]];
+  });
+  return visit(root).sort(([left], [right]) => left.localeCompare(right));
 }
 
 async function waitForPath(file, timeoutMs = 5000) {
@@ -80,6 +89,483 @@ test("offline project bootstrap writes all three schema-valid provider bindings"
   assert.equal(backlog.projects[0].work_item_provider.repo.owner, "example");
   assert.equal(assignment.projects[0].policy.label_name, "agent:claimed");
   assert.equal(change.projects[0].provider.executor, "gh-cli");
+});
+
+test("provider pickup derives one exact branch-bound claim and start plan without remote mutation", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    const result = bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: path.join(repo, "context", "settings"),
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const pickup = result.pickup;
+    assert.ok(pickup);
+    assert.equal(pickup.slug, "example-product-44");
+    assert.equal(pickup.provider_branch, "agent/provider-pickup");
+    assert.equal(pickup.actor.actorKey, "pickup-runtime-actor");
+    assert.equal(pickup.claim.record.subject_id, "example-product-44");
+    assert.equal(pickup.claim.record.work_item_ref, "example/product#44");
+    assert.equal(pickup.claim.record.branch, "agent/provider-pickup");
+    assert.deepEqual(pickup.operations.claim[0], [
+      "gh", "issue", "edit", "44", "--repo", "example/product", "--add-assignee", "provider-login",
+    ]);
+    assert.deepEqual(pickup.operations.observe_issue.argv, [
+      "gh", "issue", "view", "44", "--repo", "example/product", "--json", "number,state,assignees,labels,comments",
+    ]);
+    assert.deepEqual(pickup.operations.start_workflow.argv.slice(-6), [
+      "--work-item", "example/product#44", "--assignment-provider", "github", "--effective-state-json", pickup.artifacts.effective_state_file,
+    ]);
+    assert.equal(read(pickup.artifacts.plan_file).provider_branch, "agent/provider-pickup");
+    assert.equal(read(pickup.artifacts.claim_input_file).artifact_dir, ".kontourai/flow-agents/example-product-44");
+    assert.deepEqual(read(pickup.artifacts.liveness_events_file), []);
+
+    const repeated = bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: path.join(repo, "context", "settings"),
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+    });
+    assert.deepEqual(repeated.pickup, pickup, "rerun reuses the exact prepared claim generation");
+
+    fs.writeFileSync(pickup.artifacts.issue_snapshot_file, JSON.stringify({
+      number: 44,
+      state: "OPEN",
+      assignees: [{ login: "provider-login" }],
+      labels: [{ name: "agent:claimed" }],
+      comments: [{
+        id: "IC_pickup_44",
+        createdAt: pickup.claim.record.claimed_at,
+        author: { login: "provider-login" },
+        body: pickup.claim.claim_comment_body,
+      }],
+    }));
+    const status = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.derive_effective_state.argv.slice(1),
+    ], { encoding: "utf8" });
+    assert.equal(status.status, 0, `${status.stdout}\n${status.stderr}`);
+    fs.writeFileSync(pickup.operations.derive_effective_state.stdout_file, status.stdout);
+    assert.equal(JSON.parse(status.stdout).effective.reason, "self_is_holder");
+
+    fs.writeFileSync(
+      path.join(pickup.session_dir, `${pickup.slug}--pull-work.md`),
+      `# Pull Work\n\nSelected Work Item: ${pickup.work_item_ref}\n`,
+    );
+    const beforeBranchSwitch = snapshotTree(path.join(repo, ".kontourai"));
+    execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/branch-switch"]);
+    const switched = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.start_workflow.argv.slice(1),
+    ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+    assert.notEqual(switched.status, 0);
+    assert.match(switched.stderr, /actual Git worktree branch .* disagrees with validated provider assignment branch/);
+    assert.deepEqual(snapshotTree(path.join(repo, ".kontourai")), beforeBranchSwitch, "branch disagreement must not mirror ownership or create session state");
+    execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/provider-pickup"]);
+    const started = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.start_workflow.argv.slice(1),
+    ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+    assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+    assert.equal(read(path.join(pickup.session_dir, "state.json")).branch, "agent/provider-pickup");
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rejects ref, branch, actor, and artifact-root ambiguity before claim rendering", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  let caseNumber = 0;
+  const rejectWithoutMutation = (overrides, pattern) => {
+    caseNumber += 1;
+    const projectSettingsRoot = path.join(repo, "context", `settings-${caseNumber}`);
+    assert.throws(
+      () => bootstrapProviders({
+        scope: "project",
+        repoPath: repo,
+        projectSettingsRoot,
+        projectNumber: 7,
+        providerLogin: "provider-login",
+        ...overrides,
+      }),
+      pattern,
+    );
+    assert.equal(fs.existsSync(projectSettingsRoot), false, "failed pickup preflight must not publish provider settings");
+  };
+  try {
+    rejectWithoutMutation({ workItemRef: "other/product#44" }, /does not belong to detected repository/);
+    rejectWithoutMutation(
+      { workItemRef: "example/product", providerBranch: "agent/provider-pickup" },
+      /exact owner\/repo#positive-numeric-id/,
+    );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", providerBranch: "agent/different" },
+      /does not match the actual Git worktree branch/,
+    );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", artifactRoot: path.join(repo, "..", "outside") },
+      /canonical <repository>\/\.kontourai\/flow-agents/,
+    );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", artifactRoot: path.join(repo, "custom-artifacts") },
+      /canonical <repository>\/\.kontourai\/flow-agents/,
+    );
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("incompatible provider pickup rejects before settings or online provider commands mutate", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const session = path.join(repo, ".kontourai", "flow-agents", "example-product-44");
+  fs.mkdirSync(session, { recursive: true });
+  fs.writeFileSync(path.join(session, "provider-pickup.json"), `${JSON.stringify({
+    schema_version: "1.0",
+    role: "ProviderPickupPlan",
+    work_item_ref: "example/product#44",
+    provider_branch: "agent/provider-pickup",
+    actor: { actorKey: "different-actor" },
+    claim: { record: { claimed_at: "2026-07-25T00:00:00.000Z" } },
+  })}\n`);
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-rejection-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
+  fs.chmodSync(gh, 0o755);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+    }), /existing provider pickup plan does not match/);
+    assert.equal(fs.existsSync(settings), false, "rejected pickup must not publish provider settings");
+    assert.equal(fs.existsSync(log), false, "rejected pickup must not invoke remote provider commands");
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("pickup transaction rejects an injected race before remote commands and preserves the foreign file", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const session = path.join(repo, ".kontourai", "flow-agents", "example-product-44");
+  const conflictingActor = path.join(session, "provider-pickup.actor.json");
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-race-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
+  fs.chmodSync(gh, 0o755);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  setProviderBootstrapTestHooksForTest({
+    afterLocksAcquired() {
+      fs.writeFileSync(conflictingActor, `${JSON.stringify({ runtime: "hostile", session_id: "race", host: "race", human: null })}\n`);
+    },
+  });
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      projectNumber: 7,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+      providerBranch: "agent/provider-pickup",
+    }), /publication target changed while the transaction lock was held/);
+    assert.equal(fs.existsSync(settings), false);
+    assert.deepEqual(read(conflictingActor), { runtime: "hostile", session_id: "race", host: "race", human: null });
+    assert.equal(fs.existsSync(log), false, "local race rejection must precede every remote provider command");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    fs.unlinkSync(conflictingActor);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rejects a branch change after locks before publishing local state", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  setProviderBootstrapTestHooksForTest({
+    afterLocksAcquired() {
+      execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/changed-after-lock"]);
+    },
+  });
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.equal(fs.existsSync(settings), false, "branch rejection must not publish provider settings");
+    assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "branch rejection must not publish pickup artifacts");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rejects a branch change by the remote label callback before local commit", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-branch-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash
+set -eu
+printf '\\x1f%s' "$@" >> ${JSON.stringify(log)}
+printf '\\n' >> ${JSON.stringify(log)}
+if [[ "$1 $2" == "project list" ]]; then printf '{"projects":[{"number":7}]}'
+elif [[ "$1 $2" == "label list" ]]; then printf '[]'
+elif [[ "$1 $2" == "label create" ]]; then git -C ${JSON.stringify(repo)} symbolic-ref HEAD refs/heads/agent/changed-by-provider
+fi
+`);
+  fs.chmodSync(gh, 0o755);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      projectNumber: 7,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.ok(readArgvLog(log).some((argv) => argv[0] === "label" && argv[1] === "create"));
+    assert.equal(fs.existsSync(settings), false, "provider branch mutation must not publish settings");
+    assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "provider branch mutation must not publish pickup artifacts");
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rechecks branch after each commit hook and rolls back earlier commits", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const settingsPreimage = snapshotTree(path.join(repo, "context"));
+    const pickupPreimage = snapshotTree(path.join(repo, ".kontourai"));
+    setProviderBootstrapTestHooksForTest({
+      beforeCommit(_file, index) {
+        if (index === 1) {
+          execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/changed-before-rename"]);
+        }
+      },
+    });
+
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 8,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /actual Git worktree branch .* no longer matches provider pickup branch/);
+    assert.deepEqual(snapshotTree(path.join(repo, "context")), settingsPreimage, "rollback must restore the earlier settings commit");
+    assert.deepEqual(snapshotTree(path.join(repo, ".kontourai")), pickupPreimage, "branch rejection must not partially publish pickup artifacts");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("pickup transaction restores exact local preimages when commit fails after label creation", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  const before = snapshotTree(path.join(repo, "context"));
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-commit-gh-"));
+  const log = path.join(fakeBin, "calls.log");
+  const gh = path.join(fakeBin, "gh");
+  fs.writeFileSync(gh, `#!/usr/bin/env bash
+set -eu
+printf '\\x1f%s' "$@" >> ${JSON.stringify(log)}
+printf '\\n' >> ${JSON.stringify(log)}
+if [[ "$1 $2" == "project list" ]]; then printf '{"projects":[{"number":7}]}'
+elif [[ "$1 $2" == "label list" ]]; then printf '[]'
+fi
+`);
+  fs.chmodSync(gh, 0o755);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  setProviderBootstrapTestHooksForTest({
+    beforeCommit(_file, index) {
+      if (index === 5) throw new Error("injected pickup commit failure");
+    },
+  });
+  try {
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      online: true,
+      ghBin: gh,
+      projectNumber: 7,
+      providerLogin: "provider-login",
+      workItemRef: "example/product#44",
+      providerBranch: "agent/provider-pickup",
+    }), /injected pickup commit failure/);
+    assert.deepEqual(snapshotTree(path.join(repo, "context")), before, "settings must match exact preimages after rollback");
+    assert.equal(fs.existsSync(path.join(repo, ".kontourai")), false, "new pickup files and directories must be removed after rollback");
+    assert.ok(readArgvLog(log).some((argv) => argv[0] === "label" && argv[1] === "create"), "remote label creation is not rolled back");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("pickup transaction rejects a late foreign write, preserves it, and restores earlier committed preimages", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const settings = path.join(repo, "context", "settings");
+  const backlog = path.join(settings, "backlog-provider-settings.json");
+  const assignment = path.join(settings, "assignment-provider-settings.json");
+  const foreignBytes = "FOREIGN-WRITE\\n";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const backlogPreimage = fs.readFileSync(backlog);
+    let injected = false;
+    setProviderBootstrapTestHooksForTest({
+      beforeCommit(file, index) {
+        if (index === 1) {
+          fs.writeFileSync(file, foreignBytes);
+          injected = true;
+        }
+      },
+    });
+
+    assert.throws(() => bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: settings,
+      projectNumber: 8,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    }), /publication target changed while the transaction lock was held/);
+    assert.equal(injected, true, "the late write must occur after the first transaction-owned commit");
+    assert.deepEqual(fs.readFileSync(backlog), backlogPreimage, "rollback must restore the earlier transaction-owned commit");
+    assert.equal(fs.readFileSync(assignment, "utf8"), foreignBytes, "rollback must preserve the foreign current target");
+  } finally {
+    setProviderBootstrapTestHooksForTest(null);
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("bootstrap, public workflow start, and sidecar share the GitHub Work Item reference corpus", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const artifactRoot = path.join(repo, ".kontourai", "flow-agents");
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    for (const [ref, slug] of [
+      ["example/product#1", "example-product-1"],
+      ["example/product#9007199254740991", "example-product-9007199254740991"],
+    ]) {
+      const result = bootstrapProviders({
+        scope: "project", repoPath: repo, projectSettingsRoot: path.join(repo, "context", "settings"),
+        projectNumber: 7, providerLogin: "provider-login", workItemRef: ref,
+      });
+      assert.equal(result.pickup?.slug, slug);
+      const sidecar = spawnSync(process.execPath, ["build/src/cli/workflow-sidecar.js", "resolve-slug", ref], { encoding: "utf8" });
+      assert.equal(sidecar.status, 0, sidecar.stderr);
+      assert.equal(sidecar.stdout.trim(), slug);
+      const publicStart = spawnSync(process.execPath, [
+        "build/src/cli.js", "workflow", "start", "--artifact-root", artifactRoot,
+        "--flow", "builder.build", "--work-item", ref, "--assignment-provider", "local-file",
+      ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+      assert.notEqual(publicStart.status, 0);
+      assert.match(publicStart.stderr, new RegExp(`requires concrete pull-work selection evidence.*${slug}`));
+    }
+    for (const ref of ["example/product#0", "example/product#9007199254740992"]) {
+      const settings = path.join(repo, "context", `rejected-${ref.split("#")[1]}`);
+      assert.throws(() => bootstrapProviders({
+        scope: "project", repoPath: repo, projectSettingsRoot: settings,
+        projectNumber: 7, providerLogin: "provider-login", workItemRef: ref,
+      }), /positive-numeric-id|safe integer range/);
+      const sidecar = spawnSync(process.execPath, ["build/src/cli/workflow-sidecar.js", "resolve-slug", ref], { encoding: "utf8" });
+      assert.notEqual(sidecar.status, 0);
+      assert.match(sidecar.stderr, /positive-numeric-id|safe integer range/);
+      const publicStart = spawnSync(process.execPath, [
+        "build/src/cli.js", "workflow", "start", "--artifact-root", artifactRoot,
+        "--flow", "builder.build", "--work-item", ref, "--assignment-provider", "local-file",
+      ], { encoding: "utf8" });
+      assert.notEqual(publicStart.status, 0);
+      assert.match(publicStart.stderr, /positive-numeric-id|safe integer range/);
+      assert.equal(fs.existsSync(settings), false);
+    }
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
 });
 
 test("global bootstrap replaces only the matching repository entry", () => {
@@ -320,6 +806,7 @@ test("headless init can establish all provider settings in the installed project
   const workItem = "example/product#44";
   const slug = "example-product-44";
   const providerBranch = "provider/authorized-example-product-44";
+  execFileSync("git", ["-C", dest, "symbolic-ref", "HEAD", `refs/heads/${providerBranch}`]);
   const actorFile = path.join(dest, "bootstrap-actor.json");
   const inputFile = path.join(dest, "bootstrap-claim-input.json");
   const issueFile = path.join(dest, "bootstrap-issue.json");
@@ -426,7 +913,7 @@ test("headless init can establish all provider settings in the installed project
   assert.match(callerBranch.stderr, /workflow start.*--branch|unknown flag/i);
 
   // A later provider result that claims a different branch cannot silently rewrite a resumed
-  // session or its local mirror. It is rejected before any session artifact is mutated.
+  // session or its local mirror. The actual checkout check rejects it before any mutation.
   const mismatchedStatus = JSON.parse(status.stdout);
   mismatchedStatus.assignment.record.branch = "provider/conflicting-branch";
   const mismatchedFile = path.join(dest, "bootstrap-status-mismatched-branch.json");
@@ -440,7 +927,7 @@ test("headless init can establish all provider settings in the installed project
     "--effective-state-json", mismatchedFile,
   ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
   assert.notEqual(mismatched.status, 0);
-  assert.match(mismatched.stderr, /provider state evidence conflicts with the existing immutable snapshot/i);
+  assert.match(mismatched.stderr, /actual Git worktree branch .* disagrees with validated provider assignment branch/i);
   assert.equal(read(path.join(sessionDir, "state.json")).branch, providerBranch);
 
   // A provider-backed start fails closed when the claimed record omits its branch. The failed
