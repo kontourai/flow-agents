@@ -63,6 +63,16 @@ provider identity from a GitHub-shaped string. Pass the resolved `--assignment-p
 providers also pass their standard assignment status result through `--effective-state-json`.
 Flow Agents verifies that the current actor is the confirmed holder, retains that provider result
 as selected-work evidence, and creates a local runtime lease mirror for atomic session mutation.
+A provider-backed Builder session also takes its branch only from the validated
+`AssignmentStatus.assignment.record.branch`. That branch is copied unchanged into the immutable
+provider snapshot, local assignment mirror, delivery artifact, state, and current-session
+projections; the public command deliberately has no caller branch override. Re-running `start`
+for the same Work Item resumes only when every existing projection still agrees with the current
+provider-authorized branch. A missing, malformed, or conflicting provider branch fails closed
+before session mutation. Do not repair such a contradiction by editing runtime artifacts: retain
+the conflicting session for evidence, release or supersede the provider assignment through its
+normal provider workflow, and begin a fresh provider-backed Work Item/session. This is the safe
+recovery boundary until a transactionally recoverable branch-reconciliation protocol exists.
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
 
@@ -196,6 +206,41 @@ flow_agents workflow evidence \
 
 When a current root-signed lifecycle completion already binds a Trust Bundle and its external
 resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
+If a legitimate later public critique or gate claim has already made that receipt stale, do not
+rewrite or delete it, append a resolution event, or use history repair. First request and sign the
+completion-only refresh (the authorization file must remain outside the project):
+
+```bash
+flow_agents workflow recover-exact-current-completion-request \
+  --session-dir .kontourai/flow-agents/example > completion-recovery-request.json
+
+# Sign completion-recovery-request.json.authorization with the configured operator key.
+flow_agents workflow recover-exact-current-completion \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/completion-recovery-authorization.json
+```
+
+This narrow action is available only at the one open `builder.build` `verify` gate. It binds an
+authenticated stale same-run root completion, the raw current bundle and ledger bytes, complete
+cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
+and canonical ordered gate-policy digests, Flow head/manifest,
+fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
+the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
+plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
+generation active through root completion/nonce persistence and receipt installation. Prepared
+retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
+old/new state forward from the staged postimages, and rejects unknown or mismatched state without
+restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
+opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
+ledger, and stale receipt; it never snapshots or restores them.
+
+The canonical attachment ID and stored filename include the signed authorization digest in addition
+to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
+distinct signed recovery therefore creates a distinct attachment while the durable completion still
+binds the request digest. Replaying the same signed authorization returns the immutable completion
+without another attachment. Use it only after all final independent critique/resolution work is
+complete, and then use reseal for the final verification evidence.
+
 Use the two-stage reseal only for the final `builder.build` verify evidence after critique
 resolution:
 
@@ -468,6 +513,7 @@ flow_agents workflow drive \
   --session-dir .kontourai/flow-agents/example \
   --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
   --evidence-signing-key-file /absolute/protected/one-time-ed25519-private.pem \
+  --evidence-checkpoint-dir /absolute/protected/empty-checkpoint-directory \
   --max-turns 6 \
   --json
 ```
@@ -479,6 +525,24 @@ payload containing the canonical outcome and ordered adapter requests/results, a
 signature over the exact payload bytes. Consumers must compare the public key with the key they
 pinned before launch, verify the signature, and then validate any evidence-specific schema. Without
 this optional flag, the outcome is not externally authenticated.
+
+An evidence checkpoint directory is optional and requires both the signing-key and JSON flags. It
+must be an absolute canonical, non-symlink, empty directory provisioned by the caller outside the
+model's writable workspace. After each accepted adapter result is canonically synchronized and
+measured, the driver publishes one bounded signed checkpoint there. Each checkpoint binds the exact
+accepted-turn journal record, the canonical gate projection at that point, its sequence, and the
+digest of its predecessor. Its machine-readable `evidence_scope: accepted_prefix` and
+`drive_completion: not_attested` fields prevent an accepted adapter result from being interpreted
+as proof that the drive returned. Publication uses an unpredictable same-directory staging file, fsync,
+and an atomic no-replace link to `checkpoint-NNNNNN.json`. Incomplete staging files are ignored.
+Consumers must pin the launch public key and verify the directory with the package's
+`verifyContinuationEvidenceCheckpoints` export.
+
+A verified checkpoint proves only the ordered accepted prefix and canonical state measured at its
+publication time. It does not prove that the whole drive completed. A later timeout or process
+termination may prevent a final aggregate attestation while leaving earlier checkpoints valid.
+Malformed final files, gaps, reordering, key mismatch, cross-run substitution, and signature or
+chain failures are rejected rather than projected as partial success.
 
 Every JSON outcome also carries `canonical_gate_projection`, a compact observation copied from the
 final synchronized Flow state while the continuation lock is still held. It identifies the run and
@@ -667,6 +731,9 @@ its recovery marker. Evidence-free canonical gate evaluation is limited to accep
 gates whose effective expectations are all optional; ordinary missing-required gates remain unevaluated.
 Signed drives reserve aggregate attestation capacity before adapter execution when another bounded
 signed result cannot fit.
+When a protected checkpoint directory is supplied, each accepted turn is also signed and published
+atomically after canonical measurement. These records prove an accepted prefix only; canonical
+terminality still comes from the final synchronized outcome.
 The complete serialized adapter result is capped at 74,000 bytes, and preflight reserves that exact
 maximum plus the actual request and JSON structure. Accepted request/result pairs and measured progress
 are journaled durably before the active marker is cleared. Restart idempotently completes missing audit

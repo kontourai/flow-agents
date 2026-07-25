@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as os from "node:os";
@@ -6,6 +6,17 @@ import * as path from "node:path";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { readRunCorrelation } from "../run-correlation.js";
+import {
+  assertPinnedDirectoryChain,
+  capturePinnedDirectoryChain,
+  compileRetrospectiveObservation,
+  readRetrospectiveObservationManifest,
+} from "../retrospective-observation.js";
+import {
+  compileRetrospectiveCorpus,
+} from "../retrospective-corpus.js";
+import { assertOperatorPrivateDirectory } from "../retrospective-observation-filesystem.js";
+import { writeStateJson } from "../lib/state-file-lock.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
 
@@ -176,6 +187,159 @@ function writeJsonlUpsert(file: string, rows: Record<string, unknown>[], key: st
   const existing = new Map(strictJsonlRows(file).map((row) => [String(row[key]), row]));
   for (const row of rows) existing.set(String(row[key]), row);
   fs.writeFileSync(file, Array.from(existing.values()).map((row) => JSON.stringify(row)).join("\n") + (existing.size ? "\n" : ""), "utf8");
+}
+
+function compileObservation(argv: string[]): number {
+  const { flags } = parseArgs(argv);
+  const manifestFile = flagString(flags, "manifest");
+  if (!manifestFile) throw new Error("--manifest is required");
+  const recordRoot = flagString(flags, "record-root");
+  if (!recordRoot) throw new Error("--record-root is required");
+  const manifest = readRetrospectiveObservationManifest(manifestFile);
+  const observation = compileRetrospectiveObservation(manifest, recordRoot);
+  const outputDir = path.resolve(
+    flagString(flags, "output-dir")
+      ?? path.join(flowAgentsArtifactRoot(), "feedback"),
+  );
+  const observationsDir = path.join(outputDir, "observations");
+  ensureSafeDir(observationsDir);
+  const resolvedObservationsDir = fs.realpathSync(observationsDir);
+  const outputDirectoryChain = capturePinnedDirectoryChain(resolvedObservationsDir);
+  const outputFile = path.join(
+    resolvedObservationsDir,
+    `${observation.observation_id.slice("observation:".length)}.json`,
+  );
+  assertPinnedDirectoryChain(outputDirectoryChain);
+  writeStateJson(outputFile, observation as unknown as Record<string, unknown>);
+  assertPinnedDirectoryChain(outputDirectoryChain);
+  if (!flagBool(flags, "quiet")) {
+    console.log(JSON.stringify({
+      observation_id: observation.observation_id,
+      completeness: observation.completeness.status,
+      output_file: path.basename(outputFile),
+    }));
+  }
+  return 0;
+}
+
+function compileCorpus(argv: string[]): number {
+  const { flags } = parseArgs(argv);
+  const roots = flagList(flags, "record-root");
+  if (roots.length === 0) throw new Error("--record-root is required and may be repeated");
+  const outputDir = path.resolve(
+    flagString(flags, "output-dir")
+      ?? path.join(flowAgentsArtifactRoot(), "feedback"),
+  );
+  const corpusDir = path.join(outputDir, "corpus");
+  ensureSafeDir(corpusDir);
+  assertOperatorPrivateDirectory(corpusDir, "retrospective corpus output");
+  const outputChain = capturePinnedDirectoryChain(fs.realpathSync(corpusDir));
+  const result = compileRetrospectiveCorpus(roots);
+  publishCorpusGeneration(corpusDir, outputChain, result);
+  if (!flagBool(flags, "quiet")) console.log(JSON.stringify(result.report));
+  return 0;
+}
+
+function publishCorpusGeneration(
+  corpusDir: string,
+  outputChain: ReturnType<typeof capturePinnedDirectoryChain>,
+  result: ReturnType<typeof compileRetrospectiveCorpus>,
+): void {
+  let generation = result.report.watermark_sha256;
+  const generationsDir = path.join(corpusDir, "generations");
+  ensureSafeDir(generationsDir);
+  assertOperatorPrivateDirectory(generationsDir, "retrospective corpus generations");
+  const generationsChain = capturePinnedDirectoryChain(fs.realpathSync(generationsDir));
+  assertPinnedDirectoryChain(outputChain);
+  const stage = fs.mkdtempSync(path.join(corpusDir, ".generation-"));
+  fs.chmodSync(stage, 0o700);
+  try {
+    writeCorpusGeneration(stage, result);
+    let final = path.join(generationsDir, generation);
+    assertPinnedDirectoryChain(generationsChain);
+    if (fs.existsSync(final) && generationDigest(stage) === generationDigest(final)) {
+      fs.rmSync(stage, { recursive: true });
+    } else {
+      if (fs.existsSync(final)) {
+        generation = `${generation}-${randomBytes(16).toString("hex")}`;
+        final = path.join(generationsDir, generation);
+      }
+      fs.renameSync(stage, final);
+      fsyncDirectory(generationsDir);
+    }
+    assertPinnedDirectoryChain(outputChain);
+    assertPinnedDirectoryChain(generationsChain);
+    writeStateJson(path.join(corpusDir, "current.json"), {
+      schema: "kontour.flow-agents.retrospective-corpus-current",
+      version: "1.0",
+      generation,
+    });
+    assertPinnedDirectoryChain(outputChain);
+  } catch (error) {
+    if (fs.existsSync(stage)) fs.rmSync(stage, { recursive: true });
+    throw error;
+  }
+}
+
+function fsyncDirectory(directory: string): void {
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY | noFollow);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isDirectory()) throw new Error("retrospective corpus publication parent is not a directory");
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function generationDigest(directory: string): string {
+  const digest = createHash("sha256");
+  const visit = (current: string, relative: string): void => {
+    for (const name of fs.readdirSync(current).sort()) {
+      const absolute = path.join(current, name);
+      const child = relative ? `${relative}/${name}` : name;
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink()) throw new Error("retrospective corpus generation contains a symbolic link");
+      if (stat.isDirectory()) {
+        updateDigestFrame(digest, "directory");
+        updateDigestFrame(digest, child);
+        visit(absolute, child);
+      } else if (stat.isFile()) {
+        updateDigestFrame(digest, "file");
+        updateDigestFrame(digest, child);
+        updateDigestFrame(digest, fs.readFileSync(absolute));
+      }
+      else throw new Error("retrospective corpus generation contains an unsupported entry");
+    }
+  };
+  visit(directory, "");
+  return digest.digest("hex");
+}
+
+function updateDigestFrame(digest: ReturnType<typeof createHash>, value: string | Buffer): void {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  const length = Buffer.allocUnsafe(8);
+  length.writeBigUInt64BE(BigInt(bytes.length));
+  digest.update(length);
+  digest.update(bytes);
+}
+
+function writeCorpusGeneration(
+  directory: string,
+  result: ReturnType<typeof compileRetrospectiveCorpus>,
+): void {
+  const manifestsDir = path.join(directory, "manifests");
+  const observationsDir = path.join(directory, "observations");
+  fs.mkdirSync(manifestsDir, { mode: 0o700 });
+  fs.mkdirSync(observationsDir, { mode: 0o700 });
+  writeStateJson(path.join(directory, "watermark.json"), result.watermark as unknown as Record<string, unknown>);
+  writeStateJson(path.join(directory, "report.json"), result.report as unknown as Record<string, unknown>);
+  for (const entry of result.manifests) {
+    const id = entry.observation.observation_id.slice("observation:".length);
+    writeStateJson(path.join(manifestsDir, `${id}.json`), entry.manifest as unknown as Record<string, unknown>);
+    writeStateJson(path.join(observationsDir, `${id}.json`), entry.observation as unknown as Record<string, unknown>);
+  }
 }
 
 function recordOutcome(argv: string[]): number {
@@ -619,9 +783,11 @@ function globalDashboard(argv: string[]): number {
 }
 
 export function main(argv = process.argv.slice(2)): number {
+  const [command, ...rest] = argv;
   try {
-    const [command, ...rest] = argv;
     if (command === "record-outcome") return recordOutcome(rest);
+    if (command === "compile-observation") return compileObservation(rest);
+    if (command === "compile-corpus") return compileCorpus(rest);
     if (command === "import-codex") return importTelemetry(rest, "codex");
     if (command === "import-telemetry") return importTelemetry(rest);
     if (command === "sync-artifacts") return syncArtifacts(rest);
@@ -633,6 +799,10 @@ export function main(argv = process.argv.slice(2)): number {
     console.error("usage-feedback command required");
     return 2;
   } catch (error) {
+    if (command === "compile-observation" || command === "compile-corpus") {
+      console.error(`${command} failed (${parseErrorClass(error)})`);
+      return 1;
+    }
     console.error((error as Error).message);
     return 1;
   }

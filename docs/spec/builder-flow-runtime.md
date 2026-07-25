@@ -371,6 +371,14 @@ turn marker is cleared. Signed workflow drives preflight the aggregate attestati
 capacity before launching an adapter when another bounded signed result cannot fit.
 Accepted request/result pairs and their measured progress are first stored in a
 durable idempotent journal while the active turn remains in `measured` phase.
+When the host provisions a protected evidence-checkpoint directory, the
+long-lived driver signs that exact accepted-turn record and its current canonical
+gate projection before completing the turn. Checkpoints are sequence- and
+predecessor-bound, atomically published without replacement, and independently
+verifiable with the public key pinned before launch. They authenticate only the
+accepted prefix and measured state at publication; they do not imply that a
+later turn or the overall drive completed. The signed payload states this as
+`evidence_scope: accepted_prefix` and `drive_completion: not_attested`.
 Only after journal and completion-event persistence does the driver clear that
 marker. Restart completes either write exactly once. Signed attestations reload
 the journal and fail closed if an accepted event lacks request/result coverage.
@@ -400,6 +408,8 @@ transformation. The final drive result also projects the synchronized Flow gate
 outcomes and accepted exceptions as `canonical_gate_projection`. The projection
 is captured under the continuation lock, stays out of adapter requests, and is
 authenticated only when the signed attestation covers the final outcome.
+The checkpoint verifier is exported for host consumers, while checkpoint
+creation remains internal to the Flow Agents driver authority.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may
@@ -432,7 +442,7 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.8.1 package and the transitive runtime
+The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
 dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
@@ -464,6 +474,58 @@ a protected regular Ed25519 public key. Arbitrary alias targets, deeper symlinks
 non-root-owned components, and every symlink on non-Darwin hosts fail closed. This exception does
 not apply to lifecycle-helper installation: the pinned helper path remains symlink-free through
 every component.
+
+### Exact-current completion recovery
+
+`recover-exact-current-completion-request` and
+`recover-exact-current-completion` are the completion-only route for a valid
+same-run root receipt that became stale after a later public critique or gate
+claim. They are not history repair and are not a claim writer. Request creation
+is read-only and requires the canonical `builder.build` `verify` gate, one
+matching session/Flow subject, an authenticated stale applied receipt, and a
+complete, valid external resolution ledger. The signed authorization binds the
+stale receipt's raw digest/action/request/core/runtime identity, exact raw
+bundle and ledger identities, critique and resolution-edge projections, raw
+Flow-definition and canonical ordered gate-policy digests, fixed
+`exact-current-completion-only` transition, Flow definition/step/gate/head/
+manifest, nonce, request time, and expiry.
+
+The coordinator repeats those checks while holding its durable per-run and
+Flow mutation locks. Its pure transition returns the current bundle and ledger
+unchanged. Before any Flow postimage write, the unprivileged worker stages the
+fixed five Flow-only old/new images and root signs a request-, authorization-,
+nonce-, reducer-, and result-bound publication plan. The plan binds, but never
+stages or restores, `trust.bundle`, the resolution ledger, and the stale
+receipt. Before the first postimage, the worker activates Flow's native
+generation-bound recovery fence for the signed plan `recovery_id`. The fence
+remains active while root persists completion and nonce state and installs the
+exact receipt, so ordinary Flow writers cannot observe or mutate the
+intermediate generation. Prepared recovery uses the matching native recovery
+lock. It classifies each live artifact as exact old, exact new, or unknown;
+all-old and exact mixed states roll forward from staged new bytes, all-new
+succeeds idempotently, and unknown state fails closed without restoration.
+Finalization verifies the exact active fence generation, receipt, and all-new
+postimages, opens the fence through Flow's finalizer, and only then removes the
+stages and plan. Completion replay safely resumes receipt installation or
+cleanup.
+
+The recovery attachment and stored filename include both the durable envelope
+request digest and the signed authorization digest. The completion continues
+to bind the envelope digest. Therefore two legitimate recoveries that reuse the
+same authorization-file path and request shape but carry distinct signed
+authorization generations publish distinct attachments without colliding. An
+exact nonce replay returns the same completion and cannot add a second
+attachment; a prepared crash after any or all Flow writes resumes from the
+signed plan and converges to all-new.
+It never appends/resolves a ledger event, rewrites evidence, accepts a missing
+or duplicate authority edge, or displaces a different newer exact-current
+receipt. This source protocol does not install or upgrade the live root helper;
+that remains a separately authorized operator action.
+
+Normal ordering is: record all independent final critiques; resolve or repair
+eligible authority edges; if that legitimate public work made the receipt stale,
+recover the exact-current completion; then reseal final verification evidence
+when a gate claim itself must change.
 
 ### Atomic verification-evidence reseal
 
@@ -700,3 +762,46 @@ For legacy persisted assignments, an actor that omits only `human` is treated as
 `human: null` identity during lifecycle authorization construction and live-holder comparison.
 This compatibility rule does not rewrite the persisted assignment and does not relax any other
 actor field or non-null human identity.
+
+## Multi-cursor host dispatch
+
+Flow Agents can host a Flow definition that explicitly opts into Flow's
+`execution.mode: "multi-cursor"` / claim-contract version `1`. The definition,
+ready frontier, mutable-resource declarations, durable claims, leases, recovery,
+and settlement remain Flow-owned. A host calls `orchestrateFlowMultiCursor` with
+its authenticated actor identity and a callback. The callback receives only a
+Flow-issued claim; it must not write a run state or infer resource overlap.
+
+```ts
+const schedule = await orchestrateFlowMultiCursor({
+  runId,
+  actor: { key: "station:local", kind: "station" },
+  execute: async ({ claim, signal }) => runtime.dispatch(claim.step_id, { signal }),
+});
+```
+
+The host attempts Flow claims for the current ready frontier. It may continue
+after only Flow's typed `flow.multi_cursor.claim.resource_conflict`, allowing a
+disjoint declaration to run while the conflicting declaration waits. Every other
+claim, actor, lease, stale-head, recovery, callback, or cleanup failure fails the
+orchestration; it is never reported as a successful schedule. Long callbacks renew
+their exact Flow lease. If renewal fails, the host aborts the callback and waits for
+it to stop before releasing the exact claim through Flow; runtime adapters must
+honor the supplied `AbortSignal`.
+
+`FlowScheduleObservation` is the bounded schedule artifact for the existing
+workflow evidence path. It includes the exact Flow definition identity, initial
+and successfully captured final Flow heads, host actor, Flow-issued claim/liveness ids, admissions,
+typed deferrals, and settlements/releases. Persist that JSON as an ordinary
+workflow artifact and reference it with the existing `workflow evidence`
+artifact-reference mechanism. It explains host dispatch; it is not a second gate
+truth source and does not advance a Flow run on its own. A failed final capture
+leaves `finalRunHead` null and makes orchestration fail closed.
+
+Builder hosts use `orchestrateBuilderFlowMultiCursor({ sessionDir, ... })`. The
+wrapper proves the canonical Builder session did not change during dispatch and
+atomically writes an immutable
+`<session>/<slug>--multi-cursor-schedule-<sha256>.json`. Its returned
+`evidenceRef` is already shaped for `workflow evidence --evidence-ref-json`, so
+the schedule and typed mutable-resource deferral travel with the gate's ordinary
+test or acceptance evidence instead of becoming a parallel gate truth source.

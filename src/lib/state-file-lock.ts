@@ -4,6 +4,8 @@ import * as path from "node:path";
 
 const WAIT_MS = 30_000;
 const STALE_MS = 5 * 60_000;
+const MAX_LOCK_OWNER_BYTES = 4096;
+const MAX_STATE_BYTES = 16 * 1024 * 1024;
 
 type FileIdentity = { dev: number; ino: number };
 type StateLock = {
@@ -19,11 +21,15 @@ function sleepSync(ms: number): void {
 }
 
 function readOwner(file: string): { token: string } | null {
+  let descriptor: number | null = null;
   try {
-    const value = JSON.parse(fs.readFileSync(file, "utf8")) as { token?: unknown };
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const value = JSON.parse(readDescriptorBounded(descriptor, MAX_LOCK_OWNER_BYTES).toString("utf8")) as { token?: unknown };
     return typeof value.token === "string" && value.token ? { token: value.token } : null;
   } catch {
     return null;
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
   }
 }
 
@@ -197,7 +203,9 @@ function readExistingState(
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
     const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile()) throw new Error(`state file must be a regular file: ${file}`);
+    if (!stat.isFile() || stat.size > MAX_STATE_BYTES) {
+      throw new Error(`state file must be one bounded regular file: ${file}`);
+    }
     const openedPath = fs.lstatSync(file);
     assertStateParentIdentity(file, parentIdentity);
     if (
@@ -208,7 +216,7 @@ function readExistingState(
     ) {
       throw new Error(`state file changed during descriptor open: ${file}`);
     }
-    const raw = fs.readFileSync(descriptor, "utf8");
+    const raw = readDescriptorBounded(descriptor, MAX_STATE_BYTES).toString("utf8");
     const current = fs.lstatSync(file);
     assertStateParentIdentity(file, parentIdentity);
     if (
@@ -223,6 +231,18 @@ function readExistingState(
   } finally {
     fs.closeSync(descriptor);
   }
+}
+
+function readDescriptorBounded(descriptor: number, maxBytes: number): Buffer {
+  const bytes = Buffer.allocUnsafe(maxBytes + 1);
+  let offset = 0;
+  while (offset <= maxBytes) {
+    const read = fs.readSync(descriptor, bytes, offset, maxBytes + 1 - offset, offset);
+    if (read === 0) break;
+    offset += read;
+  }
+  if (offset > maxBytes) throw new Error("state file exceeds its byte limit");
+  return bytes.subarray(0, offset);
 }
 
 function writeAll(descriptor: number, content: string): void {
@@ -264,6 +284,9 @@ function atomicReplaceState(
   expectedIdentity: FileIdentity | null,
   content: string,
 ): void {
+  if (Buffer.byteLength(content) > MAX_STATE_BYTES) {
+    throw new Error("state replacement exceeds its byte limit");
+  }
   const temporary = `${file}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   assertStateParentIdentity(file, parentIdentity);
   const descriptor = fs.openSync(

@@ -43,6 +43,11 @@
   "engines": {
     "node": ">=22"
   },
+  "overrides": {
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.8"
+    }
+  },
   "bin": {
     "flow-agents": "build/src/cli.js",
     "flow-agents-build-bundles": "build/src/cli.js",
@@ -174,7 +179,7 @@
   "dependencies": {
     "@kontourai/conduit": "0.2.1",
     "@kontourai/dispatch": "0.3.0",
-    "@kontourai/flow": "3.8.1",
+    "@kontourai/flow": "3.9.0",
     "@kontourai/relay": "0.4.0",
     "@kontourai/survey": "2.0.0",
     "esbuild": "0.28.1"

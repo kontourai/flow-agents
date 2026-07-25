@@ -12,6 +12,7 @@ import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
+  inspectBuilderFlowSession,
   mergeGateClaimsWithCritiqueHistory,
   pauseBuilderFlowSession,
   prepareBuilderCancelRequest,
@@ -26,6 +27,7 @@ import { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAu
 import * as builderLifecycleAuthority from "../../build/src/builder-lifecycle-authority.js";
 import { lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
+import { verifyContinuationEvidenceCheckpoints } from "../../build/src/continuation-evidence-checkpoints.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
@@ -42,6 +44,7 @@ import { main as publishChangeMain } from "../../build/src/cli/publish-change-he
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
+import { loadContinuationAdapterCommand } from "../../build/src/cli/continuation-adapter.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -2399,6 +2402,8 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   const adapter = path.join(session.projectRoot, "signed-evidence-adapter.mjs");
   const commandFile = path.join(session.projectRoot, "signed-evidence-adapter-command.json");
   const keyFile = path.join(session.projectRoot, ".continuation-evidence-key.pem");
+  fs.mkdirSync(path.join(session.projectRoot, "continuation-evidence-checkpoints"));
+  const checkpointDir = fs.realpathSync(path.join(session.projectRoot, "continuation-evidence-checkpoints"));
   const keyConsumedMarker = path.join(session.projectRoot, "key-consumed.json");
   const observedRequestsFile = path.join(session.projectRoot, "observed-adapter-requests.jsonl");
   const keys = generateKeyPairSync("ed25519");
@@ -2423,6 +2428,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
       "drive", "--session-dir", session.sessionDir,
       "--adapter-command-file", commandFile,
       "--evidence-signing-key-file", keyFile,
+      "--evidence-checkpoint-dir", checkpointDir,
       "--max-turns", "0",
       "--json",
     ]),
@@ -2439,6 +2445,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
       "--session-dir", session.sessionDir,
       "--adapter-command-file", commandFile,
       "--evidence-signing-key-file", keyFile,
+      "--evidence-checkpoint-dir", checkpointDir,
       "--max-turns", "10",
       "--turn-timeout-ms", "5000",
       "--barrier-wait-ms", "0",
@@ -2475,8 +2482,107 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.equal(Object.hasOwn(payload.adapter_turns[0].request, "canonical_gate_projection"), false);
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
   assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
+  const checkpoints = verifyContinuationEvidenceCheckpoints({
+    checkpointDir,
+    expectedPublicKeySpkiB64: expectedPublicKey,
+    expectedAdapterCommandIdentity: payload.adapter_command_identity,
+    expectedMaxTurns: 10,
+    expectedRunId: session.slug,
+    expectedDefinitionId: payload.outcome.snapshot.definition_id,
+  });
+  assert.equal(checkpoints.checkpoints.length, 10);
+  assert.deepEqual(
+    checkpoints.checkpoints.map((checkpoint) => checkpoint.accepted_turn.request),
+    observedRequests,
+  );
+  assert.deepEqual(
+    checkpoints.checkpoints.map((checkpoint) => checkpoint.canonical_gate_projection),
+    Array(10).fill(result.canonical_gate_projection),
+  );
   const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
   assert.equal(verify(null, tampered, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), false);
+});
+
+test("killing a drive during its third adapter preserves two verified accepted-turn checkpoints", async () => {
+  const session = makeSession("continuation-driver-interrupted-checkpoints");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const adapter = path.join(session.projectRoot, "interrupted-checkpoint-adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "interrupted-checkpoint-command.json");
+  const keyFile = path.join(session.projectRoot, ".interrupted-checkpoint-key.pem");
+  const thirdTurnMarker = path.join(session.projectRoot, "third-turn.json");
+  fs.mkdirSync(path.join(session.projectRoot, "interrupted-checkpoints"));
+  const checkpointDir = fs.realpathSync(path.join(session.projectRoot, "interrupted-checkpoints"));
+  const keys = generateKeyPairSync("ed25519");
+  fs.writeFileSync(keyFile, keys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    const request = JSON.parse(input);
+    if (request.iteration === 3) {
+      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid }));
+      setInterval(() => {}, 1000);
+      await new Promise(() => {});
+    }
+    process.stdout.write(JSON.stringify({
+      status: "completed",
+      evidence: { iteration: request.iteration, usage: { input_tokens: 10, output_tokens: 2 } },
+    }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+  const adapterIdentity = loadContinuationAdapterCommand(commandFile).identity;
+  const cli = path.resolve(import.meta.dirname, "../../build/src/cli.js");
+  const child = spawn(process.execPath, [
+    cli, "workflow", "drive",
+    "--session-dir", session.sessionDir,
+    "--adapter-command-file", commandFile,
+    "--evidence-signing-key-file", keyFile,
+    "--evidence-checkpoint-dir", checkpointDir,
+    "--max-turns", "4",
+    "--turn-timeout-ms", "60000",
+    "--barrier-wait-ms", "0",
+    "--json",
+  ], { cwd: session.projectRoot, stdio: "ignore" });
+  let adapterPid;
+  try {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(path.join(checkpointDir, "checkpoint-000002.json")) && fs.existsSync(thirdTurnMarker)) {
+        adapterPid = readJson(thirdTurnMarker).pid;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(adapterPid, "the third adapter started after two checkpoints were published");
+    const closed = new Promise((resolve) => child.once("close", resolve));
+    child.kill("SIGKILL");
+    await closed;
+
+    const synchronized = await inspectBuilderFlowSession({ sessionDir: session.sessionDir });
+    const verified = verifyContinuationEvidenceCheckpoints({
+      checkpointDir,
+      expectedPublicKeySpkiB64: keys.publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+      expectedAdapterCommandIdentity: adapterIdentity,
+      expectedMaxTurns: 4,
+      expectedRunId: session.slug,
+      expectedDefinitionId: synchronized.run.definitionId,
+    });
+    assert.equal(verified.checkpoints.length, 2);
+    assert.deepEqual(verified.checkpoints.map((checkpoint) => checkpoint.accepted_turn.iteration), [1, 2]);
+    assert.equal(fs.existsSync(path.join(checkpointDir, "checkpoint-000003.json")), false);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (Number.isSafeInteger(adapterPid)) {
+      try { process.kill(adapterPid, "SIGKILL"); } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+  }
 });
 
 test("public workflow drive rejects a non-owner before adapter execution", async () => {
@@ -2999,6 +3105,31 @@ test("verification evidence reseal authorization binds every atomic preimage", (
     () => builderLifecycleAuthority.validateVerificationEvidenceResealAuthorization(malformed, {
       projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
     }),
+    /unexpected or missing fields/i,
+  );
+});
+
+test("exact-current completion recovery authorization fixes every refresh binding", () => {
+  const fields = {
+    project_root: "/tmp/recovery-project", run_id: "run-1", subject: SUBJECT, permitted_transition: "exact-current-completion-only",
+    stale_completion_sha256: "1".repeat(64), stale_completion_action: "resolve-critique", stale_completion_request_sha256: "2".repeat(64), stale_completion_result_core_sha256: "3".repeat(64), stale_completion_coordinator_runtime_sha256: "4".repeat(64),
+    current_bundle_sha256: "5".repeat(64), current_ledger_sha256: "6".repeat(64), current_ledger_length: 2, current_ledger_tail_hash: "7".repeat(64),
+    critique_projection_sha256: "8".repeat(64), resolution_edge_projection_sha256: "9".repeat(64), resolution_edge_projection_count: 1,
+    flow_definition_id: "builder.build", flow_definition_sha256: "a".repeat(64), flow_step_id: "verify", flow_gate_id: "verify-gate", flow_gate_policy_sha256: "b".repeat(64), flow_run_head: "c".repeat(64), flow_manifest_sha256: "d".repeat(64),
+    nonce: "recover-once", requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
+  };
+  const built = builderLifecycleAuthority.buildUnsignedExactCurrentCompletionRecoveryAuthorization(fields);
+  assert.equal(built.unsigned.operation, "recover-exact-current-completion");
+  assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
+  const malformed = { ...built.unsigned, signature: { algorithm: "ed25519", key_id: "operator", value: "AA==" }, permitted_transition: "rewrite-evidence" };
+  assert.throws(
+    () => builderLifecycleAuthority.validateExactCurrentCompletionRecoveryAuthorization(malformed, { projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z" }),
+    /transition is invalid/i,
+  );
+  const missing = { ...built.unsigned, signature: malformed.signature };
+  delete missing.stale_completion_sha256;
+  assert.throws(
+    () => builderLifecycleAuthority.validateExactCurrentCompletionRecoveryAuthorization(missing, { projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z" }),
     /unexpected or missing fields/i,
   );
 });

@@ -300,7 +300,7 @@ jobs:
   runtime-and-kit:
     name: Runtime and Kit
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       FLOW_AGENTS_CI_LANE: runtime-and-kit
       FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/runtime-and-kit

@@ -82,6 +82,39 @@ export type {
   WorkflowProcessStatus,
   WorkflowVerificationStatus,
 } from "./workflow-outcome.js";
+export {
+  FlowMultiCursorOrchestrationError,
+  orchestrateFlowMultiCursor,
+} from "./multi-cursor-flow-orchestrator.js";
+export type {
+  FlowMultiCursorExecution,
+  FlowScheduleEvent,
+  FlowScheduleObservation,
+  OrchestrateFlowMultiCursorInput,
+} from "./multi-cursor-flow-orchestrator.js";
+export { orchestrateBuilderFlowMultiCursor } from "./builder-multi-cursor-flow-orchestrator.js";
+export type {
+  BuilderFlowMultiCursorResult,
+  BuilderFlowScheduleArtifactRef,
+  BuilderFlowScheduleEvidence,
+  OrchestrateBuilderFlowMultiCursorInput,
+} from "./builder-multi-cursor-flow-orchestrator.js";
+export {
+  compileRetrospectiveObservation,
+  readRetrospectiveObservationManifest,
+  validateRetrospectiveObservation,
+} from "./retrospective-observation.js";
+export {
+  compileRetrospectiveCorpus,
+  type RetrospectiveCorpusReport,
+  type RetrospectiveCorpusResult,
+  type RetrospectiveCorpusWatermark,
+} from "./retrospective-corpus.js";
+export type {
+  ObservationDiagnostic,
+  RetrospectiveObservation,
+  RetrospectiveObservationManifest,
+} from "./retrospective-observation.js";
 export type {
   TelemetryDiagnostic,
   ToolResultStatus,
@@ -438,6 +471,13 @@ export {
   runContinuationDriver,
   withContinuationDriverLock,
 } from "./continuation-driver.js";
+export {
+  verifyContinuationEvidenceCheckpoints,
+} from "./continuation-evidence-checkpoints.js";
+export type {
+  ContinuationEvidenceCheckpoint,
+  VerifiedContinuationEvidenceCheckpoints,
+} from "./continuation-evidence-checkpoints.js";
 export type {
   ContinuationBarrier,
   ContinuationContextPolicy,

@@ -704,6 +704,115 @@ export function normalizeConsolidateAppend(options = {}) {
 }
 
 /**
+ * Normalize an explicitly authored consolidation source set. Presence is
+ * significant: an empty or malformed allowlist must fail closed rather than
+ * silently falling back to similarity selection.
+ *
+ * @param {object} [options]
+ * @returns {string[] | null}
+ */
+export function normalizeConsolidateSourceRecordIds(options = {}) {
+  if (!Object.prototype.hasOwnProperty.call(options, "sourceRecordIds")) return null;
+  if (!Array.isArray(options.sourceRecordIds) || options.sourceRecordIds.length === 0) {
+    throw missingEvidenceError(
+      "consolidate: options.sourceRecordIds must be a non-empty array of compiled record ids"
+    );
+  }
+  const ids = options.sourceRecordIds.map((value) => {
+    if (typeof value !== "string" || !value.trim() || value !== value.trim()) {
+      throw missingEvidenceError(
+        "consolidate: every options.sourceRecordIds entry must be a non-empty canonical record id"
+      );
+    }
+    return value;
+  });
+  if (new Set(ids).size !== ids.length) {
+    throw missingEvidenceError(
+      "consolidate: options.sourceRecordIds must not contain duplicate record ids"
+    );
+  }
+  return ids;
+}
+
+/**
+ * Resolve the canonical compiled-record ids that may contribute to one
+ * consolidation. This is the single enforcement boundary for append,
+ * explicitly authored, and detector-selected source sets.
+ *
+ * @param {{
+ *   store: object,
+ *   snapshotProxy: object,
+ *   detector: Function,
+ *   isIncremental: boolean,
+ *   incrementalCluster: string[] | null,
+ *   explicitSourceIds: string[] | null
+ * }} input
+ * @returns {Promise<string[]>}
+ */
+export async function resolveConsolidationSourceCluster({
+  store,
+  snapshotProxy,
+  detector,
+  isIncremental,
+  incrementalCluster,
+  explicitSourceIds,
+}) {
+  if (isIncremental) return incrementalCluster;
+
+  if (explicitSourceIds) {
+    const cluster = [];
+    for (const sourceId of explicitSourceIds) {
+      const record = await store.get(sourceId);
+      if (!record) {
+        throw missingEvidenceError(
+          `consolidate: sourceRecordIds record not found: ${sourceId}`
+        );
+      }
+      if (record.type !== "compiled") {
+        throw missingEvidenceError(
+          `consolidate: sourceRecordIds record ${sourceId} is type="${record.type}", expected "compiled"`
+        );
+      }
+      if ((record.status || "active") !== "active") {
+        throw missingEvidenceError(
+          `consolidate: sourceRecordIds record ${sourceId} is not active`
+        );
+      }
+      if (record.id !== sourceId) {
+        throw missingEvidenceError(
+          `consolidate: sourceRecordIds must use canonical record ids; "${sourceId}" resolved to "${record.id}"`
+        );
+      }
+      cluster.push(sourceId);
+    }
+    return cluster;
+  }
+
+  const allCompiled = await store.listByType("compiled");
+  const exactCategoryCompiled = allCompiled.filter(
+    (record) =>
+      record.category === snapshotProxy.category &&
+      (record.status || "active") === "active"
+  );
+  const cluster = await detector(snapshotProxy, exactCategoryCompiled, store);
+  if (!Array.isArray(cluster)) {
+    throw missingEvidenceError(
+      "related-event-gate: similarity detector must return an array of canonical record ids"
+    );
+  }
+  const allowedIds = new Set(exactCategoryCompiled.map((record) => record.id));
+  if (
+    new Set(cluster).size !== cluster.length ||
+    cluster.some((recordId) => typeof recordId !== "string" || !allowedIds.has(recordId))
+  ) {
+    throw missingEvidenceError(
+      "related-event-gate: similarity detector returned a duplicate, non-canonical, inactive, or out-of-category record"
+    );
+  }
+  return cluster;
+}
+
+/**
  * Default entry renderer for the decision-log snapshot shape: one section per
  * contributing compiled record — a level-2 heading (the record title) followed
  * by the record body. Pluggable via `options.entryRenderer`.
@@ -1347,6 +1456,9 @@ export class KnowledgeFlowRunner {
    *   - note: string                — provenance note
    *   - category: string            — category for new snapshot (required when creating)
    *   - similarityDetector: fn      — pluggable detector (same interface as synthesize R3)
+   *   - sourceRecordIds: string[]   — exact ordered compiled-record allowlist;
+   *                                   mutually exclusive with append mode and
+   *                                   similarityDetector
    * @returns {Promise<{
    *   snapshotId: string,
    *   proposerId: string,
@@ -1398,11 +1510,24 @@ export class KnowledgeFlowRunner {
       }
       // Find existing snapshot by topic tag
       const allSnapshots = await this._store.listByType("snapshot");
-      const matches = allSnapshots.filter((s) => {
+      const topicMatches = allSnapshots.filter((s) => {
         const topicTag = (s.tags || []).find((t) => t.startsWith("topic:"));
         const snapshotTopic = topicTag ? topicTag.slice(6) : s.category;
         return snapshotTopic === topic;
       });
+      const matches = sel.category
+        ? topicMatches.filter((snapshot) => snapshot.category === sel.category)
+        : topicMatches;
+      if (sel.category && topicMatches.length > 0 && matches.length === 0) {
+        throw missingEvidenceError(
+          `consolidate: topic "${topic}" is already bound to a different snapshot category`
+        );
+      }
+      if (!sel.category && new Set(matches.map((snapshot) => snapshot.category)).size > 1) {
+        throw missingEvidenceError(
+          `consolidate: topic "${topic}" is ambiguous across snapshot categories; provide category`
+        );
+      }
       if (matches.length > 0) {
         // Use the most recently created snapshot (no superseded-by log entry = current)
         const current = matches.find((s) => {
@@ -1428,11 +1553,22 @@ export class KnowledgeFlowRunner {
     // records plus the new entry. The two are mutually exclusive.
     const append = normalizeConsolidateAppend(options);
     const isIncremental = append !== null;
+    const explicitSourceIds = normalizeConsolidateSourceRecordIds(options);
 
     if (isIncremental && typeof options.proposedBody === "string" && options.proposedBody.trim()) {
       throw missingEvidenceError(
         "consolidate: options.proposedBody and append-mode (appendEntryRecordId/appendEntry) " +
         "are mutually exclusive — supply one or the other, not both"
+      );
+    }
+    if (isIncremental && explicitSourceIds) {
+      throw missingEvidenceError(
+        "consolidate: options.sourceRecordIds and append-mode are mutually exclusive"
+      );
+    }
+    if (explicitSourceIds && options.similarityDetector) {
+      throw missingEvidenceError(
+        "consolidate: options.sourceRecordIds and options.similarityDetector are mutually exclusive"
       );
     }
 
@@ -1534,13 +1670,14 @@ export class KnowledgeFlowRunner {
     // authoritative and grows by exactly the appended entry, which is precisely
     // what makes sequential appends lossless. In whole-body mode the detector
     // discovers the related compiled records as before.
-    let cluster;
-    if (isIncremental) {
-      cluster = incrementalCluster;
-    } else {
-      const allCompiled = await this._store.listByType("compiled");
-      cluster = await detector(snapshotProxy, allCompiled, this._store);
-    }
+    const cluster = await resolveConsolidationSourceCluster({
+      store: this._store,
+      snapshotProxy,
+      detector,
+      isIncremental,
+      incrementalCluster,
+      explicitSourceIds,
+    });
 
     if (!Array.isArray(cluster) || cluster.length === 0) {
       throw missingEvidenceError(
