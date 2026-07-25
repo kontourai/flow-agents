@@ -462,9 +462,9 @@ function sanitizeBranchSegment(value: string, helper: { sanitizeSegment: (v: unk
  * check is skipped silently and the lexical checks above remain the sole authority. Dies with
  * remediation, or with git's own rejection message; never mutates any artifact before this check
  * runs (resolveSessionBranch calls this before any file write). */
-function validateExplicitBranch(value: string): void {
-  const remediation = `Pass a --branch value matching [A-Za-z0-9_./-], with no leading/trailing "/", no "//", no leading ".", no ".." sequence, and no trailing "." or ".lock" (got: ${JSON.stringify(value)}).`;
-  const fail = (reason: string): never => die(`ensure-session --branch value is not a valid git ref: ${reason}. ${remediation}`);
+function validateBranchValue(value: string, source: string): void {
+  const remediation = `Use a branch matching [A-Za-z0-9_./-], with no leading/trailing "/", no "//", no leading ".", no ".." sequence, and no trailing "." or ".lock" (got: ${JSON.stringify(value)}).`;
+  const fail = (reason: string): never => die(`ensure-session ${source} is not a valid git ref: ${reason}. ${remediation}`);
   if (/[\x00-\x1F\x7F]/.test(value)) fail("contains a control character or newline");
   if (/ /.test(value)) fail("contains a space");
   if (value.startsWith("/") || value.endsWith("/")) fail('must not start or end with "/"');
@@ -506,6 +506,10 @@ function validateExplicitBranch(value: string): void {
     const gitMessage = String(result.stderr ?? "").trim();
     fail(gitMessage ? `git check-ref-format rejected the value: ${gitMessage}` : "git check-ref-format rejected the value");
   }
+}
+
+function validateExplicitBranch(value: string): void {
+  validateBranchValue(value, "--branch value");
 }
 
 /**
@@ -583,15 +587,27 @@ function resolveReadActorKey(p: ReturnType<typeof parseArgs>): string {
 
 /** Resolve the branch to seed a brand-new session with. Only called from ensureSession's
  * `if (!md)` fresh-creation branch — an existing session's already-recorded branch is never
- * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). Precedence: explicit
- * --branch (strictly validated, then honored verbatim — see F2) > derived agent/<actor>/<slug>.
+ * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). A validated provider
+ * branch is authoritative when present; otherwise precedence is explicit --branch (strictly
+ * validated, then honored verbatim — see F2) > derived agent/<actor>/<slug>.
  * Never hard-fails session creation on actor-resolution ambiguity (Design Decision 4) — only a
  * garbage explicit --actor, or a garbage explicit --branch, dies. */
-function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string): string {
+function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string, providerBranch?: string): string {
   // Deliberately NOT trimmed before validation (unlike the pre-F2 baseline): a leading/trailing
   // space must be REJECTED, not silently trimmed away — silent trimming would let a
   // caller-supplied value differ from what gets recorded without any diagnostic (F2).
   const explicitBranch = opt(p, "branch");
+  // A provider-backed Builder start has already authenticated its ownership result before it
+  // reaches this point. Its claim record is therefore the sole branch authority: accepting a
+  // caller branch here would fork a session away from the provider's durable assignment. Reject
+  // a disagreement loudly instead of silently choosing either value. Local/ad-hoc sessions keep
+  // the established explicit-then-derived behavior below.
+  if (providerBranch) {
+    if (explicitBranch && explicitBranch !== providerBranch) {
+      die(`ensure-session --branch cannot override the validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+    }
+    return providerBranch;
+  }
   if (explicitBranch) { validateExplicitBranch(explicitBranch); return explicitBranch; }
   const helper = loadActorIdentityHelper();
   // #291 Wave 2 Task 2.1: actor resolution is now single-sourced via resolveEnsureSessionActor()
@@ -2284,6 +2300,62 @@ function initSidecars(
   });
 }
 
+/**
+ * Provider-backed Builder sessions have one branch authority: the branch embedded in the
+ * AssignmentStatus record whose holder identity was just validated. Before a new local lease is
+ * mirrored, reject an existing session that points somewhere else. This is deliberately a
+ * read-only preflight so a bad resume cannot "fix" evidence by overwriting it.
+ */
+function assertExistingProviderBranchAgreement(
+  root: string,
+  slug: string,
+  dir: string,
+  providerBranch: string,
+  actorKey: string,
+): void {
+  const fail = (surface: string, observed: unknown): never => die(
+    `ensure-session refused: ${surface} branch ${JSON.stringify(observed)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`,
+  );
+  const deliverPath = path.join(dir, `${slug}--deliver.md`);
+  if (fs.existsSync(deliverPath)) {
+    const branch = markdownField(readRegularFileNoFollow(deliverPath, "ensure-session delivery branch").toString("utf8"), "branch");
+    if (branch !== providerBranch) fail("delivery", branch || "missing");
+  }
+  const statePath = path.join(dir, "state.json");
+  if (fs.existsSync(statePath)) {
+    const state = JSON.parse(readRegularFileNoFollow(statePath, "ensure-session state branch").toString("utf8")) as AnyObj;
+    if (state.branch !== providerBranch) fail("state", state.branch ?? "missing");
+  }
+
+  const relativeDir = path.relative(root, dir) || ".";
+  const checkCurrent = (payload: AnyObj | null, label: string): void => {
+    if (!payload || (payload.active_slug !== slug && payload.artifact_dir !== relativeDir)) return;
+    if (payload.branch !== providerBranch) fail(label, payload.branch ?? "missing");
+  };
+  const currentPath = path.join(root, "current.json");
+  if (fs.existsSync(currentPath)) {
+    checkCurrent(JSON.parse(readRegularFileNoFollow(currentPath, "ensure-session current branch").toString("utf8")) as AnyObj, "current");
+  }
+  checkCurrent(loadCurrentPointerHelper().readOwnCurrentPointer(root, actorKey).payload, "actor current");
+
+  const localMirror = readLocalAssignmentStatus(root, slug).record;
+  if (localMirror && localMirror.branch !== providerBranch) fail("assignment mirror", localMirror.branch ?? "missing");
+}
+
+function assertProviderBranchAgreement(
+  root: string,
+  slug: string,
+  dir: string,
+  providerBranch: string,
+  actorKey: string,
+): void {
+  assertExistingProviderBranchAgreement(root, slug, dir, providerBranch, actorKey);
+  const localMirror = readLocalAssignmentStatus(root, slug).record;
+  if (!localMirror || localMirror.status !== "claimed" || localMirror.branch !== providerBranch) {
+    die(`ensure-session refused: assignment mirror does not retain validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+  }
+}
+
 /** Read a `--*-json` flag's value as a file path (or `-` for stdin), mirroring
  * assignment-provider.ts's own `loadJsonInput` convention — this file's OTHER `--*-json` flags
  * (e.g. `--check-json`) instead take a literal inline JSON string via parseJson(), a DIFFERENT
@@ -2324,7 +2396,7 @@ function enforceEnsureSessionOwnership(
   dir: string,
   resolution: { actorStruct: ActorStruct; actorKey: string; branchActorKey: string; unresolved: boolean },
   workItemRef?: string,
-): { assignmentFile: string; actorKey: string; providerEvidenceFile?: string; providerEvidenceBytes?: Buffer } | null {
+): { assignmentFile: string; actorKey: string; providerBranch?: string; providerEvidenceFile?: string; providerEvidenceBytes?: Buffer } | null {
   if (p.flags.has("skip-ownership-guard")) {
     process.stderr.write("[ensure-session] ownership guard skipped via --skip-ownership-guard\n");
     return null;
@@ -2334,6 +2406,9 @@ function enforceEnsureSessionOwnership(
   // under, so the guard is skipped entirely (documented scope boundary, not a silent hole) rather
   // than claiming under a synthetic/unstable identity.
   if (resolution.unresolved) {
+    if (workItemRef && opt(p, "assignment-provider", "local-file") !== "local-file") {
+      die("ensure-session requires a resolved runtime actor to validate a provider-backed AssignmentStatus record and preserve its branch");
+    }
     process.stderr.write("[ensure-session] ownership guard not evaluated: actor is unresolved (set --actor or FLOW_AGENTS_ACTOR, or run inside a supported runtime) — proceeding without a durable claim, exactly as ensure-session behaved before #291\n");
     return null;
   }
@@ -2360,6 +2435,7 @@ function enforceEnsureSessionOwnership(
   type EffectiveResult = { effective_state: EffectiveState; reason: string; holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } };
   let effective: EffectiveResult;
   let providerEvidenceBytes: Buffer | undefined;
+  let providerBranch: string | undefined;
 
   const effectiveStateJsonFlag = opt(p, "effective-state-json");
   if (effectiveStateJsonFlag) {
@@ -2394,6 +2470,7 @@ function enforceEnsureSessionOwnership(
       || record?.status !== "claimed"
       || record?.subject_id !== slug
       || record?.work_item_ref !== workItemRef
+      || (assignmentProviderKind !== "local-file" && (typeof record?.branch !== "string" || record.branch.length === 0))
       || record?.actor_key !== resolution.branchActorKey
       || !record.actor || typeof record.actor !== "object"
       || record.actor.runtime !== resolution.actorStruct.runtime
@@ -2404,6 +2481,23 @@ function enforceEnsureSessionOwnership(
       || candidate.reason !== "self_is_holder"
       || candidate.holder?.actor !== resolution.branchActorKey)) {
       die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime");
+    }
+    if (assignmentProviderKind !== "local-file" && workItemRef) {
+      providerBranch = record!.branch as string;
+      validateBranchValue(providerBranch, "validated provider assignment branch");
+      // The immutable provider snapshot is part of the read-only resume preflight, not the
+      // later session-artifact staging phase. If it already exists, compare its exact bytes
+      // before performLocalClaim can create a local assignment mirror. A conflicting retry must
+      // leave no new durable ownership or session projection behind.
+      const stagedProviderEvidence = path.join(dir, "assignment-provider-state.json");
+      if (fs.existsSync(stagedProviderEvidence)
+        && !readRegularFileNoFollow(stagedProviderEvidence, "ensure-session immutable provider state evidence").equals(providerEvidenceBytes)) {
+        die("ensure-session provider state evidence conflicts with the existing immutable snapshot");
+      }
+      // Check every existing durable projection before mirroring or changing anything. A resume
+      // must continue the provider-authorized branch, never repair a conflicting session by
+      // overwriting its branch metadata.
+      assertExistingProviderBranchAgreement(root, slug, dir, providerBranch, resolution.branchActorKey);
     }
     effective = candidate as EffectiveResult;
   } else if (assignmentProviderKind === "local-file") {
@@ -2454,6 +2548,7 @@ function enforceEnsureSessionOwnership(
     return {
       assignmentFile: assignmentFilePath(root, slug),
       actorKey: resolution.branchActorKey,
+      ...(providerBranch ? { providerBranch } : {}),
       ...(effectiveStateJsonFlag ? { providerEvidenceFile: path.resolve(effectiveStateJsonFlag) } : {}),
       ...(providerEvidenceBytes ? { providerEvidenceBytes } : {}),
     };
@@ -2461,6 +2556,12 @@ function enforceEnsureSessionOwnership(
 
   const resolveBranchForClaim = (): string => {
     const existingBranch = fs.existsSync(path.join(dir, "state.json")) ? (loadJson(path.join(dir, "state.json")).branch as string | undefined) : undefined;
+    if (providerBranch) {
+      if (existingBranch && existingBranch !== providerBranch) {
+        die(`ensure-session refused: state branch ${JSON.stringify(existingBranch)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+      }
+      return providerBranch;
+    }
     return existingBranch || resolveSessionBranch(p, slug);
   };
 
@@ -2651,6 +2752,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     ? workItem.ref
     : undefined;
   let selectedWorkEvidence = enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution, selectionWorkItemRef);
+  if (selectedWorkEvidence?.providerBranch) {
+    // The provider-owned branch has been validated before this point; once the local assignment
+    // mirror exists it must agree before we create any session artifact around it.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   ensureSafeDirectory(root, dir);
   if (selectedWorkEvidence?.providerEvidenceBytes) {
     const staged = path.join(dir, "assignment-provider-state.json");
@@ -2672,7 +2778,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     // An existing session's already-recorded `branch:` line is never touched — that whole branch
     // of code is skipped on a resumed/taken-over session, which is what makes ADR 0021 §5
     // takeover continuity true by construction (see Design Decision 3 in the plan).
-    const branch = resolveSessionBranch(p, slug);
+    const branch = resolveSessionBranch(p, slug, selectedWorkEvidence?.providerBranch);
     const initialMarkdownStatus = entry.flowId ? "new" : "planning";
     const acceptanceCriteria = opts(p, "criterion");
     if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
@@ -2728,6 +2834,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
       initialPhase ? { status: "new", phase: initialPhase } : undefined,
     );
   }
+  if (selectedWorkEvidence?.providerBranch) {
+    // initSidecars is the state.json writer. Recheck immediately after it so a legacy/malformed
+    // sidecar cannot cause the current pointer to advertise a different branch.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   // ADR 0016 Abstraction A (P-a): optional --flow-id / --step-id flags persist FlowDefinition
   // routing keys into current.json for the producer (P-b) and enforcer (P-c) to consume.
   // When absent, behavior is unchanged — the workflow.* claim type path is used as before.
@@ -2753,6 +2864,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
     entry.flowId === "builder.build" || entry.flowId === "builder.shape",
   );
+  if (selectedWorkEvidence?.providerBranch) {
+    // current.json and the actor-scoped projection are both derived from state.json. Verify that
+    // both projections retained the exact provider branch before the canonical Builder run starts.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });

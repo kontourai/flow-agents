@@ -319,6 +319,7 @@ test("headless init can establish all provider settings in the installed project
   const providerLogin = "bootstrap-provider-login";
   const workItem = "example/product#44";
   const slug = "example-product-44";
+  const providerBranch = "provider/authorized-example-product-44";
   const actorFile = path.join(dest, "bootstrap-actor.json");
   const inputFile = path.join(dest, "bootstrap-claim-input.json");
   const issueFile = path.join(dest, "bootstrap-issue.json");
@@ -339,7 +340,7 @@ test("headless init can establish all provider settings in the installed project
     claim_comment_marker: assignment.policy.claim_comment_marker,
     actor_key: actorKey,
     work_item_ref: workItem,
-    branch: `agent/${actorKey}/${slug}`,
+    branch: providerBranch,
     artifact_dir: `.kontourai/flow-agents/${slug}`,
   }));
   const rendered = spawnSync(process.execPath, [
@@ -378,6 +379,7 @@ test("headless init can establish all provider settings in the installed project
   const assignmentStatus = JSON.parse(status.stdout);
   assert.equal(assignmentStatus.effective.effective_state, "held");
   assert.equal(assignmentStatus.effective.reason, "self_is_holder");
+  assert.equal(assignmentStatus.assignment.record.branch, providerBranch);
   const started = spawnSync(process.execPath, [
     "build/src/cli.js", "workflow", "start",
     "--artifact-root", artifactRoot,
@@ -387,6 +389,111 @@ test("headless init can establish all provider settings in the installed project
     "--effective-state-json", statusFile,
   ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
   assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+  // A provider-backed session has one branch authority: the validated AssignmentStatus record.
+  // Its immutable evidence, local lease mirror, session state/delivery record, and both current
+  // projections must all retain that exact value; no locally derived agent branch is allowed.
+  assert.equal(read(path.join(artifactRoot, "assignment", `${slug}.json`)).branch, providerBranch);
+  assert.equal(read(path.join(sessionDir, "state.json")).branch, providerBranch);
+  assert.match(fs.readFileSync(path.join(sessionDir, `${slug}--deliver.md`), "utf8"), new RegExp(`^branch: ${providerBranch}$`, "m"));
+  assert.equal(read(path.join(artifactRoot, "current.json")).branch, providerBranch);
+  const actorCurrent = fs.readdirSync(path.join(artifactRoot, "current"));
+  assert.equal(actorCurrent.length, 1);
+  assert.equal(read(path.join(artifactRoot, "current", actorCurrent[0])).branch, providerBranch);
+  assert.equal(read(path.join(sessionDir, "assignment-provider-state.json")).assignment.record.branch, providerBranch);
+
+  // Re-entry is a continuation of the same provider-authorized branch, not a fresh local
+  // derivation. A caller also cannot add a competing public branch argument.
+  const resumed = spawnSync(process.execPath, [
+    "build/src/cli.js", "workflow", "start",
+    "--artifact-root", artifactRoot,
+    "--flow", "builder.build",
+    "--work-item", workItem,
+    "--assignment-provider", "github",
+    "--effective-state-json", statusFile,
+  ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
+  assert.equal(resumed.status, 0, `${resumed.stdout}\n${resumed.stderr}`);
+  assert.equal(read(path.join(sessionDir, "state.json")).branch, providerBranch);
+  const callerBranch = spawnSync(process.execPath, [
+    "build/src/cli.js", "workflow", "start",
+    "--artifact-root", artifactRoot,
+    "--flow", "builder.build",
+    "--work-item", workItem,
+    "--assignment-provider", "github",
+    "--effective-state-json", statusFile,
+    "--branch", "agent/caller-override",
+  ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
+  assert.notEqual(callerBranch.status, 0);
+  assert.match(callerBranch.stderr, /workflow start.*--branch|unknown flag/i);
+
+  // A later provider result that claims a different branch cannot silently rewrite a resumed
+  // session or its local mirror. It is rejected before any session artifact is mutated.
+  const mismatchedStatus = JSON.parse(status.stdout);
+  mismatchedStatus.assignment.record.branch = "provider/conflicting-branch";
+  const mismatchedFile = path.join(dest, "bootstrap-status-mismatched-branch.json");
+  fs.writeFileSync(mismatchedFile, JSON.stringify(mismatchedStatus));
+  const mismatched = spawnSync(process.execPath, [
+    "build/src/cli.js", "workflow", "start",
+    "--artifact-root", artifactRoot,
+    "--flow", "builder.build",
+    "--work-item", workItem,
+    "--assignment-provider", "github",
+    "--effective-state-json", mismatchedFile,
+  ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
+  assert.notEqual(mismatched.status, 0);
+  assert.match(mismatched.stderr, /provider state evidence conflicts with the existing immutable snapshot/i);
+  assert.equal(read(path.join(sessionDir, "state.json")).branch, providerBranch);
+
+  // A provider-backed start fails closed when the claimed record omits its branch. The failed
+  // start must not create a partial session in the new artifact root.
+  const missingBranchStatus = JSON.parse(status.stdout);
+  delete missingBranchStatus.assignment.record.branch;
+  const missingFile = path.join(dest, "bootstrap-status-missing-branch.json");
+  const missingRoot = path.join(dest, "missing-branch-project", ".kontourai", "flow-agents");
+  const missingSession = path.join(missingRoot, slug);
+  fs.mkdirSync(missingSession, { recursive: true });
+  fs.writeFileSync(path.join(missingSession, `${slug}--pull-work.md`), `# Pull Work\n\nSelected Work Item: ${workItem}\n`);
+  fs.writeFileSync(missingFile, JSON.stringify(missingBranchStatus));
+  const missingBranch = spawnSync(process.execPath, [
+    "build/src/cli.js", "workflow", "start",
+    "--artifact-root", missingRoot,
+    "--flow", "builder.build",
+    "--work-item", workItem,
+    "--assignment-provider", "github",
+    "--effective-state-json", missingFile,
+  ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
+  assert.notEqual(missingBranch.status, 0);
+  assert.match(missingBranch.stderr, /AssignmentStatus.*claimed record and self_is_holder actor/i);
+  assert.equal(fs.existsSync(path.join(missingSession, "state.json")), false);
+
+  // Exact immutable provider evidence is checked before a local lease is mirrored. A resume
+  // presenting different (but otherwise valid) AssignmentStatus bytes must fail without leaving
+  // an assignment record or any session/current projection behind.
+  const conflictingRoot = path.join(dest, "conflicting-snapshot-project", ".kontourai", "flow-agents");
+  const conflictingSession = path.join(conflictingRoot, slug);
+  const immutableSnapshot = path.join(conflictingSession, "assignment-provider-state.json");
+  fs.mkdirSync(conflictingSession, { recursive: true });
+  fs.writeFileSync(path.join(conflictingSession, `${slug}--pull-work.md`), `# Pull Work\n\nSelected Work Item: ${workItem}\n`);
+  fs.writeFileSync(immutableSnapshot, status.stdout, { mode: 0o400 });
+  const conflictingStatus = JSON.parse(status.stdout);
+  conflictingStatus.observation_nonce = "different-but-valid-provider-observation";
+  const conflictingStatusFile = path.join(dest, "bootstrap-status-conflicting-bytes.json");
+  fs.writeFileSync(conflictingStatusFile, JSON.stringify(conflictingStatus));
+  const conflictingSnapshotStart = spawnSync(process.execPath, [
+    "build/src/cli.js", "workflow", "start",
+    "--artifact-root", conflictingRoot,
+    "--flow", "builder.build",
+    "--work-item", workItem,
+    "--assignment-provider", "github",
+    "--effective-state-json", conflictingStatusFile,
+  ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: actorKey } });
+  assert.notEqual(conflictingSnapshotStart.status, 0);
+  assert.match(conflictingSnapshotStart.stderr, /provider state evidence conflicts with the existing immutable snapshot/i);
+  assert.equal(fs.readFileSync(immutableSnapshot, "utf8"), status.stdout);
+  assert.equal(fs.existsSync(path.join(conflictingRoot, "assignment", `${slug}.json`)), false);
+  assert.equal(fs.existsSync(path.join(conflictingSession, "state.json")), false);
+  assert.equal(fs.existsSync(path.join(conflictingSession, `${slug}--deliver.md`)), false);
+  assert.equal(fs.existsSync(path.join(conflictingRoot, "current.json")), false);
+  assert.equal(fs.existsSync(path.join(conflictingRoot, "current")), false);
 });
 
 test("universal bundles do not contain Flow Agents dogfood provider bindings", () => {

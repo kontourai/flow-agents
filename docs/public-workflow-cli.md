@@ -47,6 +47,16 @@ provider identity from a GitHub-shaped string. Pass the resolved `--assignment-p
 providers also pass their standard assignment status result through `--effective-state-json`.
 Flow Agents verifies that the current actor is the confirmed holder, retains that provider result
 as selected-work evidence, and creates a local runtime lease mirror for atomic session mutation.
+A provider-backed Builder session also takes its branch only from the validated
+`AssignmentStatus.assignment.record.branch`. That branch is copied unchanged into the immutable
+provider snapshot, local assignment mirror, delivery artifact, state, and current-session
+projections; the public command deliberately has no caller branch override. Re-running `start`
+for the same Work Item resumes only when every existing projection still agrees with the current
+provider-authorized branch. A missing, malformed, or conflicting provider branch fails closed
+before session mutation. Do not repair such a contradiction by editing runtime artifacts: retain
+the conflicting session for evidence, release or supersede the provider assignment through its
+normal provider workflow, and begin a fresh provider-backed Work Item/session. This is the safe
+recovery boundary until a transactionally recoverable branch-reconciliation protocol exists.
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
 
