@@ -29,7 +29,7 @@
     {
       "id": "knowledge.consolidate",
       "path": "flows/consolidate.flow.json",
-      "description": "Consolidate related compiled records into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
+      "description": "Consolidate an exact-category or explicit compiled-record source set into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
     },
     {
       "id": "knowledge.retire",
@@ -94,7 +94,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → exact-category or explicit-source decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -156,7 +156,7 @@
     {
       "id": "knowledge.consolidation-suite",
       "path": "evals/consolidation/suite.test.js",
-      "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
+      "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); exact-category and explicit-source selection; supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
     },
     {
       "id": "knowledge.similarity-vector-suite",

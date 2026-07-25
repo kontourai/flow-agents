@@ -477,6 +477,13 @@ updated only through the `knowledge.consolidate` flow.
 - May link to superseded predecessor snapshots using link kind `"supersedes"`.
 - Carries `provenance.source_ids` referencing every compiled record that contributed to the
   current body.
+- Automatic consolidation discovers sources only within the snapshot's exact
+  category. Category hierarchy is a filing aid, not implicit authority to pull
+  a parent or descendant record into a narrower topic.
+- A caller may instead supply an ordered `sourceRecordIds` allowlist. The
+  allowlist is non-empty and duplicate-free; every id must resolve to an active
+  compiled record. It is mutually exclusive with similarity detection and
+  incremental append mode.
 
 ### A.4 Extended Link Kinds
 

@@ -16,7 +16,7 @@
           "id": "related-compiled-records-found",
           "kind": "trust.bundle",
           "required": true,
-          "description": "One or more compiled records linked to the snapshot's topic have been identified. The trigger fires when new compiled records matching the snapshot topic (by category or explicit topic tag) are present. The result is a cluster of compiled record IDs that form the consolidation input.",
+          "description": "One or more compiled records linked to the snapshot's topic have been identified. Automatic selection considers only the snapshot's exact category; parent and descendant categories are separate topics. A caller may instead provide an exact ordered source-record allowlist. The result is a cluster of compiled record IDs that form the consolidation input.",
           "bundle_claim": {
             "claimType": "knowledge.consolidate.trigger",
             "subjectType": "artifact",

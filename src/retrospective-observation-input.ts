@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { containsSensitiveCredential } from "./run-correlation.js";
+import { containsSensitiveCredential, readRunCorrelation } from "./run-correlation.js";
 import {
   confinedSourceFile,
+  decodeUtf8Fatal,
   readPinnedFile,
+  scanPinnedJsonl,
   type DirectoryIdentity,
 } from "./retrospective-observation-filesystem.js";
 
@@ -51,6 +53,7 @@ export type LoadedSource = {
   source_id: string;
   file: string;
   content_sha256: string;
+  snapshot_bytes: number;
   total_records: number;
   records: LoadedRecord[];
   diagnostics: ObservationDiagnostic[];
@@ -96,7 +99,7 @@ export function loadRetrospectiveSources(
     const declaration = manifest.sources[kind];
     if (!declaration) return [];
     const confined = confinedSourceFile(root, declaration.file, kind);
-    return [loadSource(kind, declaration.source_id, confined.file, confined.directoryChain)];
+    return [loadSource(kind, declaration.source_id, confined.file, confined.directoryChain, manifest.correlation_id)];
   });
 }
 
@@ -165,46 +168,120 @@ function loadSource(
   sourceId: string,
   file: string,
   directoryChain: DirectoryIdentity[],
+  correlationId: string,
 ): LoadedSource {
-  const bytes = readPinnedFile(file, `${kind} source`, 16 * 1024 * 1024, directoryChain);
-  const jsonl = kind === "runtime_events" || kind === "economics";
-  const lines = jsonl ? bytes.toString("utf8").split(/\r?\n/) : [bytes.toString("utf8")];
-  const records: LoadedRecord[] = [];
-  const diagnostics: ObservationDiagnostic[] = [];
-  let totalRecords = 0;
-  let malformedRecords = 0;
-  lines.forEach((line, index) => {
-    if (jsonl && line.length === 0) return;
-    totalRecords += 1;
-    const contentSha256 = sha256(line);
-    try {
-      const value = JSON.parse(line) as unknown;
-      if (!isRecord(value)) throw new TypeError("record must be a JSON object");
-      records.push({ value, line: index + 1, content_sha256: contentSha256 });
-    } catch (error) {
-      malformedRecords += 1;
-      if (diagnostics.length < MAX_OBSERVATION_DIAGNOSTICS) {
-        diagnostics.push({
-          source_id: sourceId,
-          line: index + 1,
-          content_sha256: contentSha256,
-          error: error instanceof SyntaxError ? "SyntaxError" : "ProducerValidationError",
-        });
-      }
-    }
-  });
+  const accumulator = sourceAccumulator(sourceId);
+  const snapshot = kind === "runtime_events" || kind === "economics"
+    ? loadJsonlSource(file, kind, directoryChain, correlationId, accumulator)
+    : loadJsonSource(file, kind, directoryChain, accumulator);
   return {
     kind,
     source_id: sourceId,
     file,
-    content_sha256: sha256(bytes),
-    total_records: totalRecords,
-    records,
-    diagnostics,
+    content_sha256: snapshot.contentSha256,
+    snapshot_bytes: snapshot.snapshotBytes,
+    total_records: accumulator.totalRecords,
+    records: accumulator.records,
+    diagnostics: accumulator.diagnostics,
     directory_chain: directoryChain,
-    malformed_records: malformedRecords,
-    invalid_records: 0,
+    malformed_records: accumulator.malformedRecords,
+    invalid_records: accumulator.invalidRecords,
   };
+}
+
+type SourceAccumulator = {
+  sourceId: string;
+  totalRecords: number;
+  malformedRecords: number;
+  invalidRecords: number;
+  records: LoadedRecord[];
+  diagnostics: ObservationDiagnostic[];
+};
+
+function sourceAccumulator(sourceId: string): SourceAccumulator {
+  return { sourceId, totalRecords: 0, malformedRecords: 0, invalidRecords: 0, records: [], diagnostics: [] };
+}
+
+function loadJsonlSource(
+  file: string,
+  kind: RetrospectiveSourceKind,
+  directoryChain: DirectoryIdentity[],
+  correlationId: string,
+  accumulator: SourceAccumulator,
+): { contentSha256: string; snapshotBytes: number } {
+  const scanned = scanPinnedJsonl(file, `${kind} source`, 2 * 1024 * 1024, directoryChain, (line, lineNumber, error, digest) => {
+    if (line === "") return;
+    accumulator.totalRecords += 1;
+    if (error || line === null) recordDiagnostic(accumulator, lineNumber, digest, "malformed");
+    else consumeSourceLine(accumulator, line, lineNumber, digest, correlationId);
+  });
+  return { contentSha256: scanned.contentSha256, snapshotBytes: scanned.size };
+}
+
+function loadJsonSource(
+  file: string,
+  kind: RetrospectiveSourceKind,
+  directoryChain: DirectoryIdentity[],
+  accumulator: SourceAccumulator,
+): { contentSha256: string; snapshotBytes: number } {
+  const bytes = readPinnedFile(file, `${kind} source`, 16 * 1024 * 1024, directoryChain);
+  accumulator.totalRecords = 1;
+  try {
+    consumeSourceLine(accumulator, decodeUtf8Fatal(bytes), 1, sha256(bytes), null);
+  } catch {
+    recordDiagnostic(accumulator, 1, sha256(bytes), "malformed");
+  }
+  return { contentSha256: sha256(bytes), snapshotBytes: bytes.length };
+}
+
+function consumeSourceLine(
+  accumulator: SourceAccumulator,
+  line: string,
+  lineNumber: number,
+  contentSha256: string,
+  correlationId: string | null,
+): void {
+  try {
+    const value = JSON.parse(line) as unknown;
+    if (!isRecord(value)) throw new TypeError("record must be a JSON object");
+    const disposition = correlationId ? correlationDisposition(value, correlationId) : "match";
+    if (disposition === "invalid") recordDiagnostic(accumulator, lineNumber, contentSha256, "invalid");
+    else if (disposition === "match") accumulator.records.push({ value, line: lineNumber, content_sha256: contentSha256 });
+  } catch (error) {
+    recordDiagnostic(accumulator, lineNumber, contentSha256, error instanceof SyntaxError ? "malformed" : "invalid");
+  }
+}
+
+function recordDiagnostic(
+  accumulator: SourceAccumulator,
+  line: number,
+  contentSha256: string,
+  kind: "malformed" | "invalid",
+): void {
+  if (kind === "malformed") accumulator.malformedRecords += 1;
+  else accumulator.invalidRecords += 1;
+  if (accumulator.diagnostics.length < MAX_OBSERVATION_DIAGNOSTICS) {
+    accumulator.diagnostics.push({
+      source_id: accumulator.sourceId,
+      line,
+      content_sha256: contentSha256,
+      error: kind === "malformed" ? "SyntaxError" : "ProducerValidationError",
+    });
+  }
+}
+
+function correlationDisposition(
+  value: JsonRecord,
+  correlationId: string,
+): "match" | "other" | "absent" | "invalid" {
+  if (!Object.hasOwn(value, "run_correlation")) return "absent";
+  try {
+    const correlation = readRunCorrelation(value);
+    if (correlation.status === "incomplete") return "absent";
+    return correlation.envelope.correlation_id === correlationId ? "match" : "other";
+  } catch {
+    return "invalid";
+  }
 }
 
 function assertPublicId(value: unknown, label: string): asserts value is string {
