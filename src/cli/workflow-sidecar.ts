@@ -3575,6 +3575,9 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // Sequential, never concurrent: evidence commands are test runs against one working tree, so
   // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
   // race and one fails, turning a green tree into an unrecordable claim (#974).
+  // Mirrors observeCommand's return rather than ObservedCommand[]: runObservedCommand yields a
+  // null exit_code on the timeout/kill path, which the runtime guard below rejects before any
+  // claim is persisted. Narrowing here instead would just fail to compile.
   const observed: Awaited<ReturnType<typeof observeCommand>>[] = [];
   for (const command of commands) observed.push(await observeCommand(command));
   if (observed.length !== commands.length) die("record-gate-claim requires exactly one --observed-command-json for every --command");
@@ -4980,6 +4983,11 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
   const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
   let outputSha256: string | null = null;
+  // Note: commands have already executed by this point (normalizeObservedCommands above), and
+  // evals/integration/test_evidence_command_serialization.sh relies on that ordering to observe
+  // the writer's real execution interleaving. Moving this shape check earlier is defensible
+  // (do not run commands for a claim we will reject) but will fail that eval — update it in the
+  // same change rather than treating the failure as an unrelated regression.
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
   if (gateCommands.length === 0 && observedCommandRaw.length > 0) die("--observed-command-json requires --command");
   if (!mustRunTests && gateCommand && observedCommandRaw.length === 0) {
