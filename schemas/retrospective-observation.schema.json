@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/retrospective-observation/1.0.json",
+  "title": "Flow Agents privacy-safe retrospective run observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "observation_id",
+    "correlation_id",
+    "process",
+    "workflow",
+    "activity",
+    "quality",
+    "usage",
+    "completeness",
+    "source_refs",
+    "diagnostics",
+    "snapshot_sha256"
+  ],
+  "properties": {
+    "schema": { "const": "kontour.flow-agents.retrospective-observation" },
+    "version": { "const": "1.0" },
+    "observation_id": { "type": "string", "pattern": "^observation:[a-f0-9]{64}$" },
+    "correlation_id": { "$ref": "#/$defs/publicId" },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verification_status"],
+      "properties": {
+        "status": { "$ref": "#/$defs/nullableMetadata" },
+        "verification_status": { "enum": ["PASS", "FAIL", "NOT_VERIFIED"] }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow_status", "gate_outcome_count", "transition_count", "route_back_count"],
+      "properties": {
+        "flow_status": { "$ref": "#/$defs/nullableMetadata" },
+        "gate_outcome_count": { "$ref": "#/$defs/nullableCount" },
+        "transition_count": { "$ref": "#/$defs/nullableCount" },
+        "route_back_count": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turn_count", "tool_result_count", "delegation_event_count"],
+      "properties": {
+        "turn_count": { "$ref": "#/$defs/nullableCount" },
+        "tool_result_count": { "$ref": "#/$defs/nullableCount" },
+        "delegation_event_count": { "$ref": "#/$defs/nullableCount" }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": { "const": "NOT_VERIFIED" },
+        "reason": { "const": "not_independently_evaluated" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "authority",
+        "semantics",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "estimated_cost_usd",
+        "wall_clock_s",
+        "delegation_count"
+      ],
+      "properties": {
+        "status": { "enum": ["CONFIRMED", "NOT_VERIFIED"] },
+        "authority": { "enum": ["authenticated_runtime_binding", "fixture_input", "unavailable"] },
+        "semantics": { "enum": ["run_delta", null] },
+        "model": { "$ref": "#/$defs/nullableMetadata" },
+        "input_tokens": { "$ref": "#/$defs/nullableNumber" },
+        "output_tokens": { "$ref": "#/$defs/nullableNumber" },
+        "estimated_cost_usd": { "$ref": "#/$defs/nullableNumber" },
+        "wall_clock_s": { "$ref": "#/$defs/nullableNumber" },
+        "delegation_count": { "$ref": "#/$defs/nullableCount" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "authority": { "const": "unavailable" } }, "required": ["authority"] },
+          "then": {
+            "properties": {
+              "status": { "const": "NOT_VERIFIED" },
+              "semantics": { "const": null },
+              "model": { "const": null },
+              "input_tokens": { "const": null },
+              "output_tokens": { "const": null },
+              "estimated_cost_usd": { "const": null },
+              "wall_clock_s": { "const": null },
+              "delegation_count": { "const": null }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "authority": { "enum": ["authenticated_runtime_binding", "fixture_input"] }
+            },
+            "required": ["authority"]
+          },
+          "then": {
+            "properties": {
+              "semantics": { "const": "run_delta" },
+              "input_tokens": { "type": "number", "minimum": 0 },
+              "output_tokens": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "CONFIRMED" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "authority": { "const": "authenticated_runtime_binding" },
+              "semantics": { "const": "run_delta" },
+              "model": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "input_tokens": { "type": "number", "minimum": 0 },
+              "output_tokens": { "type": "number", "minimum": 0 },
+              "estimated_cost_usd": { "type": "number", "minimum": 0 },
+              "wall_clock_s": { "type": "number", "minimum": 0 },
+              "delegation_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "present_dimensions",
+        "missing_dimensions",
+        "missing_sources",
+        "malformed_records",
+        "invalid_records"
+      ],
+      "properties": {
+        "status": { "enum": ["complete", "partial"] },
+        "present_dimensions": { "$ref": "#/$defs/factKinds" },
+        "missing_dimensions": { "$ref": "#/$defs/factKinds" },
+        "missing_sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sourceKind" }
+        },
+        "malformed_records": { "type": "integer", "minimum": 0 },
+        "invalid_records": { "type": "integer", "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "complete" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "present_dimensions": { "minItems": 9, "maxItems": 9 },
+              "missing_dimensions": { "maxItems": 0 },
+              "missing_sources": { "maxItems": 0 },
+              "malformed_records": { "const": 0 },
+              "invalid_records": { "const": 0 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "partial" } }, "required": ["status"] },
+          "then": {
+            "anyOf": [
+              { "properties": { "missing_dimensions": { "minItems": 1 } } },
+              { "properties": { "missing_sources": { "minItems": 1 } } },
+              { "properties": { "malformed_records": { "minimum": 1 } } },
+              { "properties": { "invalid_records": { "minimum": 1 } } }
+            ]
+          }
+        }
+      ]
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "source_id",
+          "content_sha256",
+          "total_records",
+          "valid_records",
+          "malformed_records",
+          "invalid_records"
+        ],
+        "properties": {
+          "kind": { "$ref": "#/$defs/sourceKind" },
+          "source_id": { "$ref": "#/$defs/publicId" },
+          "content_sha256": { "$ref": "#/$defs/sha256" },
+          "total_records": { "type": "integer", "minimum": 0 },
+          "valid_records": { "type": "integer", "minimum": 0 },
+          "malformed_records": { "type": "integer", "minimum": 0 },
+          "invalid_records": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "line", "content_sha256", "error"],
+        "properties": {
+          "source_id": { "$ref": "#/$defs/publicId" },
+          "line": { "type": "integer", "minimum": 1 },
+          "content_sha256": { "$ref": "#/$defs/sha256" },
+          "error": { "enum": ["SyntaxError", "ProducerValidationError"] }
+        }
+      }
+    },
+    "snapshot_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "completeness": {
+            "properties": { "status": { "const": "complete" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["completeness"]
+      },
+      "then": {
+        "properties": {
+          "source_refs": {
+            "minItems": 7,
+            "maxItems": 7,
+            "items": {
+              "properties": {
+                "malformed_records": { "const": 0 },
+                "invalid_records": { "const": 0 }
+              }
+            },
+            "allOf": [
+              { "contains": { "properties": { "kind": { "const": "runtime_events" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "builder_state" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "trust_bundle" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "flow_state" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "flow_evidence_manifest" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "economics" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 },
+              { "contains": { "properties": { "kind": { "const": "terminal_outcome" } }, "required": ["kind"] }, "minContains": 1, "maxContains": 1 }
+            ]
+          },
+          "diagnostics": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "publicId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$",
+      "allOf": [{ "$ref": "#/$defs/nonSensitive" }]
+    },
+    "nullableMetadata": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+ -]{0,254}$",
+          "allOf": [{ "$ref": "#/$defs/nonSensitive" }]
+        }
+      ]
+    },
+    "nonSensitive": {
+      "not": {
+        "anyOf": [
+          { "pattern": "[Bb][Ee][Aa][Rr][Ee][Rr]\\s+" },
+          { "pattern": "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\\s*[:=]" },
+          { "pattern": "(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}" },
+          { "pattern": "[Gg][Ii][Tt][Hh][Uu][Bb]_[Pp][Aa][Tt]_[A-Za-z0-9_]{12,}" },
+          { "pattern": "[Xx][Oo][Xx][BbAaPpRrSs]-[A-Za-z0-9-]{8,}" },
+          { "pattern": "[Gg][Ll][Pp][Aa][Tt]-[A-Za-z0-9_-]{8,}" },
+          { "pattern": "AKIA[A-Z0-9]{12,}" },
+          { "pattern": "AIza[A-Za-z0-9_-]{20,}" },
+          { "pattern": "[Yy][Aa]29\\.[A-Za-z0-9_-]{8,}" },
+          { "pattern": "SG\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}" },
+          { "pattern": "(?:[Ww][Hh][Ss][Ee][Cc]|[SsRrPp][Kk]_(?:[Ll][Ii][Vv][Ee]|[Tt][Ee][Ss][Tt]))_[A-Za-z0-9_-]{8,}" },
+          { "pattern": "(?:^|[^A-Za-z0-9])[Ss][Kk]-(?:[Pp][Rr][Oo][Jj]-|[Aa][Nn][Tt]-)?[A-Za-z0-9_-]{8,}" },
+          { "pattern": "[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}" },
+          { "pattern": "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\." }
+        ]
+      }
+    },
+    "nullableCount": { "type": ["integer", "null"], "minimum": 0 },
+    "nullableNumber": { "type": ["number", "null"], "minimum": 0 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "factKinds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/factKind" }
+    },
+    "factKind": {
+      "enum": [
+        "runtime_session",
+        "runtime_turn",
+        "tool",
+        "flow_gate",
+        "route_back",
+        "delegation",
+        "trust",
+        "economics",
+        "terminal"
+      ]
+    },
+    "sourceKind": {
+      "enum": [
+        "runtime_events",
+        "builder_state",
+        "trust_bundle",
+        "flow_state",
+        "flow_evidence_manifest",
+        "economics",
+        "terminal_outcome"
+      ]
+    }
+  }
+}

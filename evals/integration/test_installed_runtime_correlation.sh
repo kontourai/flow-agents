@@ -5,7 +5,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d /tmp/installed-runtime-correlation.XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+if [[ "${KEEP_TMP:-false}" == "true" ]]; then
+  echo "Keeping installed-runtime fixture at $TMP"
+else
+  trap 'rm -rf "$TMP"' EXIT
+fi
 
 pass=0
 fail=0
@@ -105,15 +109,16 @@ run_runtime() {
 }
 
 invoke_hook() {
-  local runtime="$1" session="$2" workspace="$3" prefix="$4"
+  local runtime="$1" session="$2" workspace="$3" prefix="$4" event="${5:-PreToolUse}"
   local input
-  input=$(jq -nc --arg cwd "$workspace" --arg session "$session" '{
+  input=$(jq -nc --arg cwd "$workspace" --arg session "$session" --arg event "$event" '{
     session_id: $session,
     turn_id: "turn-one",
     cwd: $cwd,
-    hook_event_name: "PreToolUse",
+    hook_event_name: $event,
     tool_name: "Task",
-    tool_input: {subagent_type: "worker", prompt: "perform the installed fixture step"}
+    tool_input: {subagent_type: "worker", prompt: "perform the installed fixture step"},
+    tool_response: {status: "completed", exit_code: 0, duration_ms: 1}
   }')
   local common=(
     HOME="$TMP/home"
@@ -138,7 +143,7 @@ invoke_hook() {
   case "$runtime" in
     claude)
       printf '%s' "$input" | run_runtime "$runtime" "$session" env "${common[@]}" \
-        node "$PACKAGE/scripts/hooks/claude-telemetry-hook.js" PreToolUse dev >/dev/null
+        node "$PACKAGE/scripts/hooks/claude-telemetry-hook.js" "$event" dev >/dev/null
       ;;
     codex)
       printf '%s' "$input" | run_runtime "$runtime" "$session" env "${common[@]}" \
@@ -291,6 +296,7 @@ TERMINAL_CORRELATION="$TMP/terminal.expected.json"
 jq '.run_correlation' "$TERMINAL_SESSION/state.json" > "$TERMINAL_CORRELATION"
 invoke_claude_lifecycle UserPromptSubmit "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
 invoke_hook claude "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX"
+invoke_hook claude "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" PostToolUse
 
 TERMINAL_REF="$(jq -nc --arg file "$TERMINAL_ARTIFACT" '{
   kind:"artifact",
@@ -376,6 +382,62 @@ then
   _pass "installed producers reconstruct one terminal run by canonical identity alone"
 else
   _fail "installed terminal producer path did not reconstruct end to end"
+fi
+
+TERMINAL_OBSERVATION_MANIFEST="$TMP/terminal-observation-manifest.json"
+TERMINAL_OBSERVATION_DIR="$TMP/compiled-observations"
+jq -n \
+  --arg correlation_id "$(jq -r '.correlation_id' "$TERMINAL_CORRELATION")" \
+  --arg runtime "${TERMINAL_PREFIX#"$TMP/"}.full.jsonl" \
+  --arg builder_state "${TERMINAL_SESSION#"$TMP/"}/state.json" \
+  --arg trust "${TERMINAL_SESSION#"$TMP/"}/trust.bundle" \
+  --arg flow_state "${TERMINAL_FLOW_DIR#"$TMP/"}/state.json" \
+  --arg flow_evidence "${TERMINAL_FLOW_DIR#"$TMP/"}/evidence/manifest.json" \
+  --arg economics "${TERMINAL_PREFIX#"$TMP/"}.economics.jsonl" \
+  --arg terminal "${TERMINAL_SESSION#"$TMP/"}/workflow-outcome.json" '{
+    schema_version: "1.0",
+    correlation_id: $correlation_id,
+    sources: {
+      runtime_events: {source_id: "installed-runtime", file: $runtime},
+      builder_state: {source_id: "builder-state", file: $builder_state},
+      trust_bundle: {source_id: "trust-bundle", file: $trust},
+      flow_state: {source_id: "flow-state", file: $flow_state},
+      flow_evidence_manifest: {source_id: "flow-evidence", file: $flow_evidence},
+      economics: {source_id: "economics", file: $economics},
+      terminal_outcome: {source_id: "terminal-outcome", file: $terminal}
+    }
+  }' > "$TERMINAL_OBSERVATION_MANIFEST"
+
+if node "$TERMINAL_CLI" usage-feedback compile-observation \
+  --manifest "$TERMINAL_OBSERVATION_MANIFEST" \
+  --record-root "$TMP" \
+  --output-dir "$TERMINAL_OBSERVATION_DIR" \
+  --quiet \
+  && TERMINAL_OBSERVATION_FILE="$(find "$TERMINAL_OBSERVATION_DIR/observations" -type f -name '*.json' -print -quit)" \
+  && [[ -n "$TERMINAL_OBSERVATION_FILE" ]] \
+  && cp "$TERMINAL_OBSERVATION_FILE" "$TMP/observation-first.json" \
+  && node "$TERMINAL_CLI" usage-feedback compile-observation \
+    --manifest "$TERMINAL_OBSERVATION_MANIFEST" \
+    --record-root "$TMP" \
+    --output-dir "$TERMINAL_OBSERVATION_DIR" \
+    --quiet \
+  && cmp -s "$TMP/observation-first.json" "$TERMINAL_OBSERVATION_FILE" \
+  && jq -e '
+    .completeness.status == "complete"
+    and .process.status == "completed"
+    and .quality.status == "NOT_VERIFIED"
+    and .quality.reason == "not_independently_evaluated"
+    and .usage.status == "NOT_VERIFIED"
+    and .usage.authority == "authenticated_runtime_binding"
+    and .usage.input_tokens > 0
+    and .usage.output_tokens > 0
+    and .usage.estimated_cost_usd == null
+    and ([.source_refs[] | has("file")] | any | not)
+  ' "$TERMINAL_OBSERVATION_FILE" >/dev/null \
+  && ! grep -Fq "$TMP" "$TERMINAL_OBSERVATION_FILE"; then
+  _pass "usage-feedback compiles the installed terminal run idempotently without raw paths or causal quality claims"
+else
+  _fail "usage-feedback did not compile the installed terminal producer fixture honestly"
 fi
 
 unique_correlations="$(

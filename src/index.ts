@@ -82,6 +82,16 @@ export type {
   WorkflowProcessStatus,
   WorkflowVerificationStatus,
 } from "./workflow-outcome.js";
+export {
+  compileRetrospectiveObservation,
+  readRetrospectiveObservationManifest,
+  validateRetrospectiveObservation,
+} from "./retrospective-observation.js";
+export type {
+  ObservationDiagnostic,
+  RetrospectiveObservation,
+  RetrospectiveObservationManifest,
+} from "./retrospective-observation.js";
 export type {
   TelemetryDiagnostic,
   ToolResultStatus,

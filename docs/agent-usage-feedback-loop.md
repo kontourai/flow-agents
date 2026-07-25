@@ -14,15 +14,96 @@ The loop has three parts:
 
 Quality outcomes are not inferred from raw telemetry alone. The CLI can automatically derive coarse outcomes from task artifacts such as `.kontourai/flow-agents/<slug>/*.md`: `delivered` and `complete` become `success`, `failed` becomes `failure`, and optionally open artifacts can be recorded as `not_verified`. It does not invent `quality_score` or `human_minutes_saved`; those remain human/eval/release-gate facts.
 
+### Retrospective run observations
+
+`usage-feedback compile-observation` compiles one exact correlated run from a
+manifest of producer-owned records. The manifest names logical source IDs and
+the exact runtime event, Builder state, trust bundle, Flow state, Flow evidence
+manifest, economics, and terminal-outcome files. Compilation never joins by
+path, timestamp, task slug, cwd, process ancestry, or content similarity.
+
+The output is a versioned
+`kontour.flow-agents.retrospective-observation` record under
+`.kontourai/flow-agents/feedback/observations/<observation-hash>.json` by default.
+One atomically replaced, locked file per run avoids cross-run lost updates. It contains
+stable identity, process and verification status, measured usage, explicit
+missing dimensions, and content hashes plus logical IDs for local drill-down.
+It contains no source paths, prompts, tool payloads, source content, or secrets.
+Repeat compilation of unchanged sources is byte-identical and upserts the same
+observation ID.
+
+Process completion and Flow verification are not independent task quality.
+Until an external evaluation is joined through the eval-owned boundary, every
+compiled observation reports quality as `NOT_VERIFIED` with reason
+`not_independently_evaluated`. The compiler emits no causal claim about a Kit,
+model, prompt, or workflow.
+
+```bash
+npm run usage-feedback -- compile-observation \
+  --manifest .kontourai/flow-agents/run-observation-manifest.json \
+  --record-root .
+```
+
+The manifest uses the
+`retrospective-observation-manifest/1.0` schema. Every individual source is
+optional so an incomplete historical run can still compile honestly, but at
+least one producer record must carry the exact manifest correlation ID. Source
+files are relative to the caller-selected `--record-root`; traversal, absolute
+paths, empty or dot path segments, and symbolic links are rejected. The record
+root and output directory are operator trust boundaries, not data supplied by
+a producer. Their directory chains must be non-group/world-writable, except for
+sticky shared ancestors such as the system temporary directory, and each final
+boundary directory must be owned by the current operator. Source files must be
+owned by the current operator or root and must not be group/world-writable.
+Concurrent mutation by another process running as the same OS principal is
+outside this local compiler's filesystem trust boundary:
+
+```json
+{
+  "schema_version": "1.0",
+  "correlation_id": "run-correlation-id",
+  "sources": {
+    "runtime_events": {
+      "source_id": "runtime-events",
+      "file": ".kontourai/telemetry/full.jsonl"
+    },
+    "terminal_outcome": {
+      "source_id": "terminal-outcome",
+      "file": ".kontourai/flow-agents/task/workflow-outcome.json"
+    }
+  }
+}
+```
+
+Runtime activity, Flow history, trust, economics, and terminal status are
+projected only when their complete correlation envelopes equal the canonical
+run envelope. Sharing a `correlation_id` alone is insufficient. A trust
+dimension additionally requires a Surface-valid bundle and one exact
+Flow-manifest attachment whose embedded bundle and SHA-256 match the supplied
+bundle.
+
+Usage describes a present run delta only when terminal usage and economics
+agree on timestamp and token totals. `CONFIRMED` additionally requires an
+authenticated runtime binding and exactly matching model, duration, delegation,
+and cost attributes. When token totals agree but another attribute is
+unavailable or disagrees, the compiler retains the token counts under
+`NOT_VERIFIED` and emits null for each unmatched attribute rather than
+fabricating or discarding useful consumption data. Fixture authority is always
+`NOT_VERIFIED`.
+
 ### Malformed input and partial reports
 
-Read-only reports and telemetry-source imports quarantine malformed JSONL records
-and continue over valid records. JSON reports expose a `measurement` object with
+Read-only reports, telemetry-source imports, and retrospective compilation
+quarantine malformed JSONL records and continue over valid records. JSON reports expose a `measurement` object with
 total, valid, and malformed counts plus content-free diagnostics; Markdown
 reports show the same counts under **Measurement State**. The CLI also emits one
 stderr warning per affected logical source. Diagnostics include only a logical
 source name, line number, SHA-256 content hash, and parse error class. They never
 include the malformed record or an absolute path.
+
+Retrospective compiler diagnostics also classify schema-valid JSON that fails a
+producer contract as `ProducerValidationError`; counts remain separate from
+syntax failures and source bytes never enter the observation.
 
 This tolerance applies only to source analysis. A destination that an import,
 sync, or upsert operation would rewrite remains strict: one malformed existing
