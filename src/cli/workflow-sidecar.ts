@@ -3567,11 +3567,16 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // Passing test evidence is always executed exactly once by this canonical
   // writer. Caller-supplied observations remain available for non-test
   // attestations but can never stand in for locally observed test execution.
-  const observed = await Promise.all(commands.map(async (command) => {
+  const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
     return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
-  }));
+  };
+  // Sequential, never concurrent: evidence commands are test runs against one working tree, so
+  // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
+  // race and one fails, turning a green tree into an unrecordable claim (#974).
+  const observed: Awaited<ReturnType<typeof observeCommand>>[] = [];
+  for (const command of commands) observed.push(await observeCommand(command));
   if (observed.length !== commands.length) die("record-gate-claim requires exactly one --observed-command-json for every --command");
   const byCommand = new Map<string, ObservedCommand>();
   for (const entry of observed) {

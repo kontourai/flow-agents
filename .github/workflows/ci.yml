@@ -156,6 +156,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workflow-artifact-cleanup-audit-integration
 
+      - name: Evidence command serialization integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check evidence-command-serialization-integration
+
       - name: Fixture retirement audit integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
