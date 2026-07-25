@@ -1,0 +1,1204 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "a9fe418caae3ee570be2bf45c3f59200e5f494266d617acd6dd91b6c495fcee6"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-945/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#945 is durably assigned to the active workflow actor (assignment sha256:d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7).",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "expected_producer": "builder.pull-work",
+          "recorded_by": "claude-code67b242ef-ed62-4f1d-8088-f9445e9ee70cKontour",
+          "self_produced_trust_slices": [
+            "selected-work"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-945.json",
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--pull-work.md",
+              "summary": "Concrete pull-work selection report for kontourai/flow-agents#945."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work",
+            "identity_version": 2,
+            "recorded_at": "2026-07-24T21:37:37Z",
+            "flow_run_head": "9a7e143a2f78ebdf89cf5c8e876626fee60db949f431e6b33095b1f2c9d95da7"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-945/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Pickup probe passed: scope, risks (FA_MARKERS test expectations, ~/.flow-agents namespace collision, copy-vs-closure boundary), sandbox=isolated worktree, planning readiness recorded in pull-work artifact §pickup_probe.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-code67b242ef-ed62-4f1d-8088-f9445e9ee70cKontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--pull-work.md",
+              "summary": "pull-work + pickup-probe selection evidence for #945"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-24T21:37:59.744Z",
+            "flow_run_head": "a31555fb6ea68aebf6280f49edad8298c0664a4f7869877cb49c471d4b769d9b"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-945/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Decisions: vendored root ~/.flow-agents/runtime/ (single-slot) to be confirmed in plan; accepted gap: AC1 npx-eviction simulation via temp-HOME harness rather than mutating real ~/.npm — verifier decides honest form.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-code67b242ef-ed62-4f1d-8088-f9445e9ee70cKontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--pull-work.md",
+              "summary": "alignment_questions + accepted_gaps recorded at pickup"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-24T21:38:00.006Z",
+            "flow_run_head": "a31555fb6ea68aebf6280f49edad8298c0664a4f7869877cb49c471d4b769d9b"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-945/gate-claim-implementation-plan",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.plan.implementation",
+        "fieldOrBehavior": "tool-planner produced the implementation plan: vendorClaudeCodeGlobalRuntime() in src/cli/init.ts mirroring the opencode global precedent (install-owned-files.js reused unmodified), vendoring to <dest>/.flow-agents/runtime/ before any settings mutation (R5 ordering), rewriteCommandsForGlobalInstall pointed at the vendored root; AC1-AC5 mapped to evals/integration tests. Sidecars updated via init-plan; validate-artifacts clean.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "expected_producer": "builder.plan-work",
+          "recorded_by": "claude-code67b242ef-ed62-4f1d-8088-f9445e9ee70cKontour",
+          "self_produced_trust_slices": [
+            "implementation-plan"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--plan-work.md",
+              "summary": "plan-work artifact with ordered steps, line refs, DoD, AC test map, risks"
+            }
+          ],
+          "acceptance_contract": {
+            "version": 1,
+            "algorithm": "sha256",
+            "digest": "3bb056245942d8a576302fee3b0bc6c88c6d0e4c7fd97e23fa78f60e33039267",
+            "criteria": [
+              {
+                "id": "ac1-fresh-npx-style-global-install-keeps-hooks-statusline-working-after-the-npx-cache-entry-is-deleted",
+                "description": "AC1: fresh npx-style global install keeps hooks+statusline working after the npx cache entry is deleted"
+              },
+              {
+                "id": "ac2-merged-settings-contain-zero-npx-paths-in-managed-commands-test-asserted",
+                "description": "AC2: merged settings contain zero _npx paths in managed commands (test-asserted)"
+              },
+              {
+                "id": "ac3-re-running-init-global-twice-yields-identical-managed-wiring",
+                "description": "AC3: re-running init --global twice yields identical managed wiring"
+              },
+              {
+                "id": "ac4-vendored-runtime-version-stamp-reflects-package-version-and-updates-on-re-run",
+                "description": "AC4: vendored runtime version stamp reflects package version and updates on re-run"
+              },
+              {
+                "id": "ac5-simulated-vendoring-failure-exits-non-zero-with-actionable-message-and-leaves-settings-json-unchanged",
+                "description": "AC5: simulated vendoring failure exits non-zero with actionable message and leaves settings.json unchanged"
+              }
+            ]
+          },
+          "gate_claim": {
+            "expectation_id": "implementation-plan",
+            "claim_type": "builder.plan.implementation",
+            "subject_type": "artifact",
+            "step_id": "plan",
+            "identity_version": 2,
+            "recorded_at": "2026-07-24T21:52:11.221Z",
+            "flow_run_head": "d25bb3819d21192b2efc59a69ca475e2612db01b7204525bb9d991b722f8a403"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-945/gate-claim-implementation-scope",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Implementation scope: src/cli/init.ts (+62/-11, vendorClaudeCodeGlobalRuntime + vendor-before-settings-mutation reorder + rewrite target vendored root), evals/integration/test_install_merge.sh Scenario 5 AC2-AC4 extensions, new evals/integration/test_global_install_npx_durability.sh AC1/AC5. No unrelated changes. Checks green: install_merge 101/101, durability 7/7, validate:source pass, zero bundle symlinks. Pre-existing unrelated failure disclosed (test_assignment_provider_local_file, reproduces on unmodified main). Detail: kontourai-flow-agents-945--execute-plan.md.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "expected_producer": "builder.execute-plan",
+          "recorded_by": "claude-code67b242ef-ed62-4f1d-8088-f9445e9ee70cKontour",
+          "self_produced_trust_slices": [
+            "implementation-scope"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--deliver.md",
+              "summary": "session deliver artifact; execution progress and scope recorded"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-scope",
+            "claim_type": "builder.execute.scope",
+            "subject_type": "change",
+            "step_id": "execute",
+            "identity_version": 2,
+            "recorded_at": "2026-07-24T22:26:44.524Z",
+            "flow_run_head": "816a547bffdaa78aaac00c84a6b92d87f19a7bba66c71a7681c29aac8e9a7423"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-global-install-npx-durability",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "bash evals/integration/test_global_install_npx_durability.sh: 10/10 passed (AC1, AC5, SEC) after independent worktree build; re-run confirmed 0 exit after clearing stale /tmp leftovers from concurrent sessions.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-install-merge",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "bash evals/integration/test_install_merge.sh: 101/101 passed, including AC2/AC3/AC4 assertions in Scenario 5 (zero _npx occurrences, byte-identical settings across two runs, install.json version/installedAt).",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-validate-source",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "npm run validate:source: Source tree validation passed (exit 0).",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-ci-baseline-durability-check",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "bash evals/ci/run-baseline.sh --check global-install-npx-durability-integration: PASS. Check id confirmed registered in evals/ci/run-baseline.sh CHECKS array (line 106) and LANE_INTEGRATION_COVERAGE required-lane list (line 233); referenced by .github/workflows/ci.yml line 578.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-fault-injection-vendorroot-revert",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Fault injection: reverted rewriteCommandsForGlobalInstall(managed, vendorRoot) to (managed, root). AC1 assertion failed as expected (durability regression detected, npx-cache-eviction hook resolution broke) and test_install_merge.sh durable-root regression guard also failed. Restored via git checkout HEAD; rebuilt; both suites returned to 10/10 and 101/101 green.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-fault-injection-shell-escape-neuter",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Fault injection: neutered shellEscapeForHookCommand to identity passthrough. SEC assertion failed as expected (INJECTION -- executing the persisted hook commands ran attacker-supplied shell). Restored via git checkout HEAD; rebuilt; suite returned to 10/10 green.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-fault-injection-vendor-after-write",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Fault injection: moved vendorClaudeCodeGlobalRuntime() call to after the settings.json write instead of before. AC5 byte-identical assertion failed as expected (settings.json was modified despite the vendoring failure). Restored via git checkout HEAD; rebuilt; suite returned to 10/10 green.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-independent-e2e-durability",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Independent end-to-end confirmation outside the eval harness: copied build/dist/scripts/packaging/schemas/kits/context/package.json + a symlinked node_modules into a scratch cache dir, ran init --global --yes from it, deleted the cache dir, then invoked the persisted hook command (claude-telemetry-hook.js SessionStart) and statusLine command directly. Both exited 0 with meaningful output; persisted commands referenced <dest>/.flow-agents/runtime/... not the deleted cache path.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/verify-work-scope-integrity",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "git diff 1629e8b..HEAD --stat shows exactly 5 files: src/cli/init.ts, evals/integration/test_install_merge.sh, evals/integration/test_global_install_npx_durability.sh (new), evals/ci/run-baseline.sh, .github/workflows/ci.yml. No unexpected files touched.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-945-ac1-fresh-npx-style-global-install-keeps-hooks-statusline-working-after-the-npx-cache-entry-is-deleted.flow-agents-workflow.ac1-fresh-npx-style-global-install-keeps-hooks-statusline-working-after-the-npx-cache-entry-is-deleted",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/ac1-fresh-npx-style-global-install-keeps-hooks-statusline-working-after-the-npx-cache-entry-is-deleted",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC1: fresh npx-style global install keeps hooks+statusline working after the npx cache entry is deleted",
+        "value": "pending",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac1-fresh-npx-style-global-install-keeps-hooks-statusline-working-after-the-npx-cache-entry-is-deleted",
+            "description": "AC1: fresh npx-style global install keeps hooks+statusline working after the npx cache entry is deleted",
+            "status": "pending",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "summary": "pending"
+              }
+            ]
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-945-ac2-merged-settings-contain-zero-npx-paths-in-managed-commands-test-asserted.flow-agents-workflow.ac2-merged-settings-contain-zero-npx-paths-in-managed-commands-test-asserted",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/ac2-merged-settings-contain-zero-npx-paths-in-managed-commands-test-asserted",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC2: merged settings contain zero _npx paths in managed commands (test-asserted)",
+        "value": "pending",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac2-merged-settings-contain-zero-npx-paths-in-managed-commands-test-asserted",
+            "description": "AC2: merged settings contain zero _npx paths in managed commands (test-asserted)",
+            "status": "pending",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "summary": "pending"
+              }
+            ]
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-945-ac3-re-running-init-global-twice-yields-identical-managed-wiring.flow-agents-workflow.ac3-re-running-init-global-twice-yields-identical-managed-wiring",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/ac3-re-running-init-global-twice-yields-identical-managed-wiring",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC3: re-running init --global twice yields identical managed wiring",
+        "value": "pending",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac3-re-running-init-global-twice-yields-identical-managed-wiring",
+            "description": "AC3: re-running init --global twice yields identical managed wiring",
+            "status": "pending",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "summary": "pending"
+              }
+            ]
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-945-ac4-vendored-runtime-version-stamp-reflects-package-version-and-updates-on-re-run.flow-agents-workflow.ac4-vendored-runtime-version-stamp-reflects-package-version-and-updates-on-re-run",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/ac4-vendored-runtime-version-stamp-reflects-package-version-and-updates-on-re-run",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC4: vendored runtime version stamp reflects package version and updates on re-run",
+        "value": "pending",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac4-vendored-runtime-version-stamp-reflects-package-version-and-updates-on-re-run",
+            "description": "AC4: vendored runtime version stamp reflects package version and updates on re-run",
+            "status": "pending",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "summary": "pending"
+              }
+            ]
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-945-ac5-simulated-vendoring-failure-exits-non-zero-with-actionable-message-and-leaves-settings-json-unchanged.flow-agents-workflow.ac5-simulated-vendoring-failure-exits-non-zero-with-actionable-message-and-leaves-settings-json-unchanged",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-945/ac5-simulated-vendoring-failure-exits-non-zero-with-actionable-message-and-leaves-settings-json-unchanged",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC5: simulated vendoring failure exits non-zero with actionable message and leaves settings.json unchanged",
+        "value": "pending",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac5-simulated-vendoring-failure-exits-non-zero-with-actionable-message-and-leaves-settings-json-unchanged",
+            "description": "AC5: simulated vendoring failure exits non-zero with actionable message and leaves settings.json unchanged",
+            "status": "pending",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "summary": "pending"
+              }
+            ]
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#945"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-945-review.flow-agents-workflow.report-only-review-clean-on-the-delivered-tree-ccd5f56-code-review-approved-at-iteration-3-security-review-resolved-at-iteration-2-one-critical-shell-injection-and-one-critical-flaky-false-fail-in-a-required-lane-were-found-and-fixed-during-review-each-re-verified-by-fault-injection-reviewed-2026-07-25t03-20-26-775z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-945/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Report-only review clean on the delivered tree (ccd5f56): code review APPROVED at iteration 3, security review RESOLVED at iteration 2. One CRITICAL (shell injection) and one CRITICAL (flaky false-FAIL in a required lane) were found and fixed during review, each re-verified by fault injection.",
+        "value": "pass",
+        "createdAt": "2026-07-25T03:20:26.775Z",
+        "updatedAt": "2026-07-25T03:20:26.775Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer-945",
+          "reviewed_at": "2026-07-25T03:20:26.775Z",
+          "identity_version": 2,
+          "critique_sequence": 1,
+          "critique_predecessor_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "critique_record_hash": "b556d2d8cc85dce9158784d91a771bd7472e5b534e3347e585c558ce176a88dc",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "tool-code-reviewer iteration 3: APPROVED. All iteration-1 findings (CI wiring HIGH, existsSync MEDIUM, DRY MEDIUM) resolved; the iteration-2 CRITICAL flake fixed and re-verified over 18 clean sequential runs with independent fault injection confirming the SEC assertion still fires. Scope exactly the 5 files.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--review-work.md",
+                  "summary": "review-work artifact: iterations 1-3, findings, resolutions, deferred LOWs"
+                }
+              ]
+            },
+            {
+              "id": "security-review",
+              "status": "pass",
+              "summary": "tool-security-reviewer iteration 2: RESOLVED. Nine adversarial payload classes (apostrophe breakout, command substitution, backticks, trailing backslash, embedded newline, pre-escaped sequence, kitchen-sink, leading --, literal escapes) all neutralized; legitimate unicode/apostrophe/long/symlinked paths still resolve; escaping confirmed applied at the correct single call site before merge with user settings.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--review-work.md",
+                  "summary": "security re-review section: payload table, layer analysis, fault injection"
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--deliver.md",
+                "sha256": "0c3dd5b3e7c15c5ad75c76a190c5a52d55cec0985c67bd796457b6746e6141ee"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "fba4acf603d08291afb7f5bf3045a062266f6d47dfb9d4fe1a49fc6872a0ffac",
+              "head_sha": "ccd5f5626b4e9f3ed03b07bd3599e74ea4a68010"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--deliver.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "superseded_by": "critique:bdae694274498cac8f53204b37e3cbac179b9db7d96f539268a7c916f8a8071e",
+          "critique_resolution": {
+            "schema_version": "1.0",
+            "kind": "same-reviewer-recheck",
+            "prior_record_id": "critique:b556d2d8cc85dce9158784d91a771bd7472e5b534e3347e585c558ce176a88dc",
+            "resolving_record_id": "critique:bdae694274498cac8f53204b37e3cbac179b9db7d96f539268a7c916f8a8071e",
+            "resolver": "tool-code-reviewer-945",
+            "resolved_lane_ids": [],
+            "resolved_finding_ids": [],
+            "resolved_at": "2026-07-25T05:31:02.509Z"
+          },
+          "critique_record_id": "critique:b556d2d8cc85dce9158784d91a771bd7472e5b534e3347e585c558ce176a88dc"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-945-review.flow-agents-workflow.report-only-review-clean-on-the-delivered-tree-rebased-onto-main-ae7699e-code-review-approved-at-iteration-3-security-review-resolved-at-iteration-2-two-criticals-found-and-fixed-during-review-each-re-verified-by-fault-injection-reviewed-2026-07-25t05-31-02-509z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-945/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Report-only review clean on the delivered tree (rebased onto main@ae7699e): code review APPROVED at iteration 3, security review RESOLVED at iteration 2. Two CRITICALs found and fixed during review, each re-verified by fault injection.",
+        "value": "pass",
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "updatedAt": "2026-07-25T05:31:02.509Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer-945",
+          "reviewed_at": "2026-07-25T05:31:02.509Z",
+          "identity_version": 2,
+          "critique_sequence": 2,
+          "critique_predecessor_hash": "b556d2d8cc85dce9158784d91a771bd7472e5b534e3347e585c558ce176a88dc",
+          "critique_record_hash": "bdae694274498cac8f53204b37e3cbac179b9db7d96f539268a7c916f8a8071e",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "tool-code-reviewer iteration 3: APPROVED. All iteration-1 findings resolved (CI wiring HIGH, existsSync MEDIUM, DRY MEDIUM); the iteration-2 CRITICAL flaky false-FAIL fixed and re-verified across 18 clean sequential runs with independent fault injection confirming the SEC assertion still fires.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--review-work.md",
+                  "summary": "review-work artifact: iterations 1-3, findings, resolutions, deferred LOWs"
+                }
+              ]
+            },
+            {
+              "id": "security-review",
+              "status": "pass",
+              "summary": "tool-security-reviewer iteration 2: RESOLVED. Nine adversarial payload classes all neutralized; legitimate unicode/apostrophe/long/symlinked paths still resolve; escaping confirmed applied at the single correct call site before merge with user settings.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--review-work.md",
+                  "summary": "security re-review: payload table, layer analysis, fault injection"
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--deliver.md",
+                "sha256": "0c3dd5b3e7c15c5ad75c76a190c5a52d55cec0985c67bd796457b6746e6141ee"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "b6b1a973b363621739aaf5a2c7224dc975c1e613cc727115c1ac0a8d13f952d8",
+              "head_sha": "8a3fd6e7ee3e75620f1ee9d65e243e8a039502f0"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-945/kontourai-flow-agents-945--deliver.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#945",
+          "critique_record_id": "critique:bdae694274498cac8f53204b37e3cbac179b9db7d96f539268a7c916f8a8071e"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#945 is durably assigned to the active workflow actor (assignment sha256:d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7).",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Pickup probe passed: scope, risks (FA_MARKERS test expectations, ~/.flow-agents namespace collision, copy-vs-closure boundary), sandbox=isolated worktree, planning readiness recorded in pull-work artifact §pickup_probe.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Decisions: vendored root ~/.flow-agents/runtime/ (single-slot) to be confirmed in plan; accepted gap: AC1 npx-eviction simulation via temp-HOME harness rather than mutating real ~/.npm — verifier decides honest form.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "tool-planner produced the implementation plan: vendorClaudeCodeGlobalRuntime() in src/cli/init.ts mirroring the opencode global precedent (install-owned-files.js reused unmodified), vendoring to <dest>/.flow-agents/runtime/ before any settings mutation (R5 ordering), rewriteCommandsForGlobalInstall pointed at the vendored root; AC1-AC5 mapped to evals/integration tests. Sidecars updated via init-plan; validate-artifacts clean.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Implementation scope: src/cli/init.ts (+62/-11, vendorClaudeCodeGlobalRuntime + vendor-before-settings-mutation reorder + rewrite target vendored root), evals/integration/test_install_merge.sh Scenario 5 AC2-AC4 extensions, new evals/integration/test_global_install_npx_durability.sh AC1/AC5. No unrelated changes. Checks green: install_merge 101/101, durability 7/7, validate:source pass, zero bundle symlinks. Pre-existing unrelated failure disclosed (test_assignment_provider_local_file, reproduces on unmodified main). Detail: kontourai-flow-agents-945--execute-plan.md.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions",
+        "claimId": "kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_global_install_npx_durability.sh: 10/10 passed (AC1, AC5, SEC) after independent worktree build; re-run confirmed 0 exit after clearing stale /tmp leftovers from concurrent sessions.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat",
+        "claimId": "kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh: 101/101 passed, including AC2/AC3/AC4 assertions in Scenario 5 (zero _npx occurrences, byte-identical settings across two runs, install.json version/installedAt).",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0",
+        "claimId": "kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "npm run validate:source: Source tree validation passed (exit 0).",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578",
+        "claimId": "kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "bash evals/ci/run-baseline.sh --check global-install-npx-durability-integration: PASS. Check id confirmed registered in evals/ci/run-baseline.sh CHECKS array (line 106) and LANE_INTEGRATION_COVERAGE required-lane list (line 233); referenced by .github/workflows/ci.yml line 578.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Fault injection: reverted rewriteCommandsForGlobalInstall(managed, vendorRoot) to (managed, root). AC1 assertion failed as expected (durability regression detected, npx-cache-eviction hook resolution broke) and test_install_merge.sh durable-root regression guard also failed. Restored via git checkout HEAD; rebuilt; both suites returned to 10/10 and 101/101 green.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Fault injection: neutered shellEscapeForHookCommand to identity passthrough. SEC assertion failed as expected (INJECTION -- executing the persisted hook commands ran attacker-supplied shell). Restored via git checkout HEAD; rebuilt; suite returned to 10/10 green.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Fault injection: moved vendorClaudeCodeGlobalRuntime() call to after the settings.json write instead of before. AC5 byte-identical assertion failed as expected (settings.json was modified despite the vendoring failure). Restored via git checkout HEAD; rebuilt; suite returned to 10/10 green.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path",
+        "claimId": "kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "Independent end-to-end confirmation outside the eval harness: copied build/dist/scripts/packaging/schemas/kits/context/package.json + a symlinked node_modules into a scratch cache dir, ran init --global --yes from it, deleted the cache dir, then invoked the persisted hook command (claude-telemetry-hook.js SessionStart) and statusLine command directly. Both exited 0 with meaningful output; persisted commands referenced <dest>/.flow-agents/runtime/... not the deleted cache path.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched",
+        "claimId": "kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-945/evidence.json",
+        "excerptOrSummary": "git diff 1629e8b..HEAD --stat shows exactly 5 files: src/cli/init.ts, evals/integration/test_install_merge.sh, evals/integration/test_global_install_npx_durability.sh (new), evals/ci/run-baseline.sh, .github/workflows/ci.yml. No unexpected files touched.",
+        "observedAt": "2026-07-25T05:31:02.509Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.plan.implementation:attestation",
+        "claimType": "builder.plan.implementation",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.plan.implementation claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:attestation",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests:attestation",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-945-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-d8526ca271a786e596ce8299eed72e900974c145446e96e721d83cefe63ae4c7-gate-visit-2026-07-24t21-37-37z"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-scope-risks-fa-markers-test-expectations-flow-agents-namespace-collision-copy-vs-closure-boundary-sandbox-isolated-worktree-planning-readiness-recorded-in-pull-work-artifact-pickup-probe-gate-visit-2026-07-24t21-37-59-744z"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decisions-vendored-root-flow-agents-runtime-single-slot-to-be-confirmed-in-plan-accepted-gap-ac1-npx-eviction-simulation-via-temp-home-harness-rather-than-mutating-real-npm-verifier-decides-honest-form-gate-visit-2026-07-24t21-38-00-006z"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-gate-claim-implementation-plan.flow-agents-workflow.tool-planner-produced-the-implementation-plan-vendorclaudecodeglobalruntime-in-src-cli-init-ts-mirroring-the-opencode-global-precedent-install-owned-files-js-reused-unmodified-vendoring-to-dest-flow-agents-runtime-before-any-settings-mutation-r5-ordering-rewritecommandsforglobalinstall-pointed-at-the-vendored-root-ac1-ac5-mapped-to-evals-integration-tests-sidecars-updated-via-init-plan-validate-artifacts-clean-gate-visit-2026-07-24t21-52-11-221z"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z",
+        "claimId": "kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-src-cli-init-ts-62-11-vendorclaudecodeglobalruntime-vendor-before-settings-mutation-reorder-rewrite-target-vendored-root-evals-integration-test-install-merge-sh-scenario-5-ac2-ac4-extensions-new-evals-integration-test-global-install-npx-durability-sh-ac1-ac5-no-unrelated-changes-checks-green-install-merge-101-101-durability-7-7-validate-source-pass-zero-bundle-symlinks-pre-existing-unrelated-failure-disclosed-test-assignment-provider-local-file-reproduces-on-unmodified-main-detail-kontourai-flow-agents-945-execute-plan-md-gate-visit-2026-07-24t22-26-44-524z"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions",
+        "claimId": "kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-global-install-npx-durability.flow-agents-workflow.bash-evals-integration-test-global-install-npx-durability-sh-10-10-passed-ac1-ac5-sec-after-independent-worktree-build-re-run-confirmed-0-exit-after-clearing-stale-tmp-leftovers-from-concurrent-sessions"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat",
+        "claimId": "kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-install-merge.flow-agents-workflow.bash-evals-integration-test-install-merge-sh-101-101-passed-including-ac2-ac3-ac4-assertions-in-scenario-5-zero-npx-occurrences-byte-identical-settings-across-two-runs-install-json-version-installedat"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0",
+        "claimId": "kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-validate-source.flow-agents-workflow.npm-run-validate-source-source-tree-validation-passed-exit-0"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578",
+        "claimId": "kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-ci-baseline-durability-check.flow-agents-workflow.bash-evals-ci-run-baseline-sh-check-global-install-npx-durability-integration-pass-check-id-confirmed-registered-in-evals-ci-run-baseline-sh-checks-array-line-106-and-lane-integration-coverage-required-lane-list-line-233-referenced-by-github-workflows-ci-yml-line-578"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-fault-injection-vendorroot-revert.flow-agents-workflow.fault-injection-reverted-rewritecommandsforglobalinstall-managed-vendorroot-to-managed-root-ac1-assertion-failed-as-expected-durability-regression-detected-npx-cache-eviction-hook-resolution-broke-and-test-install-merge-sh-durable-root-regression-guard-also-failed-restored-via-git-checkout-head-rebuilt-both-suites-returned-to-10-10-and-101-101-green"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-fault-injection-shell-escape-neuter.flow-agents-workflow.fault-injection-neutered-shellescapeforhookcommand-to-identity-passthrough-sec-assertion-failed-as-expected-injection-executing-the-persisted-hook-commands-ran-attacker-supplied-shell-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "claimId": "kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-fault-injection-vendor-after-write.flow-agents-workflow.fault-injection-moved-vendorclaudecodeglobalruntime-call-to-after-the-settings-json-write-instead-of-before-ac5-byte-identical-assertion-failed-as-expected-settings-json-was-modified-despite-the-vendoring-failure-restored-via-git-checkout-head-rebuilt-suite-returned-to-10-10-green"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path",
+        "claimId": "kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-independent-e2e-durability.flow-agents-workflow.independent-end-to-end-confirmation-outside-the-eval-harness-copied-build-dist-scripts-packaging-schemas-kits-context-package-json-a-symlinked-node-modules-into-a-scratch-cache-dir-ran-init-global-yes-from-it-deleted-the-cache-dir-then-invoked-the-persisted-hook-command-claude-telemetry-hook-js-sessionstart-and-statusline-command-directly-both-exited-0-with-meaningful-output-persisted-commands-referenced-dest-flow-agents-runtime-not-the-deleted-cache-path"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched",
+        "claimId": "kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-945-verify-work-scope-integrity.flow-agents-workflow.git-diff-1629e8b-head-stat-shows-exactly-5-files-src-cli-init-ts-evals-integration-test-install-merge-sh-evals-integration-test-global-install-npx-durability-sh-new-evals-ci-run-baseline-sh-github-workflows-ci-yml-no-unexpected-files-touched"
+        ],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-945-review.flow-agents-workflow.report-only-review-clean-on-the-delivered-tree-rebased-onto-main-ae7699e-code-review-approved-at-iteration-3-security-review-resolved-at-iteration-2-two-criticals-found-and-fixed-during-review-each-re-verified-by-fault-injection-reviewed-2026-07-25t05-31-02-509z",
+        "claimId": "kontourai-flow-agents-945-review.flow-agents-workflow.report-only-review-clean-on-the-delivered-tree-rebased-onto-main-ae7699e-code-review-approved-at-iteration-3-security-review-resolved-at-iteration-2-two-criticals-found-and-fixed-during-review-each-re-verified-by-fault-injection-reviewed-2026-07-25t05-31-02-509z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-25T05:31:02.509Z",
+        "verifiedAt": "2026-07-25T05:31:02.509Z"
+      }
+    ]
+  }
+}
