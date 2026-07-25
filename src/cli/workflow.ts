@@ -1261,7 +1261,7 @@ async function runHostAuthorizedEvidence(input: {
   validated: ReturnType<typeof validateEvidenceArguments>;
   repaired: Awaited<ReturnType<typeof recoverBuilderFlowSession>>;
   caller: Awaited<ReturnType<typeof assertMatchingAssignmentActor>>;
-  run: () => ReturnType<typeof runEvidenceTransaction>;
+  run: (beforeCanonicalMutation?: () => void) => ReturnType<typeof runEvidenceTransaction>;
 }): Promise<Awaited<ReturnType<typeof runEvidenceTransaction>>> {
   const { sessionDir, slug, parsed, validated, repaired, caller, run } = input;
   if (!caller.hostRecovery) throw new Error("host workflow recovery binding is required");
@@ -1288,8 +1288,12 @@ async function runHostAuthorizedEvidence(input: {
     actorKey: caller.hostRecovery.actorKey, assignmentActor: caller.hostRecovery.actor,
     assignmentSnapshot: caller.assignmentSnapshot,
   }, caller.hostRecovery, async (assertCurrent) => {
-    assertCurrent();
-    return run();
+    return run(() => {
+      assertCurrent();
+      if (Date.now() > Date.parse(authority.expires_at)) {
+        throw new Error("host workflow evidence authorization expired before canonical mutation");
+      }
+    });
   }) as Promise<Awaited<ReturnType<typeof runEvidenceTransaction>>>;
 }
 
@@ -1337,7 +1341,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // session state cannot change mid-invocation.
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
-    const run = () => runEvidenceTransaction({
+    const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
       sessionDir,
       slug,
       projectRoot: repaired.projectRoot,
@@ -1347,6 +1351,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       expectation,
       requestedStatus,
       beforeRun: repaired.run,
+      beforeCanonicalMutation,
     });
     if (!caller.hostRecovery) {
       if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence --authorization-file is only valid for host recovery");
@@ -1986,6 +1991,7 @@ function writeDescriptorFully(descriptor: number, bytes: Buffer, write: typeof f
 async function runEvidenceTransaction(input: {
   sessionDir: string; slug: string; projectRoot: string; callerActor: string; expectedRunHead: string; forwarded: string[];
   expectation: string; requestedStatus: string; beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"];
+  beforeCanonicalMutation?: () => void;
 }): Promise<EvidenceTransactionResult> {
   const trustBundleFile = path.join(input.sessionDir, "trust.bundle");
   const beforeEvidence = manifestEvidenceIdentity(input.beforeRun.manifest);
@@ -2004,6 +2010,7 @@ async function runEvidenceTransaction(input: {
         await workflowEvidenceTransactionTestHooks?.afterRecord?.();
         receipt = receiptForGateClaim(candidate.file, preMutationReceipt, candidate.digest);
         const commitCanonicalEvidence = async (): Promise<EvidenceTransactionSuccess> => {
+          input.beforeCanonicalMutation?.();
           const synchronized = await syncBuilderFlowSession({
             sessionDir: input.sessionDir,
             expectedRunHead: input.expectedRunHead,

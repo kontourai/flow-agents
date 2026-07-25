@@ -2087,6 +2087,16 @@ test("host evidence cannot inject a completion or replace the immutable producti
     assert.doesNotMatch(workflowSource, /hostEvidenceAuthorityInvoker|setHostEvidenceAuthorityInvokerForTest/);
     assert.match(workflowSource, /invokeExternalLifecycleAuthority\(authorityRequest\)/);
     assert.match(workflowSource, /verifyLifecycleAuthorityCompletion\(authorized\.completion\)/);
+    assert.match(
+      workflowSource,
+      /return run\(\(\) => \{\s*assertCurrent\(\);\s*if \(Date\.now\(\) > Date\.parse\(authority\.expires_at\)\)/,
+      "host binding identity and authority lifetime are rechecked after evidence execution",
+    );
+    assert.match(
+      workflowSource,
+      /input\.beforeCanonicalMutation\?\.\(\);\s*const synchronized = await syncBuilderFlowSession/,
+      "the host authorization recheck occurs immediately before canonical attachment",
+    );
 
     const session = await prepare("host-execute-immutable-authority");
     assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor);

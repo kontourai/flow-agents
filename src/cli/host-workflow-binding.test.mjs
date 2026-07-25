@@ -370,6 +370,26 @@ test("async pointer lock refuses a same-process contender without blocking the e
   }
 });
 
+test("async pointer lock heartbeats while long-running canonical work is active", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-lock-heartbeat-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const actorKey = "codex:thread-lock-heartbeat:Kontour";
+    fs.mkdirSync(path.join(root, "task"), { recursive: true });
+    const actorLockDir = `${path.join(root, "current", ".actor-pointers")}.lockdir`;
+    await pointers.withActorCurrentPointerLockAsync(root, actorKey, async () => {
+      const ownerFile = path.join(actorLockDir, "owner.json");
+      const initialOwnerMtime = fs.statSync(ownerFile).mtimeMs;
+      const initialLockMtime = fs.statSync(actorLockDir).mtimeMs;
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      assert.ok(fs.statSync(ownerFile).mtimeMs > initialOwnerMtime, "the live owner record is renewed");
+      assert.ok(fs.statSync(actorLockDir).mtimeMs > initialLockMtime, "the live lock directory is renewed");
+    });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test("detached async descendants cannot reuse an invalidated pointer-lock ownership token", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-stale-context-"));
   try {

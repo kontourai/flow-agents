@@ -280,6 +280,17 @@ async function withPointerFileLockAsync(file, body) {
   const lock = acquirePointerLock(resolvedFile);
   const ownershipToken = { live: true };
   activeAsyncPointerLocks.set(resolvedFile, ownershipToken);
+  const heartbeatMs = Math.max(10, Math.min(1_000, Math.floor(POINTER_LOCK_STALE_MS / 3)));
+  const heartbeat = setInterval(() => {
+    try {
+      if (!ownershipToken.live
+        || activeAsyncPointerLocks.get(resolvedFile) !== ownershipToken
+        || readLockOwner(lock.ownerFile)?.token !== lock.token) return;
+      const timestamp = new Date();
+      fs.utimesSync(lock.ownerFile, timestamp, timestamp);
+      fs.utimesSync(lock.lockDir, timestamp, timestamp);
+    } catch { /* release or process teardown owns cleanup */ }
+  }, heartbeatMs);
   try {
     assertPointerLockOwned(lockParent, parentIdentity, lock);
     heldPointerParentIdentities.set(lockParent, parentIdentity);
@@ -287,6 +298,7 @@ async function withPointerFileLockAsync(file, body) {
     held.set(resolvedFile, ownershipToken);
     return await pointerLockContext.run(held, body);
   } finally {
+    clearInterval(heartbeat);
     ownershipToken.live = false;
     if (activeAsyncPointerLocks.get(resolvedFile) === ownershipToken) {
       activeAsyncPointerLocks.delete(resolvedFile);
