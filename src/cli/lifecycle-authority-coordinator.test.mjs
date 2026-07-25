@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
@@ -34,12 +34,270 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+function provisionalAuthorization(overrides = {}) {
+  const now = new Date();
+  return {
+    schema_version: "1.0", operation: "publish-provisional-delivery", project_root: "/project", run_id: "session-a",
+    subject: "kontourai/flow-agents#957", work_item: "kontourai/flow-agents#957", assignment_actor_key: "codex:test:host",
+    assignment_generation: now.toISOString(), published_head_sha: "a".repeat(40), provider_record_id: "provider-957",
+    provider_observation_sha256: "9".repeat(64), flow_definition_id: "builder.build", flow_definition_version: "1.3",
+    flow_definition_digest: "1".repeat(64), flow_run_head: "2".repeat(64), flow_gate_id: "merge-ready-ci-gate",
+    flow_gate_visit: now.toISOString(), workspace_snapshot: { kind: "git-worktree", head_sha: "a".repeat(40), digest: "3".repeat(64) },
+    checkpoint_slug: "session-a", checkpoint_commit_sha: "a".repeat(40), checkpoint_sha256: "4".repeat(64),
+    bundle_sha256: "5".repeat(64), attestation_sha256: "6".repeat(64),
+    companions: [
+      { path: "trust.bundle", sha256: "5".repeat(64) },
+      { path: "trust.checkpoint.attestation.json", sha256: "6".repeat(64) },
+      { path: "trust.checkpoint.intoto.json", sha256: "7".repeat(64) },
+      { path: "trust.checkpoint.json", sha256: "4".repeat(64) },
+    ],
+    nonce: "fixture-nonce", requested_at: now.toISOString(), expires_at: new Date(now.getTime() + 60_000).toISOString(),
+    signature: { algorithm: "ed25519", key_id: "fixture", value: "signature" }, ...overrides,
+  };
+}
+
+test("provisional authorization validator rejects forged and wrong-session bindings", () => {
+  const authorization = provisionalAuthorization();
+  assert.equal(validateProvisionalDeliveryAuthorizationBinding(authorization, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+    subject: "kontourai/flow-agents#957", work_item: "kontourai/flow-agents#957",
+  }), authorization);
+  assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, run_id: "session-b" }, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+  }), /run_id does not match/);
+  assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, companions: [...authorization.companions, { path: "extra", sha256: "8".repeat(64) }] }, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a", companions: authorization.companions,
+  }), /companions do not match/);
+});
+
+test("provisional authority ledger rejects forged signatures and broken predecessor chains", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-ledger-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", "session-a");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const keys = generateKeyPairSync("ed25519");
+  const registry = path.join(root, "keys.json");
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+  const loaded = await loadProtectedReadFromCoordinator({ registryFile: registry });
+  const unsignedAuthorization = provisionalAuthorization({ project_root: root });
+  delete unsignedAuthorization.signature;
+  const authorization = { ...unsignedAuthorization, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsignedAuthorization)), keys.privateKey).toString("base64") } };
+  const eventUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: "session-a", subject: authorization.subject, authorization_sha256: loaded.sha256(loaded.canonicalJson(authorization)), predecessor_hash: "0".repeat(64), signed_authorization: authorization };
+  const event = { ...eventUnsigned, event_hash: loaded.sha256(eventUnsigned) };
+  const ledger = path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json");
+  fs.writeFileSync(ledger, JSON.stringify({ schema_version: "1.0", events: [event] }), { mode: 0o600 });
+  assert.equal(loaded.loadProvisionalDeliveryLedger({ projectRoot: root, sessionDir, runId: "session-a" }).value.events.length, 1);
+  fs.writeFileSync(ledger, JSON.stringify({ schema_version: "1.0", events: [event, { ...event, predecessor_hash: "f".repeat(64) }] }), { mode: 0o600 });
+  assert.throws(() => loaded.loadProvisionalDeliveryLedger({ projectRoot: root, sessionDir, runId: "session-a" }), /binding|hash chain/);
+  fs.writeFileSync(ledger, JSON.stringify({ schema_version: "1.0", events: [{ ...event, signed_authorization: { ...authorization, signature: { ...authorization.signature, value: Buffer.alloc(64).toString("base64") } } }] }), { mode: 0o600 });
+  assert.throws(() => loaded.loadProvisionalDeliveryLedger({ projectRoot: root, sessionDir, runId: "session-a" }), /event binding|authorization digest|signature/);
+});
+
+test("prepared provisional recovery accepts only the exact authorization at the validated ledger tail", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-prepared-tail-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", "session-a");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const keys = generateKeyPairSync("ed25519");
+  const registry = path.join(root, "keys.json");
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+  const loaded = await loadProtectedReadFromCoordinator({ registryFile: registry });
+  const signedAuthorization = (nonce) => {
+    const unsigned = provisionalAuthorization({ project_root: root, nonce });
+    delete unsigned.signature;
+    return { ...unsigned, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsigned)), keys.privateKey).toString("base64") } };
+  };
+  const event = (authorization, predecessorHash) => {
+    const unsigned = {
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.provisional-delivery-event",
+      run_id: "session-a",
+      subject: authorization.subject,
+      authorization_sha256: loaded.sha256(loaded.canonicalJson(authorization)),
+      predecessor_hash: predecessorHash,
+      signed_authorization: authorization,
+    };
+    return { ...unsigned, event_hash: loaded.sha256(unsigned) };
+  };
+  const firstAuthorization = signedAuthorization("prepared-first");
+  const secondAuthorization = signedAuthorization("prepared-second");
+  const firstEvent = event(firstAuthorization, "0".repeat(64));
+  const secondEvent = event(secondAuthorization, firstEvent.event_hash);
+  const ledgerFile = path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json");
+  fs.writeFileSync(ledgerFile, JSON.stringify({ schema_version: "1.0", events: [firstEvent, secondEvent] }), { mode: 0o600 });
+  const events = loaded.loadProvisionalDeliveryLedger({ projectRoot: root, sessionDir, runId: "session-a" }).value.events;
+
+  assert.deepEqual(loaded.recoverPreparedProvisionalDeliveryEvent(events, secondAuthorization), secondEvent);
+  assert.throws(
+    () => loaded.recoverPreparedProvisionalDeliveryEvent(events, firstAuthorization),
+    /already present before the durable ledger tail/,
+  );
+});
+
+test("signed provisional authority event installs an exact durable coordinator completion receipt", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-completion-e2e-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", "session-a");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const registry = path.join(root, "keys.json");
+  const completionPublic = path.join(root, "completion-public.pem");
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+  fs.writeFileSync(completionPublic, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const loaded = await loadProtectedReadFromCoordinator({ registryFile: registry, completionKeyFile: completionPublic });
+  const unsignedAuthorization = provisionalAuthorization({ project_root: root });
+  delete unsignedAuthorization.signature;
+  const authorization = { ...unsignedAuthorization, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsignedAuthorization)), operatorKeys.privateKey).toString("base64") } };
+  const eventUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: "session-a", subject: authorization.subject, authorization_sha256: loaded.sha256(loaded.canonicalJson(authorization)), predecessor_hash: "0".repeat(64), signed_authorization: authorization };
+  const event = { ...eventUnsigned, event_hash: loaded.sha256(eventUnsigned) };
+  fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json"), JSON.stringify({ schema_version: "1.0", events: [event] }), { mode: 0o600 });
+  const completionUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "publish-provisional-delivery", request_sha256: "c".repeat(64), run_id: "session-a", operation_status: "applied", result_core_sha256: loaded.sha256(event), coordinator_runtime_sha256: "d".repeat(64), completed_at: new Date().toISOString() };
+  const completion = { ...completionUnsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(completionUnsigned)), completionKeys.privateKey).toString("base64") } };
+  assert.deepEqual(loaded.installCompletionReceipt({ projectRoot: root, sessionDir, runId: "session-a" }, completion), { run_id: "session-a", receipt: "written" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "provisional-delivery.authority-completion.json"), "utf8")), completion);
+});
+
+test("provisional completion receipt rotates only to the validated ledger tail and recovers atomic replacement crashes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-completion-generations-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", "session-a");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const registry = path.join(root, "keys.json");
+  const completionPublic = path.join(root, "completion-public.pem");
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+  fs.writeFileSync(completionPublic, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const loaded = await loadProtectedReadFromCoordinator({ registryFile: registry, completionKeyFile: completionPublic });
+  const signAuthorization = (nonce) => {
+    const unsigned = provisionalAuthorization({ project_root: root, nonce });
+    delete unsigned.signature;
+    return { ...unsigned, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsigned)), operatorKeys.privateKey).toString("base64") } };
+  };
+  const eventFor = (authorization, predecessorHash) => {
+    const unsigned = {
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.provisional-delivery-event",
+      run_id: "session-a",
+      subject: authorization.subject,
+      authorization_sha256: loaded.sha256(loaded.canonicalJson(authorization)),
+      predecessor_hash: predecessorHash,
+      signed_authorization: authorization,
+    };
+    return { ...unsigned, event_hash: loaded.sha256(unsigned) };
+  };
+  const completionFor = (event, requestSha256) => {
+    const unsigned = {
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.completion",
+      action: "publish-provisional-delivery",
+      request_sha256: requestSha256,
+      run_id: "session-a",
+      operation_status: "applied",
+      result_core_sha256: loaded.sha256(event),
+      coordinator_runtime_sha256: "d".repeat(64),
+      completed_at: new Date().toISOString(),
+    };
+    return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), completionKeys.privateKey).toString("base64") } };
+  };
+  const firstEvent = eventFor(signAuthorization("generation-one"), "0".repeat(64));
+  const secondEvent = eventFor(signAuthorization("generation-two"), firstEvent.event_hash);
+  const firstCompletion = completionFor(firstEvent, "1".repeat(64));
+  const secondCompletion = completionFor(secondEvent, "2".repeat(64));
+  const ledgerFile = path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json");
+  const receiptFile = path.join(sessionDir, "provisional-delivery.authority-completion.json");
+  const paths = { projectRoot: root, sessionDir, runId: "session-a" };
+
+  fs.writeFileSync(ledgerFile, JSON.stringify({ schema_version: "1.0", events: [firstEvent] }), { mode: 0o600 });
+  assert.deepEqual(loaded.installCompletionReceipt(paths, firstCompletion), { run_id: "session-a", receipt: "written" });
+  assert.deepEqual(loaded.installCompletionReceipt(paths, firstCompletion), { run_id: "session-a", receipt: "present" }, "first generation replay is idempotent");
+
+  fs.writeFileSync(ledgerFile, JSON.stringify({ schema_version: "1.0", events: [firstEvent, secondEvent] }), { mode: 0o600 });
+  assert.deepEqual(loaded.installCompletionReceipt(paths, secondCompletion), { run_id: "session-a", receipt: "replaced" });
+  assert.deepEqual(loaded.installCompletionReceipt(paths, secondCompletion), { run_id: "session-a", receipt: "present" }, "second generation replay is idempotent");
+  assert.deepEqual(loaded.installCompletionReceipt(paths, firstCompletion), { run_id: "session-a", receipt: "preserved" }, "old generation replay cannot replace the current tail receipt");
+  assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), secondCompletion);
+
+  fs.writeFileSync(receiptFile, `${JSON.stringify(firstCompletion)}\n`);
+  assert.throws(
+    () => loaded.installCompletionReceipt(paths, secondCompletion, { beforeRename: () => { throw new Error("injected before-receipt-rename crash"); } }),
+    /before-receipt-rename crash/,
+  );
+  assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), firstCompletion, "a pre-rename crash preserves the prior generation");
+  assert.deepEqual(loaded.installCompletionReceipt(paths, secondCompletion), { run_id: "session-a", receipt: "replaced" });
+
+  fs.writeFileSync(receiptFile, `${JSON.stringify(firstCompletion)}\n`);
+  assert.throws(
+    () => loaded.installCompletionReceipt(paths, secondCompletion, { afterRename: () => { throw new Error("injected after-receipt-rename crash"); } }),
+    /after-receipt-rename crash/,
+  );
+  assert.deepEqual(JSON.parse(fs.readFileSync(receiptFile, "utf8")), secondCompletion, "a post-rename crash leaves the complete new generation");
+  assert.deepEqual(loaded.installCompletionReceipt(paths, secondCompletion), { run_id: "session-a", receipt: "present" });
+});
+
+test("root coordinator transport validation rejects non-exact companion sets before ledger mutation", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-companion-validation-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", "session-a");
+  const destination = path.join(root, "delivery", "session-a");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.mkdirSync(destination, { recursive: true });
+  const loaded = await loadProtectedReadFromCoordinator();
+  const coordinatorSource = fs.readFileSync(COORDINATOR, "utf8");
+  const provisionalPreparation = coordinatorSource.slice(
+    coordinatorSource.indexOf("async function prepareProvisionalDeliveryMutation"),
+    coordinatorSource.indexOf("async function appendOrRecoverProvisionalDeliveryEvent"),
+  );
+  assert.ok(
+    provisionalPreparation.indexOf("assertProvisionalCheckpoint(paths, authorization, destination, expected)")
+      < provisionalPreparation.indexOf("loadProvisionalDeliveryLedger(paths)"),
+    "the root-authenticated coordinator worker validates the exact transport before opening the durable ledger for append",
+  );
+  const checkpointValidation = coordinatorSource.slice(
+    coordinatorSource.indexOf("function assertProvisionalCheckpoint"),
+    coordinatorSource.indexOf("function assertProvisionalAuthorizationShape"),
+  );
+  assert.match(checkpointValidation, /validateProvisionalDeliveryTransport\(destination, expected\)/);
+  const ledgerFile = path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json");
+  const ledgerBytes = Buffer.from('{"schema_version":"1.0","events":[]}\n');
+  fs.writeFileSync(ledgerFile, ledgerBytes);
+  const writeTransport = (attestation = { status: "unsigned", path: "trust.checkpoint.intoto.json" }, extras = {}) => {
+    fs.rmSync(destination, { recursive: true, force: true });
+    fs.mkdirSync(destination, { recursive: true });
+    const files = {
+      "trust.bundle": "{}\n",
+      "trust.checkpoint.json": "{}\n",
+      "trust.checkpoint.attestation.json": `${JSON.stringify(attestation)}\n`,
+      "trust.checkpoint.intoto.json": "{}\n",
+      ...extras,
+    };
+    for (const [name, bytes] of Object.entries(files)) fs.writeFileSync(path.join(destination, name), bytes);
+    return Object.keys(files).sort().map((name) => ({ path: name, sha256: loaded.sha256(fs.readFileSync(path.join(destination, name))) }));
+  };
+  const cases = [
+    ["unsigned extra", () => writeTransport(undefined, { "extra.json": "{}\n" }), /exactly four|unsigned extra/],
+    ["both signature forms", () => writeTransport(undefined, { "trust.checkpoint.sig.json": "{}\n" }), /exactly four|one signature or in-toto/],
+    ["duplicate identity", () => {
+      const expected = writeTransport();
+      return [expected[0], expected[0], expected[1], expected[2]];
+    }, /companions are invalid|exact/],
+    ["alternate companion", () => {
+      const expected = writeTransport(undefined, { "trust.checkpoint.other.json": "{}\n" })
+        .filter((entry) => entry.path !== "trust.checkpoint.intoto.json");
+      fs.rmSync(path.join(destination, "trust.checkpoint.intoto.json"));
+      return expected;
+    }, /one signature or in-toto/],
+    ["attestation mismatch", () => writeTransport({ status: "signed", path: "trust.checkpoint.sig.json" }), /does not declare the exact authorized companion/],
+  ];
+  for (const [label, fixture, error] of cases) {
+    const expected = fixture();
+    assert.throws(() => loaded.validateProvisionalDeliveryTransport(destination, expected), error, label);
+    assert.equal(fs.readFileSync(ledgerFile).equals(ledgerBytes), true, `${label} must not mutate the durable authority ledger`);
+  }
+});
 
 function signHistoricalAuthorization(authorization, privateKey) {
   const { signature: _signature, ...unsigned } = authorization;
@@ -992,7 +1250,7 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   );
 
   const source = fs.readFileSync(COORDINATOR, "utf8");
-  const resealBranch = source.slice(source.indexOf("async function prepareVerificationResealTransaction"), source.indexOf("async function executeMutation"));
+  const resealBranch = source.slice(source.indexOf("async function prepareVerificationResealTransaction"), source.indexOf("function assertVerificationResealStages"));
   assert.doesNotMatch(resealBranch, /\binProjectTransaction\s*\(/, "reseal must never use the recursive tree transaction");
   const fenceWriter = source.slice(source.indexOf("async function writeVerificationResealFence"), source.indexOf("function stageVerificationResealImage"));
   assert.match(fenceWriter, /\bwriteRunRecoveryFence\s*\(/, "reseal must use Flow's native generated-fence writer");

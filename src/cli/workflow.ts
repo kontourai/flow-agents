@@ -10,17 +10,17 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
-import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
+import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
@@ -36,7 +36,19 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
+const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
+const PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION = "provisional-delivery.authority-completion.json";
+type ProvisionalDeliveryDurabilityTestHooks = {
+  afterDirectoryFsync?: (directory: string) => void;
+  beforeUnlink?: (target: string) => void;
+};
+let provisionalDeliveryDurabilityTestHooks: ProvisionalDeliveryDurabilityTestHooks | null = null;
+
+export function setProvisionalDeliveryDurabilityTestHooksForTest(hooks: ProvisionalDeliveryDurabilityTestHooks | null): void {
+  provisionalDeliveryDurabilityTestHooks = hooks;
+}
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -51,7 +63,9 @@ Public workflow verbs:
   resolve-critique    Resolve a repaired historical critique through a later review record.
   repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
   drive               Continue the canonical run through an explicit runtime adapter.
-  publish-delivery    Publish the current session's verified trust bundle for CI reconciliation.
+  publish-provisional-delivery-request  Build the exact provisional-delivery authorization payload.
+  publish-provisional-delivery  Publish a checkpoint-bound bundle for required PR CI reconciliation.
+  publish-delivery    Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -91,9 +105,16 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "repair-critique-resolution-history-request") return repairCritiqueResolutionHistoryRequest(sessionDir, argv.slice(1));
   if (verb === "repair-critique-resolution-history") return repairCritiqueResolutionHistory(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "publish-provisional-delivery-request") return provisionalDeliveryAuthorizationRequest(sessionDir, argv.slice(1));
   if (verb === "publish-delivery") {
     assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
-    return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"));
+    return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"), "terminal");
+  }
+  if (verb === "publish-provisional-delivery") {
+    assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow publish-provisional-delivery");
+    const authorizationFile = flagString(parsed.flags, "authorization-file");
+    if (!authorizationFile) throw new Error("workflow publish-provisional-delivery requires --authorization-file <signed authority>");
+    return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"), "provisional", authorizationFile);
   }
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
@@ -101,69 +122,597 @@ export async function main(argv: string[]): Promise<number> {
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
 }
 
-async function publishDeliveryFromPublicWorkflow(sessionDir: string, json: boolean): Promise<number> {
-  const { projectRoot, slug } = readBoundSession(sessionDir);
-  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
-    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
-    if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) {
-      throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
-    }
+type DeliveryPublicationKind = "provisional" | "terminal";
+type ProvisionalDeliveryAuthority = {
+  invoke: (request: Parameters<typeof invokeExternalLifecycleAuthority>[0]) =>
+    ReturnType<typeof invokeExternalLifecycleAuthority> | Promise<ReturnType<typeof invokeExternalLifecycleAuthority>>;
+  verifyCompletion: ProvisionalCompletionVerifier;
+};
+
+const PRODUCTION_PROVISIONAL_DELIVERY_AUTHORITY: ProvisionalDeliveryAuthority = {
+  invoke: invokeExternalLifecycleAuthority,
+  verifyCompletion: verifyProvisionalDeliveryLifecycleCompletion,
+};
+
+function provisionalAuthorizationHours(flags: Record<string, string | boolean | string[]>): number {
+  assertOnlyFlags(flags, new Set(["artifact-root", "session-dir", "expires-in-hours"]), "workflow publish-provisional-delivery-request");
+  const hours = Number(flagString(flags, "expires-in-hours") ?? "1");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 24) throw new Error("publish-provisional-delivery-request --expires-in-hours must be between 0 and 24");
+  return hours;
+}
+
+export async function provisionalDeliveryAuthorizationRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  const hours = provisionalAuthorizationHours(parsed.flags);
+  const { projectRoot, slug, sidecar } = readBoundSession(sessionDir);
+  const result = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const caller = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
     const inspected = await inspectBuilderFlowSession({ sessionDir });
-    const completed = inspected.run.definitionId === "builder.build" && inspected.run.state.status === "completed";
-    const release = readOptionalJson(path.join(sessionDir, "release.json"));
-    const releaseReady = inspected.run.definitionId === "builder.build"
-      && inspected.run.state.status === "active"
-      && inspected.run.state.current_step === "learn"
-      && ["merge", "release", "deploy"].includes(String(release?.decision));
-    if (!completed && !releaseReady) {
-      throw new Error("workflow publish-delivery requires a completed or release-ready canonical builder.build run; partial sessions cannot publish delivery evidence");
+    if (inspected.run.definitionId !== "builder.build" || inspected.run.state.status !== "active" || inspected.run.state.current_step !== "merge-ready-ci") {
+      throw new Error("provisional delivery authorization requires the active builder.build merge-ready-ci gate");
     }
-    const guardedSeal = await withStableDeliverySnapshot(
-      () => assertCurrentVerifiedWorkspaceEvidence(sessionDir),
-      () => sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "delivered", "release", projectRoot),
-    );
-    const verifiedSnapshot = guardedSeal.snapshot;
-    const seal = guardedSeal.result;
-    if (!seal) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
+    assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    const workspace = provisionalSourceSnapshot(projectRoot, slug);
+    const seal = await sealTrustCheckpoint(sessionDir, slug, new Date().toISOString(), "provisional", "ci-readiness", projectRoot);
+    if (!seal) throw new Error("provisional delivery authorization could not seal the current trust bundle");
     validateFreshCheckpointSeal(sessionDir, seal);
-    const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
-    const checkpoint = readJsonFile(checkpointPath, "workflow trust checkpoint");
-    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (checkpoint.commit_sha !== headSha) {
-      throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
+    assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    if (!isDeepStrictEqual(workspace, provisionalSourceSnapshot(projectRoot, slug))) throw new Error("provisional delivery authorization workspace changed while sealing");
+    const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "provisional delivery checkpoint");
+    const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
+    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("provisional delivery authorization requires exactly one current gate");
+    const assignment = readLocalAssignmentStatus(path.dirname(sessionDir), slug).record;
+    if (!assignment || assignment.status !== "claimed" || assignment.actor_key !== caller.actorKey || !assignment.claimed_at) throw new Error("provisional delivery authorization requires the current assignment generation");
+    const workItems = Array.isArray(sidecar.work_item_refs) ? sidecar.work_item_refs.filter((value): value is string => typeof value === "string") : [];
+    if (workItems.length !== 1 || assignment.work_item_ref !== workItems[0]) throw new Error("provisional delivery authorization requires one assignment-bound Work Item");
+    const providerObservationPath = path.join(sessionDir, "publish-change.result.json");
+    const providerObservation = readJsonFile(providerObservationPath, "authenticated publish-change result");
+    const changeRef = providerObservation.change_ref && typeof providerObservation.change_ref === "object" && !Array.isArray(providerObservation.change_ref)
+      ? providerObservation.change_ref as JsonRecord : null;
+    if (!changeRef || !/^[a-f0-9]{40}$/.test(String(changeRef.head_sha)) || typeof changeRef.provider_record_id !== "string" || !changeRef.provider_record_id
+      || changeRef.head_sha !== checkpoint.commit_sha || changeRef.head_sha !== workspace.head_sha) {
+      throw new Error("provisional delivery authorization requires the authenticated provider observation for the exact published head");
     }
-    const immediatelyBeforePublish = assertCurrentVerifiedWorkspaceEvidence(sessionDir);
-    if (!isDeepStrictEqual(verifiedSnapshot, immediatelyBeforePublish)) {
-      throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
-    }
-    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
-    const ownedDeliveryRoot = `delivery/${slug}`;
-    const sourceSnapshot = captureReviewWorkspaceSnapshot(projectRoot, [], [ownedDeliveryRoot]);
-    const afterSourceSnapshot = assertCurrentVerifiedWorkspaceEvidence(sessionDir);
-    if (!isDeepStrictEqual(verifiedSnapshot, afterSourceSnapshot)) {
-      throw new Error("workflow publish-delivery source snapshot changed before copying delivery evidence; re-run canonical review and verification");
-    }
-    const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
-    const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
-    const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
-    const transaction = stageDeliveryDestination(projectRoot, slug, sessionDir);
-    await withStablePublishedDeliverySnapshot(
-      sourceSnapshot,
-      () => captureReviewWorkspaceSnapshot(projectRoot, [], [ownedDeliveryRoot]),
-      async () => {
-        await publishDelivery(sessionDir, projectRoot);
-        if (!fs.existsSync(deliveryBundle) || !fs.existsSync(deliveryCheckpoint) || !fs.existsSync(deliveryAttestation)) {
-          throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
-        }
-      },
-      transaction.rollback,
-      transaction.commit,
-    );
-    return immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, published: true });
+    const companionNames = ["trust.bundle", "trust.checkpoint.json", "trust.checkpoint.attestation.json", seal.status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json"];
+    const companions = companionNames.sort().map((name) => ({ path: name, sha256: sha256File(path.join(sessionDir, name)) }));
+    const requestedAt = new Date();
+    return buildUnsignedProvisionalDeliveryAuthorization({
+      project_root: projectRoot, run_id: slug, subject: workItems[0], work_item: workItems[0], assignment_actor_key: caller.actorKey,
+      assignment_generation: assignment.claimed_at, published_head_sha: String(changeRef.head_sha), provider_record_id: String(changeRef.provider_record_id),
+      provider_observation_sha256: sha256File(providerObservationPath),
+      flow_definition_id: "builder.build", flow_definition_version: inspected.run.definitionVersion,
+      flow_definition_digest: definitionDigest(inspected.run.definition), flow_run_head: flowRunHead(inspected.run.state), flow_gate_id: gates[0].id as string,
+      flow_gate_visit: new Date(currentGateVisit(inspected.run.state, "merge-ready-ci").enteredAt).toISOString(), workspace_snapshot: workspace,
+      checkpoint_slug: slug, checkpoint_commit_sha: String(checkpoint.commit_sha), checkpoint_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.json")),
+      bundle_sha256: sha256File(path.join(sessionDir, "trust.bundle")), attestation_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.attestation.json")), companions,
+      nonce: randomBytes(16).toString("hex"), requested_at: requestedAt.toISOString(), expires_at: new Date(requestedAt.getTime() + hours * 3_600_000).toISOString(),
+    });
   });
-  if (json) console.log(JSON.stringify(report));
-  else console.log(`Published delivery trust bundle: ${String(report.delivery_bundle)}`);
+  console.log(JSON.stringify({ authorization: result.unsigned, signing_payload: result.signingPayload }));
   return 0;
+}
+
+function assertDeliveryPublicationEligibility(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, kind: DeliveryPublicationKind): void {
+  const completed = inspected.run.definitionId === "builder.build"
+    && inspected.run.state.status === "completed"
+    && ["learn", "done"].includes(inspected.run.state.current_step);
+  const provisionalReady = inspected.run.definitionId === "builder.build"
+    && inspected.run.state.status === "active"
+    && inspected.run.state.current_step === "merge-ready-ci";
+  if (kind === "provisional" && !provisionalReady) {
+    throw new Error("workflow publish-provisional-delivery requires the canonical builder.build run to be at merge-ready-ci after a pull request is opened; it cannot stand in for release readiness or terminal delivery");
+  }
+  if (kind === "terminal" && !completed) {
+    throw new Error("workflow publish-delivery requires a completed canonical builder.build run after passing learning; partial or active learn sessions cannot publish terminal delivery evidence");
+  }
+}
+function deliveryWorkspaceCapture(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  kind: DeliveryPublicationKind,
+  authority: ProvisionalDeliveryAuthority,
+): () => JsonRecord {
+  return kind === "provisional"
+    ? () => (assertCurrentVerifiedWorkspaceEvidence(sessionDir), provisionalSourceSnapshot(projectRoot, slug))
+    : () => assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(sessionDir, projectRoot, slug, authority.verifyCompletion);
+}
+async function prepareDeliveryPublication(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  kind: DeliveryPublicationKind,
+  authorizationFile: string | undefined,
+  authority: ProvisionalDeliveryAuthority,
+) {
+  const captureVerifiedWorkspace = deliveryWorkspaceCapture(sessionDir, projectRoot, slug, kind, authority);
+  const verifiedWorkspace = captureVerifiedWorkspace();
+  const guardedSeal = kind === "provisional" && authorizationFile
+    ? { snapshot: captureVerifiedWorkspace(), result: existingCheckpointSeal(sessionDir) }
+    : await withStableDeliverySnapshot(captureVerifiedWorkspace, () => sealTrustCheckpoint(
+        sessionDir, slug, new Date().toISOString(),
+        kind === "provisional" ? "provisional" : "delivered",
+        kind === "provisional" ? "ci-readiness" : "release", projectRoot,
+      ));
+  if (!guardedSeal.result) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
+  validateFreshCheckpointSeal(sessionDir, guardedSeal.result);
+  const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "workflow trust checkpoint");
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  if (checkpoint.commit_sha !== headSha) throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
+  if (!isDeepStrictEqual(guardedSeal.snapshot, captureVerifiedWorkspace())) throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+  const ownedDeliveryRoot = `delivery/${slug}`;
+  const sourceSnapshot = captureReviewWorkspaceSnapshot(projectRoot, [], [ownedDeliveryRoot]);
+  if (!isDeepStrictEqual(guardedSeal.snapshot, captureVerifiedWorkspace())) throw new Error("workflow publish-delivery source snapshot changed before copying delivery evidence; re-run canonical review and verification");
+  return { verifiedWorkspace, ownedDeliveryRoot, sourceSnapshot };
+}
+async function publishPreparedDelivery(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  kind: DeliveryPublicationKind,
+  authorizationFile: string | undefined,
+  authority: ProvisionalDeliveryAuthority,
+  prepared: Awaited<ReturnType<typeof prepareDeliveryPublication>>,
+) {
+  const deliveryBundle = path.join(projectRoot, "delivery", slug, "trust.bundle");
+  const deliveryCheckpoint = path.join(projectRoot, "delivery", slug, "trust.checkpoint.json");
+  const deliveryAttestation = path.join(projectRoot, "delivery", slug, "trust.checkpoint.attestation.json");
+  const provisionalTransaction = kind === "provisional" ? prepareProvisionalDeliveryTransaction(sessionDir, projectRoot, slug) : null;
+  const transaction = stageDeliveryDestination(projectRoot, slug, sessionDir, provisionalTransaction?.backupPath);
+  let provisionalRecorded = false;
+  try {
+    await publishDelivery(sessionDir, projectRoot);
+    if (![deliveryBundle, deliveryCheckpoint, deliveryAttestation].every((file) => fs.existsSync(file))) throw new Error("workflow publish-delivery did not produce the required delivery trust bundle and checkpoint companions");
+    if (!isDeepStrictEqual(prepared.sourceSnapshot, captureReviewWorkspaceSnapshot(projectRoot, [], [prepared.ownedDeliveryRoot]))) throw new Error("workflow publish-delivery source snapshot changed while copying delivery evidence; the prior delivery was restored");
+    if (kind === "provisional") {
+      const authorityResult = await authority.invoke({ action: "publish-provisional-delivery", project_root: projectRoot, session_dir: sessionDir, authorization_file: path.resolve(authorizationFile!) });
+      writeProvisionalDeliveryRecord(sessionDir, projectRoot, slug, prepared.verifiedWorkspace, deliveryBundle, deliveryCheckpoint, deliveryAttestation, authorityResult.completion, authority.verifyCompletion);
+      provisionalRecorded = true;
+    }
+    transaction.commit();
+    provisionalTransaction?.complete();
+  } catch (error) {
+    if (!provisionalRecorded) {
+      try { transaction.rollback(); provisionalTransaction?.abort(); }
+      catch (rollbackError) {
+        throw new Error(`workflow publish-provisional-delivery could not restore its unrecorded destination: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`, { cause: error });
+      }
+    }
+    throw error;
+  }
+  return immutableReport({ session_dir: sessionDir, delivery_bundle: deliveryBundle, delivery_checkpoint: deliveryCheckpoint, publication: kind, published: true });
+}
+async function publishDeliveryUnderSubjectLock(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  kind: DeliveryPublicationKind,
+  authorizationFile: string | undefined,
+  authority: ProvisionalDeliveryAuthority,
+) {
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+  recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
+  if (!fs.existsSync(path.join(sessionDir, "trust.bundle"))) throw new Error("workflow publish-delivery requires a current session trust.bundle; complete the declared Builder evidence and release-readiness steps first");
+  assertDeliveryPublicationEligibility(await inspectBuilderFlowSession({ sessionDir }), kind);
+  const prepared = await prepareDeliveryPublication(sessionDir, projectRoot, slug, kind, authorizationFile, authority);
+  return publishPreparedDelivery(sessionDir, projectRoot, slug, kind, authorizationFile, authority, prepared);
+}
+async function publishDeliveryFromPublicWorkflow(
+  sessionDir: string,
+  json: boolean,
+  kind: DeliveryPublicationKind,
+  authorizationFile?: string,
+  authority: ProvisionalDeliveryAuthority = PRODUCTION_PROVISIONAL_DELIVERY_AUTHORITY,
+): Promise<number> {
+  const { projectRoot, slug } = readBoundSession(sessionDir);
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, () =>
+    publishDeliveryUnderSubjectLock(sessionDir, projectRoot, slug, kind, authorizationFile, authority));
+  if (json) console.log(JSON.stringify(report));
+  else console.log(`${kind === "provisional" ? "Published provisional CI delivery trust bundle" : "Published terminal delivery trust bundle"}: ${String(report.delivery_bundle)}`);
+  return 0;
+}
+
+type ProvisionalDeliveryTransaction = {
+  backupPath: string | undefined;
+  complete: () => void;
+  abort: () => void;
+};
+
+type ProvisionalDeliveryJournal = {
+  schema_version: "1.0";
+  kind: "kontourai.workflow.provisional-delivery-transaction";
+  session_slug: string;
+  project_root: string;
+  destination: string;
+  backup_path?: string;
+  had_destination: boolean;
+  prepared_at: string;
+};
+
+function provisionalDeliveryDestination(projectRoot: string, slug: string): string {
+  return path.join(projectRoot, "delivery", slug);
+}
+
+function provisionalSourceSnapshot(projectRoot: string, slug: string): JsonRecord {
+  return captureReviewWorkspaceSnapshot(projectRoot, [], [`delivery/${slug}`]);
+}
+
+function provisionalDeliveryJournalPath(sessionDir: string): string {
+  return path.join(sessionDir, PROVISIONAL_DELIVERY_TRANSACTION);
+}
+
+function writeDurableJson(target: string, value: unknown): void {
+  const parent = path.dirname(target);
+  const temporary = path.join(parent, `.${path.basename(target)}.${randomBytes(16).toString("hex")}.tmp`);
+  const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(value)}\n`);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  fs.renameSync(temporary, target);
+  const directory = fs.openSync(parent, fs.constants.O_RDONLY);
+  try {
+    fs.fsyncSync(directory);
+  } finally {
+    fs.closeSync(directory);
+  }
+}
+
+function removeDurably(target: string): void {
+  provisionalDeliveryDurabilityTestHooks?.beforeUnlink?.(target);
+  fs.unlinkSync(target);
+  fsyncDirectory(path.dirname(target));
+}
+
+function fsyncDirectory(target: string): void {
+  const directory = fs.openSync(target, fs.constants.O_RDONLY);
+  try {
+    fs.fsyncSync(directory);
+  } finally {
+    fs.closeSync(directory);
+  }
+  provisionalDeliveryDurabilityTestHooks?.afterDirectoryFsync?.(target);
+}
+
+function fsyncDeliveryMutation(destination: string, backup?: string | null): void {
+  const destinationParent = path.dirname(destination);
+  if (fs.existsSync(destinationParent)) fsyncDirectory(destinationParent);
+  if (backup && path.dirname(backup) !== destinationParent && fs.existsSync(path.dirname(backup))) {
+    fsyncDirectory(path.dirname(backup));
+  }
+}
+
+function recoveryJournal(sessionDir: string, projectRoot: string, slug: string): ProvisionalDeliveryJournal | null {
+  const journalPath = provisionalDeliveryJournalPath(sessionDir);
+  if (!fs.existsSync(journalPath)) return null;
+  const journal = readJsonFile(journalPath, "provisional delivery transaction") as Partial<ProvisionalDeliveryJournal>;
+  const destination = provisionalDeliveryDestination(projectRoot, slug);
+  const backupPrefix = `${path.resolve(sessionDir)}${path.sep}.delivery-publish-backup-`;
+  if (journal.schema_version !== "1.0" || journal.kind !== "kontourai.workflow.provisional-delivery-transaction"
+    || journal.session_slug !== slug || journal.project_root !== projectRoot || journal.destination !== destination
+    || typeof journal.had_destination !== "boolean"
+    || (journal.backup_path !== undefined && (typeof journal.backup_path !== "string" || !path.resolve(journal.backup_path).startsWith(backupPrefix)))) {
+    throw new Error("workflow publish-provisional-delivery found an invalid recovery journal; refuse publication until it is investigated");
+  }
+  return journal as ProvisionalDeliveryJournal;
+}
+
+function provisionalRecordMatchesDestination(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  verifyCompletion: ProvisionalCompletionVerifier,
+): boolean {
+  try {
+    verifyRecordedProvisionalDelivery(sessionDir, projectRoot, slug, verifyCompletion);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function recoverProvisionalDeliveryTransaction(sessionDir: string, projectRoot: string, slug: string): void {
+  recoverProvisionalDeliveryTransactionWithAuthorityVerifier(
+    sessionDir,
+    projectRoot,
+    slug,
+    verifyProvisionalDeliveryLifecycleCompletion,
+  );
+}
+
+export function recoverProvisionalDeliveryTransactionWithAuthorityVerifier(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  verifyCompletion: ProvisionalCompletionVerifier,
+): void {
+  const journal = recoveryJournal(sessionDir, projectRoot, slug);
+  if (!journal) return;
+  const journalPath = provisionalDeliveryJournalPath(sessionDir);
+  const destination = provisionalDeliveryDestination(projectRoot, slug);
+  const backup = journal.backup_path;
+  if (provisionalRecordMatchesDestination(sessionDir, projectRoot, slug, verifyCompletion)) {
+    if (backup && fs.existsSync(backup)) {
+      fs.rmSync(backup, { recursive: true, force: false });
+      fsyncDeliveryMutation(destination, backup);
+    }
+    removeDurably(journalPath);
+    return;
+  }
+  if (backup && fs.existsSync(backup)) {
+    fs.rmSync(destination, { recursive: true, force: true });
+    fs.renameSync(backup, destination);
+    fsyncDeliveryMutation(destination, backup);
+    removeDurably(journalPath);
+    return;
+  }
+  if (!journal.had_destination) {
+    fs.rmSync(destination, { recursive: true, force: true });
+    fsyncDeliveryMutation(destination);
+    removeDurably(journalPath);
+    return;
+  }
+  if (fs.existsSync(destination)) {
+    // The durable journal was written, but the atomic rename never happened.
+    removeDurably(journalPath);
+    return;
+  }
+  throw new Error("workflow publish-provisional-delivery found an interrupted transaction whose original destination is unavailable; refuse publication until recovery is resolved");
+}
+
+function prepareProvisionalDeliveryTransaction(sessionDir: string, projectRoot: string, slug: string): ProvisionalDeliveryTransaction {
+  recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
+  const destination = provisionalDeliveryDestination(projectRoot, slug);
+  const hadDestination = fs.existsSync(destination);
+  const backupPath = hadDestination ? path.join(sessionDir, `.delivery-publish-backup-${randomBytes(16).toString("hex")}`) : undefined;
+  const journal: ProvisionalDeliveryJournal = {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery-transaction",
+    session_slug: slug,
+    project_root: projectRoot,
+    destination,
+    ...(backupPath ? { backup_path: backupPath } : {}),
+    had_destination: hadDestination,
+    prepared_at: new Date().toISOString(),
+  };
+  const journalPath = provisionalDeliveryJournalPath(sessionDir);
+  writeDurableJson(journalPath, journal);
+  return {
+    backupPath,
+    complete: () => { if (fs.existsSync(journalPath)) removeDurably(journalPath); },
+    abort: () => { if (fs.existsSync(journalPath)) removeDurably(journalPath); },
+  };
+}
+
+function sha256File(file: string): string {
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("must be a regular file no larger than 8 MiB");
+    return createHash("sha256").update(fs.readFileSync(descriptor)).digest("hex");
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function deliveryFileDigests(destination: string): Array<{ path: string; sha256: string }> {
+  const allowed = new Set(["trust.bundle", "trust.checkpoint.json", "trust.checkpoint.attestation.json", "trust.checkpoint.intoto.json", "trust.checkpoint.sig.json"]);
+  const files = fs.readdirSync(destination, { withFileTypes: true })
+    .map((entry) => {
+      if (!allowed.has(entry.name) || !entry.isFile()) throw new Error("workflow publish-provisional-delivery produced an unexpected delivery transport entry");
+      return { path: entry.name, sha256: sha256File(path.join(destination, entry.name)) };
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const names = files.map((entry) => entry.path);
+  if (!names.includes("trust.bundle") || !names.includes("trust.checkpoint.json") || !names.includes("trust.checkpoint.attestation.json")
+    || names.filter((name) => name === "trust.checkpoint.intoto.json" || name === "trust.checkpoint.sig.json").length !== 1) {
+    throw new Error("workflow publish-provisional-delivery requires the exact trust bundle, checkpoint, attestation, and one checkpoint companion");
+  }
+  return files;
+}
+
+function readProvisionalAuthorityEvent(sessionDir: string, slug: string): JsonRecord {
+  const ledger = readJsonFile(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json"), "provisional delivery authority ledger");
+  if (ledger.schema_version !== "1.0" || !Array.isArray(ledger.events) || ledger.events.length === 0
+    || Object.keys(ledger).sort().join(",") !== "events,schema_version") {
+    throw new Error("provisional delivery authority ledger is invalid");
+  }
+  let predecessor = "0".repeat(64);
+  for (const value of ledger.events) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("provisional delivery authority event is invalid");
+    const event = value as JsonRecord;
+    const fields = ["schema_version", "kind", "run_id", "subject", "authorization_sha256", "predecessor_hash", "signed_authorization", "event_hash"];
+    if (!isDeepStrictEqual(Object.keys(event).sort(), fields.sort()) || event.schema_version !== "1.0"
+      || event.kind !== "kontourai.lifecycle-authority.provisional-delivery-event" || event.run_id !== slug
+      || event.predecessor_hash !== predecessor || !/^[a-f0-9]{64}$/.test(String(event.authorization_sha256))) {
+      throw new Error("provisional delivery authority event binding is invalid");
+    }
+    if (event.authorization_sha256 !== createHash("sha256").update(canonicalJson(event.signed_authorization)).digest("hex")) {
+      throw new Error("provisional delivery authority event authorization digest is invalid");
+    }
+    const { event_hash: eventHash, ...unsigned } = event;
+    if (eventHash !== createHash("sha256").update(canonicalJson(unsigned)).digest("hex")) {
+      throw new Error("provisional delivery authority event hash chain is invalid");
+    }
+    predecessor = String(eventHash);
+  }
+  return ledger.events.at(-1) as JsonRecord;
+}
+
+function writeProvisionalDeliveryRecord(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  snapshot: JsonRecord,
+  deliveryBundle: string,
+  deliveryCheckpoint: string,
+  deliveryAttestation: string,
+  authorityCompletion: JsonRecord,
+  verifyCompletion: ProvisionalCompletionVerifier = verifyProvisionalDeliveryLifecycleCompletion,
+): void {
+  const checkpoint = readJsonFile(deliveryCheckpoint, "provisional delivery checkpoint");
+  if (checkpoint.status !== "provisional" || checkpoint.phase !== "ci-readiness") {
+    throw new Error("workflow publish-provisional-delivery requires a provisional ci-readiness checkpoint");
+  }
+  const deliveryFiles = deliveryFileDigests(path.dirname(deliveryBundle));
+  const authorityEvent = readProvisionalAuthorityEvent(sessionDir, slug);
+  verifyCompletion(authorityCompletion, {
+    runId: slug,
+    requestSha256: String(authorityCompletion.request_sha256),
+    resultCoreSha256: createHash("sha256").update(canonicalJson(authorityEvent)).digest("hex"),
+  });
+  const record = {
+    schema_version: "1.0",
+    kind: "kontourai.workflow.provisional-delivery",
+    session_slug: slug,
+    project_root: projectRoot,
+    verified_workspace_snapshot: snapshot,
+    delivery_bundle_sha256: sha256File(deliveryBundle),
+    delivery_checkpoint_sha256: sha256File(deliveryCheckpoint),
+    delivery_attestation_sha256: sha256File(deliveryAttestation),
+    delivery_files: deliveryFiles,
+    authority_completion: authorityCompletion,
+    authority_completion_sha256: createHash("sha256").update(canonicalJson(authorityCompletion)).digest("hex"),
+    authority_request_sha256: authorityCompletion.request_sha256,
+    authority_event_hash: authorityEvent.event_hash,
+    authority_authorization_sha256: authorityEvent.authorization_sha256,
+    checkpoint_commit_sha: checkpoint.commit_sha,
+    recorded_at: new Date().toISOString(),
+  };
+  const target = path.join(sessionDir, PROVISIONAL_DELIVERY_RECORD);
+  writeDurableJson(target, record);
+}
+
+/**
+ * Terminal publication usually requires an exact current review/test snapshot. A provisional
+ * CI delivery necessarily adds only delivery/<session>/ commits before provider readiness can
+ * be recorded. This narrow continuation accepts that one earlier, hash-bound provisional
+ * delivery and nothing else; source changes, another session's delivery, missing records, and
+ * altered provisional companions all fail closed.
+ */
+export function assertTerminalDeliveryWorkspaceEvidence(sessionDir: string, projectRoot: string, slug: string): JsonRecord {
+  return assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(sessionDir, projectRoot, slug, verifyProvisionalDeliveryLifecycleCompletion);
+}
+
+export function assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  verifyCompletion: ProvisionalCompletionVerifier,
+): JsonRecord {
+  try {
+    return assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+  } catch (strictError) {
+    const record = readOptionalJson(path.join(sessionDir, PROVISIONAL_DELIVERY_RECORD));
+    const snapshot = record?.verified_workspace_snapshot;
+    const base = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? String((snapshot as JsonRecord).head_sha ?? "") : "";
+    const root = typeof record?.project_root === "string" ? record.project_root : "";
+    if (!record || record.kind !== "kontourai.workflow.provisional-delivery" || record.schema_version !== "1.0"
+      || record.session_slug !== slug || root !== projectRoot || !/^[a-f0-9]{40}$/i.test(base)
+      || String(record.checkpoint_commit_sha ?? "") !== base
+      || !/^[a-f0-9]{64}$/i.test(String(record.delivery_bundle_sha256 ?? ""))
+      || !/^[a-f0-9]{64}$/i.test(String(record.delivery_checkpoint_sha256 ?? ""))
+      || !/^[a-f0-9]{64}$/i.test(String(record.delivery_attestation_sha256 ?? ""))
+      || !Array.isArray(record.delivery_files) || !record.authority_completion
+      || !/^[a-f0-9]{64}$/i.test(String(record.authority_completion_sha256 ?? ""))) {
+      throw strictError;
+    }
+    const destination = path.join(projectRoot, "delivery", slug);
+    const bundle = path.join(destination, "trust.bundle");
+    const checkpointPath = path.join(destination, "trust.checkpoint.json");
+    const checkpoint = readJsonFile(checkpointPath, "provisional delivery checkpoint");
+    const attestationPath = path.join(destination, "trust.checkpoint.attestation.json");
+    const expectedFiles = record.delivery_files as Array<{ path?: unknown; sha256?: unknown }>;
+    const verified = verifyRecordedProvisionalDelivery(sessionDir, projectRoot, slug, verifyCompletion);
+    const actualFiles = verified.deliveryFiles;
+    if (!expectedFiles.every((entry) => typeof entry?.path === "string" && /^[a-f0-9]{64}$/i.test(String(entry.sha256)))
+      || expectedFiles.length !== actualFiles.length
+      || !isDeepStrictEqual(expectedFiles, actualFiles)) {
+      throw new Error("workflow publish-delivery requires an exact, unmodified provisional delivery transport before it can continue past the delivery-only CI revision");
+    }
+    if (checkpoint.status !== "provisional" || checkpoint.phase !== "ci-readiness" || checkpoint.commit_sha !== base
+      || sha256File(bundle) !== record.delivery_bundle_sha256 || sha256File(checkpointPath) !== record.delivery_checkpoint_sha256
+      || sha256File(attestationPath) !== record.delivery_attestation_sha256) {
+      throw new Error("workflow publish-delivery requires an intact checkpoint-bound provisional delivery before it can continue past the delivery-only CI revision");
+    }
+    assertOnlyOwnedDeliveryDrift(projectRoot, base, actualFiles.map((entry) => `delivery/${slug}/${entry.path}`));
+    return snapshot as JsonRecord;
+  }
+}
+
+type ProvisionalCompletionVerifier = (
+  value: unknown,
+  expected: { runId: string; requestSha256: string; resultCoreSha256: string },
+) => JsonRecord;
+
+function verifyRecordedProvisionalDelivery(
+  sessionDir: string,
+  projectRoot: string,
+  slug: string,
+  verifyCompletion: ProvisionalCompletionVerifier,
+): { record: JsonRecord; event: JsonRecord; deliveryFiles: Array<{ path: string; sha256: string }> } {
+  const record = readJsonFile(path.join(sessionDir, PROVISIONAL_DELIVERY_RECORD), "provisional delivery record");
+  const destination = provisionalDeliveryDestination(projectRoot, slug);
+  const deliveryFiles = deliveryFileDigests(destination);
+  const event = readProvisionalAuthorityEvent(sessionDir, slug);
+  const completion = readJsonFile(path.join(sessionDir, PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION), "provisional delivery authority completion");
+  const requestSha256 = String(record.authority_request_sha256 ?? "");
+  const resultCoreSha256 = createHash("sha256").update(canonicalJson(event)).digest("hex");
+  if (record.kind !== "kontourai.workflow.provisional-delivery" || record.schema_version !== "1.0"
+    || record.session_slug !== slug || record.project_root !== projectRoot
+    || !isDeepStrictEqual(record.delivery_files, deliveryFiles)
+    || record.authority_event_hash !== event.event_hash
+    || record.authority_authorization_sha256 !== event.authorization_sha256
+    || record.authority_completion_sha256 !== createHash("sha256").update(canonicalJson(completion)).digest("hex")
+    || !isDeepStrictEqual(record.authority_completion, completion)
+    || !/^[a-f0-9]{64}$/.test(requestSha256)) {
+    throw new Error("provisional delivery record does not bind the exact durable authority evidence");
+  }
+  verifyCompletion(completion, { runId: slug, requestSha256, resultCoreSha256 });
+  const authorization = event.signed_authorization as JsonRecord;
+  const providerObservationPath = path.join(sessionDir, "publish-change.result.json");
+  const providerObservation = readJsonFile(providerObservationPath, "authenticated publish-change result");
+  const changeRef = providerObservation.change_ref && typeof providerObservation.change_ref === "object" && !Array.isArray(providerObservation.change_ref)
+    ? providerObservation.change_ref as JsonRecord : null;
+  if (!authorization || typeof authorization !== "object" || authorization.project_root !== projectRoot
+    || authorization.run_id !== slug || authorization.checkpoint_slug !== slug
+    || authorization.published_head_sha !== record.checkpoint_commit_sha
+    || authorization.provider_observation_sha256 !== sha256File(providerObservationPath)
+    || !changeRef || changeRef.head_sha !== authorization.published_head_sha || changeRef.provider_record_id !== authorization.provider_record_id
+    || !isDeepStrictEqual(authorization.workspace_snapshot, record.verified_workspace_snapshot)
+    || !isDeepStrictEqual(authorization.companions, deliveryFiles)
+    || authorization.bundle_sha256 !== record.delivery_bundle_sha256
+    || authorization.checkpoint_sha256 !== record.delivery_checkpoint_sha256
+    || authorization.attestation_sha256 !== record.delivery_attestation_sha256) {
+    throw new Error("provisional delivery record does not bind the signed authorization");
+  }
+  return { record, event, deliveryFiles };
+}
+
+function assertOnlyOwnedDeliveryDrift(projectRoot: string, base: string, expectedFiles: string[]): void {
+  const listed = (args: string[]) => execFileSync("git", args, { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+    .split("\n").filter(Boolean);
+  try {
+    const ancestor = execFileSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: projectRoot, stdio: "ignore" });
+    void ancestor;
+    const changed = [
+      ...listed(["diff", "--name-only", `${base}..HEAD`, "--"]),
+      ...listed(["diff", "--name-only", "HEAD", "--"]),
+      ...listed(["ls-files", "--others", "--exclude-standard"]),
+    ];
+    const unique = [...new Set(changed)].sort();
+    if (unique.length === 0 || !isDeepStrictEqual(unique, [...expectedFiles].sort())) {
+      throw new Error("workflow publish-delivery requires that the post-verification revision contains exactly this session's recorded provisional delivery companions and no other source changes; re-run canonical review and verification after any other change");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("workflow publish-delivery requires")) throw error;
+    throw new Error("workflow publish-delivery could not prove that the provisional delivery base is an ancestor of the current checkout; re-run canonical review and verification");
+  }
 }
 
 export async function withStableDeliverySnapshot<T>(capture: () => JsonRecord, seal: () => Promise<T>): Promise<{ snapshot: JsonRecord; result: T }> {
@@ -195,7 +744,7 @@ export async function withStablePublishedDeliverySnapshot(
   }
 }
 
-export function stageDeliveryDestination(projectRoot: string, slug: string, sessionDir: string): { rollback: () => void; commit: () => void } {
+export function stageDeliveryDestination(projectRoot: string, slug: string, sessionDir: string, preparedBackup?: string): { rollback: () => void; commit: () => void } {
   const deliveryRoot = path.join(projectRoot, "delivery");
   if (fs.existsSync(deliveryRoot)) {
     const rootStat = fs.lstatSync(deliveryRoot);
@@ -206,8 +755,9 @@ export function stageDeliveryDestination(projectRoot: string, slug: string, sess
   if (fs.existsSync(destination)) {
     const destinationStat = fs.lstatSync(destination);
     if (destinationStat.isSymbolicLink() || !destinationStat.isDirectory()) throw new Error("workflow publish-delivery requires its delivery destination to be a non-symlink directory");
-    backup = path.join(sessionDir, `.delivery-publish-backup-${randomBytes(16).toString("hex")}`);
+    backup = preparedBackup ?? path.join(sessionDir, `.delivery-publish-backup-${randomBytes(16).toString("hex")}`);
     fs.renameSync(destination, backup);
+    fsyncDeliveryMutation(destination, backup);
   }
   let settled = false;
   return {
@@ -215,11 +765,15 @@ export function stageDeliveryDestination(projectRoot: string, slug: string, sess
       if (settled) return;
       fs.rmSync(destination, { recursive: true, force: true });
       if (backup) fs.renameSync(backup, destination);
+      fsyncDeliveryMutation(destination, backup);
       settled = true;
     },
     commit: () => {
       if (settled) return;
-      if (backup) fs.rmSync(backup, { recursive: true, force: true });
+      if (backup) {
+        fs.rmSync(backup, { recursive: true, force: true });
+        fsyncDeliveryMutation(destination, backup);
+      }
       settled = true;
     },
   };
@@ -256,6 +810,24 @@ function validateFreshCheckpointSeal(sessionDir: string, seal: TrustCheckpointSe
     || !isDeepStrictEqual(statement.predicate, JSON.parse(bundleBytes.toString("utf8")))) {
     throw new Error("workflow publish-delivery checkpoint companion is not digest-bound to the current checkpoint and trust bundle");
   }
+}
+
+function existingCheckpointSeal(sessionDir: string): TrustCheckpointSealResult {
+  const checkpointPath = path.join(sessionDir, "trust.checkpoint.json");
+  const attestationPath = path.join(sessionDir, "trust.checkpoint.attestation.json");
+  const attestation = readJsonFile(attestationPath, "workflow checkpoint attestation");
+  if (attestation.status !== "signed" && attestation.status !== "unsigned") {
+    throw new Error("workflow publish-provisional-delivery requires the exact checkpoint sealed for its signed authorization");
+  }
+  const companionPath = path.join(sessionDir, attestation.status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json");
+  return {
+    status: attestation.status,
+    checkpointPath,
+    attestationPath,
+    companionPath,
+    checkpointSha256: sha256File(checkpointPath),
+    bundleSha256: sha256File(path.join(sessionDir, "trust.bundle")),
+  };
 }
 
 function readSignedCheckpointStatement(file: string): JsonRecord {

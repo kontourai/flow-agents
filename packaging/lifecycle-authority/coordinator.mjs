@@ -37,8 +37,16 @@ const ACTION_FIELDS = {
   "resolve-critique": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "reseal-verification-evidence": ["action", "project_root", "session_dir", "authorization_file"],
+  "publish-provisional-delivery": ["action", "project_root", "session_dir", "authorization_file"],
   "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
 };
+const PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation",
+  "published_head_sha", "provider_record_id", "provider_observation_sha256",
+  "flow_definition_id", "flow_definition_version", "flow_definition_digest", "flow_run_head", "flow_gate_id", "flow_gate_visit", "workspace_snapshot",
+  "checkpoint_slug", "checkpoint_commit_sha", "checkpoint_sha256", "bundle_sha256", "attestation_sha256", "companions",
+  "nonce", "expires_at", "requested_at", "signature",
+];
 const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "permitted_transition",
   "stale_completion_sha256", "stale_completion_action", "stale_completion_request_sha256", "stale_completion_result_core_sha256", "stale_completion_coordinator_runtime_sha256",
@@ -94,6 +102,36 @@ function exact(value, fields, label) {
 function within(candidate, root) {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+function provisionalWorkspaceSnapshot(projectRoot, runId) {
+  const excluded = `delivery/${runId}`;
+  const git = (args, encoding = "utf8") => {
+    const result = spawnSync("git", args, { cwd: projectRoot, encoding, maxBuffer: 32 * 1024 * 1024 });
+    if (result.status !== 0) throw new Error("provisional delivery could not inspect the signed Git workspace");
+    return result.stdout;
+  };
+  const root = String(git(["rev-parse", "--show-toplevel"])).trim();
+  if (fs.realpathSync(root) !== projectRoot) throw new Error("provisional delivery project root is not the Git worktree root");
+  const head = String(git(["rev-parse", "HEAD"])).trim();
+  const tracked = git(["diff", "--binary", "--no-ext-diff", "HEAD", "--", ".", `:(exclude)${excluded}/**`], null);
+  const untracked = Buffer.from(git(["ls-files", "--others", "--exclude-standard", "-z"], null))
+    .toString("utf8").split("\0").filter(Boolean)
+    .filter((file) => file !== excluded && !file.startsWith(`${excluded}/`)).sort();
+  const hash = crypto.createHash("sha256");
+  hash.update("flow-agents:git-worktree:v1\0").update(head).update("\0");
+  hash.update("exclude\0").update(excluded).update("\0");
+  hash.update(tracked).update("\0");
+  for (const file of untracked) {
+    const absolute = path.resolve(projectRoot, file);
+    if (!within(absolute, projectRoot)) throw new Error("provisional delivery untracked file escapes the project root");
+    const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile()) throw new Error("provisional delivery untracked entry is not a regular file");
+      hash.update(file).update("\0").update(fs.readFileSync(descriptor)).update("\0");
+    } finally { fs.closeSync(descriptor); }
+  }
+  return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: head };
 }
 function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
@@ -156,6 +194,8 @@ function assertPrivilegedAuthorizationShape(authorization) {
     ? HISTORY_REPAIR_AUTHORIZATION_FIELDS
     : authorization.operation === "reseal-verification-evidence"
       ? VERIFICATION_RESEAL_AUTHORIZATION_FIELDS
+      : authorization.operation === "publish-provisional-delivery"
+        ? PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS
       : authorization.operation === "recover-exact-current-completion"
         ? EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS
       : null;
@@ -164,18 +204,68 @@ function assertPrivilegedAuthorizationShape(authorization) {
   exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   return authorization;
 }
+export function validateProvisionalDeliveryAuthorizationBinding(authorization, expected) {
+  exact(authorization, PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS, "privileged publish-provisional-delivery authorization");
+  exact(authorization.signature, ["algorithm", "key_id", "value"], "provisional delivery authorization signature");
+  if (authorization.schema_version !== PROTOCOL_VERSION || authorization.operation !== "publish-provisional-delivery") throw new Error("provisional delivery authorization identity is invalid");
+  for (const field of ["project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation", "provider_record_id", "flow_definition_id", "flow_definition_version", "flow_gate_id", "flow_gate_visit", "checkpoint_slug"]) {
+    if (typeof authorization[field] !== "string" || !authorization[field]) throw new Error(`provisional delivery authorization ${field} is invalid`);
+    if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
+  }
+  for (const field of ["flow_definition_digest", "flow_run_head", "published_head_sha", "checkpoint_commit_sha", "provider_observation_sha256", "checkpoint_sha256", "bundle_sha256", "attestation_sha256"]) {
+    const pattern = field === "checkpoint_commit_sha" || field === "published_head_sha" ? /^[a-f0-9]{40}$/ : /^[a-f0-9]{64}$/;
+    if (!pattern.test(String(authorization[field]))) throw new Error(`provisional delivery authorization ${field} is invalid`);
+    if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
+  }
+  if (!record(authorization.workspace_snapshot) || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
+  if (!Array.isArray(authorization.companions) || (expected.companions !== undefined && canonicalJson(authorization.companions) !== canonicalJson(expected.companions))) throw new Error("provisional delivery authorization companions do not match the current session");
+  if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id || authorization.flow_definition_id !== "builder.build") throw new Error("provisional delivery authorization cross-binding is invalid");
+  const requested = Date.parse(authorization.requested_at), expires = Date.parse(authorization.expires_at);
+  if (!Number.isFinite(requested) || !Number.isFinite(expires) || expires < requested || Date.now() > expires) throw new Error("provisional delivery authorization time window is invalid");
+  return authorization;
+}
+function loadProvisionalDeliveryLedger(paths) {
+  const file = path.join(paths.sessionDir, "lifecycle-authority.provisional-delivery-events.json");
+  if (!fs.existsSync(file)) return { file, bytes: null, value: { schema_version: PROTOCOL_VERSION, events: [] } };
+  const bytes = protectedRegularFile(file, "provisional delivery authority ledger", 4 * 1024 * 1024);
+  const value = JSON.parse(bytes.toString("utf8"));
+  exact(value, ["schema_version", "events"], "provisional delivery authority ledger");
+  if (value.schema_version !== PROTOCOL_VERSION || !Array.isArray(value.events)) throw new Error("provisional delivery authority ledger is invalid");
+  let predecessor = "0".repeat(64);
+  let subject = null;
+  for (const event of value.events) {
+    exact(event, ["schema_version", "kind", "run_id", "subject", "authorization_sha256", "predecessor_hash", "signed_authorization", "event_hash"], "provisional delivery authority event");
+    if (event.schema_version !== PROTOCOL_VERSION || event.kind !== "kontourai.lifecycle-authority.provisional-delivery-event"
+      || event.run_id !== paths.runId || typeof event.subject !== "string" || !event.subject
+      || (subject !== null && event.subject !== subject) || event.predecessor_hash !== predecessor
+      || event.authorization_sha256 !== sha256(canonicalJson(event.signed_authorization))) {
+      throw new Error("provisional delivery authority event binding is invalid");
+    }
+    const { event_hash, ...unsigned } = event;
+    if (event_hash !== sha256(unsigned)) throw new Error("provisional delivery authority event hash chain is invalid");
+    const verified = assertPrivilegedAuthorizationShape(verifySignedAuthorization(event.signed_authorization, { projectRoot: paths.projectRoot, requireCurrentExpiry: false }));
+    if (verified.operation !== "publish-provisional-delivery" || verified.run_id !== paths.runId || verified.subject !== event.subject) {
+      throw new Error("provisional delivery authority event signature binding is invalid");
+    }
+    subject = event.subject;
+    predecessor = event_hash;
+  }
+  return { file, bytes, value };
+}
 function verifyAuthorization(file, options = {}) {
   return assertPrivilegedAuthorizationShape(verifySignedAuthorization(JSON.parse(protectedRegularFile(file, "authorization file").toString("utf8")), options));
 }
-function atomicWrite(file, bytes, mode = 0o600) {
+function atomicWrite(file, bytes, mode = 0o600, hooks = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const temporary = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(8).toString("hex")}.tmp`;
   fs.writeFileSync(temporary, bytes, { mode, flag: "wx" });
   const temporaryDescriptor = fs.openSync(temporary, fs.constants.O_RDONLY);
   try { fs.fsyncSync(temporaryDescriptor); } finally { fs.closeSync(temporaryDescriptor); }
+  hooks?.beforeRename?.(temporary, file);
   fs.renameSync(temporary, file);
   const descriptor = fs.openSync(path.dirname(file), fs.constants.O_RDONLY);
   try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  hooks?.afterRename?.(file);
 }
 function transactionJournal(paths) { return path.join(paths.sessionDir, ".lifecycle-authority.transaction.json"); }
 const FLOW_MUTATION_LOCK_PATH = ".mutation.lock";
@@ -410,7 +500,7 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   exact(completion, fields, label);
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
@@ -499,7 +589,7 @@ async function loadPinnedFlowReducer() {
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "flowRunHead", "definitionDigest", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
@@ -1298,6 +1388,160 @@ export function cleanupVerificationResealTransaction(paths, plan, hooks = {}) {
   hooks.before_unlink?.(planFile);
   if (fs.existsSync(planFile)) fs.unlinkSync(planFile);
 }
+export function validateProvisionalDeliveryTransport(destination, expected) {
+  if (!Array.isArray(expected) || expected.length !== 4) {
+    throw new Error("provisional delivery authorization must bind exactly four companions");
+  }
+  const names = new Set();
+  for (const entry of expected) {
+    if (!record(entry) || typeof entry.path !== "string" || !/^[a-z0-9.-]+$/.test(entry.path)
+        || typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256) || names.has(entry.path)) {
+      throw new Error("provisional delivery authorization companions are invalid");
+    }
+    names.add(entry.path);
+    const file = path.join(destination, entry.path);
+    if (!within(file, destination)
+        || sha256(protectedRegularFile(file, `provisional delivery companion ${entry.path}`, 8 * 1024 * 1024)) !== entry.sha256) {
+      throw new Error("provisional delivery transport does not match the signed authorization");
+    }
+  }
+  const fixed = ["trust.bundle", "trust.checkpoint.json", "trust.checkpoint.attestation.json"];
+  const transportCompanions = ["trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"].filter((name) => names.has(name));
+  if (!fixed.every((name) => names.has(name)) || transportCompanions.length !== 1) {
+    throw new Error("provisional delivery authorization must bind the exact bundle, checkpoint, attestation, and one signature or in-toto companion");
+  }
+  const actual = fs.readdirSync(destination).sort();
+  if (canonicalJson(actual) !== canonicalJson([...names].sort())) {
+    throw new Error("provisional delivery transport contains an unsigned extra path");
+  }
+  const selectedCompanion = transportCompanions[0];
+  const attestation = protectedJson(path.join(destination, "trust.checkpoint.attestation.json"), "provisional delivery checkpoint attestation", 256 * 1024);
+  const expectedStatus = selectedCompanion === "trust.checkpoint.sig.json" ? "signed" : "unsigned";
+  if (attestation.path !== selectedCompanion || attestation.status !== expectedStatus) {
+    throw new Error("provisional delivery checkpoint attestation does not declare the exact authorized companion");
+  }
+  return { names, selectedCompanion };
+}
+function recoverPreparedProvisionalDeliveryEvent(events, authorization) {
+  const authorizationBytes = canonicalJson(authorization);
+  const authorizationSha256 = sha256(authorizationBytes);
+  const authorizationMatches = [];
+  for (const [index, currentEvent] of events.entries()) {
+    if (currentEvent.authorization_sha256 !== authorizationSha256) continue;
+    if (canonicalJson(currentEvent.signed_authorization) !== authorizationBytes) {
+      throw new Error("prepared provisional delivery authorization digest conflicts with the durable ledger bytes");
+    }
+    authorizationMatches.push(index);
+  }
+  if (authorizationMatches.length === 0) return null;
+  const tailIndex = events.length - 1;
+  if (authorizationMatches.length !== 1 || authorizationMatches[0] !== tailIndex) {
+    throw new Error("prepared provisional delivery authorization is already present before the durable ledger tail");
+  }
+  return events[tailIndex];
+}
+function provisionalGateVisit(state) {
+  let enteredAt = null;
+  for (const transition of state.transitions ?? []) if (transition?.to_step === state.current_step) enteredAt = Date.parse(transition.at);
+  if (!Number.isFinite(enteredAt)) enteredAt = Date.parse(state.updated_at);
+  if (!Number.isFinite(enteredAt)) throw new Error("canonical Flow gate visit is invalid");
+  return new Date(enteredAt).toISOString();
+}
+function assertProvisionalAuthorizationContext(paths, authorization, context) {
+  const { definition, state, flow, assignment, subject, providerObservationBytes, changeRef } = context;
+  validateProvisionalDeliveryAuthorizationBinding(authorization, {
+    project_root: paths.projectRoot, run_id: paths.runId, checkpoint_slug: paths.runId,
+    subject, work_item: subject, assignment_actor_key: assignment.actor_key, assignment_generation: assignment.claimed_at,
+    published_head_sha: changeRef.head_sha, provider_record_id: changeRef.provider_record_id,
+    provider_observation_sha256: sha256(providerObservationBytes),
+    flow_definition_id: "builder.build", flow_definition_version: state.definition_version,
+    flow_definition_digest: flow.definitionDigest(definition), flow_run_head: flow.flowRunHead(state),
+    flow_gate_id: openGateId(definition, state), flow_gate_visit: provisionalGateVisit(state),
+  });
+  if (authorization.run_id !== paths.runId || authorization.flow_definition_id !== "builder.build" || definition.id !== "builder.build"
+      || state.current_step !== "merge-ready-ci" || state.status !== "active") {
+    throw new Error("provisional delivery authorization does not bind the active builder.build merge-ready-ci gate");
+  }
+  if (assignment.status !== "claimed" || authorization.checkpoint_commit_sha !== authorization.workspace_snapshot.head_sha
+      || authorization.published_head_sha !== authorization.checkpoint_commit_sha) {
+    throw new Error("provisional delivery authorization does not bind the live assignment and workspace revision");
+  }
+  for (const field of ["flow_definition_digest", "flow_run_head", "checkpoint_sha256", "bundle_sha256", "attestation_sha256"]) {
+    if (!/^[a-f0-9]{64}$/.test(String(authorization[field]))) throw new Error(`provisional delivery authorization ${field} is invalid`);
+  }
+}
+function assertProvisionalCheckpoint(paths, authorization, destination, expected) {
+  validateProvisionalDeliveryTransport(destination, expected);
+  const checkpoint = protectedJson(path.join(destination, "trust.checkpoint.json"), "provisional delivery checkpoint", 256 * 1024);
+  if (checkpoint.status !== "provisional" || checkpoint.phase !== "ci-readiness" || checkpoint.slug !== paths.runId
+      || checkpoint.commit_sha !== authorization.checkpoint_commit_sha
+      || authorization.checkpoint_sha256 !== expected.find((entry) => entry.path === "trust.checkpoint.json")?.sha256
+      || authorization.bundle_sha256 !== expected.find((entry) => entry.path === "trust.bundle")?.sha256
+      || authorization.attestation_sha256 !== expected.find((entry) => entry.path === "trust.checkpoint.attestation.json")?.sha256) {
+    throw new Error("provisional delivery checkpoint does not match the signed authorization");
+  }
+}
+function assertProvisionalAuthorizationShape(paths, authorization) {
+  if (authorization.project_root !== paths.projectRoot || authorization.checkpoint_slug !== paths.runId
+      || typeof authorization.subject !== "string" || !authorization.subject || typeof authorization.work_item !== "string" || !authorization.work_item
+      || typeof authorization.assignment_actor_key !== "string" || !authorization.assignment_actor_key
+      || typeof authorization.assignment_generation !== "string" || !authorization.assignment_generation
+      || typeof authorization.flow_definition_version !== "string" || !authorization.flow_definition_version
+      || typeof authorization.flow_gate_id !== "string" || !authorization.flow_gate_id
+      || typeof authorization.flow_gate_visit !== "string" || !authorization.flow_gate_visit
+      || !record(authorization.workspace_snapshot)) throw new Error("provisional delivery authorization binding is invalid");
+}
+async function prepareProvisionalDeliveryMutation(paths, authorization) {
+  const definition = protectedJson(canonicalFlowPaths(paths).definition, "canonical Flow definition", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const state = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const { flow } = await loadPinnedFlowReducer();
+  const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
+  const subject = sessionSubject(paths);
+  const providerObservationBytes = protectedRegularFile(path.join(paths.sessionDir, "publish-change.result.json"), "authenticated publish-change result", 256 * 1024);
+  const providerObservation = JSON.parse(providerObservationBytes.toString("utf8"));
+  const changeRef = record(providerObservation.change_ref) ? providerObservation.change_ref : null;
+  if (!changeRef) throw new Error("authenticated publish-change result is invalid");
+  assertProvisionalAuthorizationContext(paths, authorization, { definition, state, flow, assignment, subject, providerObservationBytes, changeRef });
+  assertProvisionalAuthorizationShape(paths, authorization);
+  const destination = path.join(paths.projectRoot, "delivery", paths.runId);
+  const expected = Array.isArray(authorization.companions) ? authorization.companions : [];
+  assertProvisionalCheckpoint(paths, authorization, destination, expected);
+  if (canonicalJson(provisionalWorkspaceSnapshot(paths.projectRoot, paths.runId)) !== canonicalJson(authorization.workspace_snapshot)) {
+    throw new Error("provisional delivery source changed after authorization");
+  }
+  return { flow, destination, expected, ledger: loadProvisionalDeliveryLedger(paths) };
+}
+async function appendOrRecoverProvisionalDeliveryEvent(paths, authorization, prepared, resumePrepared) {
+  const { flow, destination, expected, ledger } = prepared;
+  const predecessor_hash = ledger.value.events.at(-1)?.event_hash ?? "0".repeat(64);
+  const authorizationSha256 = sha256(canonicalJson(authorization));
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: paths.runId, subject: authorization.subject, authorization_sha256: authorizationSha256, predecessor_hash, signed_authorization: authorization };
+  const event = { ...unsigned, event_hash: sha256(unsigned) };
+  return withCanonicalFlowRunMutationLock(paths, async () => {
+    const currentLedger = loadProvisionalDeliveryLedger(paths);
+    const currentState = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+    if (flow.flowRunHead(currentState) !== authorization.flow_run_head || currentState.status !== "active" || currentState.current_step !== "merge-ready-ci") {
+      throw new Error("canonical Flow state changed before provisional delivery authority append");
+    }
+    if (canonicalJson(provisionalWorkspaceSnapshot(paths.projectRoot, paths.runId)) !== canonicalJson(authorization.workspace_snapshot)) {
+      throw new Error("provisional delivery source changed before authority append");
+    }
+    validateProvisionalDeliveryTransport(destination, expected);
+    if (resumePrepared) {
+      const recovered = recoverPreparedProvisionalDeliveryEvent(currentLedger.value.events, authorization);
+      if (recovered !== null) return recovered;
+    }
+    const samePreimage = ledger.bytes === null ? currentLedger.bytes === null : currentLedger.bytes?.equals(ledger.bytes) === true;
+    if (!samePreimage) throw new Error("provisional delivery authority ledger changed before append");
+    atomicWrite(ledger.file, `${JSON.stringify({ schema_version: PROTOCOL_VERSION, events: [...ledger.value.events, event] }, null, 2)}\n`, 0o644);
+    return event;
+  });
+}
+async function executeProvisionalDeliveryMutation(paths, authorization, resumePrepared) {
+  const prepared = await prepareProvisionalDeliveryMutation(paths, authorization);
+  const durableEvent = await appendOrRecoverProvisionalDeliveryEvent(paths, authorization, prepared, resumePrepared);
+  return { result_core_sha256: sha256(durableEvent), run_id: paths.runId };
+}
 function exactCurrentRecoveryProtectedFiles(paths) {
   return new Map([
     ["trust-bundle", path.join(paths.sessionDir, "trust.bundle")],
@@ -1563,11 +1807,7 @@ async function finalizeExactCurrentRecoveryPublication(paths, completion) {
   cleanupExactCurrentRecoveryPublication(paths, finalized.plan);
   return finalized.result;
 }
-async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null) {
-    if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
-    if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
-    if (envelope.action === "recover-exact-current-completion") throw new Error("exact-current completion recovery requires the signed prepare/publish protocol");
-    if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
+async function executeCritiqueMutation(envelope, paths, authorization, completionRecord, verifiedBridge) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
       assertAuthorizedBundlePreimage(beforeBytes, envelope.action, authorization);
@@ -1589,14 +1829,11 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
       const nextResolutionEvents = reduced.resolution_events;
       const resultCoreSha256 = lifecycleAuthorityResultDigest(sessionBundle, nextResolutionEvents);
       await inProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
-        // Keep the signed request bound to the exact protected bytes at the
-        // mutation boundary, not to a parsed and reserialized object.
         const currentBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
         if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
         assertResolutionEventLedgerPreimage(paths, ledger);
         const synchronized = await synchronizeCanonicalFlow(paths, sessionBundle, envelope);
-        // Recheck the exact preimage immediately before the session mutation.
         const finalBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(finalBytes, envelope.action, authorization);
         if (!finalBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
@@ -1608,6 +1845,14 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
         if (completionRecord) atomicWrite(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completionRecord, null, 2)}\n`, 0o644);
       });
       return { result_core_sha256: resultCoreSha256, run_id: paths.runId };
+}
+async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null, resumePrepared = false) {
+    if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
+    if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
+    if (envelope.action === "recover-exact-current-completion") throw new Error("exact-current completion recovery requires the signed prepare/publish protocol");
+    if (envelope.action === "publish-provisional-delivery") return executeProvisionalDeliveryMutation(paths, authorization, resumePrepared);
+    if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
+      return executeCritiqueMutation(envelope, paths, authorization, completionRecord, verifiedBridge);
     }
     const outcome = envelope.action === "cancel"
       ? await cancelCanonicalFlow(paths, authorization)
@@ -1794,7 +2039,7 @@ async function processRootOperation(envelope) {
       const prior = durableJson(completionFile, "completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
       reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
-      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
@@ -1911,7 +2156,7 @@ async function processRootOperation(envelope) {
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.
-    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
@@ -1920,7 +2165,43 @@ async function processRootOperation(envelope) {
 function response(envelope, outcome) {
   return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord } };
 }
-function installCompletionReceipt(paths, candidate) {
+function provisionalReceiptEventIndex(events, paths, completion, label) {
+  const index = events.findIndex((event) =>
+    record(event) && event.run_id === paths.runId && sha256(event) === completion.result_core_sha256);
+  if (index < 0) throw new Error(label);
+  return index;
+}
+function installProvisionalCompletionReceipt(paths, candidate, atomicHooks) {
+  const verifiedCandidate = assertCurrentLifecycleCompletionIdentity(paths, candidate);
+  const events = loadProvisionalDeliveryLedger(paths).value.events;
+  const candidateIndex = provisionalReceiptEventIndex(
+    events, paths, verifiedCandidate,
+    "provisional delivery completion does not bind a validated durable authority event",
+  );
+  const tailIndex = events.length - 1;
+  const receiptFile = path.join(paths.sessionDir, "provisional-delivery.authority-completion.json");
+  if (!fs.existsSync(receiptFile)) {
+    if (candidateIndex !== tailIndex) throw new Error("provisional delivery completion cannot install without binding the current validated ledger tail");
+    atomicWrite(receiptFile, `${JSON.stringify(verifiedCandidate, null, 2)}\n`, 0o644, atomicHooks);
+    return { run_id: paths.runId, receipt: "written" };
+  }
+  const existing = assertCurrentLifecycleCompletionIdentity(
+    paths,
+    protectedJson(receiptFile, "provisional delivery authority completion", 256 * 1024),
+  );
+  const existingIndex = provisionalReceiptEventIndex(
+    events, paths, existing,
+    "provisional delivery authority completion conflicts with the validated ledger",
+  );
+  if (canonicalJson(existing) === canonicalJson(verifiedCandidate)) return { run_id: paths.runId, receipt: "present" };
+  if (candidateIndex !== tailIndex) {
+    if (existingIndex === tailIndex) return { run_id: paths.runId, receipt: "preserved" };
+    throw new Error("provisional delivery completion cannot replace a receipt without binding the current validated ledger tail");
+  }
+  atomicWrite(receiptFile, `${JSON.stringify(verifiedCandidate, null, 2)}\n`, 0o644, atomicHooks);
+  return { run_id: paths.runId, receipt: "replaced" };
+}
+function installResolutionCompletionReceipt(paths, candidate) {
   const bundle = protectedJson(path.join(paths.sessionDir, "trust.bundle"), "trust bundle", 4 * 1024 * 1024);
   const ledgerFile = resolutionEventLedgerFile(paths);
   const events = fs.existsSync(ledgerFile) ? protectedJson(ledgerFile, "lifecycle authority resolution event ledger", 4 * 1024 * 1024).events : [];
@@ -1950,6 +2231,11 @@ function installCompletionReceipt(paths, candidate) {
   const exactCurrentCandidate = assertCurrentLifecycleCompletion(paths, verifiedCandidate, bundle, events);
   atomicWrite(receiptFile, `${JSON.stringify(exactCurrentCandidate, null, 2)}\n`, 0o644);
   return { run_id: paths.runId, receipt: "written" };
+}
+function installCompletionReceipt(paths, candidate, atomicHooks = null) {
+  return candidate?.action === "publish-provisional-delivery"
+    ? installProvisionalCompletionReceipt(paths, candidate, atomicHooks)
+    : installResolutionCompletionReceipt(paths, candidate);
 }
 async function interactiveResealWorker() {
   if (!CHILD_MODE || process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_RESEAL !== "1") {
@@ -2116,7 +2402,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     }
     const paths = canonicalMutationPaths(envelope.request);
     if (value.resume_prepared && envelope.action === "cancel") { const reconciled = await reconcileCanceledFlow(paths, value.authorization); if (reconciled) return reconciled; }
-    return executeMutation(envelope, paths, value.authorization, null, value.verified_bridge ?? null);
+    return executeMutation(envelope, paths, value.authorization, null, value.verified_bridge ?? null, value.resume_prepared);
   }
   const lines = input.split(/\r?\n/).filter(Boolean);
   if (lines.length !== 1) throw new Error("coordinator requires exactly one JSON request line");

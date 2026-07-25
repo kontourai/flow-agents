@@ -22,13 +22,12 @@
 #   1. Superseded A->B (AC1): actor A's verify-hold blocks (held, holder=B); a manufactured
 #      STALE self-claim (reclaimable) ALSO blocks for its own original actor (the Stop-short
 #      risk regression — reclaimable is never silently treated as pass).
-#   2. Composition (AC1, AC3 partial): publish-delivery / record-release called as actor A on
-#      the superseded fixture exit non-zero and never write delivery/<slug>/.
+#   2. Publication cutover (AC1, AC3 partial): legacy sidecar release/publication commands
+#      cannot publish, while the public workflow provisional command is the enforced path.
 #   3. Fresh holder + free subject pass (AC2): actor B's verify-hold passes; a free subject
 #      passes for any actor.
-#   4. #356 shape-gate composition ordering (AC3): shape-invalid AND not-held -> the SHAPE
-#      error specifically; shape-valid AND not-held -> the HOLD error specifically. Both
-#      reachable, distinct, and delivery/<slug>/ is never created in either case.
+#   4. #356 shape/hold ordering (AC3): legacy CLI bypasses stay closed, while the direct
+#      publication primitive proves shape-invalid precedes hold and shape-valid reaches hold.
 #   5. github-provider precomputed gate (AC6): --effective-state-json evaluates without any
 #      `gh` process; absent both local-file and github fixture -> not_evaluated, exit 0.
 #   6. Injection discipline (AC7): hostile liveness holder string never leaks raw control/ANSI
@@ -435,8 +434,8 @@ fi
 [[ "$(json_query "$TMPDIR_EVAL/vh-stable-differs.out" "ok")" == "false" ]] && pass "stable-differing-actor verify-hold JSON reports ok:false (AC1 SECOND fix regression guard)" || fail "stable-differing-actor verify-hold JSON did not report ok:false: $(cat "$TMPDIR_EVAL/vh-stable-differs.out")"
 grep -qF "eval-actor-unstable-holder" "$TMPDIR_EVAL/vh-stable-differs.out" && pass "stable-differing-actor verify-hold JSON still names the current holder (AC1 SECOND fix regression guard)" || fail "stable-differing-actor verify-hold JSON did not name the holder: $(cat "$TMPDIR_EVAL/vh-stable-differs.out")"
 
-# ─── 2. Composition: record-release / publish-delivery as actor A refuse, no delivery/ write (AC1, AC3) ─
-echo "--- 2. publishDelivery()/record-release as actor A (superseded) refuse with NotFreshHolderError, never write delivery/ (AC1, AC3) ---"
+# ─── 2. Publication cutover: sidecar bypasses closed; public workflow path enforced ────────
+echo "--- 2. legacy sidecar publication bypasses are closed; public provisional workflow is enforced (AC1, AC3) ---"
 
 REPO_A="$TMPDIR_EVAL/repo-a"
 mkdir -p "$REPO_A/kits"
@@ -462,13 +461,14 @@ rr_out=$(FLOW_AGENTS_ACTOR="eval-actor-a-compose" TRUST_RECONCILE_COMMANDS="node
   --summary "Release." --repo-root "$REPO_A" \
   --timestamp "2026-07-04T10:04:00Z" 2>&1)
 rr_exit=$?
-if [[ $rr_exit -ne 0 ]]; then
-  pass "record-release as superseded-away actor A exits non-zero (AC1)"
+if [[ $rr_exit -eq 0 ]]; then
+  pass "record-release remains metadata-only after the publication cutover"
 else
-  fail "record-release as superseded-away actor A should have exited non-zero: $rr_out"
+  fail "record-release metadata path unexpectedly failed: $rr_out"
 fi
-echo "$rr_out" | grep -qiF "verify-hold gate" && pass "record-release's refusal names the verify-hold gate (AC1, AC3)" || fail "record-release's refusal did not name the verify-hold gate: $rr_out"
-[[ ! -d "$REPO_A/delivery/$COMPOSE_SLUG" ]] && pass "record-release's verify-hold refusal never created delivery/$COMPOSE_SLUG/ (AC1)" || fail "delivery/$COMPOSE_SLUG/ was created despite the verify-hold refusal"
+echo "$rr_out" | grep -qiF "delivery publication is disabled on the sidecar surface" && pass "record-release explicitly declines sidecar publication" || fail "record-release did not declare the sidecar publication cutover: $rr_out"
+echo "$rr_out" | grep -qiF "workflow publish-delivery" && pass "record-release routes terminal publication to the public workflow command" || fail "record-release did not name the public workflow publication path: $rr_out"
+[[ ! -d "$REPO_A/delivery/$COMPOSE_SLUG" ]] && pass "record-release never created delivery/$COMPOSE_SLUG/" || fail "record-release created delivery/$COMPOSE_SLUG/ despite the publication cutover"
 
 pd_out=$(FLOW_AGENTS_ACTOR="eval-actor-a-compose" TRUST_RECONCILE_COMMANDS="node --version" flow_agents_node "$WRITER" publish-delivery "$COMPOSE_DIR" --repo-root "$REPO_A" 2>&1)
 pd_exit=$?
@@ -477,8 +477,22 @@ if [[ $pd_exit -ne 0 ]]; then
 else
   fail "publish-delivery as superseded-away actor A should have exited non-zero: $pd_out"
 fi
-echo "$pd_out" | grep -qiF "verify-hold refused publish" && pass "publish-delivery's thrown error message is the NotFreshHolderError text (AC3)" || fail "publish-delivery's error was not the NotFreshHolderError message: $pd_out"
-[[ ! -d "$REPO_A/delivery/$COMPOSE_SLUG" ]] && pass "publish-delivery's verify-hold refusal never created delivery/$COMPOSE_SLUG/ (AC1)" || fail "delivery/$COMPOSE_SLUG/ was created despite the publish-delivery refusal"
+echo "$pd_out" | grep -qiF "workflow-sidecar publish-delivery is disabled" && pass "direct sidecar publish-delivery is a closed bypass" || fail "direct sidecar publish-delivery did not report the cutover: $pd_out"
+echo "$pd_out" | grep -qiF "flow-agents workflow publish-delivery" && pass "direct sidecar publish-delivery names the public terminal path" || fail "direct sidecar publish-delivery did not route to the public workflow path: $pd_out"
+[[ ! -d "$REPO_A/delivery/$COMPOSE_SLUG" ]] && pass "closed sidecar bypass never created delivery/$COMPOSE_SLUG/" || fail "delivery/$COMPOSE_SLUG/ was created despite the closed sidecar bypass"
+
+PUBLIC_AUTH="$TMPDIR_EVAL/public-provisional.authorization.json"
+printf '{}\n' > "$PUBLIC_AUTH"
+public_out=$(FLOW_AGENTS_ACTOR="eval-actor-a-compose" node "$CLI" workflow publish-provisional-delivery \
+  --session-dir "$COMPOSE_DIR" --authorization-file "$PUBLIC_AUTH" 2>&1)
+public_exit=$?
+[[ $public_exit -ne 0 ]] && pass "public provisional workflow rejects the non-canonical legacy sidecar fixture" || fail "public provisional workflow unexpectedly accepted a legacy sidecar fixture: $public_out"
+if echo "$public_out" | grep -qiF "workflow-sidecar publish-delivery is disabled"; then
+  fail "public provisional workflow accidentally routed through the disabled sidecar command"
+else
+  pass "public provisional workflow is distinct from the disabled sidecar bypass"
+fi
+[[ ! -d "$REPO_A/delivery/$COMPOSE_SLUG" ]] && pass "public validation refusal occurs before delivery mutation" || fail "public validation refusal created delivery/$COMPOSE_SLUG/"
 
 # ─── 3. Fresh holder + free subject pass (AC2) ─────────────────────────────────────────────
 echo "--- 3. actor B (fresh holder) passes; a free subject passes for any actor (AC2) ---"
@@ -502,8 +516,8 @@ else
 fi
 [[ "$(json_query "$TMPDIR_EVAL/vh-free.out" "effective_state")" == "free" ]] && pass "verify-hold JSON reports effective_state:free for the untracked subject (AC2)" || fail "verify-hold JSON did not report free: $(cat "$TMPDIR_EVAL/vh-free.out")"
 
-# ─── 4. #356 shape-gate composition ordering: shape runs BEFORE hold (AC3) ─────────────────
-echo "--- 4. composition ordering: shape-invalid+not-held -> InvalidBundleShapeError; shape-valid+not-held -> NotFreshHolderError (AC3) ---"
+# ─── 4. Legacy bypass closure plus direct primitive ordering (AC3) ─────────────────────────
+echo "--- 4. legacy CLI bypasses stay closed; direct primitive preserves shape-before-hold ordering (AC3) ---"
 
 REPO4="$TMPDIR_EVAL/repo4"
 mkdir -p "$REPO4/kits"
@@ -528,12 +542,7 @@ if [[ $both_invalid_exit -ne 0 ]]; then
 else
   fail "shape-invalid+not-held bundle should have exited non-zero: $both_invalid_out"
 fi
-echo "$both_invalid_out" | grep -qiF "reconcile-preflight shape check" && pass "shape-invalid+not-held bundle: SHAPE error fires specifically (InvalidBundleShapeError text), never the hold error (AC3, ordering proof)" || fail "shape-invalid+not-held bundle did not surface the shape-check error text: $both_invalid_out"
-if echo "$both_invalid_out" | grep -qiF "verify-hold refused publish"; then
-  fail "shape-invalid+not-held bundle incorrectly surfaced the NotFreshHolderError text — the shape gate must run FIRST and refuse before the hold gate is ever reached (AC3 ordering violation)"
-else
-  pass "shape-invalid+not-held bundle never surfaces the NotFreshHolderError text — confirms the shape gate runs strictly before the hold gate (AC3)"
-fi
+echo "$both_invalid_out" | grep -qiF "workflow-sidecar publish-delivery is disabled" && pass "shape-invalid fixture cannot bypass the public workflow through the sidecar CLI" || fail "shape-invalid fixture did not hit the closed sidecar bypass: $both_invalid_out"
 [[ ! -d "$REPO4/delivery/$SLUG_4A" ]] && pass "shape-invalid+not-held bundle: delivery/$SLUG_4A/ was never created (AC3)" || fail "delivery/$SLUG_4A/ was created despite the shape refusal"
 
 # 4b. shape-VALID (manifest-matched) but not-held: proves the hold gate IS reachable once the
@@ -555,12 +564,7 @@ if [[ $shape_valid_not_held_exit -ne 0 ]]; then
 else
   fail "shape-valid+not-held bundle should have exited non-zero: $shape_valid_not_held_out"
 fi
-echo "$shape_valid_not_held_out" | grep -qiF "verify-hold refused publish" && pass "shape-valid+not-held bundle: HOLD error fires specifically (NotFreshHolderError text) — the hold gate IS reachable once shape passes (AC3, ordering proof)" || fail "shape-valid+not-held bundle did not surface the NotFreshHolderError text: $shape_valid_not_held_out"
-if echo "$shape_valid_not_held_out" | grep -qiF "reconcile-preflight shape check"; then
-  fail "shape-valid+not-held bundle incorrectly surfaced the shape-check error text — the bundle is shape-valid, only the hold gate should fire"
-else
-  pass "shape-valid+not-held bundle never surfaces the shape-check error text — confirms the two gates are genuinely distinct, not conflated (AC3)"
-fi
+echo "$shape_valid_not_held_out" | grep -qiF "workflow-sidecar publish-delivery is disabled" && pass "shape-valid fixture cannot bypass the public workflow through the sidecar CLI" || fail "shape-valid fixture did not hit the closed sidecar bypass: $shape_valid_not_held_out"
 [[ ! -d "$REPO4/delivery/$SLUG_4B" ]] && pass "shape-valid+not-held bundle: delivery/$SLUG_4B/ was never created (AC3)" || fail "delivery/$SLUG_4B/ was created despite the hold refusal"
 
 # ─── 4c. AC3 composition distinctness via .code/.instanceof (F3 fix, fix-plan iteration 1) ──
