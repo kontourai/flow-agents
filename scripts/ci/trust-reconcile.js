@@ -970,10 +970,11 @@ function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
  * "Attests this change" requires exact commit equality, except for a provisional
  * `ci-readiness` or terminal `release` checkpoint whose publication itself creates
  * the checked revision. That narrow case requires the checkpoint commit to be an ancestor
- * of the checked revision and the complete commit delta to contain exactly the fixed
- * bundle/checkpoint/attestation/one-companion set. Broad ancestry and tree equivalence are not
- * ownership proof: any source change, unrelated history, extra path, or altered checkout bytes
- * fails closed.
+ * of the checked revision and either the exact fixed bundle/checkpoint/attestation/one-companion
+ * delta, or (for terminal delivery only) exactly the bundle/checkpoint/one-companion delta when
+ * the attestation descriptor's raw Git bytes are identical at both revisions. Broad ancestry and
+ * tree equivalence are not ownership proof: any source change, unrelated history, extra path, or
+ * altered checkout bytes fails closed.
  *
  * FAIL CLOSED on ambiguity: no extractable commit_sha (bundle/checkpoint carries none, or
  * this change's own sha is unresolvable) → never treated as fresh/owned.
@@ -1026,10 +1027,20 @@ function provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleS
     const expectedNames = ['trust.bundle', 'trust.checkpoint.attestation.json', 'trust.checkpoint.json', companion].sort();
     if (JSON.stringify(names) !== JSON.stringify(expectedNames)) return false;
     const expectedPaths = expectedNames.map((name) => `${relativeDirectory}/${name}`).sort();
+    const attestationFile = `${relativeDirectory}/trust.checkpoint.attestation.json`;
+    const mutablePaths = expectedPaths.filter((file) => file !== attestationFile);
     const changed = execFileSync('git', ['diff', '--name-only', `${bundleSha}..${changeSha}`, '--'], {
       cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).split('\n').filter(Boolean).sort();
-    if (JSON.stringify(changed) !== JSON.stringify(expectedPaths)) return false;
+    const allDeliveryFilesChanged = JSON.stringify(changed) === JSON.stringify(expectedPaths);
+    const terminalMutableFilesChanged = checkpoint.status === 'delivered'
+      && JSON.stringify(changed) === JSON.stringify(mutablePaths)
+      && Buffer.from(execFileSync('git', ['show', `${bundleSha}:${attestationFile}`], {
+        cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'],
+      })).equals(Buffer.from(execFileSync('git', ['show', `${changeSha}:${attestationFile}`], {
+        cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'],
+      })));
+    if (!allDeliveryFilesChanged && !terminalMutableFilesChanged) return false;
     for (const file of expectedPaths) {
       const treeEntry = execFileSync('git', ['ls-tree', changeSha, '--', file], { cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       if (!/^100644 blob [a-f0-9]{40,64}\t/.test(treeEntry) || !treeEntry.endsWith(`\t${file}`)) return false;

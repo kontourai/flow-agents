@@ -110,14 +110,15 @@ attestation, and mutually exclusive companion digests. Publication transports th
 the root-owned coordinator rechecks every binding, appends a signed-authorization event under the
 Flow run lock, and installs a purpose-specific signed completion before the package records the
 delivery. It then writes only that session's `delivery/<slug>/` transport. Commit
-and push those companion files so the provider's Trust Verify check can reconcile the PR
-revision. It is not a release decision, does not add a `ci-merge-readiness` claim, and cannot
-complete or declare the run. `delivery/DECLARED` remains unavailable to agent work.
+and push those companion files before provider checks and before recording `ci-merge-readiness`,
+so the provider's Trust Verify check can reconcile the PR revision. It is not a release decision,
+does not add a `ci-merge-readiness` claim, and cannot complete or declare the run.
+`delivery/DECLARED` remains unavailable to agent work.
 
-After provider checks, the explicit readiness decision, and learning evidence are recorded and the
-canonical `builder.build` run has advanced through `learn` to completed `done`,
-publish the terminal CI-visible delivery evidence through the primary public CLI, commit that
-superseding delivery output, and push the resulting head:
+After those provider checks, record the explicit readiness decision and complete learning. Only
+when the canonical `builder.build` run has advanced through `learn` to completed `done`, publish
+the terminal CI-visible delivery evidence through the primary public CLI, commit that superseding
+delivery output, and push the resulting head:
 
 ```bash
 flow_agents workflow publish-delivery \
@@ -145,9 +146,16 @@ target checkout's current `HEAD`, replaces stale companions with one newly emitt
 in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
 bundle before copying the set into `delivery/<session>/`. Trust Verify accepts a provisional
 candidate only when the checked PR revision differs from the authenticated published head by
-exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory. Ordinary
-ancestry, tree equivalence, inherited bundles, extra source changes, altered companions, and
-unrelated session bundles cannot satisfy the check.
+exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory.
+
+At terminal publication, the Git delta may contain all four transport files, or exactly the three
+mutable files: `trust.bundle`, `trust.checkpoint.json`, and the signed or in-toto companion selected
+by the attestation descriptor. The three-file form is permitted only when
+`trust.checkpoint.attestation.json` is raw-byte identical in the terminal revision and the
+checkpoint revision. Even when Git omits that descriptor from the delta, Trust Verify still treats
+it as one of the validated four transport files at the checked revision and compares its raw bytes
+with the checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
+changes, altered or missing companions, and unrelated session bundles cannot satisfy the check.
 
 Terminal publication is unavailable while `learn` is active, even when a release decision is
 positive; provisional publication is the only CI-transport path before learning closes.
