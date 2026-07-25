@@ -46,5 +46,11 @@
     "reason": "PR #636 (writer-observed execution, #634): delivery fully reviewed and verified (independent Codex critique chain with remediation and final pass, unit 391/391, anti-gaming 26/26, self-proving verify-gate closures on runs 634 and 617), but the session's delivery seal is wedged by the #637 shape defect (stamped gate claims with truthful non-manifest commands are uncorrectable post-step) and reconcile's fallback candidate selection picks a stale foreign bundle (#359 class). Scoped to this branch only; remove when #637 lands and the 634 session bundle can seal.",
     "approved_by": "brian.anderson1222 (direct approval, 2026-07-14 session: 'declare and merge freely')",
     "declared_at": "2026-07-14T19:20:00Z"
+  },
+  {
+    "scope": "branch-prefix:fix/i957-provisional-delivery",
+    "reason": "Issue #957 implementation began before a canonical Builder run was bound. The change has independent code and security review plus command-backed local and hosted verification, but no historical session is fabricated. Scoped to this branch only; the feature supplies the provisional publication lifecycle needed by future bound runs.",
+    "approved_by": "briananderson1222 (direct epic completion and merge authorization, 2026-07-24)",
+    "declared_at": "2026-07-25T04:05:00Z"
   }
 ]
