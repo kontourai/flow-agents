@@ -274,12 +274,19 @@ It receives the target concept, all compiled candidates, and the store; it retur
 candidates that are similar enough to form a cluster. The `KnowledgeFlowRunner` uses the cluster
 as its evidence base — an empty cluster throws `MISSING_EVIDENCE` at the detect-cluster gate.
 
+`knowledge.consolidate` supplies only compiled records in the snapshot's exact
+category to the detector. Parent and descendant categories are separate topics;
+include one of their records only by naming it in the ordered
+`sourceRecordIds` allowlist. Explicit sources are mutually exclusive with a
+similarity detector and append mode, and every source must resolve to an active
+compiled record.
+
 ### Choosing a detector
 
 | Detector | Best for | Tradeoff |
 |---|---|---|
 | `defaultSimilarityDetector` (built-in) | Fast, zero-config. Works well when records share a structured category taxonomy and inter-record wikilinks. | Relies on category prefixes and link-overlap (Jaccard ≥ 0.10). Misses semantic similarity across category boundaries. |
-| `createVectorSimilarityDetector` | Semantic clustering. Finds similar records regardless of how they were categorised. | Requires an embedding backend (ollama by default). Adds latency proportional to cluster size. |
+| `createVectorSimilarityDetector` | Semantic clustering. Synthesis can find similar records across categories; consolidation applies it only inside the exact topic category. | Requires an embedding backend (ollama by default). Adds latency proportional to cluster size. |
 
 ### Vector detector — ollama embedding
 

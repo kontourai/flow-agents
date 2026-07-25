@@ -27,7 +27,7 @@ The Knowledge Kit is a Flow Kit for durable, gated knowledge storage. It package
 
 The output-shape story is why the adapter model matters: the same five flows and the same mutation gates produce a different rendering layer depending on which adapter is active. Authors choose the output shape that fits how they already think. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
 
-**Similarity detectors** — the `synthesize` and `consolidate` flows accept a pluggable `similarityDetector`:
+**Similarity detectors** — the `synthesize` and `consolidate` flows accept a pluggable `similarityDetector`. Synthesis may search the broader related-record set. Consolidation first limits candidates to the snapshot's exact category, so a topic such as `decision.grounded-extraction` cannot silently absorb records from `decision` or a descendant category:
 
 | Detector | Approach | Requires |
 |---|---|---|
@@ -35,6 +35,29 @@ The output-shape story is why the adapter model matters: the same five flows and
 | `createVectorSimilarityDetector` | Dense embeddings + cosine similarity | ollama (`nomic-embed-text`, default threshold 0.60) |
 
 The vector detector is fail-closed: infrastructure failures throw `EMBED_FAILURE` rather than silently returning an empty cluster (which would be indistinguishable from "no similar records found").
+
+**Exact consolidation sources** — callers that already know the reviewed source
+set can pass `sourceRecordIds`. It is an ordered, non-empty allowlist and is
+mutually exclusive with append mode and a similarity detector. Missing,
+duplicate, non-compiled, or retired records fail before snapshot/proposal
+mutation:
+
+```js
+await runner.consolidate(
+  { topic: "decision.grounded-extraction", category: "decision.grounded-extraction" },
+  {
+    sourceRecordIds: ["compiled-record-id"],
+    proposedBody: "The reviewed current decision.",
+    rationale: "Consolidated from the displayed exact source set.",
+    decision: "apply",
+  }
+);
+```
+
+If an invalid snapshot was applied, retire it through `knowledge.retire` with a
+rationale and superseding reference. Do not edit or delete store records by
+hand; retirement preserves the invalid snapshot and its provenance while
+removing it from the active working set.
 
 **Tests** — an extensive automated test suite covering contract conformance, ingest/compile, synthesis, consolidation, similarity-vector matching, and retirement. The contract suite is parameterized — any adapter can run it by pointing `KNOWLEDGE_ADAPTER` at the adapter module.
 
