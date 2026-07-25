@@ -1645,11 +1645,8 @@ function makeLifecycleCoordinatorFixture() {
 function invokeCoordinator(coordinatorFile, request) {
   const envelope = { schema_version: "1.0", action: request.action, request_sha256: createHash("sha256").update(coordinatorCanonicalJson(request)).digest("hex"), request };
   const input = `${coordinatorCanonicalJson(envelope)}\n`;
-  return spawnSync(process.execPath, [
-    "--input-type=module", "--eval",
-    "const {main}=await import(process.argv[1]);process.stdout.write(JSON.stringify(await main(Buffer.from(process.argv[2],'base64').toString())))",
-    coordinatorFile, Buffer.from(input).toString("base64"),
-  ], {
+  return spawnSync(process.execPath, [fs.realpathSync(coordinatorFile)], {
+    input,
     encoding: "utf8",
     env: { ...process.env, SUDO_UID: String(process.getuid?.() ?? 501), SUDO_GID: String(process.getgid?.() ?? 20) },
   });
