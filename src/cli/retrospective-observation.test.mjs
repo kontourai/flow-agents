@@ -211,6 +211,29 @@ test("compiler reports absent producer dimensions without inference", (t) => {
   assert.equal(compiled.quality.status, "NOT_VERIFIED");
 });
 
+test("explicit incomplete correlation markers remain valid but unjoined", (t) => {
+  const { root, manifest } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.appendFileSync(path.join(root, "runtime.jsonl"), `${JSON.stringify({
+    event_type: "session.start",
+    event_id: "explicitly-incomplete",
+    run_correlation: {
+      status: "incomplete",
+      reason: "runtime adapter did not expose a stable session identity",
+    },
+  })}\n`);
+
+  const compiled = compile(root, manifest);
+  const runtimeRef = compiled.source_refs.find((entry) => entry.kind === "runtime_events");
+  assert.equal(runtimeRef.total_records, 5);
+  assert.equal(runtimeRef.valid_records, 5);
+  assert.equal(runtimeRef.invalid_records, 0);
+  assert.equal(runtimeRef.malformed_records, 0);
+  assert.equal(compiled.completeness.invalid_records, 0);
+  assert.equal(compiled.completeness.status, "complete");
+  assert.equal(compiled.activity.turn_count, 1);
+});
+
 test("same correlation id with a different envelope is quarantined instead of joined", (t) => {
   const { root, correlation, manifest } = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -277,6 +300,28 @@ test("compiler quarantines malformed JSONL without exposing its content", (t) =>
   assert.equal(compiled.completeness.malformed_records, 1);
   assert.equal(compiled.diagnostics.at(-1).error, "SyntaxError");
   assert(!JSON.stringify(compiled).includes(sentinel));
+});
+
+test("oversized JSONL preserves physical line and exact content hash without retaining content", (t) => {
+  const { root, manifest } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const oversized = JSON.stringify({
+    event_type: "session.start",
+    padding: "x".repeat(3 * 1024 * 1024),
+  });
+  fs.appendFileSync(path.join(root, "runtime.jsonl"), `${oversized}\n{}\n`);
+
+  const compiled = compile(root, manifest);
+  const runtimeRef = compiled.source_refs.find((entry) => entry.kind === "runtime_events");
+  const oversizedDiagnostic = compiled.diagnostics.find((entry) => entry.line === 5);
+  assert.equal(runtimeRef.total_records, 6);
+  assert.equal(runtimeRef.malformed_records, 1);
+  assert.equal(oversizedDiagnostic.error, "SyntaxError");
+  assert.equal(
+    oversizedDiagnostic.content_sha256,
+    createHash("sha256").update(oversized).digest("hex"),
+  );
+  assert.equal(JSON.stringify(compiled).includes("x".repeat(100)), false);
 });
 
 test("compiler bounds emitted diagnostics while preserving malformed counts", (t) => {

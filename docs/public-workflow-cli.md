@@ -185,6 +185,41 @@ flow_agents workflow evidence \
 
 When a current root-signed lifecycle completion already binds a Trust Bundle and its external
 resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
+If a legitimate later public critique or gate claim has already made that receipt stale, do not
+rewrite or delete it, append a resolution event, or use history repair. First request and sign the
+completion-only refresh (the authorization file must remain outside the project):
+
+```bash
+flow_agents workflow recover-exact-current-completion-request \
+  --session-dir .kontourai/flow-agents/example > completion-recovery-request.json
+
+# Sign completion-recovery-request.json.authorization with the configured operator key.
+flow_agents workflow recover-exact-current-completion \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/completion-recovery-authorization.json
+```
+
+This narrow action is available only at the one open `builder.build` `verify` gate. It binds an
+authenticated stale same-run root completion, the raw current bundle and ledger bytes, complete
+cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
+and canonical ordered gate-policy digests, Flow head/manifest,
+fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
+the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
+plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
+generation active through root completion/nonce persistence and receipt installation. Prepared
+retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
+old/new state forward from the staged postimages, and rejects unknown or mismatched state without
+restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
+opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
+ledger, and stale receipt; it never snapshots or restores them.
+
+The canonical attachment ID and stored filename include the signed authorization digest in addition
+to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
+distinct signed recovery therefore creates a distinct attachment while the durable completion still
+binds the request digest. Replaying the same signed authorization returns the immutable completion
+without another attachment. Use it only after all final independent critique/resolution work is
+complete, and then use reseal for the final verification evidence.
+
 Use the two-stage reseal only for the final `builder.build` verify evidence after critique
 resolution:
 

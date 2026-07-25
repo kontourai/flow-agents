@@ -8,6 +8,9 @@ docker run --rm -i -v "$ROOT_DIR:/src:ro" node:22-bookworm bash -s <<'CONTAINER'
 set -euo pipefail
 apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
+# Fresh-checkout proof: coordinator sources and focused recovery tests cannot
+# depend on pre-existing runtime artifacts from the developer checkout.
+rm -rf /work/.kontourai
 npm ci --ignore-scripts --silent
 npm run build --silent
 # AC-5 capacity boundary: the direct privileged installer source must name and
@@ -29,7 +32,24 @@ if (!/(?:lifecycle-authority\.resolution-events\.json[\s\S]{0,800}protectedJson|
 if (!/validat\w*Resolution\w*(?:Event|Ledger)/i.test(source)) {
   throw new Error('coordinator must validate the external resolution-event ledger before mutation');
 }
+if (!/recover-exact-current-completion/.test(source)
+    || !/recoverExactCurrentCompletionTransition/.test(source)
+    || !/assertExactCurrentCompletionRecoveryPreimages/.test(source)) {
+  throw new Error('coordinator must retain the fixed exact-current completion recovery protocol');
+}
+if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
+    || !/protected_preimages/.test(source)
+    || !/classifyExactCurrentRecoveryArtifacts/.test(source)
+    || !/recoverExactCurrentRecoveryPublication/.test(source)
+    || !/withCanonicalFlowRunRecoveryLock/.test(source)
+    || !/writeVerificationResealFence\(paths, plan\.recovery_id/.test(source)
+    || !/finalizeVerificationResealFence\(paths, finalized\.plan\.recovery_id/.test(source)
+    || !/lifecycle-authority:\$\{requestSha256\}:\$\{authorizationSha256\}/.test(source)) {
+  throw new Error('completion recovery must retain its bounded durable Flow-only publication protocol');
+}
 NODE
+sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
+  src/cli/lifecycle-authority-coordinator.test.mjs
 # The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure.
 # npm installs the package's declared transitive dependencies; callers do not
 # reproduce Flow's private dependency list.

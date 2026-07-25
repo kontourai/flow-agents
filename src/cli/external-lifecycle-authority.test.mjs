@@ -46,6 +46,11 @@ test("strict lifecycle consumers reject a historical core and accept only the ne
   };
   assert.equal(lifecycleAuthorityCompletionBindsExactState(resealedCompletion, "run-1", bundle, postRepairEvents), true);
   assert.equal(
+    lifecycleAuthorityCompletionBindsExactState({ ...resealedCompletion, action: "recover-exact-current-completion" }, "run-1", bundle, postRepairEvents),
+    true,
+    "strict consumers admit only the new signed completion action when it binds the full current core",
+  );
+  assert.equal(
     lifecycleAuthorityCompletionBindsExactState(
       { ...resealedCompletion, result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: historicalEvents }) },
       "run-1", bundle, postRepairEvents,

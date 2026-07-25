@@ -12,6 +12,7 @@ import {
   critiqueHistoryProjectionSummary,
   critiqueResolutionEdgeProjectionSummary,
   critiqueResolutionHistoryBridgeDigest,
+  recoverExactCurrentCompletionTransition,
   repairCritiqueResolutionHistoryTransition,
   resealVerificationEvidenceTransition,
   resolveCritiqueTransition,
@@ -37,12 +38,21 @@ const ACTION_FIELDS = {
   "repair-critique-resolution-history": ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"],
   "reseal-verification-evidence": ["action", "project_root", "session_dir", "authorization_file"],
   "publish-provisional-delivery": ["action", "project_root", "session_dir", "authorization_file"],
+  "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
 };
 const PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation",
   "published_head_sha", "provider_record_id", "provider_observation_sha256",
   "flow_definition_id", "flow_definition_version", "flow_definition_digest", "flow_run_head", "flow_gate_id", "flow_gate_visit", "workspace_snapshot",
   "checkpoint_slug", "checkpoint_commit_sha", "checkpoint_sha256", "bundle_sha256", "attestation_sha256", "companions",
+  "nonce", "expires_at", "requested_at", "signature",
+];
+const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "permitted_transition",
+  "stale_completion_sha256", "stale_completion_action", "stale_completion_request_sha256", "stale_completion_result_core_sha256", "stale_completion_coordinator_runtime_sha256",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  "critique_projection_sha256", "resolution_edge_projection_sha256", "resolution_edge_projection_count",
+  "flow_definition_id", "flow_definition_sha256", "flow_step_id", "flow_gate_id", "flow_gate_policy_sha256", "flow_run_head", "flow_manifest_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ];
 const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
@@ -169,6 +179,16 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
   return authorization;
 }
+function assertExactCurrentRecoveryTimeWindow(authorization, { allowExpiredReplay = false } = {}) {
+  const requestedAt = Date.parse(String(authorization.requested_at));
+  const expiresAt = Date.parse(String(authorization.expires_at));
+  const now = Date.now();
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt < requestedAt
+      || requestedAt > now + 5 * 60_000 || expiresAt - requestedAt > 8760 * 3_600_000
+      || (!allowExpiredReplay && now > expiresAt)) {
+    throw new Error("exact-current completion recovery authorization time window is invalid");
+  }
+}
 function assertPrivilegedAuthorizationShape(authorization) {
   const fields = authorization.operation === "repair-critique-resolution-history"
     ? HISTORY_REPAIR_AUTHORIZATION_FIELDS
@@ -176,6 +196,8 @@ function assertPrivilegedAuthorizationShape(authorization) {
       ? VERIFICATION_RESEAL_AUTHORIZATION_FIELDS
       : authorization.operation === "publish-provisional-delivery"
         ? PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS
+      : authorization.operation === "recover-exact-current-completion"
+        ? EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS
       : null;
   if (!fields) return authorization;
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
@@ -260,6 +282,15 @@ export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
   "flow-report-markdown",
 ]);
 const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
+export const EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL = "flow-agents.exact-current-recovery-publication.v1";
+export const EXACT_CURRENT_RECOVERY_ARTIFACT_IDS = Object.freeze([
+  "flow-manifest",
+  "flow-state",
+  "flow-attachment",
+  "flow-report-json",
+  "flow-report-markdown",
+]);
+const EXACT_CURRENT_RECOVERY_PLAN_FILE = ".exact-current-recovery.transaction.json";
 const FLOW_RECOVERY_FENCE_FILE = "recovery-fence.json";
 const FLOW_RECOVERY_FENCE_PROTOCOL = "flow.run-recovery-fence.v1";
 function flowMutationPendingPathName(name) {
@@ -430,7 +461,7 @@ function loadResolutionEventLedger(paths, bundle, authorization, action = author
   const ledger = JSON.parse(bytes.toString("utf8"));
   exact(ledger, ["schema_version", "events"], "lifecycle authority resolution event ledger");
   if (ledger.schema_version !== PROTOCOL_VERSION || !Array.isArray(ledger.events)) throw new Error("lifecycle authority resolution event ledger is invalid");
-  validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" });
+  validateResolutionEventLedger(ledger.events, { run_id: authorization.run_id, subject: authorization.subject, project_root: paths.projectRoot, bundle, strict_coverage: action === "resolve-critique" || action === "recover-exact-current-completion" });
   for (const event of ledger.events) verifySignedAuthorization(event.signed_authorization, { projectRoot: paths.projectRoot, requireCurrentExpiry: false });
   return { events: ledger.events, bytes, absent: false };
 }
@@ -469,7 +500,7 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
   exact(completion, fields, label);
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
@@ -496,6 +527,54 @@ function verifyCurrentLifecycleCompletion(paths, bundle, resolutionEvents) {
 }
 function verifyHistoricalLifecycleCompletion(paths, completion) {
   return assertLifecycleCompletionIdentity(paths, completion, ["applied", "replayed"], "historical lifecycle completion");
+}
+async function assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope, expected = null, verifyFlow = true) {
+  const bundleFile = path.join(paths.sessionDir, "trust.bundle");
+  const bundleBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
+  const bundle = JSON.parse(bundleBytes.toString("utf8"));
+  const ledger = loadResolutionEventLedger(paths, bundle, authorization, envelope.action);
+  const completionBytes = protectedRegularFile(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "stale lifecycle completion", 256 * 1024);
+  const stale = assertLifecycleCompletionIdentity(paths, JSON.parse(completionBytes.toString("utf8")), ["applied"], "stale lifecycle completion");
+  if (stale.result_core_sha256 === lifecycleAuthorityResultDigest(bundle, ledger.events)) throw new Error("exact-current completion recovery requires a stale completion");
+  if (sha256(completionBytes) !== authorization.stale_completion_sha256
+      || stale.action !== authorization.stale_completion_action
+      || stale.request_sha256 !== authorization.stale_completion_request_sha256
+      || stale.result_core_sha256 !== authorization.stale_completion_result_core_sha256
+      || stale.coordinator_runtime_sha256 !== authorization.stale_completion_coordinator_runtime_sha256) {
+    throw new Error("exact-current completion recovery authorization does not bind the authenticated stale completion");
+  }
+  if (!verifyFlow) {
+    if (expected && (!bundleBytes.equals(expected.bundleBytes) || !ledger.bytes.equals(expected.ledger.bytes) || !completionBytes.equals(expected.completionBytes))) {
+      throw new Error("exact-current completion recovery protected preimage changed during publication");
+    }
+    return { bundleFile, bundleBytes, bundle, ledger, completionBytes, stale };
+  }
+  const files = canonicalFlowPaths(paths);
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+  const gatePolicy = currentGatePolicy(definition, state);
+  const { flow } = await loadPinnedFlowReducer();
+  const preimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
+  const definitionSha256 = sha256(protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024));
+  const gatePolicySha256 = flowGatePolicyDigest(gatePolicy);
+  if (authorization.permitted_transition !== "exact-current-completion-only"
+      || authorization.subject !== sessionSubject(paths) || authorization.subject !== state.subject
+      || definition.id !== authorization.flow_definition_id || state.current_step !== authorization.flow_step_id
+      || (state.definition_digest !== undefined && state.definition_digest !== flow.definitionDigest(definition))
+      || definitionSha256 !== authorization.flow_definition_sha256 || gatePolicySha256 !== authorization.flow_gate_policy_sha256
+      || gatePolicy.gate_id !== authorization.flow_gate_id || preimage.run_head !== authorization.flow_run_head
+      || preimage.manifest_sha256 !== authorization.flow_manifest_sha256) {
+    throw new Error("exact-current completion recovery canonical Flow preimage no longer matches the signed authorization");
+  }
+  const reduced = recoverExactCurrentCompletionTransition({
+    bundle, resolution_events: ledger.events, authorization, bundle_bytes: bundleBytes, ledger_bytes: ledger.bytes,
+    flow: { definition_id: definition.id, definition_sha256: definitionSha256, step_id: state.current_step, gate_policy_sha256: gatePolicySha256, ...gatePolicy },
+  });
+  if (expected && (!bundleBytes.equals(expected.bundleBytes) || !ledger.bytes.equals(expected.ledger.bytes) || !completionBytes.equals(expected.completionBytes))) {
+    throw new Error("exact-current completion recovery protected preimage changed during publication");
+  }
+  return { bundleFile, bundleBytes, bundle, ledger, completionBytes, stale, files, preimage, reduced };
 }
 function sha256File(file, label) { return sha256(protectedRegularFile(file, label, 16 * 1024 * 1024)); }
 function exactObject(value, expected, label) {
@@ -562,6 +641,25 @@ function canonicalFlowPaths(paths) {
 }
 function verificationResealPlanFile(paths) {
   return path.join(paths.sessionDir, VERIFICATION_RESEAL_PLAN_FILE);
+}
+function exactCurrentRecoveryPlanFile(paths) {
+  return path.join(paths.sessionDir, EXACT_CURRENT_RECOVERY_PLAN_FILE);
+}
+export function exactCurrentRecoveryArtifactFiles(paths, requestSha256, authorizationSha256) {
+  if (!/^[a-f0-9]{64}$/.test(String(requestSha256))) throw new Error("exact-current recovery request identity is invalid");
+  if (!/^[a-f0-9]{64}$/.test(String(authorizationSha256))) throw new Error("exact-current recovery authorization identity is invalid");
+  const files = canonicalFlowPaths(paths);
+  return new Map([
+    ["flow-manifest", files.manifest],
+    ["flow-state", files.state],
+    ["flow-attachment", path.join(files.root, "evidence", `lifecycle-authority:${requestSha256}:${authorizationSha256}.json`)],
+    ["flow-report-json", files.reportJson],
+    ["flow-report-markdown", files.reportMarkdown],
+  ]);
+}
+function exactCurrentRecoveryStageFile(file, image) {
+  if (!["old", "new"].includes(image)) throw new Error("exact-current recovery stage image is invalid");
+  return `${file}.exact-current-recovery-${image}`;
 }
 export function verificationResealArtifactFiles(paths, requestSha256) {
   if (!/^[a-f0-9]{64}$/.test(String(requestSha256))) throw new Error("verification reseal request identity is invalid");
@@ -651,10 +749,15 @@ function inspectVerificationResealFence(paths) {
   const file = verificationResealFenceFile(paths);
   if (!fs.existsSync(file)) return { status: "open", absent: true };
   const fence = protectedJson(file, "Flow recovery fence", 64 * 1024);
-  exact(fence, ["protocol", "run_id", "recovery_id", "status", "updated_at", "generation"], "Flow recovery fence");
+  exact(fence, [
+    "protocol", "run_id", "recovery_id", "status", "updated_at", "generation",
+    ...(fence.status === "open" && Object.prototype.hasOwnProperty.call(fence, "previous_generation") ? ["previous_generation"] : []),
+  ], "Flow recovery fence");
   if (fence.protocol !== FLOW_RECOVERY_FENCE_PROTOCOL || fence.run_id !== paths.runId
       || !/^[a-f0-9]{64}$/.test(String(fence.recovery_id))
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.generation))
+      || (fence.previous_generation !== undefined
+        && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.previous_generation)))
       || !["active", "open"].includes(fence.status)
       || typeof fence.updated_at !== "string" || !Number.isFinite(Date.parse(fence.updated_at))) {
     throw new Error("Flow recovery fence is malformed or unsupported");
@@ -697,6 +800,16 @@ function stageVerificationResealImage(file, bytes, mode, image) {
   atomicWrite(stage, bytes, mode);
   const reread = readVerificationResealArtifact(stage, `verification reseal ${image} stage`);
   if (!reread.bytes?.equals(bytes) || reread.descriptor.mode !== mode) throw new Error(`verification reseal ${image} stage reread changed`);
+}
+function stageExactCurrentRecoveryImage(file, bytes, mode, image) {
+  const stage = exactCurrentRecoveryStageFile(file, image);
+  if (bytes === null) {
+    if (fs.existsSync(stage)) fs.unlinkSync(stage);
+    return;
+  }
+  atomicWrite(stage, bytes, mode);
+  const reread = readVerificationResealArtifact(stage, `exact-current recovery ${image} stage`);
+  if (!reread.bytes?.equals(bytes) || reread.descriptor.mode !== mode) throw new Error(`exact-current recovery ${image} stage reread changed`);
 }
 function readSignedVerificationResealPlan(paths) {
   const capability = protectedJson(verificationResealPlanFile(paths), "verification reseal signed plan", 1024 * 1024);
@@ -823,7 +936,10 @@ function currentGatePolicy(definition, state) {
   if (!record(gate) || !Array.isArray(gate.expects)) throw new Error("canonical Flow current gate has no protected expectation requirements");
   return { gate_id: gateId, requirements: structuredClone(gate.expects) };
 }
-async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null) {
+function flowGatePolicyDigest(policy) {
+  return sha256(canonicalJson({ gate_id: policy.gate_id, requirements: policy.requirements }));
+}
+async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null, attachmentGeneration = null) {
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
@@ -845,7 +961,10 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   )) throw new Error("canonical Flow preimage no longer matches the signed lifecycle authorization");
   const gateId = openGateId(definition, state);
   if (expectedPreimage !== null && expectedPreimage.gate_id !== gateId) throw new Error("canonical Flow gate no longer matches the signed lifecycle authorization");
-  const attachmentId = `lifecycle-authority:${envelope.request_sha256}`;
+  if (attachmentGeneration !== null && !/^[a-f0-9]{64}$/.test(String(attachmentGeneration))) {
+    throw new Error("canonical Flow attachment generation is invalid");
+  }
+  const attachmentId = `lifecycle-authority:${envelope.request_sha256}${attachmentGeneration === null ? "" : `:${attachmentGeneration}`}`;
   const supersede = (Array.isArray(manifest.evidence) ? manifest.evidence : [])
     .filter((entry) => record(entry) && entry.gate_id === gateId && entry.kind === "trust.bundle" && typeof entry.superseded_by !== "string")
     .map((entry) => entry.id);
@@ -1423,6 +1542,271 @@ async function executeProvisionalDeliveryMutation(paths, authorization, resumePr
   const durableEvent = await appendOrRecoverProvisionalDeliveryEvent(paths, authorization, prepared, resumePrepared);
   return { result_core_sha256: sha256(durableEvent), run_id: paths.runId };
 }
+function exactCurrentRecoveryProtectedFiles(paths) {
+  return new Map([
+    ["trust-bundle", path.join(paths.sessionDir, "trust.bundle")],
+    ["resolution-ledger", resolutionEventLedgerFile(paths)],
+    ["stale-receipt", path.join(paths.sessionDir, "lifecycle-authority.completion.json")],
+  ]);
+}
+export function validateExactCurrentRecoveryPlan(plan) {
+  exact(plan, [
+    "schema_version", "kind", "recovery_id", "run_id", "request_sha256", "authorization_sha256",
+    "authorization_key_id", "authorization_nonce", "reducer", "result_core_sha256", "protected_preimages", "artifacts",
+  ], "exact-current recovery publication plan");
+  if (plan.schema_version !== PROTOCOL_VERSION || plan.kind !== EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL
+      || !/^[a-f0-9]{64}$/.test(String(plan.recovery_id)) || typeof plan.run_id !== "string" || !plan.run_id
+      || !/^[a-f0-9]{64}$/.test(String(plan.request_sha256))
+      || !/^[a-f0-9]{64}$/.test(String(plan.authorization_sha256))
+      || typeof plan.authorization_key_id !== "string" || !plan.authorization_key_id
+      || typeof plan.authorization_nonce !== "string" || !plan.authorization_nonce
+      || !record(plan.reducer) || !/^[a-f0-9]{64}$/.test(String(plan.result_core_sha256))
+      || !Array.isArray(plan.protected_preimages) || plan.protected_preimages.length !== 3
+      || !Array.isArray(plan.artifacts) || plan.artifacts.length !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length) {
+    throw new Error("exact-current recovery publication plan identity is invalid");
+  }
+  const protectedIds = plan.protected_preimages.map((artifact) => artifact?.id);
+  if (canonicalJson(protectedIds) !== canonicalJson(["trust-bundle", "resolution-ledger", "stale-receipt"])) {
+    throw new Error("exact-current recovery plan must bind exactly the protected evidence inputs");
+  }
+  for (const artifact of plan.protected_preimages) {
+    exact(artifact, ["id", "pre"], `exact-current recovery protected input ${artifact?.id}`);
+    assertVerificationResealDescriptor(artifact.pre, `exact-current recovery protected input ${artifact.id}`);
+  }
+  const ids = plan.artifacts.map((artifact) => artifact?.id);
+  if (canonicalJson(ids) !== canonicalJson(EXACT_CURRENT_RECOVERY_ARTIFACT_IDS)) {
+    throw new Error("exact-current recovery plan must enumerate exactly the fixed five Flow artifact ids");
+  }
+  for (const artifact of plan.artifacts) {
+    exact(artifact, ["id", "pre", "post"], `exact-current recovery artifact ${artifact?.id}`);
+    assertVerificationResealDescriptor(artifact.pre, `exact-current recovery artifact ${artifact.id} preimage`);
+    assertVerificationResealDescriptor(artifact.post, `exact-current recovery artifact ${artifact.id} postimage`);
+  }
+  return plan;
+}
+function assertExactCurrentRecoveryPlanBinding(plan, paths, binding) {
+  validateExactCurrentRecoveryPlan(plan);
+  if (plan.run_id !== paths.runId || plan.request_sha256 !== binding.request_sha256
+      || plan.authorization_sha256 !== binding.authorization_sha256) {
+    throw new Error("exact-current recovery publication plan does not bind this exact operation");
+  }
+  return plan;
+}
+function assertExactCurrentRecoveryProtectedPreimages(paths, plan) {
+  const files = exactCurrentRecoveryProtectedFiles(paths);
+  for (const artifact of plan.protected_preimages) {
+    const actual = readVerificationResealArtifact(files.get(artifact.id), `exact-current recovery protected input ${artifact.id}`).descriptor;
+    if (canonicalJson(actual) !== canonicalJson(artifact.pre)) {
+      throw new Error(`exact-current recovery protected input ${artifact.id} changed`);
+    }
+  }
+}
+function assertExactCurrentRecoveryStages(paths, plan) {
+  const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
+  for (const artifact of plan.artifacts) {
+    const file = files.get(artifact.id);
+    for (const [image, expected] of [["old", artifact.pre], ["new", artifact.post]]) {
+      const actual = readVerificationResealArtifact(exactCurrentRecoveryStageFile(file, image), `exact-current recovery ${image} stage`).descriptor;
+      if (canonicalJson(actual) !== canonicalJson(expected)) throw new Error(`exact-current recovery ${image} stage for ${artifact.id} changed`);
+    }
+  }
+}
+export function classifyExactCurrentRecoveryArtifacts(paths, plan) {
+  const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
+  const states = plan.artifacts.map((artifact) => {
+    const actual = readVerificationResealArtifact(files.get(artifact.id), `exact-current recovery artifact ${artifact.id}`).descriptor;
+    const pre = canonicalJson(actual) === canonicalJson(artifact.pre);
+    const post = canonicalJson(actual) === canonicalJson(artifact.post);
+    return pre && post ? "both" : pre ? "pre" : post ? "post" : "unknown";
+  });
+  if (states.some((state) => state === "unknown")) return "unknown";
+  if (states.every((state) => state === "pre" || state === "both")) return "old";
+  if (states.every((state) => state === "post" || state === "both")) return "new";
+  return "mixed";
+}
+function readSignedExactCurrentRecoveryPlan(paths) {
+  const capability = protectedJson(exactCurrentRecoveryPlanFile(paths), "exact-current recovery signed plan", 1024 * 1024);
+  const value = verifiedCapability(capability, "exact-current-recovery-plan-capability");
+  if (!record(value.plan)) throw new Error("exact-current recovery signed plan payload is invalid");
+  return { capability, plan: validateExactCurrentRecoveryPlan(value.plan) };
+}
+async function prepareExactCurrentRecoveryPublication(envelope, paths, authorization, { lockHeld = false } = {}) {
+  const binding = { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) };
+  const prepare = async () => {
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status !== "open") throw new Error("exact-current recovery cannot capture artifacts while the Flow recovery fence is active");
+    if (fs.existsSync(exactCurrentRecoveryPlanFile(paths))) throw new Error("exact-current recovery found an existing signed plan; recovery is required");
+    const initial = await assertExactCurrentCompletionRecoveryPreimages(paths, authorization, envelope);
+    const synchronized = await prepareCanonicalFlowSynchronization(paths, initial.reduced.bundle, envelope, {
+      definition_id: authorization.flow_definition_id, step_id: authorization.flow_step_id, gate_id: authorization.flow_gate_id,
+      subject: authorization.subject, run_head: authorization.flow_run_head, manifest_sha256: authorization.flow_manifest_sha256,
+    }, binding.authorization_sha256);
+    const artifactFiles = exactCurrentRecoveryArtifactFiles(paths, envelope.request_sha256, binding.authorization_sha256);
+    const postimageByFile = new Map(synchronized.postimages.map((postimage) => [postimage.file, postimage.bytes]));
+    if (postimageByFile.size !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length
+        || [...artifactFiles.values()].some((file) => !postimageByFile.has(file))) {
+      throw new Error("exact-current recovery reducer did not produce exactly the fixed five Flow artifacts");
+    }
+    const artifacts = [];
+    for (const id of EXACT_CURRENT_RECOVERY_ARTIFACT_IDS) {
+      const file = artifactFiles.get(id);
+      const preimage = readVerificationResealArtifact(file, `exact-current recovery artifact ${id}`);
+      const postBytes = postimageByFile.get(file);
+      const post = exactArtifactDescriptor(postBytes, 0o644);
+      stageExactCurrentRecoveryImage(file, preimage.bytes, preimage.descriptor.mode, "old");
+      stageExactCurrentRecoveryImage(file, postBytes, post.mode, "new");
+      artifacts.push({ id, pre: preimage.descriptor, post });
+    }
+    const protectedFiles = exactCurrentRecoveryProtectedFiles(paths);
+    const protectedPreimages = [...protectedFiles].map(([id, file]) => ({
+      id,
+      pre: readVerificationResealArtifact(file, `exact-current recovery protected input ${id}`).descriptor,
+    }));
+    const planCore = {
+      schema_version: PROTOCOL_VERSION,
+      kind: EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL,
+      run_id: paths.runId,
+      request_sha256: envelope.request_sha256,
+      authorization_sha256: binding.authorization_sha256,
+      authorization_key_id: authorization.signature.key_id,
+      authorization_nonce: authorization.nonce,
+      reducer: synchronized.reducer,
+      result_core_sha256: lifecycleAuthorityResultDigest(initial.reduced.bundle, initial.reduced.resolution_events),
+      protected_preimages: protectedPreimages,
+      artifacts,
+    };
+    return { run_id: paths.runId, plan: validateExactCurrentRecoveryPlan({ ...planCore, recovery_id: sha256(planCore) }) };
+  };
+  return lockHeld ? prepare() : withCanonicalFlowRunMutationLock(paths, prepare);
+}
+function installExactCurrentRecoveryImage(file, descriptor, stage, label) {
+  if (descriptor.presence === "absent") {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    return;
+  }
+  const bytes = readVerificationResealArtifact(stage, label).bytes;
+  atomicWrite(file, bytes, descriptor.mode);
+}
+async function publishExactCurrentRecoveryPublication(paths, capability, binding, { lockHeld = false, after_write = null } = {}) {
+  const value = verifiedCapability(capability, "exact-current-recovery-plan-capability");
+  if (!record(value.plan)) throw new Error("exact-current recovery plan capability payload is invalid");
+  const plan = assertExactCurrentRecoveryPlanBinding(value.plan, paths, binding);
+  const observedFence = inspectVerificationResealFence(paths);
+  const withLock = observedFence.status === "active"
+    ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
+    : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
+  const publish = async () => {
+    const planFile = exactCurrentRecoveryPlanFile(paths);
+    if (fs.existsSync(planFile)) {
+      const current = protectedJson(planFile, "exact-current recovery signed plan", 1024 * 1024);
+      if (canonicalJson(current) !== canonicalJson(capability)) throw new Error("exact-current recovery signed plan changed");
+    } else atomicWrite(planFile, `${JSON.stringify(capability, null, 2)}\n`, 0o644);
+    assertExactCurrentRecoveryStages(paths, plan);
+    assertExactCurrentRecoveryProtectedPreimages(paths, plan);
+    const classification = classifyExactCurrentRecoveryArtifacts(paths, plan);
+    if (classification === "unknown") throw new Error("exact-current recovery found foreign or unknown Flow artifact state");
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
+    else if (fence.recovery_id !== plan.recovery_id) throw new Error("exact-current recovery fence belongs to another generation");
+    const activeFence = inspectVerificationResealFence(paths);
+    if (activeFence.status !== "active" || activeFence.recovery_id !== plan.recovery_id) {
+      throw new Error("exact-current recovery publication lost its active Flow recovery fence");
+    }
+    if (classification !== "new") {
+      const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
+      let writes = 0;
+      for (const artifact of plan.artifacts) {
+        const file = files.get(artifact.id);
+        const actual = readVerificationResealArtifact(file, `exact-current recovery artifact ${artifact.id}`).descriptor;
+        if (canonicalJson(actual) === canonicalJson(artifact.post)) continue;
+        if (canonicalJson(actual) !== canonicalJson(artifact.pre)) throw new Error(`exact-current recovery artifact ${artifact.id} changed during publication`);
+        installExactCurrentRecoveryImage(file, artifact.post, exactCurrentRecoveryStageFile(file, "new"), `exact-current recovery new stage ${artifact.id}`);
+        writes += 1;
+        await after_write?.({ writes, artifact_id: artifact.id });
+      }
+    }
+    assertExactCurrentRecoveryProtectedPreimages(paths, plan);
+    if (classifyExactCurrentRecoveryArtifacts(paths, plan) !== "new") throw new Error("exact-current recovery publication did not install the exact postimages");
+    const finalFence = inspectVerificationResealFence(paths);
+    if (finalFence.status !== "active" || finalFence.recovery_id !== plan.recovery_id) {
+      throw new Error("exact-current recovery publication lost its active Flow recovery fence");
+    }
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, state: "new" };
+  };
+  return lockHeld ? publish() : withLock(publish);
+}
+async function recoverExactCurrentRecoveryPublication(paths, binding) {
+  const observedFence = inspectVerificationResealFence(paths);
+  const withLock = observedFence.status === "active"
+    ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
+    : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
+  return withLock(async () => {
+    if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, recovered: false, state: "none" };
+    const { capability, plan } = readSignedExactCurrentRecoveryPlan(paths);
+    assertExactCurrentRecoveryPlanBinding(plan, paths, binding);
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status === "active" && fence.recovery_id !== plan.recovery_id) {
+      throw new Error("exact-current recovery fence belongs to another generation");
+    }
+    assertExactCurrentRecoveryStages(paths, plan);
+    assertExactCurrentRecoveryProtectedPreimages(paths, plan);
+    const classification = classifyExactCurrentRecoveryArtifacts(paths, plan);
+    if (classification === "unknown") throw new Error("exact-current recovery found foreign or unknown Flow artifact state");
+    if (classification === "new") {
+      if (fence.status !== "active") await writeVerificationResealFence(paths, plan.recovery_id, "active");
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+    }
+    return publishExactCurrentRecoveryPublication(paths, capability, binding, { lockHeld: true });
+  });
+}
+function cleanupExactCurrentRecoveryPublication(paths, plan) {
+  const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
+  for (const file of [...files.values()].flatMap((artifact) => [
+    exactCurrentRecoveryStageFile(artifact, "old"),
+    exactCurrentRecoveryStageFile(artifact, "new"),
+  ])) if (fs.existsSync(file)) fs.unlinkSync(file);
+  if (fs.existsSync(exactCurrentRecoveryPlanFile(paths))) fs.unlinkSync(exactCurrentRecoveryPlanFile(paths));
+}
+async function finalizeExactCurrentRecoveryPublication(paths, completion) {
+  const observedFence = inspectVerificationResealFence(paths);
+  if (observedFence.status !== "active") {
+    if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, finalized: false };
+    const { plan } = readSignedExactCurrentRecoveryPlan(paths);
+    if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
+        || typeof observedFence.previous_generation !== "string") {
+      throw new Error("exact-current recovery cleanup replay does not bind the finalized Flow recovery generation");
+    }
+    if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+      throw new Error("exact-current recovery cleanup replay does not bind the signed plan result");
+    }
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery cleanup replay receipt is not exact");
+    // Once Flow has durably finalized this exact recovery generation, ordinary
+    // writers may legitimately supersede its postimages before cleanup replay.
+    // Cleanup removes only the signed plan and private stage files, never live
+    // Flow or session evidence, so do not require stale postimages here.
+    cleanupExactCurrentRecoveryPublication(paths, plan);
+    return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+  }
+  const finalized = await withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, async () => {
+    const { plan } = readSignedExactCurrentRecoveryPlan(paths);
+    if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+      throw new Error("exact-current recovery durable completion does not bind the signed plan result");
+    }
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery exact completion receipt is not installed");
+    if (classifyExactCurrentRecoveryArtifacts(paths, plan) !== "new") throw new Error("exact-current recovery cannot finalize without exact postimages");
+    const fence = inspectVerificationResealFence(paths);
+    if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id
+        || fence.generation !== observedFence.generation) {
+      throw new Error("exact-current recovery cannot finalize without its exact active Flow recovery fence generation");
+    }
+    return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
+  });
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  cleanupExactCurrentRecoveryPublication(paths, finalized.plan);
+  return finalized.result;
+}
 async function executeCritiqueMutation(envelope, paths, authorization, completionRecord, verifiedBridge) {
       const bundleFile = path.join(paths.sessionDir, "trust.bundle");
       const beforeBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
@@ -1465,6 +1849,7 @@ async function executeCritiqueMutation(envelope, paths, authorization, completio
 async function executeMutation(envelope, paths, authorization, completionRecord = null, verifiedBridge = null, resumePrepared = false) {
     if (authorization.project_root !== paths.projectRoot) throw new Error("authorization does not bind the canonical project root");
     if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
+    if (envelope.action === "recover-exact-current-completion") throw new Error("exact-current completion recovery requires the signed prepare/publish protocol");
     if (envelope.action === "publish-provisional-delivery") return executeProvisionalDeliveryMutation(paths, authorization, resumePrepared);
     if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
       return executeCritiqueMutation(envelope, paths, authorization, completionRecord, verifiedBridge);
@@ -1579,6 +1964,63 @@ async function interactiveResealInvocation(payload, identity, signPlan) {
     throw error;
   }
 }
+async function interactiveExactCurrentRecoveryInvocation(payload, identity, signPlan) {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: {
+      PATH: "/usr/bin:/bin",
+      LANG: "C",
+      LC_ALL: "C",
+      FLOW_AGENTS_LIFECYCLE_MUTATION_WORKER: "1",
+      FLOW_AGENTS_LIFECYCLE_INTERACTIVE_EXACT_CURRENT_RECOVERY: "1",
+    },
+    uid: identity.uid,
+    gid: identity.gid,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+    if (Buffer.byteLength(stderr) > 512 * 1024) child.kill("SIGKILL");
+  });
+  const exited = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolve({ status, signal }));
+  });
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
+  const nextLine = async (label) => {
+    let timer;
+    try {
+      const result = await Promise.race([
+        lines.next(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`unprivileged lifecycle ${label} timed out`)), 30_000);
+        }),
+      ]);
+      if (result.done || typeof result.value !== "string" || !result.value) throw new Error(`unprivileged lifecycle ${label} returned no response`);
+      return JSON.parse(result.value);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  try {
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+    const preparedPlan = await nextLine("exact-current recovery preparation");
+    const planCapability = signPlan(preparedPlan);
+    child.stdin.end(`${JSON.stringify({ kind: "publish-exact-current-recovery", capability: planCapability })}\n`);
+    const mutation = await nextLine("exact-current recovery publication");
+    const extra = await lines.next();
+    if (!extra.done) throw new Error("unprivileged lifecycle interactive worker returned extra output");
+    const outcome = await exited;
+    if (outcome.status !== 0) throw new Error(String(stderr || `unprivileged lifecycle interactive worker exited ${outcome.status ?? outcome.signal}`).trim());
+    return mutation;
+  } catch (error) {
+    child.kill("SIGKILL");
+    await exited.catch(() => undefined);
+    if (stderr) throw new Error(stderr.trim(), { cause: error });
+    throw error;
+  }
+}
 async function processRootOperation(envelope) {
   const authorizationPath = path.resolve(envelope.request.authorization_file);
   // Authenticate and bind before consulting durable state. Expiry is a live
@@ -1597,8 +2039,9 @@ async function processRootOperation(envelope) {
       const prior = durableJson(completionFile, "completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
       reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
-      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+      if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       return { completionRecord, replayed: true };
     }
     const transactionBinding = { request_sha256: envelope.request_sha256, authorization_sha256: authorizationSha256 };
@@ -1614,6 +2057,7 @@ async function processRootOperation(envelope) {
       }
     } else {
       verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
+      if (envelope.action === "recover-exact-current-completion") assertExactCurrentRecoveryTimeWindow(authorization);
       // Reject a stale or mismatched live holder before creating any durable
       // nonce state. A prepared nonce is intentionally exempt: it may be
       // recovering a cancel whose child mutation already completed, and the
@@ -1622,6 +2066,7 @@ async function processRootOperation(envelope) {
         assertLiveAssignmentHolder(canonicalMutationPaths(envelope.request), authorization);
       }
       if (envelope.action === "repair-critique-resolution-history") verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+      if (envelope.action === "recover-exact-current-completion") await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
       if (envelope.action === "reseal-verification-evidence") {
         const preflight = childInvocation({
           kind: "preflight-reseal",
@@ -1634,6 +2079,7 @@ async function processRootOperation(envelope) {
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
+    if (envelope.action === "recover-exact-current-completion" && !resumePrepared) await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
     // The child rechecks all worktree inputs immediately before publication. Do
     // the matching root-only completion/nonce read immediately before handing
     // it the mutation capability, so a changed durable anchor cannot be used
@@ -1672,6 +2118,34 @@ async function processRootOperation(envelope) {
           mutation = childInvocation({ kind: "publish-reseal", capability: planCapability }, caller);
         }
       }
+    } else if (envelope.action === "recover-exact-current-completion") {
+      let recovery = null;
+      if (resumePrepared) {
+        recovery = childInvocation({
+          kind: "recover-exact-current-recovery",
+          capability: signedCapability("recover-exact-current-recovery-capability", { request: envelope.request, binding: transactionBinding }),
+        }, caller);
+        if (!record(recovery) || recovery.run_id !== identity.runId || !["none", "new"].includes(recovery.state)) {
+          throw new Error("unprivileged exact-current recovery publication recovery returned an invalid response");
+        }
+      }
+      if (recovery?.state === "new") mutation = recovery;
+      else {
+        mutation = await interactiveExactCurrentRecoveryInvocation({
+          kind: "prepare-publish-exact-current-recovery",
+          capability: signedCapability("prepare-exact-current-recovery-capability", { envelope, authorization }),
+        }, caller, (preparedPlan) => {
+          if (!record(preparedPlan) || preparedPlan.run_id !== identity.runId || !record(preparedPlan.plan)) {
+            throw new Error("unprivileged exact-current recovery preparation returned an invalid plan");
+          }
+          const plan = validateExactCurrentRecoveryPlan(preparedPlan.plan);
+          if (plan.request_sha256 !== envelope.request_sha256 || plan.authorization_sha256 !== authorizationSha256
+              || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
+            throw new Error("exact-current recovery plan does not bind the root-authenticated operation");
+          }
+          return signedCapability("exact-current-recovery-plan-capability", { request: envelope.request, plan });
+        });
+      }
     } else {
       mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
     }
@@ -1682,8 +2156,9 @@ async function processRootOperation(envelope) {
     // The root process has already returned to a root-owned boundary. A second
     // unprivileged invocation installs a receipt only where that receipt is a
     // verification-gate input; archive moves the session and has no receipt path.
-    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
+    if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
   });
 }
@@ -1794,6 +2269,40 @@ async function interactiveResealWorker() {
     process.stdout.write(`${JSON.stringify(mutation)}\n`);
   });
 }
+async function interactiveExactCurrentRecoveryWorker() {
+  if (!CHILD_MODE || process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_EXACT_CURRENT_RECOVERY !== "1") {
+    throw new Error("interactive exact-current recovery worker is unavailable");
+  }
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })[Symbol.asyncIterator]();
+  const first = await lines.next();
+  if (first.done || typeof first.value !== "string" || !first.value) throw new Error("interactive exact-current recovery worker requires one preparation request");
+  const payload = JSON.parse(first.value);
+  if (!record(payload) || payload.kind !== "prepare-publish-exact-current-recovery") throw new Error("interactive exact-current recovery worker request is invalid");
+  const value = verifiedCapability(payload.capability, "prepare-exact-current-recovery-capability");
+  if (!record(value.envelope) || !record(value.authorization)) throw new Error("exact-current recovery preparation request is invalid");
+  const envelope = validateEnvelope(value.envelope);
+  if (envelope.action !== "recover-exact-current-completion" || value.authorization.operation !== envelope.action) {
+    throw new Error("exact-current recovery preparation operation is invalid");
+  }
+  const paths = canonicalMutationPaths(envelope.request);
+  return withCanonicalFlowRunMutationLock(paths, async () => {
+    const prepared = await prepareExactCurrentRecoveryPublication(envelope, paths, value.authorization, { lockHeld: true });
+    process.stdout.write(`${JSON.stringify(prepared)}\n`);
+    const second = await lines.next();
+    if (second.done || typeof second.value !== "string" || !second.value) throw new Error("interactive exact-current recovery worker requires one signed publication request");
+    const publication = JSON.parse(second.value);
+    if (!record(publication) || publication.kind !== "publish-exact-current-recovery" || !record(publication.capability)) {
+      throw new Error("interactive exact-current recovery publication request is invalid");
+    }
+    const extra = await lines.next();
+    if (!extra.done) throw new Error("interactive exact-current recovery worker received extra input");
+    const mutation = await publishExactCurrentRecoveryPublication(paths, publication.capability, {
+      request_sha256: prepared.plan.request_sha256,
+      authorization_sha256: prepared.plan.authorization_sha256,
+    }, { lockHeld: true });
+    process.stdout.write(`${JSON.stringify(mutation)}\n`);
+  });
+}
 export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {
     const payload = JSON.parse(input);
@@ -1838,6 +2347,30 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       const paths = canonicalMutationPaths(value.request);
       return finalizeVerificationResealTransaction(paths, assertCurrentLifecycleCompletionIdentity(paths, value.completion));
     }
+    if (payload.kind === "publish-exact-current-recovery") {
+      const value = verifiedCapability(payload.capability, "exact-current-recovery-plan-capability");
+      if (!record(value.request) || !record(value.plan)) throw new Error("exact-current recovery publication request is invalid");
+      const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.plan.request_sha256, request: value.request });
+      if (envelope.action !== "recover-exact-current-completion") throw new Error("exact-current recovery publication operation is invalid");
+      return publishExactCurrentRecoveryPublication(canonicalMutationPaths(value.request), payload.capability, {
+        request_sha256: value.plan.request_sha256,
+        authorization_sha256: value.plan.authorization_sha256,
+      });
+    }
+    if (payload.kind === "recover-exact-current-recovery") {
+      const value = verifiedCapability(payload.capability, "recover-exact-current-recovery-capability");
+      if (!record(value.request) || !record(value.binding)) throw new Error("exact-current recovery publication recovery request is invalid");
+      exact(value.binding, ["request_sha256", "authorization_sha256"], "exact-current recovery publication recovery binding");
+      const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
+      if (envelope.action !== "recover-exact-current-completion") throw new Error("exact-current recovery publication recovery operation is invalid");
+      return recoverExactCurrentRecoveryPublication(canonicalMutationPaths(value.request), value.binding);
+    }
+    if (payload.kind === "finalize-exact-current-recovery") {
+      const value = verifiedCapability(payload.capability, "finalize-exact-current-recovery-capability");
+      if (!record(value.request) || !record(value.completion)) throw new Error("exact-current recovery finalization request is invalid");
+      const paths = canonicalMutationPaths(value.request);
+      return finalizeExactCurrentRecoveryPublication(paths, assertCurrentLifecycleCompletionIdentity(paths, value.completion));
+    }
     if (payload.kind === "rollback") {
       const value = verifiedCapability(payload.capability, "rollback-capability");
       if (!record(value.request) || !record(value.binding)) throw new Error("mutation worker rollback request is invalid");
@@ -1879,6 +2412,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
 if (path.resolve(process.argv[1] ?? "") === path.resolve(fileURLToPath(import.meta.url))) {
   try {
     if (process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_RESEAL === "1") await interactiveResealWorker();
+    else if (process.env.FLOW_AGENTS_LIFECYCLE_INTERACTIVE_EXACT_CURRENT_RECOVERY === "1") await interactiveExactCurrentRecoveryWorker();
     else process.stdout.write(`${JSON.stringify(await main())}\n`);
   }
   catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; }

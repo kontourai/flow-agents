@@ -10,7 +10,7 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
+import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
@@ -36,7 +36,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
 const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
 const PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION = "provisional-delivery.authority-completion.json";
@@ -58,6 +58,7 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   reseal-verification-evidence  Atomically publish a signed staged verification-evidence candidate.
+  recover-exact-current-completion  Refresh stale same-run lifecycle authority without changing evidence or history.
   critique            Record review critique directly into the current trust bundle.
   resolve-critique    Resolve a repaired historical critique through a later review record.
   repair-critique-resolution-history  Attest a missing historical authority event through a new signed repair.
@@ -96,6 +97,8 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "reseal-verification-evidence-request") return resealVerificationEvidenceRequest(sessionDir, argv.slice(1));
   if (verb === "reseal-verification-evidence") return resealVerificationEvidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "recover-exact-current-completion-request") return recoverExactCurrentCompletionRequest(sessionDir, argv.slice(1));
+  if (verb === "recover-exact-current-completion") return recoverExactCurrentCompletion(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "resolve-critique-request") return resolveCritiqueRequest(sessionDir, argv.slice(1));
   if (verb === "resolve-critique") return resolveCritique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
@@ -1208,6 +1211,102 @@ async function resealVerificationEvidence(sessionDir: string, argv: string[], js
   }
   if (json) console.log(JSON.stringify(report));
   else console.log(report.operation_status === "replayed" ? "Verification evidence reseal was already applied." : "Resealed verification evidence atomically.");
+  return 0;
+}
+
+async function recoverExactCurrentCompletion(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow recover-exact-current-completion");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!authorizationFile) throw new Error("workflow recover-exact-current-completion requires a signed --authorization-file <path>");
+  const canonicalSessionDir = validateCanonicalSessionDir(sessionDir);
+  const projectRoot = path.dirname(path.dirname(path.dirname(canonicalSessionDir)));
+  const report = invokeExternalLifecycleAuthority({
+    action: "recover-exact-current-completion", project_root: projectRoot, session_dir: canonicalSessionDir, authorization_file: path.resolve(authorizationFile),
+  });
+  try {
+    await recoverBuilderFlowSession({ sessionDir: canonicalSessionDir });
+  } catch (error) {
+    throw new Error(`exact-current completion recovery was ${report.operation_status}, but the Flow Agents projection requires recovery`, { cause: error });
+  }
+  if (json) console.log(JSON.stringify(report));
+  else console.log(report.operation_status === "replayed" ? "Exact-current completion recovery was already applied." : "Recovered exact-current completion without rewriting evidence.");
+  return 0;
+}
+
+function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], projectRoot: string, runId: string, subject: string): void {
+  const edges = (Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [])
+    .filter((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
+      && ((claim.metadata as JsonRecord | undefined)?.critique_resolution as JsonRecord | undefined)?.kind === "cross-reviewer")
+    .map((claim) => (claim.metadata as JsonRecord).critique_resolution as JsonRecord);
+  const seen = new Set<string>(); let predecessor = "0".repeat(64);
+  for (const [index, event] of events.entries()) {
+    const edge = event.edge as JsonRecord | undefined;
+    const matches = edges.filter((candidate) => isDeepStrictEqual(candidate, edge));
+    const signed = event.signed_authorization as JsonRecord | undefined;
+    if (matches.length !== 1 || typeof event.event_id !== "string" || seen.has(event.event_id)
+        || event.schema_version !== "1.0" || event.sequence !== index + 1 || event.predecessor_hash !== predecessor
+        || !["resolve-critique", "repair-critique-resolution-history"].includes(String(event.operation))
+        || event.run_id !== runId || event.subject !== subject || !signed || signed.project_root !== projectRoot || signed.run_id !== runId || signed.subject !== subject
+        || event.authorization_sha256 !== canonicalSha256(signed)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+    const { event_hash: eventHash, ...unsigned } = event;
+    if (eventHash !== canonicalSha256(unsigned)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+    seen.add(event.event_id);
+    predecessor = String(eventHash);
+  }
+  if (seen.size !== edges.length) throw new Error("exact-current completion recovery requires complete resolution ledger coverage; repair is required");
+}
+
+async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]), "workflow recover-exact-current-completion-request");
+  const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const repaired = await recoverBuilderFlowSession({ sessionDir });
+    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("exact-current completion recovery is allowed only for the canonical builder.build verify gate");
+    const gates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
+    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("exact-current completion recovery requires exactly one canonical current verify gate");
+    const bundleBytes = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "exact-current completion recovery trust bundle", 4 * 1024 * 1024);
+    if (!bundleBytes) throw new Error("exact-current completion recovery requires a current trust.bundle");
+    const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
+    const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+    const ledgerBytes = readProtectedRegularFileBytes(ledgerFile, "exact-current completion recovery resolution ledger", 4 * 1024 * 1024, true) ?? Buffer.alloc(0);
+    const events = ledgerBytes.length === 0 ? [] : (JSON.parse(ledgerBytes.toString("utf8")) as JsonRecord).events;
+    if (!Array.isArray(events)) throw new Error("exact-current completion recovery resolution ledger is invalid");
+    const completionBytes = readProtectedRegularFileBytes(path.join(sessionDir, "lifecycle-authority.completion.json"), "exact-current completion recovery stale completion", 256 * 1024);
+    if (!completionBytes) throw new Error("exact-current completion recovery requires a stale lifecycle completion");
+    const stale = verifyHistoricalLifecycleAuthorityCompletion(JSON.parse(completionBytes.toString("utf8")));
+    if (stale.operation_status !== "applied" || stale.run_id !== slug || lifecycleAuthorityCompletionBindsExactState(stale, slug, bundle, events as JsonRecord[])) throw new Error("exact-current completion recovery requires an authenticated stale same-run completion");
+    const state = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
+    if (!subject || subject !== repaired.run.state.subject) throw new Error("exact-current completion recovery requires one matching canonical subject");
+    assertRecoveryLedgerCoverage(bundle, events as JsonRecord[], projectRoot, slug, subject);
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
+    const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "exact-current completion recovery Flow manifest", 16 * 1024 * 1024);
+    if (!manifestBytes) throw new Error("exact-current completion recovery canonical Flow manifest is missing");
+    const definitionBytes = readProtectedRegularFileBytes(path.join(flowRoot, "definition.json"), "exact-current completion recovery Flow definition", 4 * 1024 * 1024);
+    const flowStateBytes = readProtectedRegularFileBytes(path.join(flowRoot, "state.json"), "exact-current completion recovery Flow state", 4 * 1024 * 1024);
+    if (!definitionBytes || !flowStateBytes) throw new Error("exact-current completion recovery canonical Flow definition or state is missing");
+    const definition = JSON.parse(definitionBytes.toString("utf8")) as JsonRecord;
+    const flowState = JSON.parse(flowStateBytes.toString("utf8")) as JsonRecord;
+    if (flowState.definition_digest !== undefined && flowState.definition_digest !== definitionDigest(definition)) throw new Error("exact-current completion recovery Flow definition does not match the canonical state digest");
+    const now = new Date();
+    const claims = Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [];
+    const critique = critiqueHistoryProjectionSummary(claims);
+    const edges = critiqueResolutionEdgeProjectionSummary(claims);
+    return buildUnsignedExactCurrentCompletionRecoveryAuthorization({
+      project_root: projectRoot, run_id: slug, subject, permitted_transition: "exact-current-completion-only",
+      stale_completion_sha256: createHash("sha256").update(completionBytes).digest("hex"), stale_completion_action: stale.action as "resolve-critique" | "repair-critique-resolution-history" | "reseal-verification-evidence" | "recover-exact-current-completion",
+      stale_completion_request_sha256: String(stale.request_sha256), stale_completion_result_core_sha256: String(stale.result_core_sha256), stale_completion_coordinator_runtime_sha256: String(stale.coordinator_runtime_sha256),
+      current_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), current_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), current_ledger_length: events.length, current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
+      critique_projection_sha256: String(critique.digest), resolution_edge_projection_sha256: String(edges.digest), resolution_edge_projection_count: Number(edges.count),
+      flow_definition_id: "builder.build", flow_definition_sha256: createHash("sha256").update(definitionBytes).digest("hex"), flow_step_id: "verify", flow_gate_id: gates[0]!.id as string, flow_gate_policy_sha256: canonicalSha256({ gate_id: gates[0]!.id, requirements: gates[0]!.expects }), flow_run_head: flowRunHead(repaired.run.state), flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+      nonce: `exact-current-recovery-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
+    });
+  });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
   return 0;
 }
 
