@@ -93,12 +93,64 @@ fs.writeFileSync('/root/lifecycle-authorizations/authority-private.pem', pem(aut
 fs.writeFileSync(`${config}/keys.json`, `${JSON.stringify({ schema_version: '1.0', keys: [{ id: 'fixture-authority', algorithm: 'ed25519', public_key_pem: pem(authority.publicKey) }] })}\n`, { mode: 0o644 });
 fs.writeFileSync(`${config}/completion-signing-key.pem`, pem(completion.privateKey), { mode: 0o600 });
 fs.writeFileSync(`${config}/completion-verification-key.pem`, pem(completion.publicKey), { mode: 0o644 });
+fs.writeFileSync(`${config}/verification-reseal-atomic-replace.cjs`, String.raw`
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const path = require('node:path');
+const protocol = 'kontourai.atomic-expected-preimage-replace.v1';
+const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+const descriptor = (file) => {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('fixture target is not a regular file');
+    const bytes = fs.readFileSync(file);
+    return { presence: 'present', mode: stat.mode & 0o777, size: bytes.length, sha256: sha256(bytes) };
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { presence: 'absent', mode: null, size: 0, sha256: null };
+    throw error;
+  }
+};
+exports.protocol = protocol;
+exports.atomicReplaceExpectedPreimage = (request) => {
+  if (request.protocol !== protocol || path.basename(request.target_name) !== request.target_name) {
+    throw new Error('fixture atomic replacement request is invalid');
+  }
+  const parent = fs.fstatSync(request.parent_descriptor);
+  if (!parent.isDirectory() || parent.dev !== request.parent.dev || parent.ino !== request.parent.ino) {
+    throw new Error('fixture atomic replacement parent changed');
+  }
+  const target = '/proc/self/fd/' + request.parent_descriptor + '/' + request.target_name;
+  if (JSON.stringify(descriptor(target)) !== JSON.stringify(request.preimage)) {
+    throw new Error('fixture atomic expected-preimage mismatch');
+  }
+  if (request.postimage.presence === 'absent') {
+    fs.unlinkSync(target);
+  } else {
+    const bytes = Buffer.from(request.postimage_bytes_base64, 'base64');
+    if (bytes.length !== request.postimage.size || sha256(bytes) !== request.postimage.sha256) {
+      throw new Error('fixture atomic postimage mismatch');
+    }
+    const stagedName = '.fixture-cas-' + process.pid + '-' + crypto.randomBytes(8).toString('hex');
+    const staged = '/proc/self/fd/' + request.parent_descriptor + '/' + stagedName;
+    const handle = fs.openSync(staged, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, request.postimage.mode);
+    try {
+      fs.writeFileSync(handle, bytes);
+      fs.fsyncSync(handle);
+    } finally {
+      fs.closeSync(handle);
+    }
+    fs.renameSync(staged, target);
+  }
+  fs.fsyncSync(request.parent_descriptor);
+  return { protocol, status: 'replaced', preimage: request.preimage, postimage: request.postimage };
+};
+`, { mode: 0o644 });
 NODE
 chown -R root:root "$CONFIG" "$STATE" /root/lifecycle-authorizations
 chmod 755 /etc/kontourai "$CONFIG"
 chmod 700 "$STATE" /root/lifecycle-authorizations
 chmod 600 "$CONFIG/completion-signing-key.pem" /root/lifecycle-authorizations/authority-private.pem
-chmod 644 "$CONFIG/keys.json" "$CONFIG/completion-verification-key.pem"
+chmod 644 "$CONFIG/keys.json" "$CONFIG/completion-verification-key.pem" "$CONFIG/verification-reseal-atomic-replace.cjs"
 mkdir -p /tmp/lifecycle-root-target
 printf 'root-owned sentinel\n' > /tmp/lifecycle-root-target/sentinel
 chown -R root:root /tmp/lifecycle-root-target
@@ -477,9 +529,16 @@ const events = ledgerBytes.length ? JSON.parse(ledgerBytes).events : [];
 const completionBytes = fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json')), completion = JSON.parse(completionBytes);
 const manifestBytes = fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'));
 const workState = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8')), subject = workState.work_item_refs[0];
+const assignmentBytes = fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${runId}.json`));
+const assignment = JSON.parse(assignmentBytes);
+if (assignment.status !== 'claimed' || assignment.actor_key !== caller.actorKey
+    || JSON.stringify(assignment.actor) !== JSON.stringify(caller.actor)) {
+  throw new Error('reseal fixture does not have the exact active caller assignment');
+}
 const predecessor = current.claims[targetIndex], replacement = candidate.claims[targetIndex], now = new Date();
 const { unsigned, signingPayload } = buildUnsignedVerificationEvidenceResealAuthorization({
   project_root: project, run_id: runId, subject,
+  assignment_generation_sha256: sha(assignmentBytes), assignment_actor_key: assignment.actor_key, assignment_actor: assignment.actor,
   preimage_bundle_sha256: sha(currentBytes), candidate_bundle_sha256: sha(candidateBytes), candidate_transaction_id: staged.transaction_id,
   preimage_ledger_sha256: sha(ledgerBytes), preimage_ledger_length: events.length, preimage_ledger_tail_hash: events.at(-1)?.event_hash ?? '0'.repeat(64),
   current_completion_sha256: sha(completionBytes), current_completion_request_sha256: completion.request_sha256, current_completion_result_core_sha256: completion.result_core_sha256,

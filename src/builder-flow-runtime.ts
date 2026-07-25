@@ -1932,7 +1932,9 @@ function discoverProjectionPointers(
   let actorEntries: string[] | null = null;
   if (pathExistsNoFollow(actorRoot)) {
     assertSafeDirectory(actorRoot, context.artifactRoot, "current directory");
-    actorEntries = fs.readdirSync(actorRoot).sort();
+    actorEntries = fs.readdirSync(actorRoot)
+      .filter((name) => name !== ".actor-pointers.lockdir")
+      .sort();
     for (const name of actorEntries) {
       const file = path.join(actorRoot, name);
       const stat = fs.lstatSync(file);
@@ -2031,7 +2033,12 @@ function assertProjectionTargetsUnchanged(
 ): void {
   const actorRoot = path.join(context.artifactRoot, "current");
   const currentActorEntries = pathExistsNoFollow(actorRoot)
-    ? (assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"), fs.readdirSync(actorRoot).sort())
+    ? (
+      assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"),
+      fs.readdirSync(actorRoot)
+        .filter((name) => name !== ".actor-pointers.lockdir")
+        .sort()
+    )
     : null;
   if (JSON.stringify(currentActorEntries) !== JSON.stringify(prepared.actorEntries)) {
     throw new BuilderBuildRunInputError("current", `directory changed during ${operation}`);

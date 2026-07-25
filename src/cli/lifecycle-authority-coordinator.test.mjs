@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
@@ -1226,18 +1226,25 @@ for (const journalStatus of ["prepared", "committed"]) {
 test("reseal plan is closed over exactly six fixed artifact identities and no journal paths", () => {
   const present = { presence: "present", mode: 0o644, size: 7, sha256: "a".repeat(64) };
   const absent = { presence: "absent", mode: null, size: 0, sha256: null };
+  const authorization = {
+    signature: { key_id: "operator" }, nonce: "nonce",
+    assignment_generation_sha256: "5".repeat(64), assignment_actor_key: "actor",
+    assignment_actor: { runtime: "test", session_id: "session", host: "host", human: null },
+  };
   const plan = {
     schema_version: "1.0",
     kind: "flow-agents.verification-reseal-transaction.v1",
     recovery_id: "1".repeat(64),
     run_id: "run-1",
     request_sha256: "2".repeat(64),
-    authorization_sha256: "3".repeat(64),
+    authorization_sha256: sha256(canonicalJson(authorization)),
     authorization_key_id: "operator",
     authorization_nonce: "nonce",
+    authorization,
+    assignment: { generation_sha256: "5".repeat(64), actor_key: "actor", actor: { runtime: "test", session_id: "session", host: "host", human: null } },
     reducer: { package: "@kontourai/flow", version: "test" },
     result_core_sha256: "4".repeat(64),
-    artifacts: VERIFICATION_RESEAL_ARTIFACT_IDS.map((id) => ({ id, pre: id === "flow-attachment" ? absent : present, post: present })),
+    artifacts: VERIFICATION_RESEAL_ARTIFACT_IDS.map((id) => ({ id, parent: { dev: 1, ino: 1 }, pre: id === "flow-attachment" ? absent : present, post: present })),
   };
   assert.deepEqual(validateVerificationResealPlan(plan), plan);
   assert.deepEqual(plan.artifacts.map(({ id }) => id), [
@@ -1245,7 +1252,7 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   ]);
   assert.equal(JSON.stringify(plan).includes("path"), false, "signed plan artifact entries must not contain caller-selected paths");
   assert.throws(
-    () => validateVerificationResealPlan({ ...plan, artifacts: [...plan.artifacts, { id: "journal", pre: absent, post: absent }] }),
+    () => validateVerificationResealPlan({ ...plan, artifacts: [...plan.artifacts, { id: "journal", parent: { dev: 1, ino: 1 }, pre: absent, post: absent }] }),
     /exactly the fixed six artifact ids|identity is invalid/i,
   );
 
@@ -1268,6 +1275,99 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
     rootOperation.indexOf('"preflight-reseal"') < rootOperation.indexOf("atomicWrite(nonceFile"),
     "fresh reseal must preflight the exact installed Flow API before creating durable nonce state",
   );
+  const replacement = source.slice(
+    source.indexOf("export function replaceVerificationResealArtifactCAS"),
+    source.indexOf("function readVerificationResealArtifact"),
+  );
+  assert.match(replacement, /atomicReplaceExpectedPreimage\s*\(/);
+  assert.doesNotMatch(replacement, /fs\.(?:renameSync|unlinkSync|writeFileSync)\s*\(/, "the reference coordinator must not implement leaf replacement");
+});
+
+test("reseal delegates literal expected-preimage replacement and pins the opened parent", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "reseal-pinned-parent-"));
+  try {
+    const parent = path.join(workspace, "evidence");
+    const outside = path.join(workspace, "outside");
+    fs.mkdirSync(parent); fs.mkdirSync(outside);
+    const file = path.join(parent, "state.json");
+    const before = Buffer.from("before\n");
+    const after = Buffer.from("after\n");
+    fs.writeFileSync(file, before, { mode: 0o644 });
+    const parentStat = fs.statSync(parent);
+    const artifact = {
+      id: "flow-state",
+      parent: { dev: parentStat.dev, ino: parentStat.ino },
+      pre: { presence: "present", mode: 0o644, size: before.length, sha256: rawSha256(before) },
+      post: { presence: "present", mode: 0o644, size: after.length, sha256: rawSha256(after) },
+    };
+    const injectedCapability = (beforeAtomicCheck = () => {}) => ({
+      protocol: VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL,
+      atomicReplaceExpectedPreimage(request) {
+        assert.equal(request.protocol, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL);
+        assert.equal(request.target_name, "state.json");
+        assert.deepEqual(
+          { dev: fs.fstatSync(request.parent_descriptor).dev, ino: fs.fstatSync(request.parent_descriptor).ino },
+          request.parent,
+          "the host capability receives the pinned parent descriptor and identity",
+        );
+        beforeAtomicCheck();
+        const current = fs.readFileSync(file);
+        const currentStat = fs.statSync(file);
+        const currentDescriptor = {
+          presence: "present", mode: currentStat.mode & 0o777, size: current.length, sha256: rawSha256(current),
+        };
+        if (canonicalJson(currentDescriptor) !== canonicalJson(request.preimage)) {
+          throw new Error("host atomic expected-preimage mismatch");
+        }
+        const postimage = Buffer.from(request.postimage_bytes_base64, "base64");
+        fs.writeFileSync(file, postimage, { mode: request.postimage.mode });
+        return {
+          protocol: VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL,
+          status: "replaced",
+          preimage: request.preimage,
+          postimage: request.postimage,
+        };
+      },
+    });
+    const unchangedWithoutCapability = fs.readFileSync(file);
+    assert.throws(
+      () => replaceVerificationResealArtifactCAS(file, artifact, after),
+      /administrator-injected atomic expected-preimage replacement capability.*no artifacts were mutated/,
+    );
+    assert.deepEqual(fs.readFileSync(file), unchangedWithoutCapability);
+    fs.writeFileSync(file, "foreign\n");
+    assert.throws(
+      () => replaceVerificationResealArtifactCAS(file, artifact, after, injectedCapability()),
+      /host atomic expected-preimage mismatch/,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), "foreign\n");
+    fs.writeFileSync(file, before);
+    assert.throws(
+      () => replaceVerificationResealArtifactCAS(
+        file,
+        artifact,
+        after,
+        injectedCapability(() => fs.writeFileSync(file, "interposed\n")),
+      ),
+      /host atomic expected-preimage mismatch/,
+    );
+    assert.equal(fs.readFileSync(file, "utf8"), "interposed\n", "an interposed leaf is rejected, not overwritten");
+    fs.writeFileSync(file, before);
+    replaceVerificationResealArtifactCAS(file, artifact, after, injectedCapability());
+    assert.equal(fs.readFileSync(file, "utf8"), "after\n");
+    fs.writeFileSync(file, before);
+    const parked = `${parent}.parked`;
+    fs.renameSync(parent, parked);
+    fs.symlinkSync(outside, parent);
+    assert.throws(
+      () => replaceVerificationResealArtifactCAS(file, artifact, after, injectedCapability()),
+      /stable real directory|ELOOP/,
+    );
+    assert.equal(fs.existsSync(path.join(outside, "state.json")), false);
+    assert.equal(fs.readFileSync(path.join(parked, "state.json"), "utf8"), "before\n");
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 test("reseal recovery classifies only exact all-old or all-new generations and rejects active legacy tree journals", () => {
@@ -1290,12 +1390,19 @@ test("reseal recovery classifies only exact all-old or all-new generations and r
       index,
     };
   });
+  const authorization = {
+    signature: { key_id: "operator" }, nonce: "nonce",
+    assignment_generation_sha256: "5".repeat(64), assignment_actor_key: "actor",
+    assignment_actor: { runtime: "test", session_id: "session", host: "host", human: null },
+  };
   const plan = validateVerificationResealPlan({
     schema_version: "1.0", kind: "flow-agents.verification-reseal-transaction.v1",
     recovery_id: "1".repeat(64), run_id: runId, request_sha256: requestSha256,
-    authorization_sha256: "3".repeat(64), authorization_key_id: "operator", authorization_nonce: "nonce",
+    authorization_sha256: sha256(canonicalJson(authorization)), authorization_key_id: "operator", authorization_nonce: "nonce",
+    authorization,
+    assignment: { generation_sha256: "5".repeat(64), actor_key: "actor", actor: { runtime: "test", session_id: "session", host: "host", human: null } },
     reducer: { package: "@kontourai/flow" }, result_core_sha256: "4".repeat(64),
-    artifacts: artifacts.map(({ id, pre, post }) => ({ id, pre, post })),
+    artifacts: artifacts.map(({ id, pre, post }) => ({ id, parent: { dev: 1, ino: 1 }, pre, post })),
   });
   try {
     for (const artifact of artifacts) fs.writeFileSync(artifactFiles.get(artifact.id), artifact.preBytes, { mode: 0o644 });
@@ -1372,7 +1479,8 @@ test("privileged history-repair authorization rejects signed shape drift and leg
     loaded = await loadProtectedReadFromCoordinator({ registryFile });
     const unsigned = Object.fromEntries(loaded.historyRepairAuthorizationFields.filter((field) => field !== "signature").map((field) => [field, `fixture-${field}`]));
     unsigned.operation = "repair-critique-resolution-history";
-    unsigned.expires_at = "2030-01-01T00:00:00.000Z";
+    unsigned.requested_at = new Date().toISOString();
+    unsigned.expires_at = new Date(Date.now() + 10 * 60_000).toISOString();
     const verifySigned = (candidate) => {
       const authorizationFile = path.join(fixtureDirectory, `authorization-${Math.random()}.json`);
       fs.writeFileSync(authorizationFile, JSON.stringify(signHistoricalAuthorization(candidate, privateKey)), { mode: 0o600 });
@@ -1385,6 +1493,8 @@ test("privileged history-repair authorization rejects signed shape drift and leg
     assert.throws(() => verifySigned(missing), /unexpected or missing fields/i);
     const legacy = Object.fromEntries(Object.entries(unsigned).filter(([field]) => !field.startsWith("historical_") && !field.startsWith("current_")));
     assert.throws(() => verifySigned(legacy), /unexpected or missing fields/i);
+    assert.throws(() => verifySigned({ ...unsigned, requested_at: new Date(Date.now() + 6 * 60_000).toISOString() }), /time window is invalid/);
+    assert.throws(() => verifySigned({ ...unsigned, expires_at: new Date(Date.now() - 60_000).toISOString() }), /time window is invalid|expired/);
   } finally {
     if (loaded) fs.rmSync(loaded.directory, { recursive: true, force: true });
     fs.rmSync(fixtureDirectory, { recursive: true, force: true });

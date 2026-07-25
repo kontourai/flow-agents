@@ -183,6 +183,38 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
+An embedding host whose current runtime identity cannot reproduce the active
+assignment actor must establish an expiring recovery-capable session binding,
+then authorize each ordinary evidence mutation separately. Run
+`evidence-request` with the exact evidence arguments, sign the emitted
+`signing_payload` with a registered lifecycle-authority key, add that signature
+to the emitted `authorization`, and pass the protected signed file to the
+otherwise identical evidence command:
+
+```bash
+flow_agents workflow evidence-request \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  > evidence-request.json
+
+flow_agents workflow evidence \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  --authorization-file /absolute/outside-project/evidence-authorization.json
+```
+
+The authorization binds the exact assignment generation, assignment actor key and struct,
+the independently named host routing key and routing-binding generation, Flow head and manifest, Trust Bundle, evidence
+arguments, canonical project/run/subject, nonce, and expiry. The external
+coordinator verifies and durably redeems it before the normal evidence
+transaction runs. A pointer alone is routing metadata, never bearer authority;
+replay, binding retirement/replacement, assignment takeover, or changed Flow,
+trust, or evidence arguments fail closed before another mutation.
+
 When a current root-signed lifecycle completion already binds a Trust Bundle and its external
 resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
 If a legitimate later public critique or gate claim has already made that receipt stale, do not
@@ -272,6 +304,15 @@ accepts only an exact
 all-old or all-new generation. Mixed, malformed, or unknown generations are quarantined with the
 fence left active for offline recovery. An active legacy recursive reseal journal is never
 auto-restored.
+Publication also preflights the fixed, protected
+`verification-reseal-atomic-replace.cjs` host capability. That administrator-supplied capability
+must implement `kontourai.atomic-expected-preimage-replace.v1`: atomically compare the named leaf's
+exact preimage and install or delete only the authorized postimage. It receives a pinned parent
+descriptor and basename, while the coordinator independently rechecks the parent and postimage.
+Root validates its fixed protected artifact; only the caller-identity worker executes its code.
+The reference coordinator ships no pathname or descriptor-only fallback and refuses on every
+platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
+capability is absent or invalid. Portable request creation and external signing remain available.
 After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
 removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
