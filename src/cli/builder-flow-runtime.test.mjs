@@ -39,7 +39,7 @@ import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 
@@ -69,6 +69,65 @@ test("provisional delivery request serialization preserves every exact lifecycle
   const request = buildUnsignedProvisionalDeliveryAuthorization(fields);
   assert.deepEqual(request.unsigned, { schema_version: "1.0", operation: "publish-provisional-delivery", ...fields });
   assert.deepEqual(JSON.parse(request.signingPayload), request.unsigned);
+});
+
+test("exact-current recovery accepts the versioned lifecycle runtime ledger digest contract", () => {
+  const projectRoot = "/project";
+  const runId = "runtime-ledger-recovery";
+  const subject = "work-item:runtime-ledger-recovery";
+  const signedAuthorization = {
+    schema_version: "1.0",
+    operation: "resolve-critique",
+    project_root: projectRoot,
+    run_id: runId,
+    subject,
+    signature: { algorithm: "ed25519", key_id: "fixture", value: "fixture" },
+  };
+  const authorizationSha256 = createHash("sha256")
+    .update(JSON.stringify(signedAuthorization))
+    .digest("hex");
+  const edge = {
+    schema_version: "1.0",
+    kind: "cross-reviewer",
+    prior_record_id: "critique:prior",
+    resolving_record_id: "critique:resolving",
+    resolver: "independent-reviewer",
+    resolved_lane_ids: ["code-review"],
+    resolved_finding_ids: ["finding-1"],
+    resolved_at: NOW,
+    authorization_sha256: authorizationSha256,
+    resolution_event_id: `critique-resolution:${authorizationSha256}`,
+  };
+  const unsignedEvent = {
+    schema_version: "1.0",
+    event_id: edge.resolution_event_id,
+    sequence: 1,
+    predecessor_hash: "0".repeat(64),
+    operation: "resolve-critique",
+    run_id: runId,
+    subject,
+    authorization_sha256: authorizationSha256,
+    edge,
+    signed_authorization: signedAuthorization,
+  };
+  const event = {
+    ...unsignedEvent,
+    event_hash: createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex"),
+  };
+  const bundle = {
+    claims: [{
+      metadata: {
+        origin: "critique",
+        critique_resolution: edge,
+      },
+    }],
+  };
+
+  assert.doesNotThrow(() => assertRecoveryLedgerCoverage(bundle, [event], projectRoot, runId, subject));
+  assert.throws(
+    () => assertRecoveryLedgerCoverage(bundle, [{ ...event, event_hash: "f".repeat(64) }], projectRoot, runId, subject),
+    /complete strict resolution ledger/,
+  );
 });
 import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 import { canonicalJson as coordinatorCanonicalJson } from "../../packaging/lifecycle-authority/coordinator.mjs";

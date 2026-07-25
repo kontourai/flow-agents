@@ -1426,7 +1426,11 @@ async function recoverExactCurrentCompletion(sessionDir: string, argv: string[],
   return 0;
 }
 
-function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], projectRoot: string, runId: string, subject: string): void {
+function lifecycleRuntimeJsonSha256(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], projectRoot: string, runId: string, subject: string): void {
   const edges = (Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [])
     .filter((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
       && ((claim.metadata as JsonRecord | undefined)?.critique_resolution as JsonRecord | undefined)?.kind === "cross-reviewer")
@@ -1440,9 +1444,9 @@ function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], 
         || event.schema_version !== "1.0" || event.sequence !== index + 1 || event.predecessor_hash !== predecessor
         || !["resolve-critique", "repair-critique-resolution-history"].includes(String(event.operation))
         || event.run_id !== runId || event.subject !== subject || !signed || signed.project_root !== projectRoot || signed.run_id !== runId || signed.subject !== subject
-        || event.authorization_sha256 !== canonicalSha256(signed)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+        || event.authorization_sha256 !== lifecycleRuntimeJsonSha256(signed)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
     const { event_hash: eventHash, ...unsigned } = event;
-    if (eventHash !== canonicalSha256(unsigned)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+    if (eventHash !== lifecycleRuntimeJsonSha256(unsigned)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
     seen.add(event.event_id);
     predecessor = String(eventHash);
   }
