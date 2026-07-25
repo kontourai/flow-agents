@@ -8,7 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
 import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
-import { loadRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
+import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
 const COORDINATOR = path.resolve("packaging/lifecycle-authority/coordinator.mjs");
@@ -198,7 +198,7 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   coordinatorSource = coordinatorSource
     .replace(/export const CONFIG_ROOT = .*?;/, `export const CONFIG_ROOT = ${JSON.stringify(configRoot)};`)
     .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  coordinatorSource += "\nexport { prepareExactCurrentRecoveryPublication, publishExactCurrentRecoveryPublication, recoverExactCurrentRecoveryPublication, signedCapability };\n";
+  coordinatorSource += "\nexport { prepareExactCurrentRecoveryPublication, publishExactCurrentRecoveryPublication, recoverExactCurrentRecoveryPublication, finalizeExactCurrentRecoveryPublication, finalizeVerificationResealFence, signedCapability };\n";
   fs.writeFileSync(path.join(installRoot, "runtime-v1.mjs"), fs.readFileSync(RUNTIME), { mode: 0o644 });
   fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), coordinatorSource, { mode: 0o755 });
   const coordinator = await import(`${pathToFileURL(path.join(installRoot, "coordinator.mjs")).href}?fixture=${Date.now()}-${Math.random()}`);
@@ -275,7 +275,7 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   fs.writeFileSync(authorizationFile, `${JSON.stringify(authorization)}\n`, { mode: 0o600 });
   const request = { action: "recover-exact-current-completion", project_root: projectRoot, session_dir: sessionDir, authorization_file: authorizationFile };
   const envelope = { schema_version: "1.0", action: request.action, request_sha256: coordinator.sha256(request), request };
-  return { root, coordinator, projectRoot, sessionDir, flowRoot, stateRoot, bundleFile, ledgerFile, completionFile, bundleBytes, ledgerBytes, completionBytes, authorization, authorizationFile, envelope, signCompletion, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  return { root, coordinator, projectRoot, sessionDir, flowRoot, stateRoot, bundleFile, ledgerFile, completionFile, bundleBytes, ledgerBytes, completionBytes, authorization, authorizationFile, envelope, operatorPrivate, signCompletion, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
 async function invokeHermeticCoordinator(fixture) {
@@ -298,7 +298,7 @@ test("hermetic privileged coordinator recovers a stale completion without rewrit
     assert.equal(fs.readFileSync(fixture.bundleFile).compare(fixture.bundleBytes), 0, "recovery must retain exact trust.bundle bytes");
     assert.equal(fs.readFileSync(fixture.ledgerFile).compare(fixture.ledgerBytes), 0, "recovery must retain exact ledger bytes");
     const manifest = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "evidence", "manifest.json"), "utf8"));
-    const attachmentId = `lifecycle-authority:${fixture.envelope.request_sha256}`;
+    const attachmentId = `lifecycle-authority:${fixture.envelope.request_sha256}:${fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization))}`;
     assert.equal(manifest.evidence.filter((entry) => entry.id === attachmentId).length, 1, "one request-keyed canonical attachment is published");
     const receipt = JSON.parse(fs.readFileSync(fixture.completionFile, "utf8"));
     assert.equal(receipt.result_core_sha256, fixture.coordinator.sha256({ ...JSON.parse(fixture.bundleBytes), critique_resolution_events: JSON.parse(fixture.ledgerBytes).events }));
@@ -345,6 +345,202 @@ for (const [label, crashAfter] of [["first Flow postimage", 1], ["all Flow posti
   });
 }
 
+test("exact-current recovery fence rejects a normal Flow writer until exact finalization opens it", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-fence");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-fence" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+    });
+    const binding = {
+      request_sha256: fixture.envelope.request_sha256,
+      authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+    };
+    await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
+    await assert.rejects(
+      pauseRun(paths.runId, {
+        cwd: paths.projectRoot,
+        reason: "must wait for recovery finalization",
+        authority: { kind: "operator_request", actor: "fence-test", request_ref: "test:recovery-fence", requested_at: "2026-07-24T00:10:00.000Z" },
+        at: "2026-07-24T00:10:01.000Z",
+      }),
+      /recovery fence|recovery.*active/i,
+    );
+    const completion = fixture.signCompletion({
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.completion",
+      action: "recover-exact-current-completion",
+      request_sha256: prepared.plan.request_sha256,
+      run_id: paths.runId,
+      operation_status: "applied",
+      result_core_sha256: prepared.plan.result_core_sha256,
+      coordinator_runtime_sha256: coordinatorRuntimeSha256(),
+      completed_at: "2026-07-24T00:10:02.000Z",
+    });
+    fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const finalized = await fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion);
+    assert.equal(finalized.finalized, true);
+    await pauseRun(paths.runId, {
+      cwd: paths.projectRoot,
+      reason: "recovery finalized",
+      authority: { kind: "operator_request", actor: "fence-test", request_ref: "test:recovery-open", requested_at: "2026-07-24T00:10:03.000Z" },
+      at: "2026-07-24T00:10:04.000Z",
+    });
+    assert.equal((await loadRun(paths.runId, paths.projectRoot)).state.status, "paused");
+  } finally { fixture.cleanup(); }
+});
+
+test("exact-current cleanup replay preserves a legitimate Flow write after its matching fence was finalized", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-cleanup-replay");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-cleanup-replay" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+    });
+    const binding = {
+      request_sha256: fixture.envelope.request_sha256,
+      authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+    };
+    await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
+    const completion = fixture.signCompletion({
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.completion",
+      action: "recover-exact-current-completion",
+      request_sha256: prepared.plan.request_sha256,
+      run_id: paths.runId,
+      operation_status: "applied",
+      result_core_sha256: prepared.plan.result_core_sha256,
+      coordinator_runtime_sha256: coordinatorRuntimeSha256(),
+      completed_at: "2026-07-24T00:15:00.000Z",
+    });
+    fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const fenceFile = path.join(fixture.flowRoot, "recovery-fence.json");
+    const activeFence = JSON.parse(fs.readFileSync(fenceFile, "utf8"));
+    assert.equal(activeFence.status, "active");
+    await fixture.coordinator.finalizeVerificationResealFence(paths, prepared.plan.recovery_id, activeFence.generation);
+    const openFence = JSON.parse(fs.readFileSync(fenceFile, "utf8"));
+    assert.equal(openFence.status, "open");
+    assert.equal(openFence.previous_generation, activeFence.generation);
+
+    await pauseRun(paths.runId, {
+      cwd: paths.projectRoot,
+      reason: "legitimate post-finalization mutation",
+      authority: { kind: "operator_request", actor: "cleanup-replay-test", request_ref: "test:cleanup-replay", requested_at: "2026-07-24T00:15:01.000Z" },
+      at: "2026-07-24T00:15:02.000Z",
+    });
+    const stateFile = path.join(fixture.flowRoot, "state.json");
+    const postWriterState = fs.readFileSync(stateFile);
+    const protectedBeforeCleanup = {
+      bundle: fs.readFileSync(fixture.bundleFile),
+      ledger: fs.readFileSync(fixture.ledgerFile),
+      receipt: fs.readFileSync(fixture.completionFile),
+      fence: fs.readFileSync(fenceFile),
+    };
+    const files = exactCurrentRecoveryArtifactFiles(paths, prepared.plan.request_sha256, prepared.plan.authorization_sha256);
+    const stages = [...files.values()].flatMap((file) => [
+      `${file}.exact-current-recovery-old`,
+      `${file}.exact-current-recovery-new`,
+    ]);
+    const planFile = path.join(fixture.sessionDir, ".exact-current-recovery.transaction.json");
+    assert.ok(fs.existsSync(planFile));
+    assert.ok(stages.some((file) => fs.existsSync(file)));
+
+    const replay = await fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion);
+    assert.deepEqual(replay, { run_id: paths.runId, finalized: true, cleanup_replayed: true });
+    assert.equal(fs.existsSync(planFile), false);
+    assert.ok(stages.every((file) => !fs.existsSync(file)));
+    assert.deepEqual(fs.readFileSync(stateFile), postWriterState, "cleanup does not restore superseded Flow postimages");
+    assert.deepEqual(fs.readFileSync(fixture.bundleFile), protectedBeforeCleanup.bundle);
+    assert.deepEqual(fs.readFileSync(fixture.ledgerFile), protectedBeforeCleanup.ledger);
+    assert.deepEqual(fs.readFileSync(fixture.completionFile), protectedBeforeCleanup.receipt);
+    assert.deepEqual(fs.readFileSync(fenceFile), protectedBeforeCleanup.fence, "cleanup does not rewrite the finalized fence");
+  } finally { fixture.cleanup(); }
+});
+
+test("same recovery request path accepts a second signed authorization generation with a distinct attachment", async () => {
+  const fixture = await createHermeticRecoveryFixture("repeat-recovery");
+  try {
+    const first = await invokeHermeticCoordinator(fixture);
+    const firstAuthorizationSha256 = fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization));
+    const bundle = JSON.parse(fs.readFileSync(fixture.bundleFile, "utf8"));
+    bundle.claims.push({
+      id: "post-recovery-gate-claim",
+      subjectId: "kontourai/flow-agents#944",
+      subjectType: "work-item",
+      claimType: "workflow.check.command",
+      fieldOrBehavior: "A later legitimate gate observation makes the first recovery completion stale.",
+      value: "pass",
+      impactLevel: "high",
+      status: "verified",
+      createdAt: "2026-07-24T00:20:00.000Z",
+      updatedAt: "2026-07-24T00:20:00.000Z",
+      metadata: { origin: "verification" },
+    });
+    fs.writeFileSync(fixture.bundleFile, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o644 });
+    const bundleBytes = fs.readFileSync(fixture.bundleFile);
+    const ledgerBytes = fs.readFileSync(fixture.ledgerFile);
+    const ledger = JSON.parse(ledgerBytes);
+    const staleBytes = fs.readFileSync(fixture.completionFile);
+    const stale = JSON.parse(staleBytes);
+    const definitionFile = path.join(fixture.flowRoot, "definition.json");
+    const manifestFile = path.join(fixture.flowRoot, "evidence", "manifest.json");
+    const definitionBytes = fs.readFileSync(definitionFile);
+    const manifestBytes = fs.readFileSync(manifestFile);
+    const definition = JSON.parse(definitionBytes);
+    const state = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "state.json"), "utf8"));
+    const gate = definition.gates["verify-gate"];
+    const critique = critiqueHistoryProjectionSummary(bundle.claims);
+    const edges = critiqueResolutionEdgeProjectionSummary(bundle.claims);
+    const now = new Date();
+    const unsigned = {
+      ...fixture.authorization,
+      stale_completion_sha256: rawSha256(staleBytes),
+      stale_completion_action: stale.action,
+      stale_completion_request_sha256: stale.request_sha256,
+      stale_completion_result_core_sha256: stale.result_core_sha256,
+      stale_completion_coordinator_runtime_sha256: stale.coordinator_runtime_sha256,
+      current_bundle_sha256: rawSha256(bundleBytes),
+      current_ledger_sha256: rawSha256(ledgerBytes),
+      current_ledger_length: ledger.events.length,
+      current_ledger_tail_hash: ledger.events.at(-1)?.event_hash ?? "0".repeat(64),
+      critique_projection_sha256: critique.digest,
+      resolution_edge_projection_sha256: edges.digest,
+      resolution_edge_projection_count: edges.count,
+      flow_definition_sha256: rawSha256(definitionBytes),
+      flow_gate_policy_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson({ gate_id: "verify-gate", requirements: gate.expects })),
+      flow_run_head: flowRunHead(state),
+      flow_manifest_sha256: rawSha256(manifestBytes),
+      nonce: "fixture-repeat-recovery-second",
+      requested_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 3_600_000).toISOString(),
+    };
+    delete unsigned.signature;
+    const secondAuthorization = {
+      ...unsigned,
+      signature: {
+        algorithm: "ed25519",
+        key_id: "fixture-operator",
+        value: sign(null, Buffer.from(JSON.stringify(unsigned)), fixture.operatorPrivate).toString("base64"),
+      },
+    };
+    fs.writeFileSync(fixture.authorizationFile, `${JSON.stringify(secondAuthorization)}\n`, { mode: 0o600 });
+    const second = await invokeHermeticCoordinator(fixture);
+    assert.equal(second.result.operation_status, "applied");
+    assert.equal(second.result.completion.request_sha256, first.result.completion.request_sha256, "durable completion retains the unchanged request envelope digest");
+    const secondAuthorizationSha256 = fixture.coordinator.sha256(fixture.coordinator.canonicalJson(secondAuthorization));
+    assert.notEqual(secondAuthorizationSha256, firstAuthorizationSha256);
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    const ids = manifest.evidence.map((entry) => entry.id).filter((id) => id.startsWith(`lifecycle-authority:${fixture.envelope.request_sha256}:`));
+    assert.ok(ids.includes(`lifecycle-authority:${fixture.envelope.request_sha256}:${firstAuthorizationSha256}`));
+    assert.ok(ids.includes(`lifecycle-authority:${fixture.envelope.request_sha256}:${secondAuthorizationSha256}`));
+    assert.equal(new Set(ids).size, 2, "each signed authorization generation has one distinct stored attachment");
+  } finally { fixture.cleanup(); }
+});
+
 test("hermetic privileged coordinator rejects tampered protected recovery inputs without publication", async () => {
   const mutations = [
     ["bundle", (fixture) => fs.writeFileSync(fixture.bundleFile, `${fs.readFileSync(fixture.bundleFile, "utf8").trimEnd()} \n`, { mode: 0o644 })],
@@ -360,7 +556,8 @@ test("hermetic privileged coordinator rejects tampered protected recovery inputs
       mutate(fixture);
       await assert.rejects(invokeHermeticCoordinator(fixture), /preimage|signature|canonical Flow|stale lifecycle completion/i, `${label} must reject`);
       const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
-      assert.equal(manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${fixture.envelope.request_sha256}`).length, 0, `${label} created no attachment`);
+      const attachmentId = `lifecycle-authority:${fixture.envelope.request_sha256}:${fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization))}`;
+      assert.equal(manifest.evidence.filter((entry) => entry.id === attachmentId).length, 0, `${label} created no attachment`);
       assert.equal(fs.existsSync(path.join(fixture.stateRoot, "completions")) ? fs.readdirSync(path.join(fixture.stateRoot, "completions")).length : 0, 0, `${label} created no durable completion`);
       if (label !== "Flow manifest") assert.equal(fs.readFileSync(manifestFile).compare(manifestBefore), 0, `${label} did not change Flow artifacts`);
     } finally { fixture.cleanup(); }
@@ -446,7 +643,8 @@ test("exact-current recovery classifies all-old, mixed, all-new, and unknown Flo
   try {
     const paths = { projectRoot: root, sessionDir: path.join(root, ".kontourai", "flow-agents", "run-1"), runId: "run-1" };
     const requestSha256 = "a".repeat(64);
-    const files = exactCurrentRecoveryArtifactFiles(paths, requestSha256);
+    const authorizationSha256 = "c".repeat(64);
+    const files = exactCurrentRecoveryArtifactFiles(paths, requestSha256, authorizationSha256);
     const descriptor = (bytes) => ({ presence: "present", mode: 0o644, size: bytes.length, sha256: rawSha256(bytes) });
     const artifacts = EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.map((id) => {
       const oldBytes = Buffer.from(`old-${id}\n`), newBytes = Buffer.from(`new-${id}\n`);
@@ -456,7 +654,7 @@ test("exact-current recovery classifies all-old, mixed, all-new, and unknown Flo
     });
     const plan = {
       schema_version: "1.0", kind: "flow-agents.exact-current-recovery-publication.v1", recovery_id: "b".repeat(64),
-      run_id: paths.runId, request_sha256: requestSha256, authorization_sha256: "c".repeat(64),
+      run_id: paths.runId, request_sha256: requestSha256, authorization_sha256: authorizationSha256,
       authorization_key_id: "operator", authorization_nonce: "nonce", reducer: { id: "fixture" },
       result_core_sha256: "d".repeat(64),
       protected_preimages: ["trust-bundle", "resolution-ledger", "stale-receipt"].map((id) => ({ id, pre: { presence: "absent", mode: null, size: 0, sha256: null } })),

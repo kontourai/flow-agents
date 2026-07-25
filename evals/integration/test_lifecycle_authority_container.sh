@@ -40,11 +40,15 @@ if (!/recover-exact-current-completion/.test(source)
 if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
     || !/protected_preimages/.test(source)
     || !/classifyExactCurrentRecoveryArtifacts/.test(source)
-    || !/recoverExactCurrentRecoveryPublication/.test(source)) {
+    || !/recoverExactCurrentRecoveryPublication/.test(source)
+    || !/withCanonicalFlowRunRecoveryLock/.test(source)
+    || !/writeVerificationResealFence\(paths, plan\.recovery_id/.test(source)
+    || !/finalizeVerificationResealFence\(paths, finalized\.plan\.recovery_id/.test(source)
+    || !/lifecycle-authority:\$\{requestSha256\}:\$\{authorizationSha256\}/.test(source)) {
   throw new Error('completion recovery must retain its bounded durable Flow-only publication protocol');
 }
 NODE
-node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion' \
+node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
 # The privileged coordinator is pinned to the audited Flow 3.8.1 reducer closure.
 # npm installs the package's declared transitive dependencies; callers do not

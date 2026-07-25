@@ -496,14 +496,27 @@ unchanged. Before any Flow postimage write, the unprivileged worker stages the
 fixed five Flow-only old/new images and root signs a request-, authorization-,
 nonce-, reducer-, and result-bound publication plan. The plan binds, but never
 stages or restores, `trust.bundle`, the resolution ledger, and the stale
-receipt. Under the canonical Flow lock, publication classifies each live
-artifact as exact old, exact new, or unknown; all-old and exact mixed states
-roll forward from staged new bytes, all-new succeeds idempotently, and unknown
-state fails closed without restoration. Only after exact postimages and
-protected preimages are revalidated does root persist and install the new
-exact-current completion. A nonce replay returns the same completion and cannot
-add a second attachment; a prepared crash after any or all Flow writes resumes
-from the signed plan and converges to all-new.
+receipt. Before the first postimage, the worker activates Flow's native
+generation-bound recovery fence for the signed plan `recovery_id`. The fence
+remains active while root persists completion and nonce state and installs the
+exact receipt, so ordinary Flow writers cannot observe or mutate the
+intermediate generation. Prepared recovery uses the matching native recovery
+lock. It classifies each live artifact as exact old, exact new, or unknown;
+all-old and exact mixed states roll forward from staged new bytes, all-new
+succeeds idempotently, and unknown state fails closed without restoration.
+Finalization verifies the exact active fence generation, receipt, and all-new
+postimages, opens the fence through Flow's finalizer, and only then removes the
+stages and plan. Completion replay safely resumes receipt installation or
+cleanup.
+
+The recovery attachment and stored filename include both the durable envelope
+request digest and the signed authorization digest. The completion continues
+to bind the envelope digest. Therefore two legitimate recoveries that reuse the
+same authorization-file path and request shape but carry distinct signed
+authorization generations publish distinct attachments without colliding. An
+exact nonce replay returns the same completion and cannot add a second
+attachment; a prepared crash after any or all Flow writes resumes from the
+signed plan and converges to all-new.
 It never appends/resolves a ledger event, rewrites evidence, accepts a missing
 or duplicate authority edge, or displaces a different newer exact-current
 receipt. This source protocol does not install or upgrade the live root helper;

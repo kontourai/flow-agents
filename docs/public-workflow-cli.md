@@ -165,11 +165,18 @@ cross-reviewer resolution coverage, critique and edge projections, subject, raw 
 and canonical ordered gate-policy digests, Flow head/manifest,
 fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
 the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
-plan, then adds one request-keyed canonical Flow `trust.bundle` attachment and installs one new
-exact-current completion. Prepared retry accepts exact all-new state, rolls exact all-old or mixed
+plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
+generation active through root completion/nonce persistence and receipt installation. Prepared
+retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
 old/new state forward from the staged postimages, and rejects unknown or mismatched state without
-restoring foreign bytes. The plan only hashes the bundle, ledger, and stale receipt; it never
-snapshots or restores them. Replaying the same signed request returns the immutable completion
+restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
+opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
+ledger, and stale receipt; it never snapshots or restores them.
+
+The canonical attachment ID and stored filename include the signed authorization digest in addition
+to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
+distinct signed recovery therefore creates a distinct attachment while the durable completion still
+binds the request digest. Replaying the same signed authorization returns the immutable completion
 without another attachment. Use it only after all final independent critique/resolution work is
 complete, and then use reseal for the final verification evidence.
 
