@@ -14,8 +14,12 @@ export interface HostWorkflowAuthority {
   run_id: string;
   subject: string;
   assignment_generation: string;
+  /** Canonical key on the active implementation assignment. */
   actor_key: string;
+  /** Exact actor struct on the active implementation assignment. */
   actor: ActorStruct;
+  /** Host/session key that owns the routing binding. May differ from actor_key. */
+  binding_actor_key: string;
   binding_id: string;
   binding_sha256: string;
   flow_run_head: string;
@@ -191,7 +195,7 @@ export function validateHostWorkflowAuthority(
   if (!isRecord(value)) throw new Error("host workflow authority must be an object");
   const fields = [
     "schema_version", "operation", "project_root", "run_id", "subject",
-    "assignment_generation", "actor_key", "actor", "binding_id", "binding_sha256",
+    "assignment_generation", "actor_key", "actor", "binding_actor_key", "binding_id", "binding_sha256",
     "flow_run_head", "flow_manifest_sha256", "trust_bundle_sha256", "evidence_request_sha256",
     "nonce", "issued_at", "expires_at", "signature",
   ];

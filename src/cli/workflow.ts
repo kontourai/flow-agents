@@ -1207,8 +1207,9 @@ async function evidenceRequest(sessionDir: string, argv: string[]): Promise<numb
       run_id: slug,
       subject: repaired.run.state.subject,
       assignment_generation: caller.assignmentSnapshot.rawSha256,
-      actor_key: caller.hostRecovery.actorKey,
-      actor: caller.hostRecovery.actor,
+      actor_key: caller.assignmentActorKey,
+      actor: caller.assignmentActor,
+      binding_actor_key: caller.hostRecovery.actorKey,
       binding_id: caller.hostRecovery.bindingId,
       binding_sha256: caller.hostRecovery.pointerDigest,
       flow_run_head: caller.expectedRunHead,
@@ -1274,7 +1275,8 @@ async function runHostAuthorizedEvidence(input: {
   const authority = validateHostWorkflowAuthority(JSON.parse(authorityBytes.toString("utf8")) as unknown, {
     project_root: projectRoot, run_id: slug, subject: repaired.run.state.subject,
     assignment_generation: caller.assignmentSnapshot.rawSha256,
-    actor_key: caller.hostRecovery.actorKey, actor: caller.hostRecovery.actor,
+    actor_key: caller.assignmentActorKey, actor: caller.assignmentActor,
+    binding_actor_key: caller.hostRecovery.actorKey,
     binding_id: caller.hostRecovery.bindingId, binding_sha256: caller.hostRecovery.pointerDigest,
     flow_run_head: caller.expectedRunHead, flow_manifest_sha256: preimage.manifestSha256,
     trust_bundle_sha256: preimage.bundleSha256, evidence_request_sha256: validated.requestSha256,
@@ -1590,8 +1592,8 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       run_id: slug,
       subject,
       assignment_generation_sha256: caller.assignmentSnapshot.rawSha256,
-      assignment_actor_key: caller.actorKey,
-      assignment_actor: caller.actor,
+      assignment_actor_key: caller.assignmentActorKey,
+      assignment_actor: caller.assignmentActor,
       preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
       candidate_bundle_sha256: staged.digest,
       candidate_transaction_id: staged.transaction_id,
@@ -3035,6 +3037,8 @@ function readActiveAssignmentSnapshot(sessionDir: string, slug: string): ActiveA
 type MatchingAssignmentActor = ReturnType<typeof resolveCurrentAssignmentActor> & {
   expectedRunHead: string;
   assignmentSnapshot: ActiveAssignmentSnapshot;
+  assignmentActorKey: string;
+  assignmentActor: ReturnType<typeof resolveCurrentAssignmentActor>["actor"];
   hostRecovery?: HostWorkflowRecoveryCapability;
 };
 
@@ -3043,7 +3047,11 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
   const { projectRoot } = readBoundSession(sessionDir);
   const canonical = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
   const expectedRunHead = flowRunHead(canonical.state);
-  if (matches) return { ...caller, expectedRunHead, assignmentSnapshot: snapshot };
+  const assignmentActorKey = String(assignment.actor_key);
+  const assignmentActor = normalizeAssignmentActor(assignment.actor)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"];
+  if (matches) return {
+    ...caller, expectedRunHead, assignmentSnapshot: snapshot, assignmentActorKey, assignmentActor,
+  };
 
   const authority = loadContinuationTurnAuthority().validateSignedActiveTurnAssignmentAuthority({
     sessionDir,
@@ -3060,6 +3068,8 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
       actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"],
       expectedRunHead,
       assignmentSnapshot: snapshot,
+      assignmentActorKey,
+      assignmentActor,
     };
   }
   const hostRecovery = recoverHostWorkflowSessionActor({
@@ -3079,6 +3089,8 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
       actor: hostRecovery.actor,
       expectedRunHead,
       assignmentSnapshot: snapshot,
+      assignmentActorKey,
+      assignmentActor,
       hostRecovery,
     };
   }

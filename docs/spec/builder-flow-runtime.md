@@ -460,7 +460,8 @@ assignment actor pair. The pointer remains non-authoritative metadata.
 `workflow evidence-request` is available only through a live matching binding
 and emits the canonical unsigned `authorize-workflow-evidence` record. That
 record binds the canonical project, run, and subject; exact assignment
-generation and actor pair; routing-binding id and raw digest; Flow run head and
+generation, actor key, and actor struct; the independently named host routing
+key, routing-binding id, and raw digest; Flow run head and
 manifest digest; Trust Bundle digest; exact semantic evidence arguments; nonce;
 and bounded validity window.
 

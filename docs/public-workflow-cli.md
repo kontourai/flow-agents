@@ -207,8 +207,8 @@ flow_agents workflow evidence \
   --authorization-file /absolute/outside-project/evidence-authorization.json
 ```
 
-The authorization binds the exact assignment generation and actor pair,
-routing-binding generation, Flow head and manifest, Trust Bundle, evidence
+The authorization binds the exact assignment generation, assignment actor key and struct,
+the independently named host routing key and routing-binding generation, Flow head and manifest, Trust Bundle, evidence
 arguments, canonical project/run/subject, nonce, and expiry. The external
 coordinator verifies and durably redeems it before the normal evidence
 transaction runs. A pointer alone is routing metadata, never bearer authority;

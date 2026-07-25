@@ -269,8 +269,8 @@ may authorize `workflow evidence`.
 For ordinary, non-operation-bound gate evidence, the routed host first runs
 `workflow evidence-request` with the exact arguments it intends to pass to
 `workflow evidence`. The request captures one opened assignment generation
-(path identity, raw digest, actor key, and actor struct) under the assignment
-lock and binds it to the current routing-binding id and raw digest, Flow head
+(path identity, raw digest, assignment actor key, and actor struct) under the assignment
+lock and binds it independently from the host routing key to the current routing-binding id and raw digest, Flow head
 and manifest digest, Trust Bundle digest, canonical project/run/subject, exact
 evidence-request digest, nonce, and expiry. The command emits unsigned
 authorization bytes only. The continuing host signs those canonical bytes

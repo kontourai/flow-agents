@@ -62,7 +62,7 @@ const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
 ];
 const HOST_WORKFLOW_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject",
-  "assignment_generation", "actor_key", "actor", "binding_id", "binding_sha256",
+  "assignment_generation", "actor_key", "actor", "binding_actor_key", "binding_id", "binding_sha256",
   "flow_run_head", "flow_manifest_sha256", "trust_bundle_sha256", "evidence_request_sha256",
   "nonce", "issued_at", "expires_at", "signature",
 ];
@@ -234,7 +234,7 @@ function assertPrivilegedAuthorizationShape(authorization) {
     for (const field of ["assignment_generation", "binding_sha256", "flow_run_head", "flow_manifest_sha256", "trust_bundle_sha256", "evidence_request_sha256"]) {
       if (!/^[a-f0-9]{64}$/.test(String(authorization[field]))) throw new Error(`host workflow authorization ${field} is invalid`);
     }
-    for (const field of ["actor_key", "binding_id", "nonce"]) {
+    for (const field of ["actor_key", "binding_actor_key", "binding_id", "nonce"]) {
       if (typeof authorization[field] !== "string" || !authorization[field]) throw new Error(`host workflow authorization ${field} is invalid`);
     }
   }

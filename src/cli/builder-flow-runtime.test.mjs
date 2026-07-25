@@ -2022,6 +2022,7 @@ test("public workflow evidence requires one-time coordinator authorization for a
 test("host evidence cannot inject a completion or replace the immutable production authority path", async () => {
   const boundActor = { runtime: "codex", session_id: "thread-desktop-execute", host: "Kontour", human: null };
   const boundKey = "desktop-codex-execute-holder";
+  const assignmentKey = "implementation-assignment-holder";
   const previousActor = process.env.FLOW_AGENTS_ACTOR;
   const coordinator = makeLifecycleCoordinatorFixture();
   const restore = () => {
@@ -2048,7 +2049,7 @@ test("host evidence cannot inject a completion or replace the immutable producti
       actorKey: ambient.actor_key, reason: "desktop execute handoff",
     });
     performLocalClaim(session.artifactRoot, session.slug, boundActor, {
-      ttlSeconds: 1800, actorKey: boundKey, branch: `agent/${session.slug}`,
+      ttlSeconds: 1800, actorKey: assignmentKey, branch: `agent/${session.slug}`,
       artifactDir: session.slug, workItemRef: SUBJECT, reason: "desktop execute continuation",
     });
     bindAuthorizedHostWorkflowSession({
@@ -2101,6 +2102,9 @@ test("host evidence cannot inject a completion or replace the immutable producti
     const session = await prepare("host-execute-immutable-authority");
     assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor);
     const authorizationFile = await issue(session);
+    const authorization = readJson(authorizationFile);
+    assert.equal(authorization.actor_key, assignmentKey, "authority binds the active assignment key");
+    assert.equal(authorization.binding_actor_key, boundKey, "authority separately binds the host routing key");
     const coordinatorResult = invokeCoordinator(coordinator.coordinatorFile, {
       action: "authorize-workflow-evidence",
       project_root: session.projectRoot,
