@@ -113,6 +113,9 @@ export interface VerificationEvidenceResealAuthorization {
   project_root: string;
   run_id: string;
   subject: string;
+  assignment_generation_sha256: string;
+  assignment_actor_key: string;
+  assignment_actor: ActorStruct;
   preimage_bundle_sha256: string;
   candidate_bundle_sha256: string;
   candidate_transaction_id: string;
@@ -274,6 +277,7 @@ export function validateExactCurrentCompletionRecoveryAuthorization(value: JsonR
 
 const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject",
+  "assignment_generation_sha256", "assignment_actor_key", "assignment_actor",
   "preimage_bundle_sha256", "candidate_bundle_sha256", "candidate_transaction_id",
   "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash",
   "current_completion_sha256", "current_completion_request_sha256", "current_completion_result_core_sha256",
@@ -302,6 +306,10 @@ export function validateVerificationEvidenceResealAuthorization(value: JsonRecor
   }
   if (value.schema_version !== "1.0" || value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
   if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("verification evidence reseal authorization does not bind the canonical project, run, and subject");
+  if (typeof value.assignment_actor_key !== "string" || !value.assignment_actor_key
+      || typeof value.assignment_actor !== "object" || value.assignment_actor === null || Array.isArray(value.assignment_actor)) {
+    throw new Error("verification evidence reseal authorization assignment binding is invalid");
+  }
   if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("verification evidence reseal authorization must bind the builder.build verify gate");
   if (value.claim_delta !== "replace") throw new Error("verification evidence reseal authorization claim delta is invalid");
   for (const field of VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {

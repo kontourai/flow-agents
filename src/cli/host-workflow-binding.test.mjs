@@ -4,11 +4,94 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createHash, randomUUID } from "node:crypto";
 
-import { bindHostWorkflowSession, retireHostWorkflowSession } from "../../build/src/index.js";
+import {
+  bindHostWorkflowSession,
+  buildUnsignedHostWorkflowAuthority,
+  hostWorkflowAuthorityPayload,
+  retireHostWorkflowSession,
+  validateHostWorkflowAuthority,
+} from "../../build/src/index.js";
+import { recoverHostWorkflowSessionActor, withHostWorkflowSessionActorBinding } from "../../build/src/lib/host-workflow-binding.js";
 
 const require = createRequire(import.meta.url);
 const pointers = require("../../scripts/hooks/lib/current-pointer.js");
+
+function installRecoveryAssignment(root, task, actorKey, actor, subject = "local:work-item/host-recovery") {
+  const slug = path.basename(task);
+  fs.mkdirSync(path.join(root, "assignment"), { recursive: true });
+  if (!fs.existsSync(path.join(task, "state.json"))) {
+    fs.writeFileSync(path.join(task, "state.json"), `${JSON.stringify({ work_item_refs: [subject] })}\n`);
+  } else {
+    const state = JSON.parse(fs.readFileSync(path.join(task, "state.json"), "utf8"));
+    fs.writeFileSync(path.join(task, "state.json"), `${JSON.stringify({ ...state, work_item_refs: [subject] })}\n`);
+  }
+  fs.writeFileSync(path.join(root, "assignment", `${slug}.json`), `${JSON.stringify({
+    schema_version: "1.0", role: "AssignmentClaimRecord", subject_id: slug, actor, actor_key: actorKey,
+    work_item_ref: subject, claimed_at: new Date().toISOString(), ttl_seconds: 1800,
+    branch: `agent/${slug}`, artifact_dir: slug, status: "claimed",
+  }, null, 2)}\n`);
+}
+
+function activeAssignmentSnapshot(root, task) {
+  const file = path.join(root, "assignment", `${path.basename(task)}.json`);
+  const stat = fs.lstatSync(file);
+  return {
+    file,
+    identity: { dev: stat.dev, ino: stat.ino },
+    rawSha256: createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
+  };
+}
+
+function bindAuthorizedHost(input) {
+  installRecoveryAssignment(input.artifactRoot, input.artifactDir, input.actorKey, input.actor);
+  return bindHostWorkflowSession({
+    ...input,
+    bindingId: input.bindingId ?? `binding-${randomUUID()}`,
+    updatedAt: new Date(Date.now() - 1_000).toISOString(),
+  });
+}
+
+test("host evidence authority uses one canonical exact-preimage signing contract", () => {
+  const actor = { runtime: "codex", session_id: "thread", host: "Kontour", human: null };
+  const expected = {
+    project_root: "/project",
+    run_id: "run",
+    subject: "local:work-item/run",
+    assignment_generation: "1".repeat(64),
+    actor_key: "codex:thread:Kontour",
+    actor,
+    binding_id: "binding-1",
+    binding_sha256: "2".repeat(64),
+    flow_run_head: "3".repeat(64),
+    flow_manifest_sha256: "4".repeat(64),
+    trust_bundle_sha256: "5".repeat(64),
+    evidence_request_sha256: "6".repeat(64),
+  };
+  const built = buildUnsignedHostWorkflowAuthority({
+    ...expected,
+    nonce: "workflow-evidence-run-123456",
+    issued_at: new Date(Date.now() - 1_000).toISOString(),
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(built.signingPayload, hostWorkflowAuthorityPayload(built.unsigned));
+  const signed = {
+    ...built.unsigned,
+    signature: { algorithm: "ed25519", key_id: "host-key", value: "signed-bytes" },
+  };
+  assert.deepEqual(validateHostWorkflowAuthority(signed, expected), signed);
+  assert.throws(
+    () => validateHostWorkflowAuthority({ ...signed, extra: true }, expected),
+    /unexpected or missing fields/,
+  );
+  assert.throws(
+    () => validateHostWorkflowAuthority({ ...signed, trust_bundle_sha256: "7".repeat(64) }, expected),
+    /trust_bundle_sha256 does not match/,
+  );
+});
 
 test("bindHostWorkflowSession writes the canonical actor-scoped pointer", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-"));
@@ -49,7 +132,7 @@ test("bindHostWorkflowSession rejects unsafe actor and task boundaries", () => {
     const task = path.join(root, "task");
     fs.mkdirSync(task, { recursive: true });
     const base = { artifactRoot: root, artifactDir: task, owner: "host", source: "resume" };
-    assert.throws(() => bindHostWorkflowSession({ ...base, actorKey: "a:b" }), /actorKey/);
+    assert.throws(() => bindHostWorkflowSession({ ...base, actorKey: "a/b" }), /actorKey/);
     assert.throws(
       () => bindHostWorkflowSession({ ...base, artifactRoot: ".kontourai/flow-agents", actorKey: "actor" }),
       /absolute paths/,
@@ -74,6 +157,280 @@ test("bindHostWorkflowSession rejects unsafe actor and task boundaries", () => {
       () => bindHostWorkflowSession({ ...base, actorKey: "actor", updatedAt: "not-a-date" }),
       /updatedAt must be a valid date-time/,
     );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: "thread", host: "Kontour", human: null },
+      }),
+      /actor and expiresAt must be supplied together/,
+    );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: "thread", host: "Kontour" },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+      /exactly runtime, session_id, host, and human/,
+    );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: " thread", host: "Kontour", human: null },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+      /surrounding whitespace/,
+    );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: "thread", host: "Kontour", human: null },
+        updatedAt: new Date(Date.now() + 6 * 60_000).toISOString(),
+        expiresAt: new Date(Date.now() + 7 * 60_000).toISOString(),
+      }),
+      /5 minutes in the future/,
+    );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: "thread", host: "Kontour", human: null },
+        expiresAt: new Date(Date.now() + 61 * 60_000).toISOString(),
+      }),
+      /1 hour TTL/,
+    );
+    assert.throws(
+      () => bindHostWorkflowSession({
+        ...base,
+        actorKey: "actor",
+        actor: { runtime: "codex", session_id: "thread", host: "Kontour", human: null },
+        updatedAt: new Date(Date.now() - 120_000).toISOString(),
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+      /still be active/,
+    );
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("recovery-capable host bindings preserve an exact, expiring actor pair", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-binding-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const task = path.join(root, "runtime-switch");
+    const actor = { runtime: "codex", session_id: "thread-123", host: "Kontour", human: null };
+    fs.mkdirSync(task, { recursive: true });
+    const binding = bindAuthorizedHost({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      actor,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      owner: "station",
+      source: "session-start",
+    });
+    assert.equal(Object.hasOwn(binding, "host_authority"), false, "routing pointers never persist bearer authority");
+    assert.deepEqual(binding.actor, actor);
+    assert.equal(binding.actor_key, "codex:thread-123:Kontour");
+    assert.ok(binding.expires_at);
+    const assignmentSnapshot = activeAssignmentSnapshot(root, task);
+    const capability = recoverHostWorkflowSessionActor({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      assignmentActor: actor,
+      assignmentSnapshot,
+    });
+    assert.equal(capability.actorKey, "codex:thread-123:Kontour");
+    assert.deepEqual(capability.actor, actor);
+    assert.equal(capability.bindingId, binding.binding_id);
+    assert.equal(capability.expiresAt, binding.expires_at);
+    assert.equal(capability.pointerFile, fs.realpathSync(pointers.perActorCurrentFile(root, "codex:thread-123:Kontour")));
+    assert.match(capability.pointerDigest, /^[a-f0-9]{64}$/);
+    assert.ok(capability.pointerIdentity.dev >= 0);
+    assert.ok(capability.pointerIdentity.ino > 0);
+    const assignmentFile = path.join(root, "assignment", "runtime-switch.json");
+    const assignmentRaw = fs.readFileSync(assignmentFile);
+    const refreshedAssignment = JSON.parse(assignmentRaw.toString("utf8"));
+    refreshedAssignment.claimed_at = new Date(Date.now() + 1_000).toISOString();
+    fs.writeFileSync(assignmentFile, `${JSON.stringify(refreshedAssignment, null, 2)}\n`);
+    assert.throws(() => recoverHostWorkflowSessionActor({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      assignmentActor: actor,
+      assignmentSnapshot,
+    }), /assignment generation/);
+    fs.writeFileSync(assignmentFile, assignmentRaw);
+    assert.throws(() => recoverHostWorkflowSessionActor({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      assignmentActor: { ...actor, host: "other-host" },
+      assignmentSnapshot: activeAssignmentSnapshot(root, task),
+    }), /does not match the active assignment actor pair/);
+    assert.equal(retireHostWorkflowSession({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      bindingId: binding.binding_id,
+      reason: "session-ended",
+    }), "retired");
+    assert.equal(recoverHostWorkflowSessionActor({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      assignmentActor: actor,
+      assignmentSnapshot: activeAssignmentSnapshot(root, task),
+    }), null);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("canonical host recovery lock delays retirement until the protected mutation completes", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-lock-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const task = path.join(root, "runtime-switch");
+    const actorKey = "codex:thread-123:Kontour";
+    const actor = { runtime: "codex", session_id: "thread-123", host: "Kontour", human: null };
+    fs.mkdirSync(task, { recursive: true });
+    const binding = bindAuthorizedHost({
+      artifactRoot: root, artifactDir: task, actorKey, actor,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      owner: "station", source: "session-start",
+    });
+    const recoveryInput = {
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey,
+      assignmentActor: actor,
+      assignmentSnapshot: activeAssignmentSnapshot(root, task),
+    };
+    const capability = recoverHostWorkflowSessionActor(recoveryInput);
+    assert.ok(capability);
+    let child;
+    let childExit;
+    await withHostWorkflowSessionActorBinding(recoveryInput, capability, async () => {
+      const moduleUrl = new URL("../../build/src/index.js", import.meta.url).href;
+      const script = `
+        import { retireHostWorkflowSession } from ${JSON.stringify(moduleUrl)};
+        retireHostWorkflowSession(${JSON.stringify({
+          artifactRoot: root,
+          artifactDir: task,
+          actorKey,
+          bindingId: binding.binding_id,
+          reason: "concurrent-retirement",
+        })});
+      `;
+      child = spawn(process.execPath, ["--input-type=module", "--eval", script], { stdio: "ignore" });
+      childExit = once(child, "exit");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(child.exitCode, null, "retirement waits while canonical mutation owns the pointer lock");
+    });
+    const [exitCode] = await childExit;
+    assert.equal(exitCode, 0);
+    assert.equal(recoverHostWorkflowSessionActor(recoveryInput), null);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("async pointer lock refuses a same-process contender without blocking the event loop", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-local-contender-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const actorKey = "codex:thread-local-contender:Kontour";
+    fs.mkdirSync(path.join(root, "task"), { recursive: true });
+    let release;
+    const held = pointers.withActorCurrentPointerLockAsync(root, actorKey, async () => {
+      await new Promise((resolve) => { release = resolve; });
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    let heartbeat = false;
+    const heartbeatTimer = setTimeout(() => { heartbeat = true; }, 10);
+    const startedAt = Date.now();
+    await assert.rejects(
+      () => pointers.withActorCurrentPointerLockAsync(root, actorKey, async () => {}),
+      /already held by concurrent work in this process; retry/,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(heartbeat, true);
+    assert.ok(Date.now() - startedAt < 1_000, "same-process refusal must not enter the 30 second synchronous poll");
+    clearTimeout(heartbeatTimer);
+    release();
+    await held;
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("detached async descendants cannot reuse an invalidated pointer-lock ownership token", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-stale-context-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const actorKey = "codex:thread-stale-context:Kontour";
+    fs.mkdirSync(path.join(root, "task"), { recursive: true });
+    const actorLockDir = `${path.join(root, "current", ".actor-pointers")}.lockdir`;
+    let resolveDetached;
+    const detached = new Promise((resolve) => { resolveDetached = resolve; });
+    await pointers.withActorCurrentPointerLockAsync(root, actorKey, async () => {
+      setImmediate(async () => {
+        try {
+          const observedLock = await pointers.withActorCurrentPointerLockAsync(root, actorKey, async () => fs.existsSync(actorLockDir));
+          resolveDetached({ observedLock });
+        } catch (error) {
+          resolveDetached({ error });
+        }
+      });
+    });
+    const result = await detached;
+    assert.equal(result.error, undefined);
+    assert.equal(result.observedLock, true, "detached work must acquire a fresh live lock rather than reentering by stale path");
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("recovery bindings reject already-expired creation and path-replaced task directories", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-invalid-"));
+  try {
+    const root = path.join(workspace, ".kontourai", "flow-agents");
+    const task = path.join(root, "runtime-switch");
+    const actor = { runtime: "codex", session_id: "thread-123", host: "Kontour", human: null };
+    fs.mkdirSync(task, { recursive: true });
+    assert.throws(() => bindHostWorkflowSession({
+      artifactRoot: root, artifactDir: task, actorKey: "codex:thread-123:Kontour", actor,
+      updatedAt: new Date(Date.now() - 120_000).toISOString(),
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      owner: "station", source: "session-start",
+    }), /still be active/);
+
+    const fresh = bindAuthorizedHost({
+      artifactRoot: root,
+      artifactDir: task,
+      actorKey: "codex:thread-123:Kontour",
+      actor,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      owner: "station",
+      source: "session-resume",
+    });
+    const saved = `${task}.saved`;
+    fs.renameSync(task, saved);
+    fs.mkdirSync(task);
+    assert.throws(() => recoverHostWorkflowSessionActor({
+      artifactRoot: root,
+      artifactDir: saved,
+      actorKey: "codex:thread-123:Kontour",
+      assignmentActor: actor,
+      assignmentSnapshot: activeAssignmentSnapshot(root, task),
+    }), /assignment snapshot path changed|ENOENT/);
+    assert.ok(fresh.binding_id);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

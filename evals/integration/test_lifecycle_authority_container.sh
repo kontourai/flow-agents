@@ -477,9 +477,16 @@ const events = ledgerBytes.length ? JSON.parse(ledgerBytes).events : [];
 const completionBytes = fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json')), completion = JSON.parse(completionBytes);
 const manifestBytes = fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'));
 const workState = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8')), subject = workState.work_item_refs[0];
+const assignmentBytes = fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${runId}.json`));
+const assignment = JSON.parse(assignmentBytes);
+if (assignment.status !== 'claimed' || assignment.actor_key !== caller.actorKey
+    || JSON.stringify(assignment.actor) !== JSON.stringify(caller.actor)) {
+  throw new Error('reseal fixture does not have the exact active caller assignment');
+}
 const predecessor = current.claims[targetIndex], replacement = candidate.claims[targetIndex], now = new Date();
 const { unsigned, signingPayload } = buildUnsignedVerificationEvidenceResealAuthorization({
   project_root: project, run_id: runId, subject,
+  assignment_generation_sha256: sha(assignmentBytes), assignment_actor_key: assignment.actor_key, assignment_actor: assignment.actor,
   preimage_bundle_sha256: sha(currentBytes), candidate_bundle_sha256: sha(candidateBytes), candidate_transaction_id: staged.transaction_id,
   preimage_ledger_sha256: sha(ledgerBytes), preimage_ledger_length: events.length, preimage_ledger_tail_hash: events.at(-1)?.event_hash ?? '0'.repeat(64),
   current_completion_sha256: sha(completionBytes), current_completion_request_sha256: completion.request_sha256, current_completion_result_core_sha256: completion.result_core_sha256,

@@ -43,6 +43,10 @@ import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvid
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 
+const runtimeTestSeams = await loadRuntimeTestSeams();
+const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
+const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
+
 test("provisional delivery request serialization preserves every exact lifecycle binding", () => {
   const fields = {
     project_root: "/project", run_id: "session-a", subject: "kontourai/flow-agents#957", work_item: "kontourai/flow-agents#957",
@@ -61,11 +65,14 @@ test("provisional delivery request serialization preserves every exact lifecycle
   assert.deepEqual(JSON.parse(request.signingPayload), request.unsigned);
 });
 import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { canonicalJson as coordinatorCanonicalJson } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 import { loadContinuationAdapterCommand } from "../../build/src/cli/continuation-adapter.js";
+import { bindHostWorkflowSession, retireHostWorkflowSession } from "../../build/src/index.js";
+import { validateLifecycleAuthorityCompletionVerificationKeyInstallation } from "../../build/src/external-lifecycle-authority.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -739,10 +746,59 @@ const require = createRequire(import.meta.url);
 const commandLogChain = require("../../scripts/lib/command-log-chain.js");
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const currentPointer = require("../../scripts/hooks/lib/current-pointer.js");
-const runtimeTestSeams = await loadRuntimeTestSeams();
-const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
-const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
+const hostAuthorityKeys = generateKeyPairSync("ed25519");
+const hostAuthorityPublic = hostAuthorityKeys.publicKey.export({ type: "spki", format: "pem" });
+const hostAuthorityKeyFile = path.join(os.tmpdir(), `flow-agents-builder-host-authority-${process.pid}.pem`);
+fs.writeFileSync(hostAuthorityKeyFile, hostAuthorityPublic);
+const fsCjsForHostAuthority = require("node:fs");
+const realHostAuthorityOpen = fsCjsForHostAuthority.openSync;
+const realHostAuthorityFstat = fsCjsForHostAuthority.fstatSync;
+const realHostAuthorityClose = fsCjsForHostAuthority.closeSync;
+const hostAuthorityDescriptors = new Set();
+const mockHostAuthorityOpen = (file, flags, ...rest) => {
+  if (typeof file === "string" && file.endsWith("/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem")) {
+    const descriptor = realHostAuthorityOpen(hostAuthorityKeyFile, flags, ...rest);
+    hostAuthorityDescriptors.add(descriptor);
+    return descriptor;
+  }
+  return realHostAuthorityOpen(file, flags, ...rest);
+};
+const mockHostAuthorityFstat = (descriptor, ...args) => {
+  const stat = realHostAuthorityFstat(descriptor, ...args);
+  return hostAuthorityDescriptors.has(descriptor)
+    ? new Proxy(stat, { get: (target, property) => property === "uid" ? 0 : Reflect.get(target, property) })
+    : stat;
+};
+const mockHostAuthorityClose = (descriptor) => {
+  hostAuthorityDescriptors.delete(descriptor);
+  return realHostAuthorityClose(descriptor);
+};
+function installHostAuthorityFsMock() {
+  fsCjsForHostAuthority.openSync = mockHostAuthorityOpen;
+  fsCjsForHostAuthority.fstatSync = mockHostAuthorityFstat;
+  fsCjsForHostAuthority.closeSync = mockHostAuthorityClose;
+  syncBuiltinESMExports();
+}
+installHostAuthorityFsMock();
+assert.deepEqual(
+  validateLifecycleAuthorityCompletionVerificationKeyInstallation().export({ type: "spki", format: "der" }),
+  hostAuthorityKeys.publicKey.export({ type: "spki", format: "der" }),
+  "host-authority tests use the independently provisioned mock completion verification key",
+);
+process.once("exit", () => {
+  fsCjsForHostAuthority.openSync = realHostAuthorityOpen;
+  fsCjsForHostAuthority.fstatSync = realHostAuthorityFstat;
+  fsCjsForHostAuthority.closeSync = realHostAuthorityClose;
+  syncBuiltinESMExports();
+  fs.rmSync(hostAuthorityKeyFile, { force: true });
+});
 
+function bindAuthorizedHostWorkflowSession(input) {
+  installHostAuthorityFsMock();
+  const issuedAt = new Date(Date.now() - 1_000).toISOString();
+  const bindingId = input.bindingId ?? `binding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return bindHostWorkflowSession({ ...input, bindingId, updatedAt: issuedAt });
+}
 function currentGateVisitForTest(state, step) {
   assert.equal(typeof builderFlowRuntime.currentGateVisit, "function", "the runtime must expose its canonical current-gate visit seam to internal CLI consumers");
   return builderFlowRuntime.currentGateVisit(state, step);
@@ -1499,6 +1555,74 @@ async function captureWorkflowPublicResult(args) {
   }
 }
 
+function installSignedCurrentCompletion(session) {
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const unsigned = {
+    schema_version: "1.0",
+    kind: "kontourai.lifecycle-authority.completion",
+    action: "resolve-critique",
+    request_sha256: "a".repeat(64),
+    run_id: session.slug,
+    operation_status: "applied",
+    result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: [] }),
+    coordinator_runtime_sha256: "b".repeat(64),
+    completed_at: new Date().toISOString(),
+  };
+  const completion = {
+    ...unsigned,
+    signature: { algorithm: "ed25519", value: sign(null, Buffer.from(coordinatorCanonicalJson(unsigned)), hostAuthorityKeys.privateKey).toString("base64") },
+  };
+  writeJson(path.join(session.sessionDir, "lifecycle-authority.completion.json"), completion);
+}
+
+function makeLifecycleCoordinatorFixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "builder-host-redeem-"));
+  const stateRoot = path.join(directory, "state");
+  const coordinatorFile = path.join(directory, "coordinator.mjs");
+  const atomicReplaceFile = path.join(directory, "atomic-replace.cjs");
+  const runtimeSource = path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/runtime-v1.mjs");
+  fs.copyFileSync(runtimeSource, path.join(directory, "runtime-v1.mjs"));
+  fs.copyFileSync(path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/flow-reducer-v1.json"), path.join(directory, "flow-reducer-v1.json"));
+  const flowPackageRoot = path.resolve(import.meta.dirname, "../../node_modules/@kontourai/flow");
+  const completionPrivate = path.join(directory, "completion-private.pem");
+  const completionPublic = path.join(directory, "completion-public.pem");
+  fs.writeFileSync(completionPrivate, hostAuthorityKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublic, hostAuthorityKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const coordinatorSourceFile = path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/coordinator.mjs");
+  let source = fs.readFileSync(coordinatorSourceFile, "utf8");
+  source = source
+    .replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(TEST_AUTHORITY_FILE)};`)
+    .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`)
+    .replace(/export const COMPLETION_PRIVATE_KEY_FILE = .*?;/, `export const COMPLETION_PRIVATE_KEY_FILE = ${JSON.stringify(completionPrivate)};`)
+    .replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionPublic)};`)
+    .replace(/export const VERIFICATION_RESEAL_ATOMIC_REPLACE_CAPABILITY_FILE = .*?;/, `export const VERIFICATION_RESEAL_ATOMIC_REPLACE_CAPABILITY_FILE = ${JSON.stringify(atomicReplaceFile)};`)
+    .replace(/const FLOW_REDUCER_PACKAGE_ROOT = .*?;/, `const FLOW_REDUCER_PACKAGE_ROOT = ${JSON.stringify(flowPackageRoot)};`);
+  fs.writeFileSync(coordinatorFile, source);
+  return { directory, coordinatorFile, stateRoot };
+}
+
+function invokeCoordinator(coordinatorFile, request) {
+  const envelope = { schema_version: "1.0", action: request.action, request_sha256: createHash("sha256").update(coordinatorCanonicalJson(request)).digest("hex"), request };
+  const input = `${coordinatorCanonicalJson(envelope)}\n`;
+  return spawnSync(process.execPath, [
+    "--input-type=module", "--eval",
+    "const {main}=await import(process.argv[1]);process.stdout.write(JSON.stringify(await main(Buffer.from(process.argv[2],'base64').toString())))",
+    coordinatorFile, Buffer.from(input).toString("base64"),
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, SUDO_UID: String(process.getuid?.() ?? 501), SUDO_GID: String(process.getgid?.() ?? 20) },
+  });
+}
+
+function redeemWithCoordinator(coordinatorFile, session, authorizationFile) {
+  return invokeCoordinator(coordinatorFile, {
+    action: "reseal-verification-evidence",
+    project_root: session.projectRoot,
+    session_dir: session.sessionDir,
+    authorization_file: authorizationFile,
+  });
+}
+
 function assertPublicDiagnosticRedacted(result, sentinel, label) {
   assert.doesNotMatch(`${result.output.join("\n")}\n${result.error ? String(result.error) : ""}`, new RegExp(sentinel), label);
 }
@@ -1630,6 +1754,326 @@ test("public workflow evidence retains an explicit non-pass verdict while report
   assert.equal(gateClaim.value, "not_verified");
   assert.equal(gateClaim.status, "proposed");
   assert.deepEqual(gateClaim.metadata.observed_commands.map((entry) => [entry.command, entry.exit_code]), [["true", 0]]);
+});
+
+test("public workflow evidence requires one-time coordinator authorization for a live host binding", async () => {
+  const boundActor = { runtime: "codex", session_id: "thread-desktop", host: "Kontour", human: null };
+  const boundKey = "desktop-codex-holder";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  const restoreActor = () => {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  };
+  const prepare = async (slug, configure) => {
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const ambientAssignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+    performLocalRelease(session.artifactRoot, session.slug, ambientAssignment.actor, {
+      actorKey: ambientAssignment.actor_key,
+      reason: "desktop host handoff fixture",
+    });
+    performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+      ttlSeconds: 1800,
+      actorKey: boundKey,
+      branch: `agent/${session.slug}`,
+      artifactDir: session.slug,
+      workItemRef: SUBJECT,
+      reason: "desktop host fixture",
+    });
+    await configure(session);
+    return session;
+  };
+  const evidenceArgs = (session) => [
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified",
+    "--summary", "Host binding recovery fixture.",
+  ];
+  try {
+    const recovered = await prepare("host-binding-recovery", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot,
+        artifactDir: session.sessionDir,
+        actorKey: boundKey,
+        actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        owner: "station",
+        source: "desktop-resume",
+      });
+    });
+    process.env.FLOW_AGENTS_ACTOR = boundKey;
+    assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor, "the explicit flat key must not reconstruct the desktop actor struct");
+    const ordinary = await captureWorkflowPublicResult(evidenceArgs(recovered));
+    assert.ok(ordinary.error);
+    assert.match(String(ordinary.error), /requires workflow evidence-request.*signed --authorization-file/);
+    assert.equal(fs.existsSync(path.join(recovered.sessionDir, "trust.bundle")), false);
+    assert.equal((await loadRun(recovered.slug, recovered.projectRoot)).manifest.evidence.length, 0);
+
+    const rejected = async (slug, configure, actorKey = boundKey) => {
+      const session = await prepare(slug, async (prepared) => {
+        const afterPrepare = await configure(prepared);
+        if (typeof afterPrepare === "function") await afterPrepare();
+      });
+      process.env.FLOW_AGENTS_ACTOR = actorKey;
+      const result = await captureWorkflowPublicResult(evidenceArgs(session));
+      assert.ok(result.error, `${slug}: recovery must reject before evidence mutation`);
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false, `${slug}: rejected recovery leaves canonical evidence absent`);
+    };
+    await rejected("host-binding-flat-only", async () => {});
+    await rejected("host-binding-unrelated", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+    }, "unrelated-actor");
+    await rejected("host-binding-mismatched", async (session) => {
+      const valid = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+        actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      writeJson(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), {
+        ...valid,
+        actor: { ...boundActor, host: "other-host" },
+      });
+    });
+    await rejected("host-binding-expired", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      const pointer = currentPointer.perActorCurrentFile(session.artifactRoot, boundKey);
+      writeJson(pointer, { ...binding, expires_at: new Date(Date.now() - 60_000).toISOString() });
+    });
+    await rejected("host-binding-retired", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      retireHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+        bindingId: binding.binding_id, reason: "desktop-ended",
+      });
+    });
+    await rejected("host-binding-malformed", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      fs.writeFileSync(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), "{invalid binding");
+    });
+    await rejected("host-binding-symlink", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      const pointer = currentPointer.perActorCurrentFile(session.artifactRoot, boundKey);
+      const replacement = path.join(session.artifactRoot, "foreign-pointer.json");
+      fs.writeFileSync(replacement, "{}\n");
+      fs.unlinkSync(pointer);
+      fs.symlinkSync(replacement, pointer);
+    });
+    await rejected("host-binding-generation-changed-before-attempt", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        bindAuthorizedHostWorkflowSession({
+          artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-refresh",
+        });
+      };
+    });
+    await rejected("host-binding-retired-before-attempt", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        retireHostWorkflowSession({
+          artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+          bindingId: binding.binding_id, reason: "desktop-ended-before-commit",
+        });
+      };
+    });
+    await rejected("host-binding-expired-before-attempt", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        writeJson(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), {
+          ...binding,
+          expires_at: new Date(Date.now() - 60_000).toISOString(),
+        });
+      };
+    });
+    const prepareVerifyRecovery = async (slug) => {
+      process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+      const session = makeSession(slug);
+      claimAmbientSessionAssignment(session);
+      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      const acceptanceFile = path.join(session.sessionDir, "acceptance.json");
+      writeJson(acceptanceFile, { criteria: [] });
+      await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+      await writeAndSync(session, [
+        bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+        bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+      ]);
+      await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+      await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+      writeBundle(session.sessionDir, verifiedTestsPrerequisites(session).slice(0, 1));
+      process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+      const predecessor = await captureWorkflowPublicResult([
+        "evidence", "--session-dir", session.sessionDir,
+        "--expectation", "acceptance-criteria", "--status", "not_verified",
+        "--summary", "Initial canonical acceptance evidence.",
+      ]);
+      assert.equal(predecessor.error, null);
+      const ambientAssignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+      performLocalRelease(session.artifactRoot, session.slug, ambientAssignment.actor, {
+        actorKey: ambientAssignment.actor_key,
+        reason: "desktop host handoff fixture",
+      });
+      performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+        ttlSeconds: 1800, actorKey: boundKey, branch: `agent/${session.slug}`,
+        artifactDir: session.slug, workItemRef: SUBJECT, reason: "desktop host fixture",
+      });
+      installSignedCurrentCompletion(session);
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return session;
+    };
+    const issueAuthorization = async (session) => {
+      process.env.FLOW_AGENTS_ACTOR = boundKey;
+      const result = await captureWorkflowPublicResult([
+        "reseal-verification-evidence-request", "--session-dir", session.sessionDir,
+        "--expectation", "acceptance-criteria", "--status", "not_verified",
+        "--summary", "Continuing host requests a one-time replacement.",
+      ]);
+      assert.equal(result.error, null);
+      assert.equal(result.output.length, 1);
+      const request = JSON.parse(result.output[0]);
+      const signature = sign(null, Buffer.from(request.signing_payload), AUTHORITY_KEYS.privateKey).toString("base64");
+      const file = path.join(os.tmpdir(), `host-reseal-${session.slug}-${Date.now()}-${Math.random()}.json`);
+      fs.writeFileSync(file, `${JSON.stringify({ ...request.authorization, signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: signature } })}\n`, { mode: 0o600 });
+      return file;
+    };
+    const coordinator = makeLifecycleCoordinatorFixture();
+    try {
+      const redeemable = await prepareVerifyRecovery("host-binding-redeem");
+      const authorizationFile = await issueAuthorization(redeemable);
+      const projectBeforeRedemption = coordinatorCanonicalJson(snapshotTree(redeemable.projectRoot));
+      const unsupported = redeemWithCoordinator(coordinator.coordinatorFile, redeemable, authorizationFile);
+      assert.notEqual(unsupported.status, 0);
+      assert.match(unsupported.stderr, /administrator-injected atomic expected-preimage replacement capability.*no artifacts were mutated/);
+      assert.equal(coordinatorCanonicalJson(snapshotTree(redeemable.projectRoot)), projectBeforeRedemption);
+      assert.equal(fs.existsSync(coordinator.stateRoot), false, "missing host capability must refuse before creating coordinator state");
+    } finally {
+      fs.rmSync(coordinator.directory, { recursive: true, force: true });
+    }
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    restoreActor();
+  }
+});
+
+test("host evidence cannot inject a completion or replace the immutable production authority path", async () => {
+  const boundActor = { runtime: "codex", session_id: "thread-desktop-execute", host: "Kontour", human: null };
+  const boundKey = "desktop-codex-execute-holder";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  const coordinator = makeLifecycleCoordinatorFixture();
+  const restore = () => {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+    fs.rmSync(coordinator.directory, { recursive: true, force: true });
+  };
+  const prepare = async (slug) => {
+    process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeJson(path.join(session.sessionDir, "acceptance.json"), { criteria: [] });
+    await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+    await writeAndSync(session, [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ]);
+    await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+    assert.equal((await loadRun(session.slug, session.projectRoot)).state.current_step, "execute");
+    fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Delivery\n\nstatus: executing\ntype: deliver\n");
+    const ambient = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+    performLocalRelease(session.artifactRoot, session.slug, ambient.actor, {
+      actorKey: ambient.actor_key, reason: "desktop execute handoff",
+    });
+    performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+      ttlSeconds: 1800, actorKey: boundKey, branch: `agent/${session.slug}`,
+      artifactDir: session.slug, workItemRef: SUBJECT, reason: "desktop execute continuation",
+    });
+    bindAuthorizedHostWorkflowSession({
+      artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), owner: "station", source: "desktop-resume",
+    });
+    process.env.FLOW_AGENTS_ACTOR = boundKey;
+    return session;
+  };
+  const args = (session, verb = "evidence") => [
+    verb, "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "pass",
+    "--summary", "Externally authorized desktop execution completed the planned scope.",
+    "--evidence-ref-json", JSON.stringify({
+      kind: "artifact",
+      file: `.kontourai/flow-agents/${session.slug}/${session.slug}--deliver.md`,
+      summary: "Implemented scope.",
+    }),
+  ];
+  const issue = async (session) => {
+    const requestResult = await captureWorkflowPublicResult(args(session, "evidence-request"));
+    assert.equal(requestResult.error, null);
+    assert.equal(requestResult.output.length, 1);
+    const request = JSON.parse(requestResult.output[0]);
+    const signature = sign(null, Buffer.from(request.signing_payload), AUTHORITY_KEYS.privateKey).toString("base64");
+    const file = path.join(os.tmpdir(), `host-evidence-${session.slug}-${Date.now()}-${Math.random()}.json`);
+    fs.writeFileSync(file, `${JSON.stringify({
+      ...request.authorization,
+      signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: signature },
+    })}\n`, { mode: 0o600 });
+    return file;
+  };
+  try {
+    const workflowSource = fs.readFileSync(new URL("../../src/cli/workflow.ts", import.meta.url), "utf8");
+    assert.equal("setHostEvidenceAuthorityInvokerForTest" in workflowRuntime, false);
+    assert.doesNotMatch(workflowSource, /hostEvidenceAuthorityInvoker|setHostEvidenceAuthorityInvokerForTest/);
+    assert.match(workflowSource, /invokeExternalLifecycleAuthority\(authorityRequest\)/);
+    assert.match(workflowSource, /verifyLifecycleAuthorityCompletion\(authorized\.completion\)/);
+
+    const session = await prepare("host-execute-immutable-authority");
+    assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor);
+    const authorizationFile = await issue(session);
+    const coordinatorResult = invokeCoordinator(coordinator.coordinatorFile, {
+      action: "authorize-workflow-evidence",
+      project_root: session.projectRoot,
+      session_dir: session.sessionDir,
+      authorization_file: authorizationFile,
+    });
+    assert.equal(coordinatorResult.status, 0, coordinatorResult.stderr);
+    const fabricatedCompletionFile = path.join(os.tmpdir(), `host-completion-${session.slug}-${Date.now()}.json`);
+    fs.writeFileSync(fabricatedCompletionFile, `${JSON.stringify(JSON.parse(coordinatorResult.stdout).result.completion)}\n`, { mode: 0o600 });
+    const beforeState = structuredClone((await loadRun(session.slug, session.projectRoot)).state);
+    const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    const rejected = await captureWorkflowPublicResult([
+      ...args(session), "--authorization-file", authorizationFile,
+      "--completion-file", fabricatedCompletionFile,
+    ]);
+    assert.match(String(rejected.error), /does not support --completion-file/);
+    assert.deepEqual((await loadRun(session.slug, session.projectRoot)).state, beforeState);
+    assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+  } finally {
+    restore();
+  }
 });
 
 test("public workflow evidence restores evidence bytes when synchronization fails before canonical attachment", async () => {
@@ -2153,6 +2597,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
     "implementation-scope": "execute",
     "clean-critique": "verify",
     "tests-evidence": "verify",
+    "acceptance-criteria": "verify",
     "verified-criterion": "verify",
     "merge-readiness": "merge-ready",
     "decision-evidence": "learn",
@@ -2247,8 +2692,9 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
   critique.claim.metadata.critique_record_hash = critiqueRecordHash(critiqueRecord);
   critique.claim.metadata.critique_record_id = `critique:${critique.claim.metadata.critique_record_hash}`;
   critique.claim.status = "verified";
-  const criterion = bundleClaim({ expectation: "verified-criterion", claimType: "workflow.acceptance.criterion", subjectType: "flow-step", timestamp });
+  const criterion = bundleClaim({ expectation: "acceptance-criteria", claimType: "workflow.acceptance.criterion", subjectType: "flow-step", timestamp });
   criterion.claim.metadata = {
+    ...criterion.claim.metadata,
     workflow_subject_ref: SUBJECT,
     origin: "acceptance",
     criterion: { id: "ac-runtime", status: "pass", evidence_refs: [{ kind: "command", excerpt: "node --test src/cli/builder-flow-runtime.test.mjs", summary: "Runtime fixture assertion." }] },
@@ -3586,6 +4032,9 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
 test("verification evidence reseal authorization binds every atomic preimage", () => {
   const fields = {
     project_root: "/tmp/reseal-project", run_id: "run-1", subject: SUBJECT,
+    assignment_generation_sha256: "0".repeat(64),
+    assignment_actor_key: ACTOR_KEY,
+    assignment_actor: ACTOR,
     preimage_bundle_sha256: "1".repeat(64), candidate_bundle_sha256: "2".repeat(64),
     candidate_transaction_id: "3".repeat(32),
     preimage_ledger_sha256: "4".repeat(64), preimage_ledger_length: 5, preimage_ledger_tail_hash: "5".repeat(64),
