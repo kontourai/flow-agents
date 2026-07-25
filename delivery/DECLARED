@@ -48,7 +48,7 @@
     "declared_at": "2026-07-14T19:20:00Z"
   },
   {
-    "scope": "branch-prefix:fix/i957-provisional-delivery",
+    "scope": "author:briananderson1222 branch-prefix:fix/i957-provisional-delivery",
     "reason": "Issue #957 implementation began before a canonical Builder run was bound. The change has independent code and security review plus command-backed local and hosted verification, but no historical session is fabricated. Scoped to this branch only; the feature supplies the provisional publication lifecycle needed by future bound runs.",
     "approved_by": "briananderson1222 (direct epic completion and merge authorization, 2026-07-24)",
     "declared_at": "2026-07-25T04:05:00Z"
