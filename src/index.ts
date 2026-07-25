@@ -104,6 +104,12 @@ export {
   readRetrospectiveObservationManifest,
   validateRetrospectiveObservation,
 } from "./retrospective-observation.js";
+export {
+  compileRetrospectiveCorpus,
+  type RetrospectiveCorpusReport,
+  type RetrospectiveCorpusResult,
+  type RetrospectiveCorpusWatermark,
+} from "./retrospective-corpus.js";
 export type {
   ObservationDiagnostic,
   RetrospectiveObservation,
