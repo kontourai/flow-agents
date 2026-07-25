@@ -113,6 +113,30 @@ test("runtime v1 rejects incomplete repair coverage and same-reviewer resolution
   assert.throws(() => resolveCritiqueTransition({ bundle: same, resolution_events: [], authorization: { ...authorization, expected_resolver: "reviewer-a" }, prior_record_id: "prior", resolving_record_id: "resolving" }), /distinct/);
 });
 
+test("exact-current recovery is completion-only and rejects ledger or projection tampering", () => {
+  assert.equal(typeof lifecycleRuntime.recoverExactCurrentCompletionTransition, "function");
+  const resolved = resolveCritiqueTransition({ bundle, resolution_events: [], authorization, prior_record_id: "prior", resolving_record_id: "resolving" });
+  const bundleBytes = Buffer.from(JSON.stringify(resolved.bundle));
+  const ledgerBytes = Buffer.from(JSON.stringify({ schema_version: "1.0", events: resolved.resolution_events }));
+  const critique = lifecycleRuntime.critiqueHistoryProjectionSummary(resolved.bundle.claims);
+  const edges = lifecycleRuntime.critiqueResolutionEdgeProjectionSummary(resolved.bundle.claims);
+  const recoveryAuthorization = {
+    schema_version: "1.0", operation: "recover-exact-current-completion", project_root: "/project", run_id: "run-1", subject: "work-item:1",
+    permitted_transition: "exact-current-completion-only", current_bundle_sha256: rawSha256(bundleBytes), current_ledger_sha256: rawSha256(ledgerBytes),
+    current_ledger_length: resolved.resolution_events.length, current_ledger_tail_hash: resolved.resolution_events.at(-1).event_hash,
+    critique_projection_sha256: critique.digest, resolution_edge_projection_sha256: edges.digest, resolution_edge_projection_count: edges.count,
+    flow_definition_id: "builder.build", flow_definition_sha256: "d".repeat(64), flow_step_id: "verify", flow_gate_id: "verify-gate", flow_gate_policy_sha256: "e".repeat(64),
+  };
+  const input = { bundle: resolved.bundle, resolution_events: resolved.resolution_events, authorization: recoveryAuthorization, bundle_bytes: bundleBytes, ledger_bytes: ledgerBytes, flow: { definition_id: "builder.build", definition_sha256: "d".repeat(64), step_id: "verify", gate_id: "verify-gate", gate_policy_sha256: "e".repeat(64), requirements: [] } };
+  const next = lifecycleRuntime.recoverExactCurrentCompletionTransition(input);
+  assert.strictEqual(next.bundle, resolved.bundle, "the pure transition does not clone or rewrite bundle evidence");
+  assert.strictEqual(next.resolution_events, resolved.resolution_events, "the pure transition does not append a resolution event");
+  assert.throws(() => lifecycleRuntime.recoverExactCurrentCompletionTransition({ ...input, ledger_bytes: Buffer.from("tampered") }), /preimage bytes changed/i);
+  assert.throws(() => lifecycleRuntime.recoverExactCurrentCompletionTransition({ ...input, authorization: { ...recoveryAuthorization, resolution_edge_projection_count: edges.count + 1 } }), /projection changed/i);
+  assert.throws(() => lifecycleRuntime.recoverExactCurrentCompletionTransition({ ...input, flow: { ...input.flow, gate_policy_sha256: "f".repeat(64) } }), /Flow definition or ordered gate policy changed/i);
+  assert.throws(() => lifecycleRuntime.recoverExactCurrentCompletionTransition({ ...input, resolution_events: [] }), /coverage|uncovered|ledger identity/i);
+});
+
 test("runtime v1 reseals only verification evidence while preserving critique and ledger exactly", () => {
   assert.equal(
     typeof lifecycleRuntime.resealVerificationEvidenceTransition,
