@@ -81,7 +81,7 @@ set +e
 PARTIAL_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
 PARTIAL_BUNDLE_PUBLISH_RC=$?
 set -e
-[[ "$PARTIAL_BUNDLE_PUBLISH_RC" -ne 0 && "$PARTIAL_BUNDLE_PUBLISH" == *"requires a completed or release-ready canonical builder.build run"* && ! -e "$CONSUMER/delivery/acme-widgets-101/trust.bundle" ]] || fail "public delivery publishing accepted a partial Builder session"
+[[ "$PARTIAL_BUNDLE_PUBLISH_RC" -ne 0 && "$PARTIAL_BUNDLE_PUBLISH" == *"requires a completed canonical builder.build run after passing learning"* && ! -e "$CONSUMER/delivery/acme-widgets-101/trust.bundle" ]] || fail "public delivery publishing accepted a partial Builder session"
 pass "public delivery publishing refuses partial Builder sessions even when selected-work created a trust bundle"
 seed_pull_work acme/widgets#108
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#108 --assignment-provider local-file --summary "Missing delivery bundle fixture" >/dev/null
@@ -384,8 +384,8 @@ node - "$FLOW_STATE" <<'NODE'
 const fs = require('node:fs');
 const file = process.argv[2];
 const state = JSON.parse(fs.readFileSync(file, 'utf8'));
-state.status = 'active';
-state.current_step = 'learn';
+state.status = 'completed';
+state.current_step = 'done';
 fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 NODE
 set +e
@@ -407,8 +407,8 @@ node - "$FLOW_STATE" <<'NODE'
 const fs = require('node:fs');
 const file = process.argv[2];
 const state = JSON.parse(fs.readFileSync(file, 'utf8'));
-state.status = 'active';
-state.current_step = 'learn';
+state.status = 'completed';
+state.current_step = 'done';
 fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 NODE
 pass "canonical verification rerun binds tests to source snapshot B"
@@ -496,6 +496,14 @@ set -e
 [[ "$SYMLINK_RC" -ne 0 && "$SYMLINK_EVIDENCE" == *"session directory must be a non-symlink directory"* && "$(snapshot_tree "$OUTSIDE")" == "$OUTSIDE_BEFORE" ]] || fail "evidence followed a symlinked session"
 pass "evidence rejects symlinked session paths before mutation"
 
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
 run_candidate pause --session-dir "$RELEASE_SESSION" --reason "consumer pause" >/dev/null
 run_candidate resume --session-dir "$RELEASE_SESSION" --reason "consumer resume" >/dev/null
 run_candidate release --session-dir "$RELEASE_SESSION" --reason "consumer release" >/dev/null

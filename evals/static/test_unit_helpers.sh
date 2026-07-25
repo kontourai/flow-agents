@@ -18,6 +18,8 @@ if [[ ! -f build/src/cli/workflow-sidecar.js ]]; then
   npm run build --silent
 fi
 
+node scripts/build-test-support.mjs
+
 if node --test src/cli/*.test.mjs; then
   echo "  PASS: workflow-sidecar pure-helper unit tests"
 else

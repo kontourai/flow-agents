@@ -53,6 +53,14 @@ terms or treating absence as success.
 1. Confirm the confidence report remains applicable to the proposed scope.
 2. Reconcile current provider checks and review state with the revision covered
    by acceptance evidence. Stale or mismatched evidence is `NOT_VERIFIED`.
+   When a required provider check reports only that a delivery bundle is missing, do not record
+   that structural lifecycle ordering gap as a product CI failure and do not manufacture PASS.
+   At `merge-ready-ci`, first run `workflow publish-provisional-delivery-request`, have the
+   lifecycle operator sign its exact `authorization` payload, then invoke
+   `workflow publish-provisional-delivery --authorization-file <protected-signed-file>`.
+   Commit and push that session's `delivery/<slug>/`
+   companions, then collect the provider result for that exact revision. A provisional delivery
+   is CI visibility only; it is not this readiness decision and cannot satisfy it by itself.
    When the repository has `.veritas/repo-map.json`, run the pinned Veritas
    engine for the same base/head revision (prefer
    `npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness
