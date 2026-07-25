@@ -150,6 +150,38 @@ Existing `project.paths` entries remain consumer-owned; resolution chooses the
 longest matching repository-relative path prefix and otherwise uses the
 repository-root entry.
 
+To prepare a specific provider-backed pickup without hand-authoring its
+identity or positive status documents, include the exact Work Item:
+
+```bash
+flow-agents provider-bootstrap --scope project \
+  --repo-path . \
+  --provider-project 2 \
+  --work-item owner/repository#123 \
+  --provider-login authenticated-login \
+  --provider-branch "$(git branch --show-current)" \
+  --json
+```
+
+The command derives the canonical session slug and structured runtime actor
+through the same helpers used by `workflow start` and the assignment provider.
+It refuses a Work Item from another repository, a detached checkout, a branch
+that differs from the actual worktree branch, an unresolved actor, or an
+artifact root outside the repository. The result contains:
+
+- exact `gh` argv arrays for the rendered assignment claim, but does not run
+  those mutations;
+- a read-only issue-observation argv and its pinned output path;
+- an assignment-status argv and immutable effective-state output path; and
+- the final `workflow start` argv bound to that status artifact.
+
+Run the emitted operations in order. Redirect only the declared
+`stdout_file` results to their named paths. Re-running setup for the same Work
+Item, actor, and branch reuses the exact prepared claim generation; a changed
+identity fails closed and requires an explicit recovery or restart decision.
+With `--online`, the authenticated GitHub login is discovered. Offline setup
+requires `--provider-login` so the command never invents provider identity.
+
 ### Assignment ownership: the third provider leg
 
 Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership represented by the configured provider. For example, the optional GitHub adapter can use an issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment; tracker-less repos and evals can use an equivalent local JSON record. Join it against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.

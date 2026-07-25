@@ -38,6 +38,7 @@ import {
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
+import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 
 type AnyObj = Record<string, any>;
 
@@ -321,38 +322,10 @@ function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
   return 0;
 }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
-/** Derives a deterministic, filesystem-safe slug from a canonical work-item ref like `kontourai/flow-agents#161`.
- * Format: `<owner>-<repo>-<id>` e.g. `kontourai-flow-agents-161`.
- * Reuses slugify() for normalization. Validates that the id is a numeric GitHub issue number. */
-function workItemSlug(ref: string): string {
-  const hashIdx = ref.indexOf("#");
-  if (hashIdx < 0) {
-    if (!/^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes("..")) {
-      die("--work-item must be a provider-neutral provider:id ref or owner/repo#numeric-id");
-    }
-    return slugify(ref, "work-item");
-  }
-  if (hashIdx === ref.length - 1) die("--work-item must be in owner/repo#numeric-id format");
-  const repoPath = ref.slice(0, hashIdx);
-  const id = ref.slice(hashIdx + 1);
-  if (!/^\d+$/.test(id)) die("--work-item id must be a numeric issue number");
-  const parts = repoPath.split("/");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) die("--work-item repo must be owner/repo format");
-  const [owner, repo] = parts;
-  return slugify(`${owner}-${repo}-${id}`, "work-item");
-}
 
 function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
   if (ref === `local:${slug}`) return true;
   try { return workItemSlug(ref) === slug; } catch { return false; }
-}
-
-function githubWorkItemIdentity(ref: string): { owner: string; name: string; issueNumber: number } {
-  const match = ref.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9]\d*)$/);
-  if (!match) die("GitHub assignment ownership requires an exact owner/repo#numeric-id Work Item reference");
-  const issueNumber = Number(match[3]);
-  if (!Number.isSafeInteger(issueNumber)) die("GitHub Work Item issue number exceeds the safe integer range");
-  return { owner: match[1], name: match[2], issueNumber };
 }
 
 type SessionWorkItem = {

@@ -6,6 +6,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
+import { githubWorkItemIdentity } from "../lib/work-item-identity.js";
+import { renderGithubClaim, resolveCurrentAssignmentActor, type AssignmentRenderResult } from "./assignment-provider.js";
 
 export type ProviderScope = "project" | "global";
 
@@ -17,10 +19,47 @@ export type ProviderBootstrapOptions = {
   projectNumber?: number;
   online?: boolean;
   ghBin?: string;
+  workItemRef?: string;
+  providerLogin?: string;
+  providerBranch?: string;
+  artifactRoot?: string;
 };
 
 type Repo = { owner: string; name: string; url: string };
 type Project = { number: number; title?: string; url?: string };
+type ProviderPickupPreflight = {
+  identity: ReturnType<typeof githubWorkItemIdentity>;
+  branch: string;
+  actor: ReturnType<typeof resolveCurrentAssignmentActor>;
+  login: string;
+  requestedArtifactRoot: string;
+};
+
+export type ProviderPickupPlan = {
+  schema_version: "1.0";
+  role: "ProviderPickupPlan";
+  work_item_ref: string;
+  slug: string;
+  artifact_root: string;
+  session_dir: string;
+  provider_branch: string;
+  actor: ReturnType<typeof resolveCurrentAssignmentActor>;
+  claim: AssignmentRenderResult;
+  artifacts: {
+    plan_file: string;
+    actor_file: string;
+    claim_input_file: string;
+    issue_snapshot_file: string;
+    liveness_events_file: string;
+    effective_state_file: string;
+  };
+  operations: {
+    claim: string[][];
+    observe_issue: { argv: string[]; stdout_file: string };
+    derive_effective_state: { argv: string[]; stdout_file: string };
+    start_workflow: { argv: string[] };
+  };
+};
 
 const SETTINGS = [
   ["backlog-provider-settings.json", "backlog-provider-settings.schema.json"],
@@ -80,6 +119,163 @@ function ensureGhAuth(ghBin: string): void {
   } catch {
     throw new Error(`GitHub CLI is not authenticated; run '${ghBin} auth login' and retry provider setup`);
   }
+}
+
+function currentGitBranch(repoPath: string): string {
+  let branch: string;
+  try {
+    branch = execFileSync("git", ["-C", repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    throw new Error("provider pickup requires a named Git worktree branch; detached HEAD is not a safe assignment authority");
+  }
+  if (!branch || branch === "HEAD") throw new Error("provider pickup requires a named Git worktree branch");
+  return branch;
+}
+
+function currentGitHubLogin(ghBin: string): string {
+  const value = ghJson(ghBin, ["api", "user"]) as Record<string, unknown>;
+  if (typeof value.login !== "string" || !value.login) throw new Error("GitHub provider discovery did not return the authenticated login");
+  return value.login;
+}
+
+function writeJsonIfAbsentOrExact(file: string, value: unknown): void {
+  const bytes = `${JSON.stringify(value, null, 2)}\n`;
+  if (fs.existsSync(file)) {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: provider pickup artifact must be a regular file`);
+    if (fs.readFileSync(file, "utf8") !== bytes) throw new Error(`${file}: existing provider pickup artifact does not match the exact canonical inputs`);
+    return;
+  }
+  fs.writeFileSync(file, bytes, { encoding: "utf8", mode: 0o600, flag: "wx" });
+}
+
+function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPreflight | null {
+  if (!options.workItemRef) return null;
+  const identity = githubWorkItemIdentity(options.workItemRef);
+  if (identity.owner !== repo.owner || identity.name !== repo.name) {
+    throw new Error(`Work Item ${options.workItemRef} does not belong to detected repository ${repo.owner}/${repo.name}`);
+  }
+  const branch = currentGitBranch(options.repoPath);
+  if (options.providerBranch !== undefined && options.providerBranch !== branch) {
+    throw new Error(`provider branch ${JSON.stringify(options.providerBranch)} does not match the actual Git worktree branch ${JSON.stringify(branch)}`);
+  }
+  const actor = resolveCurrentAssignmentActor();
+  const ghBin = options.ghBin ?? "gh";
+  const login = options.providerLogin ?? (options.online ? currentGitHubLogin(ghBin) : undefined);
+  if (!login) throw new Error("provider pickup requires --provider-login when --online is not enabled");
+  const requestedArtifactRoot = path.resolve(options.artifactRoot ?? path.join(options.repoPath, ".kontourai", "flow-agents"));
+  const repository = path.resolve(options.repoPath);
+  const relative = path.relative(repository, requestedArtifactRoot);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("provider pickup artifact root must stay inside the repository");
+  }
+  let cursor = repository;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    if (!fs.existsSync(cursor)) break;
+    if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`provider pickup artifact path contains a symbolic link: ${cursor}`);
+  }
+  return { identity, branch, actor, login, requestedArtifactRoot };
+}
+
+function persistProviderPickup(options: ProviderBootstrapOptions, repo: Repo, preflight: ProviderPickupPreflight | null): ProviderPickupPlan | null {
+  if (!preflight) return null;
+  const { identity, branch, actor, login } = preflight;
+  if (currentGitBranch(options.repoPath) !== branch) throw new Error("Git worktree branch changed during provider pickup preparation");
+  const artifactRoot = assertProjectSettingsRoot(options.repoPath, preflight.requestedArtifactRoot);
+  const sessionDir = path.join(artifactRoot, identity.slug);
+  if (fs.existsSync(sessionDir)) {
+    const stat = fs.lstatSync(sessionDir);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("provider pickup session target must be a regular directory");
+  } else {
+    fs.mkdirSync(sessionDir);
+  }
+  const artifacts = {
+    plan_file: path.join(sessionDir, "provider-pickup.json"),
+    actor_file: path.join(sessionDir, "provider-pickup.actor.json"),
+    claim_input_file: path.join(sessionDir, "provider-pickup.claim-input.json"),
+    issue_snapshot_file: path.join(sessionDir, "provider-pickup.issue.json"),
+    liveness_events_file: path.join(sessionDir, "provider-pickup.liveness.json"),
+    effective_state_file: path.join(sessionDir, "provider-pickup.effective-state.json"),
+  };
+  const claimInput = {
+    repo: { owner: repo.owner, name: repo.name },
+    issue_number: identity.issueNumber,
+    assignee_login: login,
+    label_name: "agent:claimed",
+    claim_comment_marker: "<!-- flow-agents:assignment-claim -->",
+    actor_key: actor.actorKey,
+    work_item_ref: identity.ref,
+    branch,
+    artifact_dir: `.kontourai/flow-agents/${identity.slug}`,
+  };
+  let claimedAt: string | undefined;
+  if (fs.existsSync(artifacts.plan_file)) {
+    const existing = JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as Partial<ProviderPickupPlan>;
+    if (existing.role !== "ProviderPickupPlan"
+        || existing.work_item_ref !== identity.ref
+        || existing.provider_branch !== branch
+        || existing.actor?.actorKey !== actor.actorKey
+        || typeof existing.claim?.record?.claimed_at !== "string") {
+      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+    }
+    claimedAt = existing.claim.record.claimed_at;
+  }
+  const claim = renderGithubClaim(identity.slug, claimInput, actor.actor, claimedAt);
+  const flowAgents = "flow-agents";
+  const plan: ProviderPickupPlan = {
+    schema_version: "1.0",
+    role: "ProviderPickupPlan",
+    work_item_ref: identity.ref,
+    slug: identity.slug,
+    artifact_root: artifactRoot,
+    session_dir: sessionDir,
+    provider_branch: branch,
+    actor,
+    claim,
+    artifacts,
+    operations: {
+      claim: claim.gh_commands,
+      observe_issue: {
+        argv: ["gh", "issue", "view", String(identity.issueNumber), "--repo", `${repo.owner}/${repo.name}`, "--json", "number,state,assignees,labels,comments"],
+        stdout_file: artifacts.issue_snapshot_file,
+      },
+      derive_effective_state: {
+        argv: [
+          flowAgents, "assignment-provider", "status",
+          "--provider", "github",
+          "--repo", `${repo.owner}/${repo.name}`,
+          "--issue-json", artifacts.issue_snapshot_file,
+          "--subject-id", identity.slug,
+          "--liveness-events-json", artifacts.liveness_events_file,
+          "--self-actor", actor.actorKey,
+        ],
+        stdout_file: artifacts.effective_state_file,
+      },
+      start_workflow: {
+        argv: [
+          flowAgents, "workflow", "start",
+          "--artifact-root", artifactRoot,
+          "--flow", "builder.build",
+          "--work-item", identity.ref,
+          "--assignment-provider", "github",
+          "--effective-state-json", artifacts.effective_state_file,
+        ],
+      },
+    },
+  };
+  writeJsonIfAbsentOrExact(artifacts.actor_file, actor.actor);
+  writeJsonIfAbsentOrExact(artifacts.claim_input_file, claimInput);
+  writeJsonIfAbsentOrExact(artifacts.liveness_events_file, []);
+  writeJsonIfAbsentOrExact(artifacts.plan_file, plan);
+  return plan;
+}
+
+export function prepareProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPlan | null {
+  return persistProviderPickup(options, repo, preflightProviderPickup(options, repo));
 }
 
 function discoverProject(ghBin: string, owner: string, requested?: number): Project {
@@ -336,7 +532,7 @@ function publishDocuments(root: string, lock: string, rootStat: fs.Stats, pendin
   }
 }
 
-export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; offlineRemediation?: string } {
+export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; offlineRemediation?: string; pickup?: ProviderPickupPlan } {
   const repoPath = path.resolve(options.repoPath);
   const repo = detectGitHubRepo(repoPath);
   const ghBin = options.ghBin ?? "gh";
@@ -351,6 +547,9 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     }
     project = { number: options.projectNumber };
   }
+  // Validate every pickup identity before provider settings or remote labels
+  // are mutated. Claim operations themselves remain render-only.
+  const pickupPreflight = preflightProviderPickup(options, repo);
 
   const requestedRoot = options.scope === "global"
     ? path.resolve(options.globalSettingsRoot ?? path.join(os.homedir(), ".config", "flow-agents"))
@@ -379,7 +578,8 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
     else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
     publishDocuments(root, lock, rootStat, pending);
     const files = pending.map((item) => item.file);
-    return { repo, project, files, offlineRemediation };
+    const pickup = persistProviderPickup(options, repo, pickupPreflight);
+    return { repo, project, files, offlineRemediation, ...(pickup ? { pickup } : {}) };
   } finally {
     try {
       const currentRoot = fs.lstatSync(root);
@@ -399,6 +599,10 @@ Options:
   --global-settings-root    Global settings directory (default: ~/.config/flow-agents).
   --provider-project NUMBER GitHub Project number.
   --online                  Verify gh auth, discover/verify the project, and create the claim label if missing.
+  --work-item OWNER/REPO#N  Prepare exact provider claim, observation, status, and workflow-start inputs.
+  --provider-login LOGIN    Authenticated provider login (required offline with --work-item).
+  --provider-branch BRANCH  Assert the provider branch equals the actual Git worktree branch.
+  --artifact-root PATH      Runtime artifact root (default: <repo>/.kontourai/flow-agents).
   --json
 `);
 }
@@ -419,6 +623,10 @@ export function main(argv = process.argv.slice(2)): number {
       globalSettingsRoot: flagString(args.flags, "global-settings-root"),
       projectNumber,
       online: flagBool(args.flags, "online"),
+      workItemRef: flagString(args.flags, "work-item"),
+      providerLogin: flagString(args.flags, "provider-login"),
+      providerBranch: flagString(args.flags, "provider-branch"),
+      artifactRoot: flagString(args.flags, "artifact-root"),
     });
     if (flagBool(args.flags, "json")) console.log(JSON.stringify(result, null, 2));
     else {

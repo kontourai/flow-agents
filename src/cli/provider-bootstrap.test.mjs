@@ -82,6 +82,130 @@ test("offline project bootstrap writes all three schema-valid provider bindings"
   assert.equal(change.projects[0].provider.executor, "gh-cli");
 });
 
+test("provider pickup derives one exact branch-bound claim and start plan without remote mutation", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  try {
+    const result = bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: path.join(repo, "context", "settings"),
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+      providerBranch: "agent/provider-pickup",
+    });
+    const pickup = result.pickup;
+    assert.ok(pickup);
+    assert.equal(pickup.slug, "example-product-44");
+    assert.equal(pickup.provider_branch, "agent/provider-pickup");
+    assert.equal(pickup.actor.actorKey, "pickup-runtime-actor");
+    assert.equal(pickup.claim.record.subject_id, "example-product-44");
+    assert.equal(pickup.claim.record.work_item_ref, "example/product#44");
+    assert.equal(pickup.claim.record.branch, "agent/provider-pickup");
+    assert.deepEqual(pickup.operations.claim[0], [
+      "gh", "issue", "edit", "44", "--repo", "example/product", "--add-assignee", "provider-login",
+    ]);
+    assert.deepEqual(pickup.operations.observe_issue.argv, [
+      "gh", "issue", "view", "44", "--repo", "example/product", "--json", "number,state,assignees,labels,comments",
+    ]);
+    assert.deepEqual(pickup.operations.start_workflow.argv.slice(-6), [
+      "--work-item", "example/product#44", "--assignment-provider", "github", "--effective-state-json", pickup.artifacts.effective_state_file,
+    ]);
+    assert.equal(read(pickup.artifacts.plan_file).provider_branch, "agent/provider-pickup");
+    assert.equal(read(pickup.artifacts.claim_input_file).artifact_dir, ".kontourai/flow-agents/example-product-44");
+    assert.deepEqual(read(pickup.artifacts.liveness_events_file), []);
+
+    const repeated = bootstrapProviders({
+      scope: "project",
+      repoPath: repo,
+      projectSettingsRoot: path.join(repo, "context", "settings"),
+      projectNumber: 7,
+      workItemRef: "example/product#44",
+      providerLogin: "provider-login",
+    });
+    assert.deepEqual(repeated.pickup, pickup, "rerun reuses the exact prepared claim generation");
+
+    fs.writeFileSync(pickup.artifacts.issue_snapshot_file, JSON.stringify({
+      number: 44,
+      state: "OPEN",
+      assignees: [{ login: "provider-login" }],
+      labels: [{ name: "agent:claimed" }],
+      comments: [{
+        id: "IC_pickup_44",
+        createdAt: pickup.claim.record.claimed_at,
+        author: { login: "provider-login" },
+        body: pickup.claim.claim_comment_body,
+      }],
+    }));
+    const status = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.derive_effective_state.argv.slice(1),
+    ], { encoding: "utf8" });
+    assert.equal(status.status, 0, `${status.stdout}\n${status.stderr}`);
+    fs.writeFileSync(pickup.operations.derive_effective_state.stdout_file, status.stdout);
+    assert.equal(JSON.parse(status.stdout).effective.reason, "self_is_holder");
+
+    fs.writeFileSync(
+      path.join(pickup.session_dir, `${pickup.slug}--pull-work.md`),
+      `# Pull Work\n\nSelected Work Item: ${pickup.work_item_ref}\n`,
+    );
+    const started = spawnSync(process.execPath, [
+      "build/src/cli.js",
+      ...pickup.operations.start_workflow.argv.slice(1),
+    ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+    assert.equal(started.status, 0, `${started.stdout}\n${started.stderr}`);
+    assert.equal(read(path.join(pickup.session_dir, "state.json")).branch, "agent/provider-pickup");
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
+test("provider pickup rejects ref, branch, actor, and artifact-root ambiguity before claim rendering", () => {
+  const repo = repoFixture();
+  execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
+  let caseNumber = 0;
+  const rejectWithoutMutation = (overrides, pattern) => {
+    caseNumber += 1;
+    const projectSettingsRoot = path.join(repo, "context", `settings-${caseNumber}`);
+    assert.throws(
+      () => bootstrapProviders({
+        scope: "project",
+        repoPath: repo,
+        projectSettingsRoot,
+        projectNumber: 7,
+        providerLogin: "provider-login",
+        ...overrides,
+      }),
+      pattern,
+    );
+    assert.equal(fs.existsSync(projectSettingsRoot), false, "failed pickup preflight must not publish provider settings");
+  };
+  try {
+    rejectWithoutMutation({ workItemRef: "other/product#44" }, /does not belong to detected repository/);
+    rejectWithoutMutation(
+      { workItemRef: "example/product", providerBranch: "agent/provider-pickup" },
+      /exact owner\/repo#numeric-id/,
+    );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", providerBranch: "agent/different" },
+      /does not match the actual Git worktree branch/,
+    );
+    rejectWithoutMutation(
+      { workItemRef: "example/product#44", artifactRoot: path.join(repo, "..", "outside") },
+      /must stay inside the repository/,
+    );
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
+});
+
 test("global bootstrap replaces only the matching repository entry", () => {
   const repo = repoFixture();
   const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-global-"));
