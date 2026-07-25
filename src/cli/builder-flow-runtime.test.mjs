@@ -39,7 +39,8 @@ import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 
 test("provisional delivery request serialization preserves every exact lifecycle binding", () => {

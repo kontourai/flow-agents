@@ -311,23 +311,6 @@ async function publishDeliveryFromPublicWorkflow(
   return 0;
 }
 
-/** Hermetic integration seam; production dispatch always uses the fixed OS authority above. */
-export function publishDeliveryFromPublicWorkflowWithAuthorityForTest(
-  sessionDir: string,
-  authorizationFile: string,
-  authority: ProvisionalDeliveryAuthority,
-): Promise<number> {
-  return publishDeliveryFromPublicWorkflow(sessionDir, false, "provisional", authorizationFile, authority);
-}
-
-/** Hermetic terminal-continuation seam paired with the provisional authority fixture above. */
-export function publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest(
-  sessionDir: string,
-  authority: ProvisionalDeliveryAuthority,
-): Promise<number> {
-  return publishDeliveryFromPublicWorkflow(sessionDir, false, "terminal", undefined, authority);
-}
-
 type ProvisionalDeliveryTransaction = {
   backupPath: string | undefined;
   complete: () => void;
