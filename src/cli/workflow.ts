@@ -24,6 +24,10 @@ import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-pro
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import {
+  createContinuationEvidenceCheckpointWriter,
+  validateContinuationEvidenceCheckpointDirectory,
+} from "../continuation-evidence-checkpoints.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -267,11 +271,16 @@ function readSignedCheckpointStatement(file: string): JsonRecord {
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), "workflow drive");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), "workflow drive");
   const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
   if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
   const evidenceSigningKeyFile = flagString(parsed.flags, "evidence-signing-key-file");
   if (evidenceSigningKeyFile && !json) throw new Error("workflow drive --evidence-signing-key-file requires --json");
+  const evidenceCheckpointDir = flagString(parsed.flags, "evidence-checkpoint-dir");
+  if (evidenceCheckpointDir && !evidenceSigningKeyFile) {
+    throw new Error("workflow drive --evidence-checkpoint-dir requires --evidence-signing-key-file");
+  }
+  if (evidenceCheckpointDir && !json) throw new Error("workflow drive --evidence-checkpoint-dir requires --json");
   const maxTurns = integerFlag(parsed.flags, "max-turns", 4, 1, 100);
   const turnTimeoutMs = integerFlag(parsed.flags, "turn-timeout-ms", 900_000, 1, 86_400_000);
   const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
@@ -280,11 +289,20 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const { slug, projectRoot } = readBoundSession(sessionDir);
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
+  if (evidenceCheckpointDir) validateContinuationEvidenceCheckpointDirectory(evidenceCheckpointDir);
   let evidenceSigner: EvidenceSigner | null = null;
   let observedAdapterTurns: Array<Record<string, unknown>> = [];
   const driven = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
+    const checkpointWriter = evidenceCheckpointDir && evidenceSigner
+      ? createContinuationEvidenceCheckpointWriter({
+          checkpointDir: evidenceCheckpointDir,
+          signer: evidenceSigner,
+          adapterCommandIdentity: adapterCommand.identity,
+          maxTurns,
+        })
+      : null;
     const continuationStore = createFileContinuationStore(sessionDir);
     const outcome = await driveBuilderFlowSession({
       sessionDir,
@@ -321,6 +339,9 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
       }),
       ...(evidenceSigningKeyFile ? { preflightTurn: async (request) => {
         assertAcceptedTurnEvidenceCapacity(attestationTurns(continuationStore.acceptedTurns()), request);
+      } } : {}),
+      ...(checkpointWriter ? { onTurnAccepted: async (_request, _result, capture, synchronizedSession) => {
+        checkpointWriter.publish(capture, canonicalGateProjection(synchronizedSession.run));
       } } : {}),
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });

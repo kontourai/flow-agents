@@ -448,6 +448,13 @@ export {
   runContinuationDriver,
   withContinuationDriverLock,
 } from "./continuation-driver.js";
+export {
+  verifyContinuationEvidenceCheckpoints,
+} from "./continuation-evidence-checkpoints.js";
+export type {
+  ContinuationEvidenceCheckpoint,
+  VerifiedContinuationEvidenceCheckpoints,
+} from "./continuation-evidence-checkpoints.js";
 export type {
   ContinuationBarrier,
   ContinuationContextPolicy,
