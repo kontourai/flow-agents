@@ -768,42 +768,276 @@ test("public terminal delivery refuses an active learn step even after a positiv
   );
 });
 
-test("Trust Verify accepts provisional delivery only at the exact companion-only checked revision", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  git("init"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Flow Agents Test");
-  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
-  git("add", "."); git("commit", "-m", "reviewed source");
-  const publishedHead = git("rev-parse", "HEAD");
-  const directory = path.join(root, "delivery", "session-a");
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
-  git("add", "delivery"); git("commit", "-m", "exact provisional transport");
-  const exactCheckedRevision = git("rev-parse", "HEAD");
+test("Trust Verify accepts exact four-path and byte-identical terminal companion revisions only", () => {
   const reconcile = require("../../scripts/ci/trust-reconcile.js");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(fs.realpathSync(root), fs.realpathSync(path.join(directory, "trust.bundle")), publishedHead, exactCheckedRevision), true);
-  git("switch", "-c", "mode-trick");
-  fs.chmodSync(path.join(directory, "trust.checkpoint.intoto.json"), 0o755);
-  git("add", "delivery"); git("commit", "-m", "executable companion trick");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
-  git("switch", "--detach", exactCheckedRevision);
-  fs.writeFileSync(path.join(root, "source.txt"), "unreviewed source change\n");
-  git("add", "source.txt"); git("commit", "-m", "extra source change");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
-  git("switch", "--orphan", "unrelated");
-  fs.rmSync(path.join(root, "source.txt"), { force: true });
-  fs.rmSync(path.join(root, "delivery"), { recursive: true, force: true });
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
-  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
-  git("add", "."); git("commit", "-m", "unrelated same tree");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
+  const makeFixture = ({ status = "unsigned", mutateBeforeCommit } = {}) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    git("init");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "Flow Agents Test");
+    fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
+    git("add", ".");
+    git("commit", "-m", "reviewed source");
+    const publishedHead = git("rev-parse", "HEAD");
+    const directory = path.join(root, "delivery", "session-a");
+    const bundle = path.join(directory, "trust.bundle");
+    const checkpoint = path.join(directory, "trust.checkpoint.json");
+    const descriptor = path.join(directory, "trust.checkpoint.attestation.json");
+    const companionName = status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json";
+    const companion = path.join(directory, companionName);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(bundle, "{}\n");
+    fs.writeFileSync(checkpoint, `${JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead })}\n`);
+    fs.writeFileSync(descriptor, `${JSON.stringify({ status, path: companionName })}\n`);
+    fs.writeFileSync(companion, "{}\n");
+    mutateBeforeCommit?.({ root, directory, bundle, checkpoint, descriptor, companion, companionName, publishedHead });
+    git("add", ".");
+    git("commit", "-m", "provisional delivery transport");
+    return {
+      root,
+      git,
+      directory,
+      bundle,
+      checkpoint,
+      descriptor,
+      companion,
+      companionName,
+      publishedHead,
+      provisionalHead: git("rev-parse", "HEAD"),
+    };
+  };
+  const accepted = (fixture, bundleSha = fixture.publishedHead, changeSha = fixture.provisionalHead) => (
+    reconcile.provisionalDeliveryIsExactCheckedRevision(
+      fs.realpathSync(fixture.root),
+      fs.realpathSync(fixture.bundle),
+      bundleSha,
+      changeSha,
+    )
+  );
+  const makeThreePathRevision = (
+    status,
+    { checkpointStatus = "delivered", checkpointPhase = "release" } = {},
+  ) => {
+    const fixture = makeFixture({ status });
+    const descriptorAtCheckpoint = fs.readFileSync(fixture.descriptor);
+    fs.writeFileSync(fixture.bundle, `${checkpointStatus} ${status} bundle\n`);
+    fs.writeFileSync(fixture.checkpoint, `${JSON.stringify({
+      status: checkpointStatus,
+      phase: checkpointPhase,
+      commit_sha: fixture.provisionalHead,
+    })}\n`);
+    fs.writeFileSync(fixture.companion, `${checkpointStatus} ${status} companion\n`);
+    fixture.git("add", "delivery");
+    fixture.git("commit", "-m", `${checkpointStatus} ${checkpointPhase} ${status} delivery`);
+    const checkedHead = fixture.git("rev-parse", "HEAD");
+    assert.deepEqual(
+      fs.readFileSync(fixture.descriptor),
+      descriptorAtCheckpoint,
+      `${checkpointStatus}/${checkpointPhase} ${status} transport leaves descriptor raw bytes unchanged`,
+    );
+    assert.deepEqual(
+      fixture.git("diff", "--name-only", `${fixture.provisionalHead}..${checkedHead}`, "--").split("\n").sort(),
+      [
+        `delivery/session-a/${fixture.companionName}`,
+        "delivery/session-a/trust.bundle",
+        "delivery/session-a/trust.checkpoint.json",
+      ].sort(),
+      `${checkpointStatus}/${checkpointPhase} ${status} transport changes exactly the three mutable paths`,
+    );
+    return { ...fixture, checkedHead };
+  };
+
+  const exactFour = makeFixture();
+  assert.equal(accepted(exactFour), true, "the existing exact-four-path provisional transport remains accepted");
+
+  const unsignedTerminal = makeThreePathRevision("unsigned");
+  assert.equal(
+    accepted(unsignedTerminal, unsignedTerminal.provisionalHead, unsignedTerminal.checkedHead),
+    true,
+    "an unsigned terminal transport accepts an exact three-path delta with a raw-byte-identical descriptor",
+  );
+  const signedTerminal = makeThreePathRevision("signed");
+  assert.equal(
+    accepted(signedTerminal, signedTerminal.provisionalHead, signedTerminal.checkedHead),
+    true,
+    "a signed terminal transport accepts an exact three-path delta with a raw-byte-identical descriptor",
+  );
+  const provisionalThreePath = makeThreePathRevision("unsigned", {
+    checkpointStatus: "provisional",
+    checkpointPhase: "ci-readiness",
+  });
+  assert.equal(
+    accepted(provisionalThreePath, provisionalThreePath.provisionalHead, provisionalThreePath.checkedHead),
+    false,
+    "a provisional ci-readiness checkpoint cannot use the terminal exact-three-path exception",
+  );
+  const nonReleaseTerminal = makeThreePathRevision("unsigned", {
+    checkpointStatus: "delivered",
+    checkpointPhase: "learning",
+  });
+  assert.equal(
+    accepted(nonReleaseTerminal, nonReleaseTerminal.provisionalHead, nonReleaseTerminal.checkedHead),
+    false,
+    "a delivered checkpoint outside the release phase cannot use the terminal exact-three-path exception",
+  );
+  const mutateTerminalRevision = (message, mutate) => {
+    const fixture = makeThreePathRevision("unsigned");
+    mutate(fixture);
+    fixture.git("add", "-A");
+    fixture.git("commit", "-m", message);
+    return { ...fixture, mutatedHead: fixture.git("rev-parse", "HEAD") };
+  };
+
+  const terminalExtraPath = mutateTerminalRevision("terminal delivery with extra path", ({ directory }) => {
+    fs.writeFileSync(path.join(directory, "unexpected.json"), "{}\n");
+  });
+  assert.equal(
+    accepted(terminalExtraPath, terminalExtraPath.provisionalHead, terminalExtraPath.mutatedHead),
+    false,
+    "an extra delivery path cannot extend an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalSourcePath = mutateTerminalRevision("terminal delivery with source path", ({ root }) => {
+    fs.writeFileSync(path.join(root, "source.txt"), "unreviewed terminal source change\n");
+  });
+  assert.equal(
+    accepted(terminalSourcePath, terminalSourcePath.provisionalHead, terminalSourcePath.mutatedHead),
+    false,
+    "a source path cannot extend an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalMissingCompanion = mutateTerminalRevision("terminal delivery missing companion", ({ companion }) => {
+    fs.unlinkSync(companion);
+  });
+  assert.equal(
+    accepted(terminalMissingCompanion, terminalMissingCompanion.provisionalHead, terminalMissingCompanion.mutatedHead),
+    false,
+    "a terminal exact-three revision is rejected when its selected companion is missing",
+  );
+
+  const terminalAlteredCheckout = makeThreePathRevision("unsigned");
+  fs.writeFileSync(terminalAlteredCheckout.companion, "terminal checkout bytes differ from the checked commit\n");
+  assert.equal(
+    accepted(terminalAlteredCheckout, terminalAlteredCheckout.provisionalHead, terminalAlteredCheckout.checkedHead),
+    false,
+    "altered checkout bytes reject an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalExecutableCompanion = mutateTerminalRevision("terminal executable companion", ({ companion }) => {
+    fs.chmodSync(companion, 0o755);
+  });
+  assert.equal(
+    accepted(terminalExecutableCompanion, terminalExecutableCompanion.provisionalHead, terminalExecutableCompanion.mutatedHead),
+    false,
+    "an executable companion rejects an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalNonRegularCompanion = mutateTerminalRevision("terminal non-regular companion", ({ companion }) => {
+    fs.unlinkSync(companion);
+    fs.symlinkSync("trust.bundle", companion);
+  });
+  assert.equal(
+    accepted(terminalNonRegularCompanion, terminalNonRegularCompanion.provisionalHead, terminalNonRegularCompanion.mutatedHead),
+    false,
+    "a non-regular companion rejects an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalUnrelated = makeThreePathRevision("unsigned");
+  const terminalTree = new Map(
+    ["trust.bundle", "trust.checkpoint.attestation.json", "trust.checkpoint.json", terminalUnrelated.companionName]
+      .map((name) => [name, fs.readFileSync(path.join(terminalUnrelated.directory, name))]),
+  );
+  terminalUnrelated.git("switch", "--orphan", "unrelated-terminal");
+  fs.rmSync(path.join(terminalUnrelated.root, "source.txt"), { force: true });
+  fs.rmSync(terminalUnrelated.directory, { recursive: true, force: true });
+  fs.mkdirSync(terminalUnrelated.directory, { recursive: true });
+  fs.writeFileSync(path.join(terminalUnrelated.root, "source.txt"), "reviewed source\n");
+  for (const [name, bytes] of terminalTree) fs.writeFileSync(path.join(terminalUnrelated.directory, name), bytes);
+  terminalUnrelated.git("add", ".");
+  terminalUnrelated.git("commit", "-m", "unrelated terminal-shaped tree");
+  assert.equal(
+    accepted(terminalUnrelated, terminalUnrelated.provisionalHead, terminalUnrelated.git("rev-parse", "HEAD")),
+    false,
+    "a terminal-shaped revision on unrelated non-ancestor history is rejected",
+  );
+
+  const extraPath = makeFixture({
+    mutateBeforeCommit({ directory }) {
+      fs.writeFileSync(path.join(directory, "unexpected.json"), "{}\n");
+    },
+  });
+  assert.equal(accepted(extraPath), false, "an extra delivery path is rejected");
+
+  const sourcePath = makeFixture({
+    mutateBeforeCommit({ root }) {
+      fs.writeFileSync(path.join(root, "source.txt"), "unreviewed source change\n");
+    },
+  });
+  assert.equal(accepted(sourcePath), false, "a source path in the delivery delta is rejected");
+
+  const missingDescriptor = makeFixture({
+    mutateBeforeCommit({ descriptor }) {
+      fs.unlinkSync(descriptor);
+    },
+  });
+  assert.equal(accepted(missingDescriptor), false, "a missing descriptor is rejected");
+
+  const missingCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.unlinkSync(companion);
+    },
+  });
+  assert.equal(accepted(missingCompanion), false, "a missing selected companion is rejected");
+
+  const alteredCheckout = makeFixture();
+  fs.writeFileSync(alteredCheckout.companion, "checkout bytes differ from the checked commit\n");
+  assert.equal(accepted(alteredCheckout), false, "altered checkout bytes are rejected");
+
+  const executableCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.chmodSync(companion, 0o755);
+    },
+  });
+  assert.equal(accepted(executableCompanion), false, "an executable companion is rejected");
+
+  const nonRegularCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.unlinkSync(companion);
+      fs.symlinkSync("trust.bundle", companion);
+    },
+  });
+  assert.equal(accepted(nonRegularCompanion), false, "a non-regular companion is rejected");
+
+  const mismatchedSelection = makeFixture({
+    status: "signed",
+    mutateBeforeCommit({ descriptor }) {
+      fs.writeFileSync(descriptor, `${JSON.stringify({ status: "signed", path: "trust.checkpoint.intoto.json" })}\n`);
+    },
+  });
+  assert.equal(accepted(mismatchedSelection), false, "descriptor status and selected companion must agree");
+
+  const unrelated = makeFixture();
+  unrelated.git("switch", "--orphan", "unrelated");
+  fs.rmSync(path.join(unrelated.root, "source.txt"), { force: true });
+  fs.rmSync(unrelated.directory, { recursive: true, force: true });
+  fs.mkdirSync(unrelated.directory, { recursive: true });
+  fs.writeFileSync(path.join(unrelated.root, "source.txt"), "reviewed source\n");
+  fs.writeFileSync(unrelated.bundle, "{}\n");
+  fs.writeFileSync(unrelated.checkpoint, `${JSON.stringify({
+    status: "provisional",
+    phase: "ci-readiness",
+    commit_sha: unrelated.publishedHead,
+  })}\n`);
+  fs.writeFileSync(unrelated.descriptor, `${JSON.stringify({ status: "unsigned", path: unrelated.companionName })}\n`);
+  fs.writeFileSync(unrelated.companion, "{}\n");
+  unrelated.git("add", ".");
+  unrelated.git("commit", "-m", "unrelated same tree");
+  assert.equal(
+    accepted(unrelated, unrelated.publishedHead, unrelated.git("rev-parse", "HEAD")),
+    false,
+    "an unrelated non-ancestor revision is rejected even with the same delivery tree",
+  );
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
