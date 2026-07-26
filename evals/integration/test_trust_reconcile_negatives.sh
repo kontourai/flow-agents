@@ -804,6 +804,244 @@ else
   _fail "push-event-failing-verify: expected the push-event no-op line -- output: $out7v"
 fi
 
+# 7w-7ad. #1011: an exemption keyed on a bot identity failed silently when that identity
+#   rotated, and an unmatched marker was indistinguishable from an absent one.
+#
+#   Live incident: the standing release-automation exemption was scoped
+#   "author:github-actions[bot] branch-prefix:release-please--". The release bot moved to
+#   the kontourai-releases GitHub App, the author: half stopped matching, matchesScope()'s
+#   AND therefore failed, and Trust Reconcile went red on EVERY release PR for 13 days with
+#   nothing surfacing it -- 5.4.0 never shipped. The reporting made it invisible: the old
+#   flat 'delivery/DECLARED marker present but out of scope for this change' line read
+#   identically whether the marker was absent, stale, or genuinely inapplicable.
+#
+#   Two halves, both pinned below:
+#     Part 1 (7w-7y) -- the repo's OWN delivery/DECLARED release-automation entry is scoped
+#       on the durable branch prefix alone, so an actor rotation cannot recur, and the dead
+#       author:github-actions[bot] entry is gone rather than left inert beside a replacement.
+#       7w/7x run against a COPY of the real committed delivery/DECLARED, not a fixture --
+#       a fixture would prove the matcher works, not that the governance file is correct.
+#     Part 2 (7z-7ad) -- an unmatched marker is a distinguishable outcome: PARTIAL match
+#       (the #1011 signature: some conditions matched, one drifted) vs no condition matching
+#       anything, each naming the failed conditions and the resolved context values they
+#       failed against. Verdict unchanged: every case below still exits non-zero (7ac).
+
+REAL_DECLARED="$ROOT/delivery/DECLARED"
+RELEASE_REF="release-please--branches--main--components--flow-agents"
+
+# copy_real_declared <dir> -- stage the repo's committed delivery/DECLARED in a temp root.
+copy_real_declared() {
+  mkdir -p "$1/delivery"
+  cp "$REAL_DECLARED" "$1/delivery/DECLARED"
+}
+
+# 7w. ACTOR-ROTATION SIMULATION (the #1011 recurrence, closed). The real committed
+#     delivery/DECLARED, the real release-please branch name, and an actor that has NEVER
+#     existed -- a hypothetical FUTURE rotation of the release bot. Under the old
+#     identity-keyed scope this is exactly the 13-day outage; it must now exempt.
+CASE7W="$DECLARED_TMPROOT/real-declared-actor-rotation"
+mkdir -p "$CASE7W"
+copy_real_declared "$CASE7W"
+out7w="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="some-future-release-bot[bot]" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7W" 2>&1)"
+code7w=$?
+if [[ $code7w -eq 0 ]]; then
+  _pass "real-declared-actor-rotation: exits 0 -- the committed release-automation exemption survives an actor rotation (#1011 recurrence closed)"
+else
+  _fail "real-declared-actor-rotation: expected exit 0, got $code7w -- the committed delivery/DECLARED release exemption is still identity-coupled and will silently break on the next bot rotation (#1011) -- output: $out7w"
+fi
+if echo "$out7w" | grep -qF "DECLARED (no-agent-delivery): branch-prefix:release-please--"; then
+  _pass "real-declared-actor-rotation: DECLARED line names the branch-prefix-only release scope"
+else
+  _fail "real-declared-actor-rotation: expected a DECLARED line naming 'branch-prefix:release-please--' -- output: $out7w"
+fi
+
+# 7x. SAME file, a SECOND, differently-shaped rotation plus a wholly UNRESOLVABLE actor
+#     (TRUST_RECONCILE_ACTOR/GITHUB_ACTOR unset -> ctx.actor === ''). One passing actor
+#     value would only prove a lucky string; the exemption must not depend on the actor at
+#     all, including when the actor cannot be resolved.
+CASE7X="$DECLARED_TMPROOT/real-declared-actor-independent"
+mkdir -p "$CASE7X"
+copy_real_declared "$CASE7X"
+out7x="$(env -u TRUST_RECONCILE_ACTOR -u GITHUB_ACTOR TRUST_RECONCILE_REF="$RELEASE_REF" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7X" 2>&1)"
+code7x=$?
+if [[ $code7x -eq 0 ]]; then
+  _pass "real-declared-actor-independent: exits 0 with NO resolvable actor -- the release exemption is actor-independent, not merely tolerant of one new bot name"
+else
+  _fail "real-declared-actor-independent: expected exit 0 with an unresolvable actor, got $code7x -- output: $out7x"
+fi
+out7x2="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="briananderson1222" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7X" 2>&1)"
+code7x2=$?
+if [[ $code7x2 -eq 0 ]]; then
+  _pass "real-declared-actor-independent: exits 0 for a human actor on a release-please-- branch too (documented, accepted branch-prefix residual -- see the entry's own reason)"
+else
+  _fail "real-declared-actor-independent: expected exit 0, got $code7x2 -- output: $out7x2"
+fi
+
+# 7y. The dead entry is DELETED, not left inert. #1010 restored release service by adding a
+#     second identity-keyed entry BESIDE the stale author:github-actions[bot] one; an inert
+#     stale exemption in a governance file teaches readers that stale exemptions are normal.
+#     Checked against the parsed `scope` fields, not the raw file text -- an entry's `reason`
+#     prose legitimately NAMES the dead identity when explaining why it was removed, and a
+#     raw grep would fail on the very explanation the deletion deserves.
+declared_release_bot_scopes="$(node -e '
+  const fs = require("fs");
+  const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const bad = entries
+    .map((e) => (e && typeof e.scope === "string" ? e.scope : ""))
+    .filter((s) => s.includes("author:github-actions[bot]") || s.includes("author:kontourai-releases[bot]"));
+  process.stdout.write(bad.join(" | "));
+' "$REAL_DECLARED")"
+if [[ -z "$declared_release_bot_scopes" ]]; then
+  _pass "declared-no-dead-release-entry: no delivery/DECLARED scope is keyed on a release-bot identity -- neither the dead github-actions[bot] entry nor an identity-keyed replacement remains (#1011)"
+else
+  _fail "declared-no-dead-release-entry: delivery/DECLARED still keys a scope on a release-bot identity [$declared_release_bot_scopes] -- an identity condition couples a standing exemption to something that rotates on someone else's schedule, and an inert stale entry left beside its replacement teaches readers that stale exemptions are normal (#1011)"
+fi
+
+# 7z. PARTIAL match -> STALE-SCOPE SUSPECTED. Reproduces the exact #1011 shape against a
+#     fixture: branch-prefix: matches, author: has drifted. The output must say so, name
+#     the condition that failed, and name the resolved value it failed against.
+CASE7Z="$DECLARED_TMPROOT/partial-stale-scope"
+mkdir -p "$CASE7Z"
+write_declared "$CASE7Z" '[
+  {"scope":"author:github-actions[bot] branch-prefix:release-please--","reason":"release-please automation PR","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z"},
+  {"scope":"branch-prefix:fix/unrelated","reason":"some other lane","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z"}
+]'
+out7z="$(TRUST_RECONCILE_REF="release-please--branches--main" TRUST_RECONCILE_ACTOR="kontourai-releases[bot]" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7Z" 2>&1)"
+code7z=$?
+if [[ $code7z -ne 0 ]]; then
+  _pass "partial-stale-scope: exits non-zero ($code7z) -- a partial match is still no match (verdict unchanged, fail closed)"
+else
+  _fail "partial-stale-scope: expected non-zero exit (a partial match must never exempt), got 0 -- output: $out7z"
+fi
+if echo "$out7z" | grep -qF "STALE-SCOPE SUSPECTED"; then
+  _pass "partial-stale-scope: emitted 'STALE-SCOPE SUSPECTED' -- a drifted exemption is distinguishable from a change that simply has none"
+else
+  _fail "partial-stale-scope: expected 'STALE-SCOPE SUSPECTED' -- output: $out7z"
+fi
+if echo "$out7z" | grep -qF "NO CONDITION MATCHED"; then
+  _fail "partial-stale-scope: must NOT report 'NO CONDITION MATCHED' when a condition DID match -- that is the collapse #1011 is about -- output: $out7z"
+else
+  _pass "partial-stale-scope: does not claim 'NO CONDITION MATCHED' when a condition matched"
+fi
+if echo "$out7z" | grep -qF "failed [author:github-actions[bot] vs actor='kontourai-releases[bot]']"; then
+  _pass "partial-stale-scope: names the FAILED condition and the resolved context value it failed against"
+else
+  _fail "partial-stale-scope: expected \"failed [author:github-actions[bot] vs actor='kontourai-releases[bot]']\" -- output: $out7z"
+fi
+if echo "$out7z" | grep -qF "matched [branch-prefix:release-please-- vs ref='release-please--branches--main']"; then
+  _pass "partial-stale-scope: names the condition that DID match (the half that makes this entry look applicable)"
+else
+  _fail "partial-stale-scope: expected the matched-condition breakdown -- output: $out7z"
+fi
+if echo "$out7z" | grep -qF "out of scope"; then
+  _pass "partial-stale-scope: retains the pinned 'out of scope' substring"
+else
+  _fail "partial-stale-scope: expected the pinned 'out of scope' substring -- output: $out7z"
+fi
+
+# 7aa. NO condition matched anywhere -> the OTHER distinct outcome. This change legitimately
+#      has no exemption; nothing is stale. Still names every failed condition and value.
+CASE7AA="$DECLARED_TMPROOT/no-condition-matched"
+mkdir -p "$CASE7AA"
+write_declared "$CASE7AA" '[
+  {"scope":"author:dependabot[bot]","reason":"dependabot dependency updates","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z"},
+  {"scope":"branch-prefix:fix/unrelated","reason":"some other lane","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z"}
+]'
+out7aa="$(TRUST_RECONCILE_REF="feat/brand-new-work" TRUST_RECONCILE_ACTOR="briananderson1222" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7AA" 2>&1)"
+code7aa=$?
+if [[ $code7aa -ne 0 ]]; then
+  _pass "no-condition-matched: exits non-zero ($code7aa)"
+else
+  _fail "no-condition-matched: expected non-zero exit, got 0 -- output: $out7aa"
+fi
+if echo "$out7aa" | grep -qF "NO CONDITION MATCHED"; then
+  _pass "no-condition-matched: emitted 'NO CONDITION MATCHED' -- 'this change has no exemption' is stated, not implied"
+else
+  _fail "no-condition-matched: expected 'NO CONDITION MATCHED' -- output: $out7aa"
+fi
+if echo "$out7aa" | grep -qF "STALE-SCOPE SUSPECTED"; then
+  _fail "no-condition-matched: must NOT report 'STALE-SCOPE SUSPECTED' when no condition matched -- output: $out7aa"
+else
+  _pass "no-condition-matched: does not cry stale when nothing is stale"
+fi
+if echo "$out7aa" | grep -qF "resolved context: ref='feat/brand-new-work' actor='briananderson1222'"; then
+  _pass "no-condition-matched: prints the resolved scope-matching context the conditions were evaluated against"
+else
+  _fail "no-condition-matched: expected the resolved-context line -- output: $out7aa"
+fi
+if echo "$out7aa" | grep -qF "NO-MATCH scope 'author:dependabot[bot]' (0/1 conditions matched): failed [author:dependabot[bot] vs actor='briananderson1222']"; then
+  _pass "no-condition-matched: per-entry breakdown names each failed condition and the value it failed against"
+else
+  _fail "no-condition-matched: expected the per-entry NO-MATCH breakdown -- output: $out7aa"
+fi
+
+# 7ab. THE THREE CASES ARE DISTINGUISHABLE. The defect #1011 names is not that any one of
+#      these is wrong -- it is that absent, stale, and inapplicable all printed the SAME
+#      sentence. Assert the three diagnostics are pairwise different, by content, not by
+#      exit code (all three exit 1, and must keep doing so -- 7ac).
+diag_absent="$(echo "$out7a" | grep -F 'bundle-required-no-declared-marker' | head -1)"
+diag_nomatch="$(echo "$out7aa" | grep -F 'bundle-required-no-declared-marker' | head -1)"
+diag_partial="$(echo "$out7z" | grep -F 'bundle-required-no-declared-marker' | head -1)"
+if [[ -n "$diag_absent" && -n "$diag_nomatch" && -n "$diag_partial" ]]; then
+  _pass "three-cases-distinguishable: all three cases emit a bundle-required-no-declared-marker issue line"
+else
+  _fail "three-cases-distinguishable: expected an issue line in each of the three cases (absent='$diag_absent' nomatch='$diag_nomatch' partial='$diag_partial')"
+fi
+if [[ "$diag_absent" != "$diag_nomatch" && "$diag_nomatch" != "$diag_partial" && "$diag_absent" != "$diag_partial" ]]; then
+  _pass "three-cases-distinguishable: absent / no-condition-matched / stale-scope produce three DIFFERENT diagnostics (the #1011 collapse is gone)"
+else
+  _fail "three-cases-distinguishable: two or more of the three marker outcomes still report identically -- absent='$diag_absent' nomatch='$diag_nomatch' partial='$diag_partial'"
+fi
+if echo "$out7a" | grep -qE "STALE-SCOPE SUSPECTED|NO CONDITION MATCHED"; then
+  _fail "three-cases-distinguishable: the marker-ABSENT case must not borrow a marker-present diagnostic -- output: $out7a"
+else
+  _pass "three-cases-distinguishable: the marker-absent case keeps its own 'no delivery/DECLARED marker found' diagnostic"
+fi
+
+# 7ac. FAIL-CLOSED PIN. The #1011 change is to the REPORTING, not the verdict. Louder
+#      diagnostics must not become a route to exit 0 without a bundle.
+for pair in "absent:$code7a" "no-condition-matched:$code7aa" "stale-scope:$code7z"; do
+  name="${pair%%:*}"; codev="${pair##*:}"
+  if [[ "$codev" -ne 0 ]]; then
+    _pass "reporting-change-is-fail-closed: $name still exits non-zero ($codev) -- no marker outcome became a pass"
+  else
+    _fail "reporting-change-is-fail-closed: $name exited 0 -- the reporting change must never widen the verdict"
+  fi
+done
+
+# 7ad. Unset context values are STATED, never rendered as an empty string a reader would
+#      mistake for a matched-but-blank value. (An empty context value never matches any
+#      condition -- resolveScopeContext()/matchesScopeCondition() -- so this is precisely a
+#      case where the reason for non-match must be legible.)
+CASE7AD="$DECLARED_TMPROOT/unset-context-rendering"
+mkdir -p "$CASE7AD"
+write_declared "$CASE7AD" '{"scope":"author:dependabot[bot]","reason":"dependabot dependency updates","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z"}'
+out7ad="$(env -u TRUST_RECONCILE_ACTOR -u GITHUB_ACTOR -u TRUST_RECONCILE_REF -u GITHUB_HEAD_REF -u GITHUB_REF \
+  -u TRUST_RECONCILE_SHA -u GITHUB_SHA TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7AD" 2>&1)"
+code7ad=$?
+if [[ $code7ad -ne 0 ]]; then
+  _pass "unset-context-rendering: exits non-zero ($code7ad) -- an unresolvable context never becomes a wildcard match"
+else
+  _fail "unset-context-rendering: expected non-zero exit, got 0 -- output: $out7ad"
+fi
+if echo "$out7ad" | grep -qF "failed [author:dependabot[bot] vs actor=<unset>]"; then
+  _pass "unset-context-rendering: an unresolvable actor renders as <unset>, so 'the condition could not be evaluated' is legible rather than blank"
+else
+  _fail "unset-context-rendering: expected \"failed [author:dependabot[bot] vs actor=<unset>]\" -- output: $out7ad"
+fi
+
 # 8. #379 per-session delivery paths — concurrent-delivery collision resolution.
 #   resolveDeliveryCandidates() now discovers delivery/<slug>/trust.bundle per-session dirs
 #   in addition to the flat path; discoverBundle() selects the candidate whose checkpoint
