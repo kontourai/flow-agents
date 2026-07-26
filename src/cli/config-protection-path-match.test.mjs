@@ -173,6 +173,31 @@ test("#1004 finding 2: an argument-less cd with no trailing space still trips th
   );
 });
 
+test("#1004 re-review: incidental `cd` text is not a directory change (over-block regression)", () => {
+  // The cd guard answers "does a directory-changing builtin RUN here?", so only command-position
+  // text can answer it. Scanning a de-quoted copy of the whole command let prose inside a string
+  // literal trip it -- the reviewer's case blocked with no `cd` anywhere in the command.
+  // Targets are RELATIVE on purpose: that is what makes the guard load-bearing for the verdict.
+  const scratch = tmpdir();
+  const proseAllowed = [
+    `sed -i '' 's/replace me;cd; also/updated/' scratch/${STATE}`,
+    `sed -i '' 's/x;cd&& y/z/' scratch/${STATE}`,
+    `sed -i ${Q}s/a;cd| b/c/${Q} scratch/${STATE}`,
+    `node -e ${Q}require('fs').writeFileSync('scratch/${STATE}','then;cd; done')${Q}`,
+    `sed -i '' 's/recd;/x/' scratch/${STATE}`,
+    `echo 'cd;' && sed -i '' 's/a/b/' scratch/${STATE}`,
+  ];
+  for (const cmd of proseAllowed) {
+    assert.equal(runBash(cmd, scratch).exitCode, 0, `incidental cd text must not block:\n${cmd}`);
+  }
+  // ...while a real directory change in command position still fails closed, including the
+  // forms the tokenizer has to see through: quote concatenation, env prefixes, and keywords.
+  for (const lead of ["cd;", "cd&&", "cd|", "(cd)", "\\cd;", 'c""d;', "FOO=bar cd;", "time cd;", "do cd;"]) {
+    const cmd = `${lead} sed -i '' 's/a/b/' scratch/.kontourai/flow-agents/slug/${STATE}`;
+    assert.equal(runBash(cmd, scratch).exitCode, 2, `real directory change must fail closed:\n${cmd}`);
+  }
+});
+
 test("#682: a bare basename resolved from a cwd INSIDE a session dir still blocks", () => {
   const res = runBash(
     `node -e ${Q}require('fs').writeFileSync('${STATE}','x')${Q}`,

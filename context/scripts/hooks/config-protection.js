@@ -496,20 +496,44 @@ function matchesRedirectProtected(token) {
   return REDIRECT_GLOBAL_RE.test(norm) || REDIRECT_ARTIFACT_RE.test(norm);
 }
 
+/** Builtins that move the shell's working directory. */
+const DIRECTORY_CHANGING_COMMANDS = new Set(['cd', 'pushd', 'popd']);
+
+// Words that may precede the real command word without being it. Skipping a word can only
+// expose MORE `cd`s to the check, never fewer, so this list errs toward fail-closed.
+const COMMAND_POSITION_PREFIXES = new Set([
+  'do', 'then', 'else', 'elif', '!', 'time', 'command', 'builtin', 'eval', 'exec', 'nohup',
+]);
+
 /**
  * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
  * the shell resolves later relative paths against a cwd we did not model. Fail closed:
  * commands that change directory get NO root-scoping relief on artifact-shaped targets.
+ *
+ * #1004 re-review: this asks "does a directory-changing builtin run here?", and only text in
+ * COMMAND POSITION can answer it. The previous implementation scanned a de-quoted copy of the
+ * whole command, so incidental prose inside a string literal tripped it —
+ * `sed -i '' 's/replace me;cd; also/updated/' <path>` was blocked with no `cd` anywhere in the
+ * command. Narrowing the character class again would only move that seam, so the scan is now
+ * scoped structurally: split on connectors and tokenize (both already quote-aware, so a `;` or
+ * a `cd` inside quotes cannot open a segment or become a command word), then inspect only the
+ * command word of each segment. The quote-concatenation case this guard was written for still
+ * works, because the tokenizer joins adjacent fragments: `c""d` yields the token `cd`.
  */
 function commandChangesDirectory(command) {
-  // Strip quote characters first (confirmation-review F2 variant): the shell concatenates
-  // adjacent quoted fragments, so `c""d` executes as `cd` — the guard must see through that.
-  const dequoted = String(command || '').replace(/["']/g, '');
-  // #1004 security review: an ARGUMENT-LESS `cd` still changes directory (to $HOME), and the
-  // trailing group previously demanded whitespace or end-of-string — so `cd;`, `cd&&`, `cd|`
-  // and `(cd)` all evaded the guard. A separator terminates the word just as whitespace does.
-  // The leading group also admits `\` for the alias-bypassing `\cd` spelling.
-  return /(^|[;&|(\\]|\s)(cd|pushd|popd)(\s|$|[;&|)])/.test(dequoted);
+  if (typeof command !== 'string' || !command) return false;
+  for (const segment of splitSegments(command)) {
+    for (const raw of tokenize(segment)) {
+      // Subshell/group punctuation glues to the word it opens: `(cd`, `{cd`, `(cd)`.
+      const word = raw.replace(/^[({]+/, '').replace(/[)}]+$/, '');
+      if (word === '') continue;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) continue; // `FOO=bar cd …` env prefix
+      if (COMMAND_POSITION_PREFIXES.has(word)) continue;
+      if (DIRECTORY_CHANGING_COMMANDS.has(word)) return true;
+      break; // this segment runs something else; its arguments are not command position
+    }
+  }
+  return false;
 }
 
 /**
