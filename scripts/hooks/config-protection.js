@@ -505,7 +505,11 @@ function commandChangesDirectory(command) {
   // Strip quote characters first (confirmation-review F2 variant): the shell concatenates
   // adjacent quoted fragments, so `c""d` executes as `cd` — the guard must see through that.
   const dequoted = String(command || '').replace(/["']/g, '');
-  return /(^|[;&|(]|\s)(cd|pushd|popd)(\s|$)/.test(dequoted);
+  // #1004 security review: an ARGUMENT-LESS `cd` still changes directory (to $HOME), and the
+  // trailing group previously demanded whitespace or end-of-string — so `cd;`, `cd&&`, `cd|`
+  // and `(cd)` all evaded the guard. A separator terminates the word just as whitespace does.
+  // The leading group also admits `\` for the alias-bypassing `\cd` spelling.
+  return /(^|[;&|(\\]|\s)(cd|pushd|popd)(\s|$|[;&|)])/.test(dequoted);
 }
 
 /**
@@ -724,27 +728,38 @@ const PATH_CANDIDATE_CHAR_RE = /[A-Za-z0-9._/~${}-]/;
 // Characters that continue a path COMPONENT. A protected token must both start and end a
 // component: `.../x-trust.bundle.json` and `.../effective-state.json` name other files.
 const PATH_COMPONENT_CHAR_RE = /[A-Za-z0-9._-]/;
-// A recovered candidate is only trustworthy when it STARTS a word: the shell/interpreter
-// contexts in which a path literal legitimately begins. Anything else means the candidate was
-// truncated by something that determines where the write actually lands -- a command
-// substitution (`$(pwd)/…`, backticks), a glob, a runtime concatenation (`dir+'/…'`), or a
-// quoted expansion glued to the path (`"$D"/…`) -- so the destination is unknowable and the
-// block stays. Whitelist, not deny-list: an unrecognized prefix fails closed.
-const CANDIDATE_OPENING_CONTEXT_RE = /[\s(,=[{:;|&]/;
+// A recovered candidate is trustworthy ONLY when it provably STARTS A WORD. Leftward expansion
+// stops at the first character outside PATH_CANDIDATE_CHAR_RE, and that stop is the whole
+// problem: the character that stopped it may be a separator that DETERMINES where the write
+// lands -- a brace-expansion comma (`{slug,other}/state.json` truncates to `other}/state.json`,
+// which looks like an ordinary relative path), a glob, a command substitution's closing paren,
+// a runtime concatenation `+`, or a quoted expansion glued to the path (`"$D"/…`).
+//
+// SECURITY REVIEW (#1004): enumerating those separators one at a time is how the next one gets
+// missed -- the comma was missed exactly that way. So this is a strict WHITELIST of the only
+// two contexts in which an UNQUOTED path literal legitimately begins: whitespace, or the `=` of
+// a `--flag=<path>` value. Every other stop character means the prefix was truncated by
+// something meaningful, the destination is unknowable, and the candidate fails closed.
+//
+// A quote is handled one level up: the quote itself must open a word, so `'…'` after `(` or a
+// comma-separated argument counts, while the closing `"` of `"$D"` and the `+` of `dir+'…'`
+// do not. Both lists are minimal by construction -- adding a character can only ALLOW more,
+// so anything not proven necessary stays out.
+const UNQUOTED_CANDIDATE_OPENS_WORD_RE = /[\s=]/;
+const QUOTED_CANDIDATE_OPENS_WORD_RE = /[\s(,=[{:]/;
 
 /**
- * True when the character(s) left of a recovered candidate prove it begins a fresh path
- * literal. A quote counts only when the quote itself opens a word -- `'/a/b'` after `(` opens
- * one, the closing `"` of `"$D"` does not.
+ * True when the character(s) left of a recovered candidate do NOT prove it begins a fresh path
+ * literal -- i.e. the candidate was truncated by something that decides where it lands.
  */
 function candidatePrefixIsAmbiguous(seg, start) {
   const prefix = seg[start - 1];
   if (prefix === undefined) return false; // the candidate starts the segment
   if (prefix === "'" || prefix === '"') {
     const beforeQuote = seg[start - 2];
-    return beforeQuote !== undefined && !CANDIDATE_OPENING_CONTEXT_RE.test(beforeQuote);
+    return beforeQuote !== undefined && !QUOTED_CANDIDATE_OPENS_WORD_RE.test(beforeQuote);
   }
-  return !CANDIDATE_OPENING_CONTEXT_RE.test(prefix);
+  return !UNQUOTED_CANDIDATE_OPENS_WORD_RE.test(prefix);
 }
 
 /**

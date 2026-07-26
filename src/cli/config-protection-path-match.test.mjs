@@ -125,6 +125,54 @@ for (const [label, cmd] of mustFailClosed) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// #1004 security review: two execution-verified bypasses this redesign introduced. Both exist
+// because a real resolved candidate now flows through a path that `main` never reached (it fed
+// the bare token literal to the resolver, which fails closed for any basename). Pinned with the
+// reviewer's proof-of-concept commands.
+// ---------------------------------------------------------------------------
+
+test("#1004 finding 1: brace expansion cannot truncate into an innocent-looking candidate", () => {
+  // Leftward expansion stops at the comma and yields `other}/<state file>` -- not a bare
+  // basename, no expansion, no glob. It must fail closed on the truncation itself, because the
+  // separator that stopped the expansion is what decides where the write lands.
+  const braced = `.kontourai/flow-agents/{slug,other}/${STATE}`;
+  assert.equal(runBash(`sed -i '' 's/executing/planning/' ${braced}`).exitCode, 2);
+  // The class, not the instance: every metacharacter that can truncate an expansion fails the
+  // same way. Only whitespace and a `--flag=` value open an unquoted path literal.
+  for (const prefix of [",", "?", "[", "]", "+", ":", "(", ")", "*", "%", "@", "!", "^"]) {
+    const cmd = `sed -i '' 's/a/b/' x${prefix}.kontourai/flow-agents/slug/${STATE}`;
+    assert.equal(runBash(cmd).exitCode, 2, `prefix ${prefix} must fail closed:\n${cmd}`);
+  }
+  // ...while the two proven word-opening contexts still resolve normally.
+  assert.equal(runBash(`sed -i '' 's/a/b/' .kontourai/flow-agents/slug/${STATE}`).exitCode, 2);
+  assert.equal(runBash(`sed -i '' --file=.kontourai/flow-agents/slug/${STATE}`).exitCode, 2);
+});
+
+test("#1004 finding 2: an argument-less cd with no trailing space still trips the cd guard", () => {
+  // `cd;` / `cd&&` / `cd|` really do change directory (to $HOME), so relative resolution is
+  // unsound and a relative candidate must fail closed -- the guard previously demanded
+  // whitespace or end-of-string after the word.
+  const fakeHome = tmpdir();
+  const victim = path.join(fakeHome, ".kontourai", "flow-agents", "victim-slug");
+  fs.mkdirSync(victim, { recursive: true });
+  fs.writeFileSync(path.join(victim, STATE), "{}");
+  const hop = path.join(fakeHome, "hop");
+  fs.symlinkSync(victim, hop);
+  const elsewhere = tmpdir();
+  for (const lead of ["cd;", "cd&&", "cd|", "(cd)", "\\cd;", "pushd;", "popd;"]) {
+    const cmd = `${lead} sed -i '' 's/{}/forged/' ${path.join(hop, STATE)}`;
+    assert.equal(runBash(cmd, elsewhere).exitCode, 2, `bare directory change must fail closed:\n${cmd}`);
+  }
+  // The same guard is shared with the redirect detector, where the identical bare-`cd` shape
+  // was a PRE-EXISTING gap on main (the reviewer flagged it as out of scope). Fixing the guard
+  // closes it there too, so pin it rather than let it silently regress.
+  assert.ok(
+    hook.checkRedirectToProtected(`cd; echo forged > ${path.join(hop, STATE)}`, elsewhere),
+    "redirect detector must also see an argument-less cd",
+  );
+});
+
 test("#682: a bare basename resolved from a cwd INSIDE a session dir still blocks", () => {
   const res = runBash(
     `node -e ${Q}require('fs').writeFileSync('${STATE}','x')${Q}`,
