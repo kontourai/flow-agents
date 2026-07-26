@@ -134,7 +134,7 @@ function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) out.push(...walk(p));
+    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) for (const nested of walk(p)) out.push(nested);
     else out.push(p);
   }
   return out;

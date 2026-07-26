@@ -50,7 +50,7 @@ function relativeFiles(root, current = root) {
     const file = path.join(current, name);
     const stat = fs.lstatSync(file);
     if (stat.isSymbolicLink()) fail(`refusing symlink in install overlay: ${file}`);
-    if (stat.isDirectory()) out.push(...relativeFiles(root, file));
+    if (stat.isDirectory()) for (const nested of relativeFiles(root, file)) out.push(nested);
     else if (stat.isFile()) out.push(path.relative(root, file).split(path.sep).join("/"));
     else fail(`unsupported install overlay entry: ${file}`);
   }
