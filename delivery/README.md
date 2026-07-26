@@ -116,8 +116,8 @@ condition.
 
 **Compound scope (space-separated AND).** Multiple conditions in one `scope` string are
 ANDed — every condition must match for the entry to apply; a single-condition scope is just
-the N=1 case of the same rule (unchanged, backward compatible). The production worked example
-is this repo's own `delivery/DECLARED` release-please entry:
+the N=1 case of the same rule (unchanged, backward compatible). The worked example is this
+repo's release-please entry **as it was declared from 2026-07-03 to 2026-07-26**:
 
 ```json
 {
@@ -127,6 +127,9 @@ is this repo's own `delivery/DECLARED` release-please entry:
   "declared_at": "2026-07-03T16:27:21Z"
 }
 ```
+
+That is no longer the live entry — see the documented exception below — but it remains the
+clearest illustration of the compound form, and of what the form costs.
 
 **`ref:`/`branch-prefix:` alone are insufficient for identity exemptions.** Per the ADR 0022
 2026-07-03 addendum: `ref:`/`branch-prefix:` match against `GITHUB_HEAD_REF`, which is
@@ -139,6 +142,34 @@ to match. `author:` alone does not have this weakness (`GITHUB_ACTOR` is platfor
 pusher-chosen), which is why this repo's `dependabot[bot]` entry (`author:dependabot[bot]`)
 was security-review-confirmed sufficient on its own with no `branch-prefix:` needed — identity
 alone, not branch/ref, is the relevant boundary for that actor.
+
+**Documented exception: the live release-please entry is `branch-prefix:release-please--`
+alone (#1011).** The rule above has a cost the addendum did not price: an `author:` condition
+couples a standing exemption to an identity that rotates on someone else's schedule, and when
+it rotates the exemption fails **closed and silent**. That happened — the release bot became
+the `kontourai-releases` GitHub App, `author:github-actions[bot]` stopped matching, and every
+release PR failed Trust Reconcile for 13 days while `5.4.0` never shipped. Re-keying the
+entry to the new bot identity (#1010) restores service and preserves the defect for the next
+rotation. The live entry therefore drops `author:` and keeps the durable half: nothing but
+`.github/workflows/release-please.yml` opens `release-please--*` branches.
+
+The residual is accepted and disclosed, not solved: a `branch-prefix:`-only scope is
+satisfiable by anyone who can name a branch, exactly as the addendum says. It is bounded on
+four sides — the marker exempts **Step 2 only** and Step 1 fresh verify always runs;
+`/delivery/DECLARED` is CODEOWNERS-protected; merging still requires branch protection on
+`main`; and every match prints the loud `DECLARED (no-agent-delivery):` line naming the scope
+and its release-automation reason, so a non-release PR claiming it is visible in that run's
+own log. **This exception is specific to release automation and is not a general licence to
+drop `author:` from identity exemptions** — the rule above still governs every other case,
+and the `dependabot[bot]` entry remains identity-only for the reason given above.
+
+**Unmatched markers are reported distinctly (#1011).** The reconciler no longer prints one
+sentence for every marker-side failure. A marker that is **absent**, **malformed**, present
+but matching **no condition at all**, and present with an entry that matched **some** of its
+conditions are four separate diagnostics; the last two name each failed condition and the
+resolved context value it failed against, and the partial-match case is flagged
+`STALE-SCOPE SUSPECTED` because that is the signature of a drifted scope rather than of a
+change that simply has no exemption. The verdict is unchanged — all four still fail closed.
 
 **Array form + append, never clobber.** `delivery/DECLARED` accepts either a single
 `{scope, reason, approved_by, declared_at}` object or a JSON array of such objects, so one
