@@ -64,14 +64,25 @@ if node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-prote
 JSON
 then
   claude_reason="$(run_json "$TMPDIR_EVAL/claude-block.json" "hookSpecificOutput.permissionDecisionReason")"
-  if [[ "$(run_json "$TMPDIR_EVAL/claude-block.json" "continue")" == "false" ]] \
+  # #1005: a first denial must NOT set `continue: false`. In the Claude Code hook contract
+  # `continue: false` stops Claude processing entirely and takes precedence over the deny
+  # decision beside it, so the model never sees permissionDecisionReason and the turn ends
+  # instead of the call. The deny alone is the recoverable form. `continue: false` returns
+  # only on the third identical denial in one flow step (see the escalation eval below).
+  if [[ "$(run_json "$TMPDIR_EVAL/claude-block.json" "continue")" != "false" ]] \
     && [[ "$(run_json "$TMPDIR_EVAL/claude-block.json" "hookSpecificOutput.permissionDecision")" == "deny" ]]; then
-    pass "Claude runtime adapter translates PreToolUse policy block"
+    pass "Claude runtime adapter translates PreToolUse policy block without ending the turn"
     # Block Reason Channel: the deny must carry the steering reason to the model.
     if [[ "$claude_reason" == *"Fix the source"* ]]; then
       pass "Claude block surfaces the steer-to-source reason to the model"
     else
       fail "Claude block reason did not reach the model channel (permissionDecisionReason): $claude_reason"
+    fi
+    # Tier 1: the refusal must read as recoverable guidance, not an incident report.
+    if [[ "$claude_reason" != BLOCKED:* ]] && [[ "$claude_reason" != *"disable the config-protection hook temporarily"* ]]; then
+      pass "Claude block message drops the incident register"
+    else
+      fail "Claude block message still reads as an incident report: $claude_reason"
     fi
   else
     fail "Claude runtime adapter block contract mismatch"
