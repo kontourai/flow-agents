@@ -535,6 +535,39 @@ const REDIRECT_OPERATOR_ONLY_RE = /^(?:[0-9]*(?:>>|>|<)|&>>|&>|<<<|<<|>&|<&)$/;
  * Quote-aware, so the round-3 over-block stays fixed: the `;cd;` inside
  * `sed -i '' 's/replace me;cd; also/updated/' <path>` is quoted data, not a connector.
  */
+/**
+ * The command with every quoted region blanked out, so a lexical test can distinguish shell
+ * SYNTAX from identical characters appearing as data. `grep "(" file` must not read as a
+ * function definition; `f(){ …}` must.
+ */
+function maskQuotedRegions(command) {
+  const out = command.split('');
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === '\\') { i++; continue; }
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      out[i] = ' ';
+      i++;
+      while (i < command.length && command[i] !== quote) {
+        if (quote === '"' && command[i] === '\\') { out[i] = ' '; i++; }
+        if (i < command.length) out[i] = ' ';
+        i++;
+      }
+      if (i < command.length) out[i] = ' ';
+    }
+  }
+  return out.join('');
+}
+
+// #1009 round 5: the keyword-less function definition `f(){ cd /x;}` hides a command position
+// inside a body this scanner does not parse. Unlike the rest of that finding's class it HAS a
+// literal signal -- `IDENT ( )` is a command definition and nothing else in sh -- so it is
+// enumerable and costs no measured relief. (The `function f {…}` spelling is covered by
+// UNMODELLED_COMMAND_WORDS.) Tested against the quote-masked command so `grep "(" file` and
+// `sed 's/f()/x/'` are unaffected.
+const FUNCTION_DEFINITION_RE = /(?:^|[\s;&|(])[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\)/;
+
 function containsUnmodelledShellConstruct(command) {
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
@@ -565,6 +598,27 @@ function containsUnmodelledShellConstruct(command) {
 }
 
 /**
+ * BAR-RAISER, NOT A BOUNDARY (#1009). Read this before treating a `false` from this function
+ * as an assurance: it is a best-effort lexical scan of an unexecuted command string, in the
+ * same spirit as the redirect / interpreter-write / cp-target detectors described in this
+ * file's header, and it is defeated by a residual class that CANNOT be closed lexically.
+ *
+ * The residual class is commands whose command word is not literal, so no local signal exists:
+ *   - variable command words     `X=cd; $X /repo`
+ *   - array elements             `A=(cd /repo); "${A[@]}"`
+ *   - positional parameters      `set -- cd /repo; "$@"`
+ *   - `printf -v` assembly, and any other indirection that materializes the word at runtime
+ * `X=cd; $X /repo` is character-for-character identical to `X=notcd; $X /repo`, which does not
+ * change directory. Deciding between them requires runtime variable values, which may come
+ * from command substitution — undecidable, not merely under-enumerated. Adding cases here
+ * cannot fix it; that is why #1009 tracks the architectural answer (post-execution
+ * verification / an authoritative cwd from the harness) rather than more scanning.
+ *
+ * What this function IS good for: raising the cost of casual and accidental evasion, and
+ * keeping the declared-root scoping honest for the ordinary command shapes agents actually
+ * write. The real anchor remains external — signed checkpoints, CI trust-reconcile, and human
+ * review — exactly as for every other detector in this file.
+ *
  * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
  * the shell resolves later relative paths against a cwd we did not model. Fail closed:
  * commands that change directory get NO root-scoping relief on artifact-shaped targets.
@@ -589,6 +643,7 @@ function containsUnmodelledShellConstruct(command) {
 function commandChangesDirectory(command) {
   if (typeof command !== 'string' || !command) return false;
   if (containsUnmodelledShellConstruct(command)) return true;
+  if (FUNCTION_DEFINITION_RE.test(maskQuotedRegions(command))) return true;
   for (const segment of splitSegments(command)) {
     const tokens = tokenize(segment);
     for (let i = 0; i < tokens.length; i++) {

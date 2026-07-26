@@ -272,6 +272,59 @@ test("#1004 round 4: ordinary redirections are still not directory changes", () 
   }
 });
 
+test("#1009 round 5: the keyword-less function definition fails closed", () => {
+  const { gitTree, cwd, target } = unmodelledCdFixture();
+  for (const def of [
+    `f(){ cd ${gitTree};}`,
+    `f() { cd ${gitTree}; }`,
+    `f ( ) { cd ${gitTree}; }`,
+    `function f { cd ${gitTree}; }`, // keyword spelling, via UNMODELLED_COMMAND_WORDS
+  ]) {
+    const cmd = `${def}; f; echo forged > ${target}`;
+    assert.ok(hook.checkRedirectToProtected(cmd, cwd), `function body hides a command position:\n${cmd}`);
+  }
+});
+
+test("#1009 round 5: parentheses that are not a function definition cost no relief", () => {
+  // The function-definition signal is tested against the QUOTE-MASKED command, so parens
+  // appearing as data stay data. Without this, closing the function form would have cost more
+  // relief than it bought.
+  const scratch = tmpdir();
+  const fixture = path.join(scratch, ".kontourai", "flow-agents", "demo", STATE);
+  for (const cmd of [
+    `grep ${Q}(${Q} in.txt > ${fixture}`,
+    `sed 's/f()/x/' in.txt > ${fixture}`,
+    `awk '{print length($0)}' in.txt > ${fixture}`,
+    `(echo x) > ${fixture}`,
+    `python3 -c ${Q}print(1)${Q} > ${fixture}`,
+  ]) {
+    assert.equal(hook.checkRedirectToProtected(cmd, packageRoot), null, `must not read as a definition:\n${cmd}`);
+  }
+});
+
+test("#1009: the residual non-literal-command-word class is a DOCUMENTED GAP, not coverage", () => {
+  // Deliberately asserting the BYPASS. `commandChangesDirectory` is a bar-raiser, not a
+  // boundary: a command word materialized at runtime has no lexical signal --
+  // `X=cd; $X /repo` is character-for-character identical to `X=notcd; $X /repo`, and telling
+  // them apart needs runtime values that may come from command substitution. Undecidable, not
+  // under-enumerated. If a future change closes any of these, update this test deliberately;
+  // do NOT read a passing suite as evidence that this class is covered.
+  const { gitTree, cwd, target } = unmodelledCdFixture();
+  for (const lead of [
+    `X=cd; $X ${gitTree}`,
+    `A=(cd ${gitTree}); ${Q}\${A[@]}${Q}`,
+    `set -- cd ${gitTree}; ${Q}$@${Q}`,
+    `printf -v C cd; $C ${gitTree}`,
+  ]) {
+    const cmd = `${lead}; echo forged > ${target}`;
+    assert.equal(
+      hook.checkRedirectToProtected(cmd, cwd),
+      null,
+      `expected the documented #1009 residual gap; if this now blocks, update the test and #1009:\n${cmd}`,
+    );
+  }
+});
+
 test("#682: a bare basename resolved from a cwd INSIDE a session dir still blocks", () => {
   const res = runBash(
     `node -e ${Q}require('fs').writeFileSync('${STATE}','x')${Q}`,
