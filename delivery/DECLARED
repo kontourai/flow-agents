@@ -70,5 +70,11 @@
     "reason": "The governance-file change that restores the release-bot exemption above. Touches delivery/DECLARED only; no source or behaviour changes and no command-backed agent-delivery claims to reconcile.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-26 session: scoped-DECLARED-exemption route, drive-it)",
     "declared_at": "2026-07-26T04:45:00Z"
+  },
+  {
+    "scope": "branch-prefix:fix/walkfiles-overflow",
+    "reason": "Build-tooling fix for #1006. `walkFiles` did `out.push(...walkFiles(child))`, which passes one argument per discovered path and therefore throws `RangeError: Maximum call stack size exceeded` once a subtree exceeds the engine's argument limit (measured 123,923 on the pinned Node v24.18.0) -- a file-count limit, not a recursion-depth limit. Because `validate:source` is a pre-push gate, this broke pushing for every lane in any checkout holding a large untracked directory, and cascaded into `eval:static`. The PR pushes individually instead, in src/tools/common.ts and in every other recursive walker sharing the shape (src/lib/fs.ts, src/cli/fixture-retirement-audit.ts, src/cli/validate-workflow-artifacts.ts, scripts/hooks/lib/skill-drift.js, scripts/install-owned-files.js) plus src/tools/validate-source-tree.ts, which spread an unbounded walk result on the failing path itself. Exemption reason: this is developer build tooling fixed outside builder.build, so no trust bundle exists and there are no agent-delivery claims to reconcile -- the change makes no assertion about any agent run. Verification in lieu of a bundle: a new regression test (src/cli/walk-files-scale.test.mjs) walks a synthetic 130,000-file tree, roughly 5% above the measured argument ceiling, built in a temp dir outside the repo; author fault-injection confirmed it goes RED with the spread restored (RangeError, the exact reported symptom), RED again with only src/lib/fs.ts reverted -- proving the second assertion is not dead weight -- and GREEN once restored. Full local verification recorded on the PR.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-26 session: scoped-DECLARED-exemption route approved for this build-tooling fix)",
+    "declared_at": "2026-07-26T06:11:51Z"
   }
 ]
