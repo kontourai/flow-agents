@@ -58,5 +58,17 @@
     "reason": "Graduated denial escalation (#1005). Root cause: scripts/hooks/claude-hook-adapter.js emitted `continue: false` on every PreToolUse/PostToolUse block, which per the Claude Code hook contract halts processing entirely and takes precedence over the `deny` decision beside it, while the reason travelled in `stopReason` (shown to the user, explicitly NOT to the model). The model therefore never received a tool result at all -- the documented cause of chronic subagent stalls (#962), measured this session at roughly a third of ~45 agent runs. This PR makes an ordinary denial recoverable (deny emitted, turn continues, reason reaches the model), escalates to turn-ending only on the third occurrence of the same denial identity within a flow step, and rewrites denial text to read as guidance while preserving every remediation path. stop-goal-fit.js and the Stop branch are deliberately untouched. Exemption reason: the change was agent-delivered outside builder.build, so no trust bundle exists; Trust Reconcile Step 1 (fresh canonical verification) PASSES on this branch. Verification in lieu of a bundle: independent report-only review commissioned; orchestrator verified the merge-gating behaviour by direct execution against the branch adapter -- a genuinely prohibited operation still returns permissionDecision `deny`, `continue` is absent on a first strike, permissionDecisionReason reaches the model, escalation to turn-ending confirmed after repeated identical denials, and the workflow:sidecar remediation plus json.tool read-escape survive in the message while the incomplete-coverage note and all disable-the-hook advice are gone. Author fault-injection cut cleanly along the policy's two halves (constant-keyed counter fails the route-around guards; >= to > fails the third-strike guards) and found a real hermeticity defect (counter store resolved from the shared repo root) which was fixed and pinned.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-26 session: scoped-DECLARED-exemption chosen over builder.build re-run to land the stall fix)",
     "declared_at": "2026-07-26T04:30:00Z"
+  },
+  {
+    "scope": "author:kontourai-releases[bot] branch-prefix:release-please--",
+    "reason": "Restores the existing release-please automation exemption after the release bot's identity changed. The original entry (declared 2026-07-03) scopes to author:github-actions[bot], but release PRs are now opened by the kontourai-releases GitHub App, so the actor condition stopped matching and every release PR has failed Trust Reconcile since at least 2026-07-25 \u2014 silently blocking 5.4.0. Intent unchanged from the original entry: release-please automation PR, no agent delivery involved, nothing to reconcile. A faithful restoration of an owner-approved exemption, not a new grant.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-26 session: scoped-DECLARED-exemption route, drive-it)",
+    "declared_at": "2026-07-26T04:45:00Z"
+  },
+  {
+    "scope": "branch-prefix:fix/release-bot-declared-scope",
+    "reason": "The governance-file change that restores the release-bot exemption above. Touches delivery/DECLARED only; no source or behaviour changes and no command-backed agent-delivery claims to reconcile.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-26 session: scoped-DECLARED-exemption route, drive-it)",
+    "declared_at": "2026-07-26T04:45:00Z"
   }
 ]
