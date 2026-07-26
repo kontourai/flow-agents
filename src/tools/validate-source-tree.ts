@@ -478,7 +478,7 @@ function validateNoFirstPartyPythonCommands(reporter: Reporter): void {
   for (const entry of pythonCommandScanRoots) {
     const abs = path.join(root, entry);
     if (!fs.existsSync(abs)) continue;
-    if (fs.statSync(abs).isDirectory()) files.push(...walkFiles(abs));
+    if (fs.statSync(abs).isDirectory()) for (const file of walkFiles(abs)) files.push(file);
     else files.push(abs);
   }
   for (const file of files.sort()) {
