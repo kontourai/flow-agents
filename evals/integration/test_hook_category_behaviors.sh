@@ -59,7 +59,14 @@ else
   fail "traversal rejection should fail open"
 fi
 
-if node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/claude-block.json" 2>"$TMPDIR_EVAL/claude-block.err" <<'JSON'
+# #1005: the denial counter is per-actor and scoped to the SHARED repo artifact root, so
+# these assertions run from an isolated cwd outside any git working tree. Otherwise repeated
+# eval runs accumulate strikes against the repo's real streak store and the third run flips
+# the first-denial assertion — and the eval would litter the repo's artifact tree besides.
+DENIAL_SANDBOX="$TMPDIR_EVAL/denial-sandbox"
+mkdir -p "$DENIAL_SANDBOX"
+
+if (cd "$DENIAL_SANDBOX" && node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-protection config-protection.js standard,strict) >"$TMPDIR_EVAL/claude-block.json" 2>"$TMPDIR_EVAL/claude-block.err" <<'JSON'
 {"hook_event_name":"PreToolUse","tool_input":{"path":"prettier.config.js"}}
 JSON
 then
@@ -86,6 +93,34 @@ then
     fi
   else
     fail "Claude runtime adapter block contract mismatch"
+  fi
+else
+  fail "Claude runtime adapter should exit successfully after translating block"
+fi
+
+# #1005 tier 2: the third IDENTICAL denial in one flow step escalates to a human. The first
+# call above already consumed strike 1 in this sandbox, so two more reach the limit.
+for _ in 1 2; do
+  (cd "$DENIAL_SANDBOX" && node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-protection config-protection.js standard,strict) >"$TMPDIR_EVAL/claude-block-repeat.json" 2>/dev/null <<'JSON'
+{"hook_event_name":"PreToolUse","tool_input":{"path":"prettier.config.js"}}
+JSON
+done
+if [[ "$(run_json "$TMPDIR_EVAL/claude-block-repeat.json" "continue")" == "false" ]] \
+  && [[ "$(run_json "$TMPDIR_EVAL/claude-block-repeat.json" "hookSpecificOutput.permissionDecision")" == "deny" ]]; then
+  pass "Claude adapter escalates the third identical denial in one flow step"
+else
+  fail "third identical denial did not escalate: $(cat "$TMPDIR_EVAL/claude-block-repeat.json")"
+fi
+
+# A denial of a DIFFERENT rule/target must start its own count, not inherit those strikes.
+if (cd "$DENIAL_SANDBOX" && node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-protection config-protection.js standard,strict) >"$TMPDIR_EVAL/claude-block-other.json" 2>/dev/null <<'JSON'
+{"hook_event_name":"PreToolUse","tool_input":{"path":"biome.json"}}
+JSON
+then
+  if [[ "$(run_json "$TMPDIR_EVAL/claude-block-other.json" "continue")" != "false" ]]; then
+    pass "Claude adapter does not carry strikes across denial identities"
+  else
+    fail "a different denial identity inherited another identity's strikes"
   fi
 else
   fail "Claude runtime adapter should exit successfully after translating block"
