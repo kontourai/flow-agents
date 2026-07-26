@@ -116,8 +116,8 @@ condition.
 
 **Compound scope (space-separated AND).** Multiple conditions in one `scope` string are
 ANDed — every condition must match for the entry to apply; a single-condition scope is just
-the N=1 case of the same rule (unchanged, backward compatible). The worked example is this
-repo's release-please entry **as it was declared from 2026-07-03 to 2026-07-26**:
+the N=1 case of the same rule (unchanged, backward compatible). The production worked example
+is this repo's own `delivery/DECLARED` release-please entry:
 
 ```json
 {
@@ -128,8 +128,9 @@ repo's release-please entry **as it was declared from 2026-07-03 to 2026-07-26**
 }
 ```
 
-That is no longer the live entry — see the documented exception below — but it remains the
-clearest illustration of the compound form, and of what the form costs.
+(The live entry names the current release bot, `author:kontourai-releases[bot]`; the shape is
+identical. See the note below on why the `author:` half survived a serious proposal to remove
+it.)
 
 **`ref:`/`branch-prefix:` alone are insufficient for identity exemptions.** Per the ADR 0022
 2026-07-03 addendum: `ref:`/`branch-prefix:` match against `GITHUB_HEAD_REF`, which is
@@ -143,25 +144,31 @@ pusher-chosen), which is why this repo's `dependabot[bot]` entry (`author:depend
 was security-review-confirmed sufficient on its own with no `branch-prefix:` needed — identity
 alone, not branch/ref, is the relevant boundary for that actor.
 
-**Documented exception: the live release-please entry is `branch-prefix:release-please--`
-alone (#1011).** The rule above has a cost the addendum did not price: an `author:` condition
-couples a standing exemption to an identity that rotates on someone else's schedule, and when
-it rotates the exemption fails **closed and silent**. That happened — the release bot became
-the `kontourai-releases` GitHub App, `author:github-actions[bot]` stopped matching, and every
-release PR failed Trust Reconcile for 13 days while `5.4.0` never shipped. Re-keying the
-entry to the new bot identity (#1010) restores service and preserves the defect for the next
-rotation. The live entry therefore drops `author:` and keeps the durable half: nothing but
-`.github/workflows/release-please.yml` opens `release-please--*` branches.
+**Why the pairing survives its own worst day (#1011) — read this before proposing to drop
+`author:`.** The rule above has a real cost, and it has already been paid once. An `author:`
+condition couples a standing exemption to an identity that rotates on someone else's
+schedule, and when it rotates the exemption fails **closed and silent**: the release bot
+became the `kontourai-releases` GitHub App, `author:github-actions[bot]` stopped matching,
+and every release PR failed Trust Reconcile for 13 days while `5.4.0` never shipped. The
+obvious remedy — scope release automation on `branch-prefix:release-please--` alone, since
+nothing but `.github/workflows/release-please.yml` opens branches with that prefix — was
+proposed, implemented, and **rejected before merge**.
 
-The residual is accepted and disclosed, not solved: a `branch-prefix:`-only scope is
-satisfiable by anyone who can name a branch, exactly as the addendum says. It is bounded on
-four sides — the marker exempts **Step 2 only** and Step 1 fresh verify always runs;
-`/delivery/DECLARED` is CODEOWNERS-protected; merging still requires branch protection on
-`main`; and every match prints the loud `DECLARED (no-agent-delivery):` line naming the scope
-and its release-automation reason, so a non-release PR claiming it is visible in that run's
-own log. **This exception is specific to release automation and is not a general licence to
-drop `author:` from identity exemptions** — the rule above still governs every other case,
-and the `dependabot[bot]` entry remains identity-only for the reason given above.
+It was rejected because it pays for a *reporting* failure with a *security* boundary. The
+addendum's finding is not hypothetical here: the adversary this anchor exists to constrain is
+an **agent delivering in this repo**, and an agent names its own branch. A
+`branch-prefix:`-only release exemption is therefore self-service — any agent willing to call
+its branch `release-please--something` skips Step 2 entirely. "Nothing else opens branches
+with that prefix" describes today's *automation*, not the set of things that *can*.
+
+What changed instead is the reporting (see the next note): the identical incident is now
+legible in the **first** failing run rather than after thirteen. The accepted trade is stated
+rather than implied — on the next actor rotation this exemption **will** fail and release PRs
+**will** go red until a human re-keys it. A release train that breaks loudly is a bounded
+operational cost; thirteen silent days was the bug. Both halves are pinned by regression
+tests (`evals/integration/test_trust_reconcile_negatives.sh`, cases 7w/7x): the rotation
+fails and the failure names the dead condition and the resolved actor, and naming a
+`release-please--` branch without the bot identity does not exempt.
 
 **Unmatched markers are reported distinctly (#1011).** The reconciler no longer prints one
 sentence for every marker-side failure. A marker that is **absent**, **malformed**, present

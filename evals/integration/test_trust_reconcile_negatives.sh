@@ -815,12 +815,24 @@ fi
 #   flat 'delivery/DECLARED marker present but out of scope for this change' line read
 #   identically whether the marker was absent, stale, or genuinely inapplicable.
 #
+#   The fix is the REPORTING, not the scope. Dropping the author: condition (leaving
+#   branch-prefix:release-please-- alone as "the durable half") was implemented and REVERSED
+#   before merge: branch-prefix:/ref: resolve against GITHUB_HEAD_REF, pusher-controlled on a
+#   fork PR (ADR 0022 2026-07-03 addendum), and the adversary this anchor exists to constrain
+#   is an AGENT DELIVERING IN THIS REPO -- which names its own branch. A branch-prefix:-only
+#   release exemption is a self-service Step-2 bypass for any agent willing to call its branch
+#   release-please--something. The pairing stays; the silence goes.
+#
 #   Two halves, both pinned below:
-#     Part 1 (7w-7y) -- the repo's OWN delivery/DECLARED release-automation entry is scoped
-#       on the durable branch prefix alone, so an actor rotation cannot recur, and the dead
-#       author:github-actions[bot] entry is gone rather than left inert beside a replacement.
-#       7w/7x run against a COPY of the real committed delivery/DECLARED, not a fixture --
-#       a fixture would prove the matcher works, not that the governance file is correct.
+#     Part 1 (7w-7y) -- the ACCEPTED TRADE, asserted rather than left implied. The repo's OWN
+#       delivery/DECLARED keeps author: paired with branch-prefix: on the release exemption,
+#       so on the next actor rotation the exemption FAILS -- and the new reporting must make
+#       WHY obvious inside that single run, naming the dead author: condition and the actor
+#       that was actually resolved. 7w/7x run against a COPY of the real committed
+#       delivery/DECLARED, not a fixture -- a fixture would prove the matcher works, not that
+#       the governance file is correct. The dead author:github-actions[bot] entry is gone
+#       (inert, and leaving it teaches readers that stale exemptions are normal), but its
+#       live replacement keeps the pairing.
 #     Part 2 (7z-7ad) -- an unmatched marker is a distinguishable outcome: PARTIAL match
 #       (the #1011 signature: some conditions matched, one drifted) vs no condition matching
 #       anything, each naming the failed conditions and the resolved context values they
@@ -828,6 +840,7 @@ fi
 
 REAL_DECLARED="$ROOT/delivery/DECLARED"
 RELEASE_REF="release-please--branches--main--components--flow-agents"
+RELEASE_BOT="kontourai-releases[bot]"
 
 # copy_real_declared <dir> -- stage the repo's committed delivery/DECLARED in a temp root.
 copy_real_declared() {
@@ -835,73 +848,117 @@ copy_real_declared() {
   cp "$REAL_DECLARED" "$1/delivery/DECLARED"
 }
 
-# 7w. ACTOR-ROTATION SIMULATION (the #1011 recurrence, closed). The real committed
-#     delivery/DECLARED, the real release-please branch name, and an actor that has NEVER
-#     existed -- a hypothetical FUTURE rotation of the release bot. Under the old
-#     identity-keyed scope this is exactly the 13-day outage; it must now exempt.
-CASE7W="$DECLARED_TMPROOT/real-declared-actor-rotation"
+CASE7W="$DECLARED_TMPROOT/real-declared-release"
 mkdir -p "$CASE7W"
 copy_real_declared "$CASE7W"
-out7w="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="some-future-release-bot[bot]" \
+
+# 7w-1. TODAY'S release PR (real committed delivery/DECLARED, real release-please branch,
+#       real GitHub App actor) is exempt. Without this the "rotation fails" assertions below
+#       would be satisfiable by an exemption that is simply broken for everyone.
+out7w1="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="$RELEASE_BOT" \
   TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
   node "$RECONCILE" --repo-root "$CASE7W" 2>&1)"
-code7w=$?
-if [[ $code7w -eq 0 ]]; then
-  _pass "real-declared-actor-rotation: exits 0 -- the committed release-automation exemption survives an actor rotation (#1011 recurrence closed)"
+code7w1=$?
+if [[ $code7w1 -eq 0 ]]; then
+  _pass "real-declared-release-today: exits 0 -- the committed release exemption matches the live release PR (ref + $RELEASE_BOT)"
 else
-  _fail "real-declared-actor-rotation: expected exit 0, got $code7w -- the committed delivery/DECLARED release exemption is still identity-coupled and will silently break on the next bot rotation (#1011) -- output: $out7w"
+  _fail "real-declared-release-today: expected exit 0, got $code7w1 -- the release exemption does not match today's release PR; releases are blocked -- output: $out7w1"
 fi
-if echo "$out7w" | grep -qF "DECLARED (no-agent-delivery): branch-prefix:release-please--"; then
-  _pass "real-declared-actor-rotation: DECLARED line names the branch-prefix-only release scope"
+if echo "$out7w1" | grep -qF "DECLARED (no-agent-delivery): author:$RELEASE_BOT branch-prefix:release-please--"; then
+  _pass "real-declared-release-today: DECLARED line names the COMPOUND scope -- author: is paired with branch-prefix:, not dropped"
 else
-  _fail "real-declared-actor-rotation: expected a DECLARED line naming 'branch-prefix:release-please--' -- output: $out7w"
+  _fail "real-declared-release-today: expected a DECLARED line naming 'author:$RELEASE_BOT branch-prefix:release-please--' -- if the author: half was dropped, see ADR 0022's 2026-07-03 addendum and delivery/README.md before restoring that change -- output: $out7w1"
 fi
 
-# 7x. SAME file, a SECOND, differently-shaped rotation plus a wholly UNRESOLVABLE actor
-#     (TRUST_RECONCILE_ACTOR/GITHUB_ACTOR unset -> ctx.actor === ''). One passing actor
-#     value would only prove a lucky string; the exemption must not depend on the actor at
-#     all, including when the actor cannot be resolved.
-CASE7X="$DECLARED_TMPROOT/real-declared-actor-independent"
-mkdir -p "$CASE7X"
-copy_real_declared "$CASE7X"
-out7x="$(env -u TRUST_RECONCILE_ACTOR -u GITHUB_ACTOR TRUST_RECONCILE_REF="$RELEASE_REF" \
+# 7w-2. ACTOR-ROTATION SIMULATION -- the accepted trade, asserted deliberately. A FUTURE
+#       rotation of the release bot (an actor that has never existed) MUST fail: the pairing
+#       is the security property, and a release train that breaks loudly on a rotation is the
+#       correct outcome. What must NOT recur is the silence -- this single run has to say
+#       which condition died and what the actor actually resolved to.
+out7w2="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="some-future-release-bot[bot]" \
   TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
-  node "$RECONCILE" --repo-root "$CASE7X" 2>&1)"
+  node "$RECONCILE" --repo-root "$CASE7W" 2>&1)"
+code7w2=$?
+if [[ $code7w2 -ne 0 ]]; then
+  _pass "real-declared-actor-rotation: exits non-zero ($code7w2) -- a rotated actor does NOT inherit the release exemption (the identity pairing is the point)"
+else
+  _fail "real-declared-actor-rotation: expected non-zero exit, got 0 -- the release exemption no longer requires the bot identity, so anyone naming a release-please-- branch can claim it (ADR 0022 2026-07-03 addendum) -- output: $out7w2"
+fi
+if echo "$out7w2" | grep -qF "STALE-SCOPE SUSPECTED"; then
+  _pass "real-declared-actor-rotation: the failure is labelled STALE-SCOPE SUSPECTED -- a drifted identity is not reported as 'this change has no exemption'"
+else
+  _fail "real-declared-actor-rotation: expected 'STALE-SCOPE SUSPECTED' -- this is the #1011 defect verbatim: a rotation that reads like an ordinary unexempted change is a rotation nobody notices -- output: $out7w2"
+fi
+if echo "$out7w2" | grep -qF "failed [author:$RELEASE_BOT vs actor='some-future-release-bot[bot]']"; then
+  _pass "real-declared-actor-rotation: names the dead condition AND the actor that actually resolved -- a human reading this one run can re-key the entry without investigating"
+else
+  _fail "real-declared-actor-rotation: expected \"failed [author:$RELEASE_BOT vs actor='some-future-release-bot[bot]']\" -- output: $out7w2"
+fi
+if echo "$out7w2" | grep -qF "matched [branch-prefix:release-please-- vs ref='$RELEASE_REF']"; then
+  _pass "real-declared-actor-rotation: names the half that DID match -- the evidence that this entry was meant to cover this run"
+else
+  _fail "real-declared-actor-rotation: expected the matched-condition breakdown naming branch-prefix:release-please-- -- output: $out7w2"
+fi
+
+# 7w-3. Same rotation shape with a wholly UNRESOLVABLE actor (TRUST_RECONCILE_ACTOR and
+#       GITHUB_ACTOR unset -> ctx.actor === ''). An empty context value never matches, and
+#       "the actor could not be resolved" must be legible rather than silent.
+out7w3="$(env -u TRUST_RECONCILE_ACTOR -u GITHUB_ACTOR TRUST_RECONCILE_REF="$RELEASE_REF" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7W" 2>&1)"
+code7w3=$?
+if [[ $code7w3 -ne 0 ]]; then
+  _pass "real-declared-actor-unresolvable: exits non-zero ($code7w3) -- an unresolvable actor is never a wildcard"
+else
+  _fail "real-declared-actor-unresolvable: expected non-zero exit, got 0 -- output: $out7w3"
+fi
+if echo "$out7w3" | grep -qF "failed [author:$RELEASE_BOT vs actor=<unset>]"; then
+  _pass "real-declared-actor-unresolvable: reports actor=<unset> against the release entry -- 'could not evaluate' is stated, not blank"
+else
+  _fail "real-declared-actor-unresolvable: expected \"failed [author:$RELEASE_BOT vs actor=<unset>]\" -- output: $out7w3"
+fi
+
+# 7x. THE REASON THE PAIRING IS KEPT, pinned against the repo's OWN governance file: naming a
+#     release-please-- branch is NOT sufficient to claim the release exemption. GITHUB_HEAD_REF
+#     is pusher-controlled on a fork PR, and an agent delivering here picks its own branch
+#     name -- so a branch-prefix:-only release scope would be a self-service Step-2 bypass.
+#     If this case ever goes green-as-exempt, that bypass is open.
+out7x="$(TRUST_RECONCILE_REF="release-please--totally-not-a-bot" TRUST_RECONCILE_ACTOR="some-contributor" \
+  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7W" 2>&1)"
 code7x=$?
-if [[ $code7x -eq 0 ]]; then
-  _pass "real-declared-actor-independent: exits 0 with NO resolvable actor -- the release exemption is actor-independent, not merely tolerant of one new bot name"
+if [[ $code7x -ne 0 ]]; then
+  _pass "release-branch-name-alone-insufficient: exits non-zero ($code7x) -- naming a release-please-- branch does not exempt a non-bot actor (ADR 0022 2026-07-03 addendum)"
 else
-  _fail "real-declared-actor-independent: expected exit 0 with an unresolvable actor, got $code7x -- output: $out7x"
-fi
-out7x2="$(TRUST_RECONCILE_REF="$RELEASE_REF" TRUST_RECONCILE_ACTOR="briananderson1222" \
-  TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
-  node "$RECONCILE" --repo-root "$CASE7X" 2>&1)"
-code7x2=$?
-if [[ $code7x2 -eq 0 ]]; then
-  _pass "real-declared-actor-independent: exits 0 for a human actor on a release-please-- branch too (documented, accepted branch-prefix residual -- see the entry's own reason)"
-else
-  _fail "real-declared-actor-independent: expected exit 0, got $code7x2 -- output: $out7x2"
+  _fail "release-branch-name-alone-insufficient: expected non-zero exit, got 0 -- SECURITY REGRESSION: the release exemption is claimable by anyone who can name a branch, which on a fork PR is anyone who can open one, and in this repo is any delivering agent -- output: $out7x"
 fi
 
-# 7y. The dead entry is DELETED, not left inert. #1010 restored release service by adding a
-#     second identity-keyed entry BESIDE the stale author:github-actions[bot] one; an inert
-#     stale exemption in a governance file teaches readers that stale exemptions are normal.
-#     Checked against the parsed `scope` fields, not the raw file text -- an entry's `reason`
-#     prose legitimately NAMES the dead identity when explaining why it was removed, and a
-#     raw grep would fail on the very explanation the deletion deserves.
-declared_release_bot_scopes="$(node -e '
+# 7y. Governance-file shape: the DEAD entry is deleted, the LIVE one keeps its pairing.
+#     #1010 restored release service by adding a second identity-keyed entry BESIDE the stale
+#     author:github-actions[bot] one; an inert stale exemption in a governance file teaches
+#     readers that stale exemptions are normal. Checked against the parsed `scope` fields, not
+#     the raw file text -- an entry's `reason` prose legitimately NAMES both the dead identity
+#     and the rejected branch-prefix-only proposal when explaining them, and a raw grep would
+#     fail on the very explanations they deserve.
+declared_release_shape="$(node -e '
   const fs = require("fs");
   const raw = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   const entries = Array.isArray(raw) ? raw : [raw];
-  const bad = entries
-    .map((e) => (e && typeof e.scope === "string" ? e.scope : ""))
-    .filter((s) => s.includes("author:github-actions[bot]") || s.includes("author:kontourai-releases[bot]"));
-  process.stdout.write(bad.join(" | "));
+  const scopes = entries.map((e) => (e && typeof e.scope === "string" ? e.scope : ""));
+  const dead = scopes.filter((s) => s.includes("author:github-actions[bot]"));
+  const release = scopes.filter((s) => s.includes("release-please--"));
+  const unpaired = release.filter((s) => !s.includes("author:"));
+  process.stdout.write(JSON.stringify({ dead, release, unpaired }));
 ' "$REAL_DECLARED")"
-if [[ -z "$declared_release_bot_scopes" ]]; then
-  _pass "declared-no-dead-release-entry: no delivery/DECLARED scope is keyed on a release-bot identity -- neither the dead github-actions[bot] entry nor an identity-keyed replacement remains (#1011)"
+if echo "$declared_release_shape" | grep -qF '"dead":[]'; then
+  _pass "declared-release-scope-shape: the dead author:github-actions[bot] entry is gone -- deleted, not left inert beside its replacement (#1011)"
 else
-  _fail "declared-no-dead-release-entry: delivery/DECLARED still keys a scope on a release-bot identity [$declared_release_bot_scopes] -- an identity condition couples a standing exemption to something that rotates on someone else's schedule, and an inert stale entry left beside its replacement teaches readers that stale exemptions are normal (#1011)"
+  _fail "declared-release-scope-shape: a dead author:github-actions[bot] scope is still present -- the release bot has not used that identity since it became a GitHub App; delete it rather than leaving it beside its replacement (#1011) -- shape: $declared_release_shape"
+fi
+if echo "$declared_release_shape" | grep -qF '"unpaired":[]'; then
+  _pass "declared-release-scope-shape: every release-please-- scope pairs branch-prefix: with author: -- the ADR 0022 addendum's identity requirement is intact"
+else
+  _fail "declared-release-scope-shape: a release-please-- scope has no author: condition -- branch-prefix: alone is pusher-controlled on a fork PR and self-assignable by a delivering agent; see delivery/README.md on why #1011 option 1 was rejected -- shape: $declared_release_shape"
 fi
 
 # 7z. PARTIAL match -> STALE-SCOPE SUSPECTED. Reproduces the exact #1011 shape against a
