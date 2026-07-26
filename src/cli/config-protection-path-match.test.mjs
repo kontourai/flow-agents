@@ -198,6 +198,80 @@ test("#1004 re-review: incidental `cd` text is not a directory change (over-bloc
   }
 });
 
+// ---------------------------------------------------------------------------
+// #1004 targeted review: the round-3 structural scan models less of sh than it looks like it
+// does, and anything it does not model was silently trusted. Four bypasses were confirmed
+// end-to-end (real bash, protected file really overwritten). The fix is not to enumerate them:
+// the guard now fails closed on any construct the scanner does not fully model.
+//
+// These pins only discriminate when the target resolves OUTSIDE every declared root against
+// the REPORTED cwd -- otherwise isCandidateWithinDeclaredRoots blocks on its own and the cd
+// guard is not load-bearing. A nested prefix does that; a bare relative gate path does not.
+// ---------------------------------------------------------------------------
+
+function unmodelledCdFixture() {
+  const gitTree = tmpdir(); // where the cd really lands: a genuine working tree
+  fs.mkdirSync(path.join(gitTree, ".git"), { recursive: true });
+  return { gitTree, cwd: tmpdir(), target: `sub/.kontourai/flow-agents/slug/${STATE}` };
+}
+
+test("#1004 round 4: connectors splitSegments does not model fail closed", () => {
+  const { gitTree, cwd, target } = unmodelledCdFixture();
+  const NL = String.fromCharCode(10);
+  const cases = [
+    // Raw newline. `cd` must not be the FIRST command word, or the single-segment scan sees it.
+    `echo hi${NL}cd ${gitTree}${NL}echo forged > ${target}`,
+    `echo hi\r${NL}cd ${gitTree}\r${NL}echo forged > ${target}`,
+    // Bare `&` does not fork the parent shell -- its cwd genuinely changes across it.
+    `true & cd ${gitTree} && echo forged > ${target}`,
+    `false |& cd ${gitTree} ; echo forged > ${target}`,
+  ];
+  for (const cmd of cases) {
+    assert.ok(hook.checkRedirectToProtected(cmd, cwd), `unmodelled connector must fail closed:\n${cmd}`);
+  }
+});
+
+test("#1004 round 4: re-interpretation builtins and ANSI-C quoting fail closed", () => {
+  const { gitTree, cwd, target } = unmodelledCdFixture();
+  const cases = [
+    // `eval` is the one builtin whose job is reinterpreting text as a command line, so
+    // "one quoted token = one word" is exactly wrong for it.
+    `eval ${Q}cd ${gitTree}${Q} && echo forged > ${target}`,
+    `eval 'cd ${gitTree}' && echo forged > ${target}`,
+    `source ./setup.sh && echo forged > ${target}`,
+    `. ./setup.sh && echo forged > ${target}`,
+    // `$'cd'` executes as the word `cd`; the tokenizer yields `$cd`.
+    `$'cd' ${gitTree} && echo forged > ${target}`,
+    // Compound syntax splitSegments does not parse into command positions.
+    `case x in a) cd ${gitTree};; esac; echo forged > ${target}`,
+    `function f { cd ${gitTree}; }; f; echo forged > ${target}`,
+  ];
+  for (const cmd of cases) {
+    assert.ok(hook.checkRedirectToProtected(cmd, cwd), `unmodelled construct must fail closed:\n${cmd}`);
+  }
+});
+
+test("#1004 round 4: a redirection before the command word does not hide the cd", () => {
+  const { gitTree, cwd, target } = unmodelledCdFixture();
+  for (const lead of [">/dev/null", "> /dev/null", "2>/dev/null", "2>&1", "&>/dev/null", "<in.txt"]) {
+    const cmd = `${lead} cd ${gitTree} && echo forged > ${target}`;
+    assert.ok(hook.checkRedirectToProtected(cmd, cwd), `leading redirect must not consume command position:\n${cmd}`);
+  }
+});
+
+test("#1004 round 4: ordinary redirections are still not directory changes", () => {
+  // The redirect handling must not turn every redirect into a fail-closed trigger, or the
+  // round-3 over-block returns by another route.
+  const scratch = tmpdir();
+  for (const cmd of [
+    `sed -i '' 's/a/b/' scratch/${STATE} 2>/dev/null`,
+    `sed -i '' 's/a/b/' scratch/${STATE} 2>&1`,
+    `python3 -m json.tool scratch/${STATE} > /dev/null`,
+  ]) {
+    assert.equal(runBash(cmd, scratch).exitCode, 0, `ordinary redirect must not block:\n${cmd}`);
+  }
+});
+
 test("#682: a bare basename resolved from a cwd INSIDE a session dir still blocks", () => {
   const res = runBash(
     `node -e ${Q}require('fs').writeFileSync('${STATE}','x')${Q}`,

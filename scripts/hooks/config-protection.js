@@ -501,9 +501,68 @@ const DIRECTORY_CHANGING_COMMANDS = new Set(['cd', 'pushd', 'popd']);
 
 // Words that may precede the real command word without being it. Skipping a word can only
 // expose MORE `cd`s to the check, never fewer, so this list errs toward fail-closed.
+// `eval` is deliberately ABSENT — see UNMODELLED_COMMAND_WORDS.
 const COMMAND_POSITION_PREFIXES = new Set([
-  'do', 'then', 'else', 'elif', '!', 'time', 'command', 'builtin', 'eval', 'exec', 'nohup',
+  'do', 'then', 'else', 'elif', '!', 'time', 'command', 'builtin', 'exec', 'nohup',
 ]);
+
+// Command words whose effect this scanner cannot model, so their mere presence in command
+// position fails closed. `eval`/`source`/`.` re-interpret their operand AS a command line --
+// "one quoted token = one word" is right for ordinary commands and wrong for exactly these,
+// so `eval "cd /x"` really does move the shell while the tokenizer sees one non-`cd` token.
+// `case`/`esac`/`coproc`/`function` introduce compound syntax (pattern `)` arms, function
+// bodies) that splitSegments does not parse into command positions at all.
+const UNMODELLED_COMMAND_WORDS = new Set(['eval', 'source', '.', 'case', 'esac', 'coproc', 'function']);
+
+// A redirection may legally precede the command word without consuming command position:
+// `>/dev/null cd /x` really does change directory. Recognized so the scan keeps looking for
+// the command word instead of concluding "something else runs here".
+const REDIRECT_TOKEN_RE = /^(?:[0-9]*(?:>>|>|<)|&>>|&>|<<<|<<|>&|<&)/;
+const REDIRECT_OPERATOR_ONLY_RE = /^(?:[0-9]*(?:>>|>|<)|&>>|&>|<<<|<<|>&|<&)$/;
+
+/**
+ * True when the command contains a construct this scanner does not fully model, in which case
+ * the caller must fail closed rather than trust a structural verdict.
+ *
+ * #1004 targeted review: the structural scan is precise for what it models, but
+ * `splitSegments` only recognizes `&&`, `||`, `;` and `|` as connectors. Anything after an
+ * unrecognized connector is invisible to it — `true & cd /repo && …` and a `cd` on its own
+ * LINE both slipped past, because the scan stops at the first segment's command word and never
+ * sees the later `cd`. Rather than adding connectors one at a time (the enumeration that has
+ * already produced two rounds of bypasses), any connector-shaped text this tokenizer does not
+ * model returns true here.
+ *
+ * Quote-aware, so the round-3 over-block stays fixed: the `;cd;` inside
+ * `sed -i '' 's/replace me;cd; also/updated/' <path>` is quoted data, not a connector.
+ */
+function containsUnmodelledShellConstruct(command) {
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === '\\') { i++; continue; } // escaped char (incl. line continuation) is data
+    if (ch === "'") { i++; while (i < command.length && command[i] !== "'") i++; continue; }
+    if (ch === '"') {
+      i++;
+      while (i < command.length) {
+        if (command[i] === '\\') { i += 2; continue; }
+        if (command[i] === '"') break;
+        i++;
+      }
+      continue;
+    }
+    // A raw newline separates commands exactly as `;` does, and splitSegments ignores it.
+    if (ch === '\n' || ch === '\r') return true;
+    // ANSI-C / locale quoting: `$'cd'` executes as the word `cd`, but this tokenizer yields
+    // `$cd`. The quoting model does not cover it, so it fails closed.
+    if (ch === '$' && (command[i + 1] === "'" || command[i + 1] === '"')) return true;
+    if (ch === '&') {
+      if (command[i + 1] === '&') { i++; continue; }              // `&&` is modelled
+      if (command[i - 1] === '>' || command[i - 1] === '<') continue; // `2>&1`, `>&2` redirection
+      if (command[i + 1] === '>') { i++; continue; }              // `&>` redirect-both
+      return true; // bare `&` (and `|&`): a real connector splitSegments does not split on
+    }
+  }
+  return false;
+}
 
 /**
  * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
@@ -519,16 +578,32 @@ const COMMAND_POSITION_PREFIXES = new Set([
  * a `cd` inside quotes cannot open a segment or become a command word), then inspect only the
  * command word of each segment. The quote-concatenation case this guard was written for still
  * works, because the tokenizer joins adjacent fragments: `c""d` yields the token `cd`.
+ *
+ * #1004 targeted review: structural precision is only sound for the shapes this tokenizer
+ * actually models, and it models less of sh than it appears to. The rule is therefore
+ * two-part, and the first part dominates: FAIL CLOSED on any construct the scanner does not
+ * fully model (unrecognized connectors, re-interpretation builtins, ANSI-C quoting), and only
+ * then trust the structural verdict. This keeps the old regex's fail-closed posture for the
+ * unmodelled remainder while keeping the precision that removed the `'…;cd;…'` over-block.
  */
 function commandChangesDirectory(command) {
   if (typeof command !== 'string' || !command) return false;
+  if (containsUnmodelledShellConstruct(command)) return true;
   for (const segment of splitSegments(command)) {
-    for (const raw of tokenize(segment)) {
+    const tokens = tokenize(segment);
+    for (let i = 0; i < tokens.length; i++) {
       // Subshell/group punctuation glues to the word it opens: `(cd`, `{cd`, `(cd)`.
-      const word = raw.replace(/^[({]+/, '').replace(/[)}]+$/, '');
+      const word = tokens[i].replace(/^[({]+/, '').replace(/[)}]+$/, '');
       if (word === '') continue;
       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) continue; // `FOO=bar cd …` env prefix
+      if (REDIRECT_TOKEN_RE.test(word)) {
+        // `>/dev/null cd /x` and `> /dev/null cd /x` both leave command position unconsumed;
+        // a detached operator also swallows the following filename token.
+        if (REDIRECT_OPERATOR_ONLY_RE.test(word)) i++;
+        continue;
+      }
       if (COMMAND_POSITION_PREFIXES.has(word)) continue;
+      if (UNMODELLED_COMMAND_WORDS.has(word)) return true;
       if (DIRECTORY_CHANGING_COMMANDS.has(word)) return true;
       break; // this segment runs something else; its arguments are not command position
     }
