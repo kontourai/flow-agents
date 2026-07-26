@@ -35,6 +35,26 @@
  * claimed-pass command CI cannot confirm blocks. Fail-closed on compile-only: if no
  * comprehensive verify is configured, exits 1.
  *
+ * Non-signal is not success, and it is not one undifferentiated outcome either (#1011).
+ * The four marker-side failure modes above are REPORTED distinctly, not collapsed into a
+ * single sentence — see reportDeclaredNonMatch(). The verdict is unchanged and still
+ * fail-closed in every one of them; only the diagnostics differ:
+ *   absent            → 'no delivery/DECLARED marker found'
+ *   malformed         → 'delivery/DECLARED marker is malformed: ...' (names the fields/parse)
+ *   present, 0 of N conditions matched on every entry
+ *                     → 'NO CONDITION MATCHED' — this change genuinely has no exemption
+ *   present, ≥1 entry matched SOME conditions but not all
+ *                     → 'STALE-SCOPE SUSPECTED' — an exemption for this change plausibly
+ *                       exists and a condition has drifted (a rotated bot actor, a renamed
+ *                       branch); the entry, the conditions that matched, the conditions that
+ *                       failed, and the resolved context value each failed against are all
+ *                       named. This is the exact #1011 signature: the release-automation
+ *                       exemption's `branch-prefix:` half kept matching while its `author:`
+ *                       half went dead when the release bot became a GitHub App, and the
+ *                       flat 'out of scope for this change' line read identically to a PR
+ *                       that simply had no exemption — so 13 days of blocked releases were
+ *                       invisible.
+ *
  * "Bundle-required" means a bundle FOR THIS CHANGE (ADR 0022 addendum §2), not merely a
  * bundle reachable at the checkout: an AUTO-DISCOVERED bundle whose trust.checkpoint.json
  * `commit_sha` neither equals nor is a git-ancestor of this change's own commit sha
@@ -875,12 +895,142 @@ function matchesScope(scope, ctx) {
 }
 
 /**
+ * Which resolved-context field a scope condition is compared against (#1011 reporting).
+ * Naming the field — and therefore the VALUE the condition failed against — is the whole
+ * point: "author:kontourai-releases[bot] did not match" is not actionable; "did not match
+ * actor='github-actions[bot]'" names the drift.
+ * Returns null for an unrecognized prefix (which matches nothing, by design).
+ */
+function scopeConditionField(condition) {
+  const s = typeof condition === 'string' ? condition : '';
+  if (s.startsWith('ref:') || s.startsWith('branch-prefix:')) return 'ref';
+  if (s.startsWith('commit:')) return 'sha';
+  if (s.startsWith('author:')) return 'actor';
+  return null;
+}
+
+/** Render a resolved-context value for a diagnostic — empty/absent is stated, never blank. */
+function renderCtxValue(value) {
+  return value ? `'${value}'` : '<unset>';
+}
+
+/**
+ * Evaluate a marker `scope` condition-by-condition against the resolved context, keeping the
+ * per-condition outcome instead of collapsing it to one boolean (#1011).
+ *
+ * The VERDICT is delegated to matchesScope()/matchesScopeCondition() — the single source of
+ * truth for whether a scope matches — so this can never drift into a second, looser matcher.
+ * `matched` below is asserted to equal matchesScope(scope, ctx) by construction: it is the
+ * same `every()` over the same per-condition predicate.
+ *
+ * @returns {{scope:string, matched:boolean, conditions:{condition:string, matched:boolean,
+ *   field:string|null, value:string}[], matchedCount:number, total:number, partial:boolean}}
+ *   `partial` is the stale-scope signal: at least one condition matched AND at least one did
+ *   not. A single-condition scope can never be partial (0-of-1 is indistinguishable from
+ *   "this entry is about a different change"), which is why every failed condition is
+ *   reported with its context value regardless of partiality.
+ */
+function explainScope(scope, ctx) {
+  const s = typeof scope === 'string' ? scope : '';
+  const raw = s.split(' ').map((c) => c.trim()).filter(Boolean);
+  const conditions = raw.map((condition) => {
+    const field = scopeConditionField(condition);
+    return {
+      condition,
+      matched: matchesScopeCondition(condition, ctx),
+      field,
+      value: field ? (ctx[field] || '') : '',
+    };
+  });
+  const matchedCount = conditions.filter((c) => c.matched).length;
+  const total = conditions.length;
+  return {
+    scope: s,
+    matched: total > 0 && matchedCount === total,
+    conditions,
+    matchedCount,
+    total,
+    partial: matchedCount > 0 && matchedCount < total,
+  };
+}
+
+/** Render one evaluated condition as `<condition> vs <field>=<value>` for a diagnostic. */
+function renderCondition(c) {
+  if (!c.field) return `${c.condition} (unrecognized scope-condition prefix — matches nothing, fails closed)`;
+  return `${c.condition} vs ${c.field}=${renderCtxValue(c.value)}`;
+}
+
+/**
+ * Cap on per-entry breakdown lines emitted for an unmatched delivery/DECLARED (#1011).
+ * Truncation is itself stated in the output ("+N more entr(y|ies) not shown") — a silently
+ * truncated report would reproduce the very defect this reporting change exists to fix.
+ */
+const DECLARED_BREAKDOWN_LIMIT = 20;
+
+/**
+ * Build the diagnostic + per-entry breakdown for a delivery/DECLARED marker that is present
+ * and well-formed but matched nothing (#1011 option 3).
+ *
+ * Splits the single old sentence ('delivery/DECLARED marker present but out of scope for
+ * this change') into two distinguishable outcomes, and names, for every well-formed entry,
+ * which conditions matched and which failed against which resolved context value:
+ *
+ *   STALE-SCOPE SUSPECTED — ≥1 entry matched SOME of its conditions. An exemption plausibly
+ *     covering this change exists and a condition has drifted. Partial entries are listed
+ *     first because they are the actionable ones.
+ *   NO CONDITION MATCHED  — every entry matched zero conditions. This change genuinely has
+ *     no declared exemption; nothing here is stale.
+ *
+ * The substring 'out of scope' is retained in the diagnostic: it is pinned by existing evals
+ * and by anything grepping CI logs for the unmatched-marker outcome.
+ *
+ * @returns {{diagnostic:string, details:string[]}} `details` are additional stderr lines the
+ *   caller emits alongside the (single-line) diagnostic that becomes the issue message.
+ */
+function reportDeclaredNonMatch(wellFormed, ctx) {
+  const evaluations = wellFormed.map((marker) => ({ marker, explain: explainScope(marker.scope, ctx) }));
+  const partials = evaluations.filter((e) => e.explain.partial);
+  const n = evaluations.length;
+  const plural = n === 1 ? 'entry' : 'entries';
+
+  const diagnostic = partials.length > 0
+    ? `delivery/DECLARED marker present but out of scope for this change — STALE-SCOPE SUSPECTED: ${partials.length} of ${n} well-formed ${plural} PARTIALLY matched (some conditions matched, at least one did not). An exemption covering this change plausibly exists and a condition has drifted — e.g. a rotated bot actor (#1011) — rather than this change having no exemption at all. Per-entry breakdown below.`
+    : `delivery/DECLARED marker present but out of scope for this change — NO CONDITION MATCHED: none of the ${n} well-formed ${plural} matched a single condition against this context, so this change has no declared exemption (nothing here is stale). Per-entry breakdown below.`;
+
+  const details = [
+    `delivery/DECLARED resolved context: ref=${renderCtxValue(ctx.ref)} actor=${renderCtxValue(ctx.actor)} sha=${renderCtxValue(ctx.sha)}`,
+  ];
+
+  // Partial (stale-suspect) entries first — they are the actionable ones.
+  const ordered = [...partials, ...evaluations.filter((e) => !e.explain.partial)];
+  for (const { explain } of ordered.slice(0, DECLARED_BREAKDOWN_LIMIT)) {
+    const label = explain.partial ? 'PARTIAL' : 'NO-MATCH';
+    const matched = explain.conditions.filter((c) => c.matched).map(renderCondition);
+    const failed = explain.conditions.filter((c) => !c.matched).map(renderCondition);
+    const matchedPart = matched.length > 0 ? ` matched [${matched.join('; ')}];` : '';
+    details.push(
+      `delivery/DECLARED ${label} scope '${explain.scope}' (${explain.matchedCount}/${explain.total} conditions matched):${matchedPart} failed [${failed.join('; ')}]`,
+    );
+  }
+  if (ordered.length > DECLARED_BREAKDOWN_LIMIT) {
+    details.push(`delivery/DECLARED +${ordered.length - DECLARED_BREAKDOWN_LIMIT} more ${ordered.length - DECLARED_BREAKDOWN_LIMIT === 1 ? 'entry' : 'entries'} not shown (breakdown capped at ${DECLARED_BREAKDOWN_LIMIT})`);
+  }
+
+  return { diagnostic, details };
+}
+
+/**
  * Orchestrate delivery/DECLARED resolution for the bundle-absent path: discover → parse
  * → scope-match → return {exempt, marker?, diagnostic?}. First in-scope, well-formed
  * entry wins (array form); every entry is validated regardless, and malformed entries
  * are logged individually so a bad entry never silently masks a good one.
  *
  * Diagnostic strings below are pinned (grepped by callers/evals) — do not reword.
+ *
+ * On the non-match path the returned object also carries `details` (#1011): extra stderr
+ * lines the caller emits verbatim, naming the resolved context and, per entry, which scope
+ * conditions matched and which failed against which value. `details` is advisory output
+ * only — `exempt` (the verdict) is decided by matchesScope() alone, exactly as before.
  */
 function resolveDeclaredExemption(repoRoot, ctx) {
   const markerPath = discoverDeclaredMarker(repoRoot);
@@ -914,10 +1064,8 @@ function resolveDeclaredExemption(repoRoot, ctx) {
     }
   }
 
-  return {
-    exempt: false,
-    diagnostic: 'delivery/DECLARED marker present but out of scope for this change',
-  };
+  const { diagnostic, details } = reportDeclaredNonMatch(parsed.wellFormed, ctx);
+  return { exempt: false, diagnostic, details };
 }
 
 /**
@@ -1423,6 +1571,12 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       process.stdout.write(`[trust-reconcile] DECLARED (no-agent-delivery): ${scope} — ${reason} (approved by ${approved_by}, declared ${declared_at})\n`);
     } else {
       process.stderr.write(`[trust-reconcile] ${exemption.diagnostic}\n`);
+      // #1011: per-entry breakdown of WHY nothing matched (which conditions failed against
+      // which resolved context values). Reporting only — the issue below, and therefore the
+      // exit code, is identical with or without these lines.
+      for (const detail of exemption.details || []) {
+        process.stderr.write(`[trust-reconcile] ${detail}\n`);
+      }
       issues.push({
         type: 'bundle-required-no-declared-marker',
         message: exemption.diagnostic,
