@@ -1,5 +1,37 @@
 # Changelog
 
+## [5.4.0](https://github.com/kontourai/flow-agents/compare/v5.3.0...v5.4.0) (2026-07-26)
+
+
+### Features
+
+* add actor-bound host recovery ([#981](https://github.com/kontourai/flow-agents/issues/981)) ([5a3cc2a](https://github.com/kontourai/flow-agents/commit/5a3cc2aa3b1c8a3a489264d9d3d1442f3b3b8c92))
+* add provisional delivery lifecycle ([#972](https://github.com/kontourai/flow-agents/issues/972)) ([ffbc15e](https://github.com/kontourai/flow-agents/commit/ffbc15e9d0fd9288a2e16cc5cc128ccb7835f04f))
+* compile retrospective run observations ([#952](https://github.com/kontourai/flow-agents/issues/952)) ([f6de5a0](https://github.com/kontourai/flow-agents/commit/f6de5a020f30cf6e72ce3bba8a2fbf84974bb64b))
+* compile retrospective usage corpus ([#968](https://github.com/kontourai/flow-agents/issues/968)) ([3a9affa](https://github.com/kontourai/flow-agents/commit/3a9affaa38ccbbabea61eab0261a72b36c59d180))
+* correlate workflow outcome producers ([#941](https://github.com/kontourai/flow-agents/issues/941)) ([424b821](https://github.com/kontourai/flow-agents/commit/424b82129e3d1ffde5188c0e54579c9e1478e09d))
+* **hooks:** a denied tool call ends the call, not the turn ([#1005](https://github.com/kontourai/flow-agents/issues/1005)) ([#1007](https://github.com/kontourai/flow-agents/issues/1007)) ([8da05ad](https://github.com/kontourai/flow-agents/commit/8da05ad3d36fb0d88d43712c183d324a5e611b02))
+* **init:** bootstrap workflow providers ([#943](https://github.com/kontourai/flow-agents/issues/943)) ([1629e8b](https://github.com/kontourai/flow-agents/commit/1629e8bf80d10168101666f6970d48754879ff16))
+* orchestrate mutable-resource flow cursors ([#965](https://github.com/kontourai/flow-agents/issues/965)) ([3f7f17f](https://github.com/kontourai/flow-agents/commit/3f7f17fa90cbd1d30056ae5defd7f4b9be4341dd))
+* prepare canonical provider pickup ([#983](https://github.com/kontourai/flow-agents/issues/983)) ([e5820cd](https://github.com/kontourai/flow-agents/commit/e5820cd811dbcb6d3f5da433c2a6b79247701c70))
+* **workflow:** persist signed continuation checkpoints ([#964](https://github.com/kontourai/flow-agents/issues/964)) ([4c00e16](https://github.com/kontourai/flow-agents/commit/4c00e169be3601eea1918ab69f7595aed1d36a6e))
+
+
+### Fixes
+
+* complete workflow evidence integrity recovery ([e821b6f](https://github.com/kontourai/flow-agents/commit/e821b6fa6785b3d3dcbf29aa18aede828daea7e9))
+* constrain knowledge consolidation sources ([#969](https://github.com/kontourai/flow-agents/issues/969)) ([bcc6fe5](https://github.com/kontourai/flow-agents/commit/bcc6fe5e158e8be51d0bea1d8b7516ebb0743d30))
+* **evidence:** execute evidence commands sequentially, not concurrently ([#974](https://github.com/kontourai/flow-agents/issues/974)) ([#976](https://github.com/kontourai/flow-agents/issues/976)) ([ae7699e](https://github.com/kontourai/flow-agents/commit/ae7699e0005b6f4d26c83dee912c7330311c5db7))
+* make lifecycle static checks hermetic ([1c8c568](https://github.com/kontourai/flow-agents/commit/1c8c5680d6994b8f9f0e2537eeb46cd6c8a8a60a))
+* make workflow evidence reseal atomic ([#932](https://github.com/kontourai/flow-agents/issues/932)) ([88f4fdc](https://github.com/kontourai/flow-agents/commit/88f4fdc8b723f0ad72a4faf27d6866fe03506404))
+* patch production brace expansion ([#966](https://github.com/kontourai/flow-agents/issues/966)) ([43d6398](https://github.com/kontourai/flow-agents/commit/43d63984026f8979d71c9917dcac60ce84abe900))
+* preserve Flow pending mutation tickets ([7976e24](https://github.com/kontourai/flow-agents/commit/7976e2473e2d949e8739deffa4048b67d6501089))
+* preserve provider-confirmed workflow branches ([#956](https://github.com/kontourai/flow-agents/issues/956)) ([7cb7cb0](https://github.com/kontourai/flow-agents/commit/7cb7cb0e066f4f80a2734a2f31ae6dc5f15d678b))
+* recover exact-current lifecycle completion ([#973](https://github.com/kontourai/flow-agents/issues/973)) ([a441e5d](https://github.com/kontourai/flow-agents/commit/a441e5d6e34acb7c18f34a55ce7d20584c93eb79))
+* restore the release-please exemption after the bot identity changed ([#1010](https://github.com/kontourai/flow-agents/issues/1010)) ([67128f7](https://github.com/kontourai/flow-agents/commit/67128f77a3c1b11f433ae1d7933ce4bf704952f2))
+* **trust:** accept unchanged terminal delivery companion ([#996](https://github.com/kontourai/flow-agents/issues/996)) ([fac32d0](https://github.com/kontourai/flow-agents/commit/fac32d0cf2be788bc1f3b51fc085c661a392a55b))
+* use supported gh repository selectors ([#951](https://github.com/kontourai/flow-agents/issues/951)) ([a61130d](https://github.com/kontourai/flow-agents/commit/a61130db8d98f7760b005040f337b2832760b4ab))
+
 ## [5.3.0](https://github.com/kontourai/flow-agents/compare/v5.2.0...v5.3.0) (2026-07-24)
 
 
