@@ -2900,6 +2900,7 @@ async function processRootOperation(envelope) {
     if (fs.existsSync(nonceFile)) {
       const prior = durableJson(nonceFile, "nonce record");
       assertPreparedNonceRecord(prior, prepared);
+      assertPreparedMergeAuthorizationCurrent(envelope, authorization);
       resumePrepared = true;
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
         const recovery = childInvocation({ kind: "rollback", capability: signedCapability("rollback-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
@@ -2928,6 +2929,9 @@ async function processRootOperation(envelope) {
       }
       if (envelope.action === "merge-change") await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization, assertMergeChangeRequestAction(envelope, authorization));
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    }
+    if (resumePrepared && envelope.action === "merge-change") {
+      await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization, assertMergeChangeRequestAction(envelope, authorization));
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
     if (envelope.action === "recover-exact-current-completion" && !resumePrepared) await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
@@ -3012,6 +3016,15 @@ async function processRootOperation(envelope) {
     if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
   }));
+}
+function assertPreparedMergeAuthorizationCurrent(envelope, authorization) {
+  if (envelope.action === "merge-change") {
+    // Unlike Flow artifact recovery, merge-change has no coordinator-owned
+    // mutation to finish. A prepared nonce only proves an interrupted authority
+    // handoff, so it must never outlive the signed permission window.
+    verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
+  }
+  return authorization;
 }
 function response(envelope, outcome) {
   return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: {
