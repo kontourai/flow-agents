@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# test_runtime_hook_parity.sh — #1024: every shipped runtime carries every canonical policy hook,
+# or declares the gap with a reason.
+#
+# The defect this exists to prevent: `exportClaudeSettings` and `exportCodexHooks` were
+# hand-maintained parallel lists, and codex's copy omitted `config-protection` (the gate that
+# refuses interpreter writes to protected gate files) and `quality-gate`. Nothing failed, nothing
+# warned, and nothing declared the gap — a codex session simply ran unprotected. That is the
+# "absence of signal reads as success" shape, in the one layer whose whole job is enforcement.
+#
+# Asserts against the GENERATED BUNDLES, not the table, so a table that says the right thing while
+# the emitter does something else still fails.
+#
+# Usage: bash evals/integration/test_runtime_hook_parity.sh
+
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT" || exit 1
+
+errors=0
+_pass() { echo "  PASS: $1"; }
+_fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }
+
+# Canonical policies every runtime must run unless it declares otherwise.
+UNIVERSAL_HOOKS=(config-protection quality-gate evidence-capture stop-goal-fit workflow-steering)
+
+echo ""
+echo "=== bundles are present (regenerate with 'npm run build:bundles' if this fails) ==="
+if [[ -f dist/claude-code/.claude/settings.json && -f dist/codex/.codex/hooks.json \
+   && -f dist/opencode/.opencode/plugins/flow-agents.js && -f dist/pi/.pi/extensions/flow-agents.ts ]]; then
+  _pass "all four runtime bundles exist"
+else
+  echo "  SKIP: bundles not built; run 'npm run build:bundles' first." >&2
+  echo "  ACCEPTED GAP: recording as an explicit skip, not a pass." >&2
+  exit 1
+fi
+
+check_runtime() {
+  local label="$1" file="$2"
+  echo ""
+  echo "=== $label ==="
+  for hook in "${UNIVERSAL_HOOKS[@]}"; do
+    if grep -q "$hook" "$file"; then
+      _pass "$label wires $hook"
+    else
+      _fail "$label is MISSING $hook — wire it, or declare it in RUNTIME_POLICY_EVENTS with a RUNTIME_HOOK_NOTES reason"
+    fi
+  done
+}
+
+check_runtime "claude-code" dist/claude-code/.claude/settings.json
+check_runtime "codex"       dist/codex/.codex/hooks.json
+check_runtime "opencode"    dist/opencode/.opencode/plugins/flow-agents.js
+check_runtime "pi"          dist/pi/.pi/extensions/flow-agents.ts
+
+# Regression pin for the specific defect: codex must carry the two hooks it silently lacked.
+echo ""
+echo "=== #1024 regression pin: codex parity on the two hooks it silently lacked ==="
+for hook in config-protection quality-gate; do
+  if grep -q "$hook" dist/codex/.codex/hooks.json; then
+    _pass "codex carries $hook (was absent before #1024)"
+  else
+    _fail "codex lost $hook again — the shared POLICY_HOOKS table is no longer load-bearing"
+  fi
+done
+
+# The build-time assertions must actually refuse an undeclared gap.
+echo ""
+echo "=== build-time coverage assertion refuses an undeclared gap ==="
+if node -e '
+  const m = require("./build/src/tools/build-universal-bundles.js");
+  if (typeof m.assertGeneratedPolicyCoverage !== "function") { console.error("assertGeneratedPolicyCoverage not exported"); process.exit(2); }
+  try {
+    // opencode maps config-protection; a source that omits it must be refused.
+    m.assertGeneratedPolicyCoverage("opencode", "// a plugin that wires nothing at all");
+    process.exit(1); // did NOT throw -> the guard is inert
+  } catch { process.exit(0); }
+' 2>/dev/null; then
+  _pass "assertGeneratedPolicyCoverage throws when a mapped hook is missing from generated source"
+else
+  _fail "assertGeneratedPolicyCoverage did not refuse a source missing a mapped hook — the guard is inert"
+fi
+
+echo ""
+echo "----------------------------------------------"
+if [[ $errors -eq 0 ]]; then
+  echo "test_runtime_hook_parity: all checks passed."
+  exit 0
+else
+  echo "test_runtime_hook_parity: $errors check(s) failed."
+  exit 1
+fi
