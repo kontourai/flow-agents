@@ -765,6 +765,94 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+test("routed-back provenance keeps the manifest bound to the start definition after an authorized amendment", async () => {
+  const session = makeSession("amended-route-back-provenance");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  initializePublishChangeGitRepository(session.projectRoot);
+  execFileSync("git", ["add", ".gitignore", "package.json", "context", "review-target"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed implementation"], { cwd: session.projectRoot, stdio: "ignore" });
+  await advanceSessionToPrOpen(session);
+  const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Amended route-back provenance",
+    body: "Exercise start-definition manifest identity after an authorized amendment.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
+
+  const historical = bundleClaim({
+    expectation: "ci-merge-readiness",
+    claimType: "builder.merge-ready-ci.readiness",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+  });
+  historical.claim.status = "disputed";
+  historical.claim.metadata.gate_claim.step_id = "merge-ready-ci";
+  writeBundle(session.sessionDir, [historical]);
+  const routed = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(routed.run.state.current_step, "verify");
+
+  const successor = { ...structuredClone(routed.run.definition), version: `${routed.run.definition.version}-amended-provenance-test` };
+  await amendRunDefinition(session.slug, {
+    cwd: session.projectRoot,
+    definition: successor,
+    request: {
+      reason: "exercise immutable start-definition manifest identity",
+      expected_run_head: flowRunHead(routed.run.state),
+      expected_definition: definitionIdentity(routed.run.definition),
+      successor_digest: definitionDigest(successor),
+      authority: {
+        kind: "user_request",
+        actor: "amended-route-back-test",
+        request_ref: "test:amended-route-back-provenance",
+        requested_at: new Date().toISOString(),
+      },
+    },
+  });
+  const amended = await loadRun(session.slug, session.projectRoot);
+  const projected = readJson(path.join(session.sessionDir, "state.json"));
+  projected.flow_run = {
+    ...projected.flow_run,
+    definition_version: successor.version,
+    definition_digest: definitionDigest(successor),
+    run_head: flowRunHead(amended.state),
+  };
+  writeJson(path.join(session.sessionDir, "state.json"), projected);
+
+  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  currentTests.claim.status = "verified";
+  currentTests.claim.metadata.verification_workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  const prerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of prerequisites) entry.claim.status = "verified";
+  writeBundle(session.sessionDir, [currentTests, ...prerequisites, historical]);
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "amended-route-back-review",
+    "--reviewer", "amended-route-back-reviewer",
+    "--verdict", "pass",
+    "--summary", "The amended run retains authenticated start-definition manifest provenance.",
+    "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
+    "--lane-json", JSON.stringify({
+      id: "code-review",
+      status: "pass",
+      summary: "Review the amended route-back provenance fixture.",
+      evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed fixture artifact." }],
+    }),
+  ]);
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) =>
+      claim.metadata?.gate_claim?.expectation_id === "ci-merge-readiness"),
+    false,
+  );
+});
+
 test("provisional delivery journals interrupted replacement until it can deterministically restore or finish", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-journal-"));
   const slug = "provisional-session";

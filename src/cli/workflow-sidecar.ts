@@ -4520,8 +4520,11 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
   }
   if (flowRunHead(canonicalState) !== currentRunHead) return { currentRunHead, claimsById: new Map() };
   const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest", 32 * 1024 * 1024);
-  if (manifest.run_id !== runId || manifest.definition_id !== canonicalState.definition_id
-    || manifest.definition_version !== canonicalState.definition_version) {
+  // Flow's evidence manifest is anchored to the immutable start definition.
+  // Authorized amendments are authenticated by validateRunStateConsistency
+  // above and advance only the effective state/definition identity.
+  if (manifest.run_id !== runId || manifest.definition_id !== startDefinition.id
+    || manifest.definition_version !== startDefinition.version) {
     return { currentRunHead, claimsById: new Map() };
   }
   const evidenceById = new Map<string, AnyObj>();
