@@ -35,7 +35,8 @@ produces its local record only.
 
 - Original intent, acceptance evidence, confidence report, and release decision.
 - Observed outcomes from `RepositoryAdapter`, `CheckProvider`, `ReleaseProvider`,
-  `BacklogProvider`, and `DeployProvider` when those providers exist.
+  `WorkItemProvider`, `BoardProvider`, and `DeployProvider` when those providers
+  exist.
 - Incidents, user feedback, review findings, operational observations, and
   durable documentation decisions.
 
@@ -50,16 +51,19 @@ produces its local record only.
    explicit rationale for no change.
 4. Give each correction a stable identifier, owner or ownership gap, target
    destination, evidence, disposition, and follow-up state. Route product work
-   to the backlog through `BacklogProvider`, workflow defects to the owning
-   workflow, regression risks to tests, durable operating knowledge to the
-   knowledge system, and binding decisions or changed contracts to
-   documentation or an ADR.
-5. When a `BacklogProvider` is configured, it is the required destination for
+   to the backlog through the configured `WorkItemProvider` (with
+   `BoardProvider` for board, queue, or milestone placement), workflow defects
+   to the owning workflow, regression risks to tests, durable operating
+   knowledge through `knowledge-capture`, and binding decisions or changed
+   contracts to documentation or an ADR.
+5. When a `WorkItemProvider` is configured, it is the required destination for
    follow-up work — a lesson recorded only somewhere else has not been routed.
    Naming an abstract destination ("the backlog", "the knowledge system")
-   without a provider-observed record leaves the follow-up open. Where no
-   provider is configured, say so explicitly and record where the follow-up
-   went instead; do not treat its absence as a reason to skip routing.
+   without a provider-observed record leaves the follow-up open. Resolve what
+   is configured the same way the rest of the kit does, through
+   `flow-agents effective-backlog-settings`; where nothing is configured, say
+   so explicitly and record where the follow-up went instead, rather than
+   treating its absence as a reason to skip routing.
 6. A learning may also belong in the operator's own agent instruction files
    when it changes how future work should be approached, but that is the
    operator's call about their own files and never a substitute for the
