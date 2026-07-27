@@ -6,6 +6,7 @@ import { parseArgs, flagString } from "../lib/args.js";
 import { atomicWriteFile } from "../lib/fs.js";
 import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { inspectBuilderFlowSession } from "../builder-flow-runtime.js";
+import { validateRunStateConsistency } from "@kontourai/flow";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync } from "./assignment-provider.js";
 import { validateTrustBundle } from "./workflow-sidecar.js";
 import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
@@ -22,6 +23,7 @@ const DELIVERY_FILES = ["trust.bundle", "trust.checkpoint.attestation.json", "tr
 
 type SessionContext = { sessionDir: string; artifactRoot: string; projectRoot: string; slug: string };
 type CompletedMerge = { action: IssuedMergeChangeAction; observation: AuthenticatedMergeChangeObservation };
+type CanonicalRunDefinitions = { startDefinition: Record<string, unknown>; effectiveDefinition: Record<string, unknown> };
 type MergeChangeCliDependencies = Readonly<{
   /** Internal test seam; the public CLI always uses the authenticated defaults. */
   currentAction?: (context: SessionContext, strategy: MergeChangeStrategy) => Promise<IssuedMergeChangeAction>;
@@ -151,9 +153,9 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function resultDigestClaimedByCanonicalRun(manifest: unknown, actionId: string, observation: ReturnType<typeof assertAuthenticatedPublishChangeObservation>, digest: string, binding: PublishChangeActionBinding, slug: string): boolean {
+export function resultDigestClaimedByCanonicalRun(manifest: unknown, actionId: string, observation: ReturnType<typeof assertAuthenticatedPublishChangeObservation>, digest: string, binding: PublishChangeActionBinding, slug: string, startDefinition: { id: string; version: string }): boolean {
   const root = record(manifest, "canonical Flow evidence manifest");
-  if (root.run_id !== slug || root.definition_id !== binding.definition_id || root.definition_version !== binding.definition_version || !Array.isArray(root.evidence)) return false;
+  if (root.run_id !== slug || root.definition_id !== startDefinition.id || root.definition_version !== startDefinition.version || !Array.isArray(root.evidence)) return false;
   const summary = `Authenticated publish-change operation ${actionId} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`;
   return root.evidence.some((entry) => {
     try {
@@ -182,7 +184,7 @@ function assertCanonicalBundleRunBinding(bundle: unknown, slug: string): void {
   }
 }
 
-function readAuthenticatedPublishResult(context: SessionContext, inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, provider: ChangeProviderSettings): ReturnType<typeof assertAuthenticatedPublishChangeObservation> {
+function readAuthenticatedPublishResult(context: SessionContext, inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, provider: ChangeProviderSettings, startDefinition: { id: string; version: string }): ReturnType<typeof assertAuthenticatedPublishChangeObservation> {
   const bytes = readRegularFile(path.join(context.sessionDir, "publish-change.result.json"), "publish-change.result.json");
   if (bytes.byteLength > 65_536) throw new Error("merge-change publish-change.result.json exceeds the canonical operation bound");
   let raw: Record<string, unknown>;
@@ -201,7 +203,7 @@ function readAuthenticatedPublishResult(context: SessionContext, inspected: Awai
   if (authenticated.binding.run_id !== context.slug || authenticated.binding.definition_id !== inspected.run.definitionId || authenticated.binding.definition_version !== inspected.run.definitionVersion) {
     throw new Error("merge-change requires publish-change result binding to the canonical completed run");
   }
-  if (!resultDigestClaimedByCanonicalRun(inspected.run.manifest, actionId, authenticated, sha256(bytes), authenticated.binding, context.slug)) {
+  if (!resultDigestClaimedByCanonicalRun(inspected.run.manifest, actionId, authenticated, sha256(bytes), authenticated.binding, context.slug, startDefinition)) {
     throw new Error("merge-change requires publish-change.result.json action and digest bound to canonical completed run evidence");
   }
   return authenticated;
@@ -227,20 +229,43 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   const actor = assertCurrentAssignment(context);
   const effective = resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
   if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") throw new Error("merge-change requires a configured ChangeProvider");
-  const published = readAuthenticatedPublishResult(context, inspected, effective.provider as ChangeProviderSettings);
+  const definitions = validateCanonicalRunDefinitions(inspected);
+  const published = readAuthenticatedPublishResult(context, inspected, effective.provider as ChangeProviderSettings, definitions.startDefinition as { id: string; version: string });
   const change = published.change_ref;
   const terminalHead = resolveTrustedLocalGitCommit(context.projectRoot, change.head_ref);
   await assertExactTerminalDelivery(context, terminalHead);
-  assertEvidenceRefreshControl(inspected);
+  assertEvidenceRefreshControl(inspected, definitions);
   return issueMergeChangeAction({ binding: published.binding, provider: effective.provider as ChangeProviderSettings, assignment_actor: actor, expected_provider_actor: published.provider_actor, intent: { strategy, change_number: change.number, base_ref: change.base_ref, head_ref: change.head_ref, terminal_head_sha: terminalHead } });
 }
 
-function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): void {
+function validateCanonicalRunDefinitions(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): CanonicalRunDefinitions {
   const definitionFile = path.join(inspected.run.dir, "definition.json");
+  let startDefinition: Record<string, unknown>;
+  try { startDefinition = record(JSON.parse(readRegularFile(definitionFile, "canonical Flow start definition").toString("utf8")), "canonical Flow start definition"); }
+  catch { throw new Error("merge-change requires a readable canonical Flow start definition"); }
+  let validated: ReturnType<typeof validateRunStateConsistency>;
+  try { validated = validateRunStateConsistency(startDefinition, inspected.run.state, { runId: inspected.run.runId }); }
+  catch { throw new Error("merge-change requires a canonical Flow state consistent with its immutable start definition and authorized amendments"); }
+  const effectiveDefinition = record(validated.definition, "canonical effective Flow definition");
+  const validatedStartDefinition = record(validated.startDefinition, "canonical Flow start definition");
+  if (!isDeepStrictEqual(validatedStartDefinition, inspected.run.startDefinition)
+    || !isDeepStrictEqual(effectiveDefinition, inspected.run.definition)
+    || effectiveDefinition.id !== inspected.run.definitionId
+    || effectiveDefinition.version !== inspected.run.definitionVersion) {
+    throw new Error("merge-change canonical Flow definition identity is inconsistent");
+  }
+  const manifest = record(inspected.run.manifest, "canonical Flow evidence manifest");
+  if (manifest.run_id !== inspected.run.runId
+    || manifest.definition_id !== validatedStartDefinition.id
+    || manifest.definition_version !== validatedStartDefinition.version) {
+    throw new Error("merge-change requires the canonical evidence manifest bound to the immutable start definition");
+  }
+  return { startDefinition: validatedStartDefinition, effectiveDefinition };
+}
+
+function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, definitions: CanonicalRunDefinitions): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
-  let definition: Record<string, unknown>;
-  try { definition = record(JSON.parse(readRegularFile(definitionFile, "canonical Flow definition").toString("utf8")), "canonical Flow definition"); }
-  catch { throw new Error("merge-change requires a readable canonical Flow definition with the evidence-refresh control"); }
+  const definition = definitions.effectiveDefinition;
   const gates = record(definition.gates, "canonical Flow definition gates");
   const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
   if (!isDeepStrictEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" })
@@ -285,7 +310,7 @@ function assertEvidenceRefreshVerificationProvenance(state: Record<string, unkno
 async function prepareAuthorizationRequest(context: SessionContext, strategy: MergeChangeStrategy, input: { nonce?: string; requestedAt?: string; expiresAt?: string }) {
   const action = await currentAction(context, strategy);
   const inspected = await inspectBuilderFlowSession({ sessionDir: context.sessionDir });
-  assertEvidenceRefreshControl(inspected);
+  assertEvidenceRefreshControl(inspected, validateCanonicalRunDefinitions(inspected));
   const flow = record(inspected.projection.flow_run, "canonical Flow projection");
   const manifestBytes = readRegularFile(path.join(inspected.run.dir, "evidence", "manifest.json"), "canonical Flow evidence manifest");
   const requested_at = input.requestedAt ?? new Date().toISOString();

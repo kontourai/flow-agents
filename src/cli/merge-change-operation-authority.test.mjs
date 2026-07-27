@@ -74,8 +74,9 @@ test("canonical completed-run evidence authenticates the publish action identity
   };
   const summary = `Authenticated publish-change operation ${publishedAction} observed open provider record PR_fixture`;
   const manifest = { run_id: binding.run_id, definition_id: binding.definition_id, definition_version: binding.definition_version, evidence: [{ gate_id: binding.gate_ids[0], producer: "publish-change-operation-authority", authority_trace: publishedAction, expectation_ids: ["pull-request-opened"], bundle: { claims: [{ fieldOrBehavior: summary, metadata: { artifact_refs: [{ kind: "provider", sha256: digest }] } }] } }] };
-  assert.equal(resultDigestClaimedByCanonicalRun(manifest, publishedAction, observation, digest, binding, binding.run_id), true);
-  assert.equal(resultDigestClaimedByCanonicalRun(manifest, "c".repeat(64), observation, digest, binding, binding.run_id), false, "an action id not recorded as authority_trace is unauthenticated");
-  assert.equal(resultDigestClaimedByCanonicalRun(manifest, publishedAction, observation, "c".repeat(64), binding, binding.run_id), false, "a result whose bytes do not match the canonical provider artifact digest is unauthenticated");
-  assert.equal(resultDigestClaimedByCanonicalRun({ ...manifest, run_id: "other-run" }, publishedAction, observation, digest, binding, binding.run_id), false, "cross-run evidence is unauthenticated");
+  const startDefinition = { id: binding.definition_id, version: binding.definition_version };
+  assert.equal(resultDigestClaimedByCanonicalRun(manifest, publishedAction, observation, digest, binding, binding.run_id, startDefinition), true);
+  assert.equal(resultDigestClaimedByCanonicalRun(manifest, "c".repeat(64), observation, digest, binding, binding.run_id, startDefinition), false, "an action id not recorded as authority_trace is unauthenticated");
+  assert.equal(resultDigestClaimedByCanonicalRun(manifest, publishedAction, observation, "c".repeat(64), binding, binding.run_id, startDefinition), false, "a result whose bytes do not match the canonical provider artifact digest is unauthenticated");
+  assert.equal(resultDigestClaimedByCanonicalRun({ ...manifest, run_id: "other-run" }, publishedAction, observation, digest, binding, binding.run_id, startDefinition), false, "cross-run evidence is unauthenticated");
 });

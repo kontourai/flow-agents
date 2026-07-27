@@ -1238,8 +1238,9 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const stateBytes = protectedRegularFile(files.state, "canonical Flow state", 4 * 1024 * 1024);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const definition = JSON.parse(definitionBytes.toString("utf8"));
-  const state = JSON.parse(stateBytes.toString("utf8"));
+  const startDefinition = JSON.parse(definitionBytes.toString("utf8"));
+  const stateInput = JSON.parse(stateBytes.toString("utf8"));
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   if (definition.id !== "builder.build" || state.definition_id !== "builder.build" || state.current_step !== "verify") {
     throw new Error("critique resolution is authorized only for the canonical builder.build verify step");

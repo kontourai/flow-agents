@@ -80,6 +80,68 @@ test("coordinator resolves effective definition identity through authorized amen
   assert.equal(flowRunHead(resolved.state), flowRunHead(amended.state));
 });
 
+test("canonical Flow synchronization attaches through an authorized amended gate", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "coordinator-amended-gate-"));
+  const projectRoot = path.join(root, "project");
+  const installRoot = path.join(root, "installed");
+  const runId = "amended-gate";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  try {
+    fs.mkdirSync(projectRoot, { recursive: true });
+    copyPinnedFlowClosure(installRoot);
+    fs.copyFileSync(RUNTIME, path.join(installRoot, "runtime-v1.mjs"));
+    const source = fs.readFileSync(COORDINATOR, "utf8");
+    fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), `${source}\nexport { prepareCanonicalFlowSynchronization };\n`);
+    const coordinator = await import(`${pathToFileURL(path.join(installRoot, "coordinator.mjs")).href}?amended-gate=${Date.now()}-${Math.random()}`);
+    await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+      cwd: projectRoot,
+      runId,
+      params: { subject: "kontourai/flow-agents#1000" },
+    });
+    const started = await loadRun(runId, projectRoot);
+    const successor = structuredClone(started.definition);
+    successor.version = `${started.definition.version}-amended-gate`;
+    successor.gates["amended-verify-gate"] = { ...successor.gates["verify-gate"] };
+    delete successor.gates["verify-gate"];
+    await amendRunDefinition(runId, {
+      cwd: projectRoot,
+      definition: successor,
+      request: {
+        reason: "exercise effective gate resolution in canonical synchronization",
+        expected_run_head: flowRunHead(started.state),
+        expected_definition: definitionIdentity(started.definition),
+        successor_digest: definitionDigest(successor),
+        authority: {
+          kind: "user_request",
+          actor: "coordinator-test",
+          request_ref: "test:coordinator-amended-gate",
+          requested_at: new Date().toISOString(),
+        },
+      },
+    });
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
+    const stateFile = path.join(flowRoot, "state.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    state.current_step = "verify";
+    state.next_action = "attach amended verify gate evidence";
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    const prepared = await coordinator.prepareCanonicalFlowSynchronization(
+      { projectRoot, sessionDir, runId },
+      { schemaVersion: 5, source: "coordinator-amended-gate-test", claims: [], evidence: [], policies: [], events: [] },
+      { request_sha256: "a".repeat(64) },
+    );
+    const manifestPostimage = prepared.postimages.find(({ file }) => file === path.join(flowRoot, "evidence", "manifest.json"));
+    assert.ok(manifestPostimage, "synchronization emits the canonical manifest postimage");
+    const manifest = JSON.parse(manifestPostimage.bytes.toString("utf8"));
+    const attachment = manifest.evidence.find(({ id }) => id === prepared.attachment_id);
+    assert.equal(attachment.gate_id, "amended-verify-gate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("merge-change requires an exact signed request action and post-amendment verify pass", async () => {
   const loaded = await loadProtectedReadFromCoordinator();
   const actionId = "a".repeat(64);
