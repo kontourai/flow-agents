@@ -16,6 +16,7 @@ function action(terminalHead = SHA) {
     binding,
     provider,
     assignment_actor: "codex:fixture:Kontour",
+    expected_provider_actor: "fixture",
     intent: { strategy: "squash", change_number: 1000, base_ref: "main", head_ref: "fixture", terminal_head_sha: terminalHead },
   });
 }
@@ -47,7 +48,10 @@ async function runExecute(sessionDir, dependencies) {
   const originalError = console.error;
   console.error = () => {};
   try {
-    return await mergeChangeMain(["execute", "--session-dir", sessionDir, "--strategy", "squash"], dependencies);
+    return await mergeChangeMain(["execute", "--session-dir", sessionDir, "--strategy", "squash", "--authorization-file", path.join(sessionDir, "signed-merge-authorization.json")], {
+      authorizeOperation: () => ({ run_id: binding.run_id, operation_status: "applied", completion: {} }),
+      ...dependencies,
+    });
   } finally {
     console.error = originalError;
   }
@@ -114,6 +118,53 @@ test("session-bound merge execution refuses terminal validation before provider 
     });
     assert.equal(result, 1);
     assert.equal(providerCalls, 0, "terminal refusal must happen before provider invocation");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("session-bound merge execution consumes signed authorization under the lock before provider mutation", async () => {
+  const fixture = fixtureSession();
+  const issued = action();
+  let providerCalls = 0;
+  try {
+    const result = await runExecute(fixture.sessionDir, {
+      provider,
+      currentAction: async () => issued,
+      authorizeOperation: (_context, observed, file) => {
+        assert.equal(fs.existsSync(fixture.lockDir), true, "authority consumption must occur under the subject lock");
+        assert.equal(observed.action_id, issued.action_id);
+        assert.match(file, /signed-merge-authorization\.json$/);
+        return { run_id: binding.run_id, operation_status: "replayed", completion: {} };
+      },
+      executeProvider: async () => {
+        providerCalls += 1;
+        return mergedObservation(issued, "2026-07-26T00:00:00.000Z");
+      },
+    });
+    assert.equal(result, 0);
+    assert.equal(providerCalls, 1, "an exact replay may retry only the same action");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("merge execution requires a signed authorization before it can reach the provider", async () => {
+  const fixture = fixtureSession();
+  let providerCalls = 0;
+  try {
+    const originalError = console.error;
+    console.error = () => {};
+    let result;
+    try {
+      result = await mergeChangeMain(["execute", "--session-dir", fixture.sessionDir, "--strategy", "squash"], {
+        provider,
+        currentAction: async () => action(),
+        executeProvider: async () => { providerCalls += 1; return mergedObservation(action(), "2026-07-26T00:00:00.000Z"); },
+      });
+    } finally { console.error = originalError; }
+    assert.equal(result, 1);
+    assert.equal(providerCalls, 0);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

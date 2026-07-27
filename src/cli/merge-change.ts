@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parseArgs, flagString } from "../lib/args.js";
 import { atomicWriteFile } from "../lib/fs.js";
@@ -10,11 +10,13 @@ import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLo
 import { validateTrustBundle } from "./workflow-sidecar.js";
 import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
 import { executeMergeChangeProvider } from "./merge-change-provider.js";
-import { assertAuthenticatedMergeChangeObservation, assertIssuedMergeChangeAction, issueMergeChangeAction, MERGE_CHANGE_STRATEGIES, type AuthenticatedMergeChangeObservation, type IssuedMergeChangeAction, type MergeChangeStrategy } from "../merge-change-operation-authority.js";
+import { assertAuthenticatedMergeChangeObservation, assertIssuedMergeChangeAction, buildUnsignedMergeChangeAuthorization, issueMergeChangeAction, MERGE_CHANGE_STRATEGIES, type AuthenticatedMergeChangeObservation, type IssuedMergeChangeAction, type MergeChangeStrategy } from "../merge-change-operation-authority.js";
 import { assertAuthenticatedPublishChangeObservation, issuePublishChangeAction } from "../publish-change-operation-authority.js";
 import type { ChangeProviderSettings, PublishChangeActionBinding } from "./public-contracts.js";
+import { invokeExternalLifecycleAuthority, type ExternalLifecycleMutationResult } from "../external-lifecycle-authority.js";
 
-const FLAGS = new Set(["session-dir", "strategy"]);
+const FLAGS = new Set(["session-dir", "strategy", "authorization-file"]);
+const REQUEST_FLAGS = new Set(["session-dir", "strategy", "out", "requested-at", "expires-at", "nonce"]);
 const VALIDATE_FLAGS = new Set(["session-dir", "head-ref"]);
 const DELIVERY_FILES = ["trust.bundle", "trust.checkpoint.attestation.json", "trust.checkpoint.intoto.json", "trust.checkpoint.json", "trust.checkpoint.sig.json"] as const;
 
@@ -25,6 +27,8 @@ type MergeChangeCliDependencies = Readonly<{
   currentAction?: (context: SessionContext, strategy: MergeChangeStrategy) => Promise<IssuedMergeChangeAction>;
   provider?: ChangeProviderSettings;
   executeProvider?: (provider: ChangeProviderSettings, action: IssuedMergeChangeAction) => Promise<AuthenticatedMergeChangeObservation>;
+  /** Internal test seam; production always invokes the protected lifecycle helper. */
+  authorizeOperation?: (context: SessionContext, action: IssuedMergeChangeAction, authorizationFile: string) => ExternalLifecycleMutationResult;
 }>;
 
 function projectRootForSession(sessionDirInput: string): SessionContext {
@@ -227,7 +231,46 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   const change = published.change_ref;
   const terminalHead = resolveTrustedLocalGitCommit(context.projectRoot, change.head_ref);
   await assertExactTerminalDelivery(context, terminalHead);
-  return issueMergeChangeAction({ binding: published.binding, provider: effective.provider as ChangeProviderSettings, assignment_actor: actor, intent: { strategy, change_number: change.number, base_ref: change.base_ref, head_ref: change.head_ref, terminal_head_sha: terminalHead } });
+  assertEvidenceRefreshControl(inspected);
+  return issueMergeChangeAction({ binding: published.binding, provider: effective.provider as ChangeProviderSettings, assignment_actor: actor, expected_provider_actor: published.provider_actor, intent: { strategy, change_number: change.number, base_ref: change.base_ref, head_ref: change.head_ref, terminal_head_sha: terminalHead } });
+}
+
+function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): void {
+  const definitionFile = path.join(inspected.run.dir, "definition.json");
+  const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
+  let definition: Record<string, unknown>;
+  try { definition = record(JSON.parse(readRegularFile(definitionFile, "canonical Flow definition").toString("utf8")), "canonical Flow definition"); }
+  catch { throw new Error("merge-change requires a readable canonical Flow definition with the evidence-refresh control"); }
+  const gates = record(definition.gates, "canonical Flow definition gates");
+  const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
+  if (!isDeepStrictEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" })
+    || !isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" })) {
+    throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
+  }
+  const outcomes = Array.isArray(inspected.run.state.gate_outcomes) ? inspected.run.state.gate_outcomes : [];
+  const refreshedVerification = outcomes.some((outcome) => outcome && typeof outcome === "object"
+    && (outcome as Record<string, unknown>).gate_id === "verify-gate"
+    && (outcome as Record<string, unknown>).status === "pass");
+  if (!refreshedVerification) throw new Error("merge-change requires a completed run with refreshed passing verification evidence after adopting the merge-ready-ci control");
+  // Force the same protected regular-file constraints used for a signed request
+  // before the helper binds its independently recomputed digest.
+  readRegularFile(manifestFile, "canonical Flow evidence manifest");
+}
+
+async function prepareAuthorizationRequest(context: SessionContext, strategy: MergeChangeStrategy, input: { nonce?: string; requestedAt?: string; expiresAt?: string }) {
+  const action = await currentAction(context, strategy);
+  const inspected = await inspectBuilderFlowSession({ sessionDir: context.sessionDir });
+  assertEvidenceRefreshControl(inspected);
+  const flow = record(inspected.projection.flow_run, "canonical Flow projection");
+  const manifestBytes = readRegularFile(path.join(inspected.run.dir, "evidence", "manifest.json"), "canonical Flow evidence manifest");
+  const requested_at = input.requestedAt ?? new Date().toISOString();
+  const expires_at = input.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString();
+  return buildUnsignedMergeChangeAuthorization({
+    project_root: context.projectRoot, run_id: context.slug, subject: String(inspected.run.state.subject ?? ""),
+    flow_definition_id: inspected.run.definitionId, flow_definition_version: inspected.run.definitionVersion,
+    flow_definition_digest: inspected.run.definitionDigest, flow_run_head: String(flow.run_head ?? ""), flow_manifest_sha256: sha256(manifestBytes),
+    issued_action: action, nonce: input.nonce ?? randomBytes(24).toString("hex"), requested_at, expires_at,
+  });
 }
 
 async function execute(argv: string[], dependencies: MergeChangeCliDependencies = {}): Promise<number> {
@@ -236,7 +279,8 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
   for (const key of Object.keys(args.flags)) if (!FLAGS.has(key) || Array.isArray(args.flags[key])) throw new Error(`merge-change execute does not support repeated or unknown --${key}`);
   const sessionDir = flagString(args.flags, "session-dir");
   const strategy = flagString(args.flags, "strategy");
-  if (!sessionDir || !strategy || !(MERGE_CHANGE_STRATEGIES as readonly string[]).includes(strategy)) throw new Error("merge-change execute requires --session-dir and --strategy squash|rebase|merge-commit|merge-queue");
+  const authorizationFile = flagString(args.flags, "authorization-file");
+  if (!sessionDir || !strategy || !authorizationFile || !(MERGE_CHANGE_STRATEGIES as readonly string[]).includes(strategy)) throw new Error("merge-change execute requires --session-dir, --strategy squash|rebase|merge-commit|merge-queue, and signed --authorization-file <path>");
   const context = projectRootForSession(sessionDir);
   const result = await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const resolveAction = dependencies.currentAction ?? currentAction;
@@ -249,6 +293,10 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
       ? { status: "configured", provider: dependencies.provider }
       : resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
     if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") throw new Error("merge-change requires a configured ChangeProvider");
+    const authorization = (dependencies.authorizeOperation ?? ((requestContext, _issuedAction, file) => invokeExternalLifecycleAuthority({
+      action: "merge-change", project_root: requestContext.projectRoot, session_dir: requestContext.sessionDir, authorization_file: file,
+    })))(context, action, authorizationFile);
+    if (authorization.run_id !== context.slug || !["applied", "replayed"].includes(authorization.operation_status)) throw new Error("merge-change lifecycle authority did not bind the exact session operation");
     const observation = await (dependencies.executeProvider ?? executeMergeChangeProvider)(effective.provider as ChangeProviderSettings, action);
     const current = await resolveAction(context, strategy as MergeChangeStrategy);
     if (!isDeepStrictEqual(current, action)) throw new Error("merge-change action changed while provider mutation was in flight");
@@ -258,6 +306,30 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
     return payload;
   });
   console.log(JSON.stringify({ operation: "merge-change", action_id: result.action.action_id, strategy, terminal_head_sha: result.action.intent.terminal_head_sha, state: result.observation.state }, null, 2));
+  return 0;
+}
+
+/** Public, read-only signing-request surface for a protected merge authorization. */
+async function requestAuthorization(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  if (args.positionals.length !== 0) throw new Error("merge-change request accepts only named flags");
+  for (const key of Object.keys(args.flags)) if (!REQUEST_FLAGS.has(key) || Array.isArray(args.flags[key])) throw new Error(`merge-change request does not support repeated or unknown --${key}`);
+  const sessionDir = flagString(args.flags, "session-dir");
+  const strategy = flagString(args.flags, "strategy");
+  const out = flagString(args.flags, "out");
+  if (!sessionDir || !strategy || !out || !(MERGE_CHANGE_STRATEGIES as readonly string[]).includes(strategy)) throw new Error("merge-change request requires --session-dir, --strategy squash|rebase|merge-commit|merge-queue, and --out <unsigned authorization path>");
+  const context = projectRootForSession(sessionDir);
+  const prepared = await withSubjectLockAsync(context.artifactRoot, context.slug, async () => prepareAuthorizationRequest(context, strategy as MergeChangeStrategy, {
+    nonce: flagString(args.flags, "nonce"), requestedAt: flagString(args.flags, "requested-at"), expiresAt: flagString(args.flags, "expires-at"),
+  }));
+  const target = path.resolve(out);
+  const descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+  try { fs.writeFileSync(descriptor, `${JSON.stringify(prepared.unsigned, null, 2)}\n`); } finally { fs.closeSync(descriptor); }
+  console.log(JSON.stringify({ operation: "merge-change", unsigned_authorization_file: target, signing_payload: prepared.signingPayload, next_steps: [
+    "Sign signing_payload with a registered lifecycle-authority Ed25519 key.",
+    `Add signature {\"algorithm\":\"ed25519\",\"key_id\":\"<registry key id>\",\"value\":\"<base64 signature>\"} to ${target}.`,
+    `Run: flow-agents merge-change execute --session-dir ${context.sessionDir} --strategy ${strategy} --authorization-file ${target}`,
+  ] }, null, 2));
   return 0;
 }
 
@@ -280,8 +352,9 @@ export function main(argv = process.argv.slice(2), dependencies: MergeChangeCliD
   try {
     const [command, ...rest] = argv;
     if (command === "execute") return execute(rest, dependencies).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
+    if (command === "request") return requestAuthorization(rest).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
     if (command === "validate-terminal-delivery") return validateTerminalDelivery(rest).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
-    console.error("usage: merge-change <execute|validate-terminal-delivery> --session-dir .kontourai/flow-agents/<slug>");
+    console.error("usage: merge-change <request|execute|validate-terminal-delivery> --session-dir .kontourai/flow-agents/<slug>");
     return 2;
   } catch (error) { console.error(`merge-change: ${(error as Error).message}`); return 1; }
 }

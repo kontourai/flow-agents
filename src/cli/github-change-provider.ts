@@ -202,6 +202,7 @@ export async function mergeGithubChangeExactHead(
   const authenticated = await bindGithubAuthentication(execution);
   try {
     const capability = await checkGithubCapability(settings, authenticated);
+    assertExpectedProviderActor(action, capability.provider_actor);
     const before = await mergeProviderRecord(action, authenticated);
     assertExactMergeHead(before, action);
     await assertExactHeadChecks(action, authenticated);
@@ -218,6 +219,7 @@ export async function mergeGithubChangeExactHead(
     if (action.intent.strategy === "merge-queue") {
       const admitted = await observeExactMergeQueueEntry(action, authenticated);
       if (admitted) return queuedMergeObservation(action, capability.provider_actor, admitted, execution.now());
+      await assertMergeMutationPolicy(settings, action, authenticated);
       // GitHub routes --auto through a configured merge queue.  The match-head
       // guard is the server-side compare-and-mutate fence; re-observation below
       // proves that the queue accepted the very same terminal source head.
@@ -233,6 +235,7 @@ export async function mergeGithubChangeExactHead(
     }
 
     const mergeMethod = action.intent.strategy === "merge-commit" ? "merge" : action.intent.strategy;
+    await assertMergeMutationPolicy(settings, action, authenticated);
     const result = plainObject(parseProviderJson(await invoke(authenticated, ["api", "--method", "PUT", `repos/${repoSlug(action)}/pulls/${action.intent.change_number}/merge`, "-f", `sha=${action.intent.terminal_head_sha}`, "-f", `merge_method=${mergeMethod}`]), "merge provider result"), "merge provider result");
     if (result.merged !== true) throw new ChangeProviderError("provider_observation_mismatch", "provider did not merge the exact terminal change head");
     const after = await mergeProviderRecord(action, authenticated);
@@ -321,6 +324,105 @@ async function assertExactHeadChecks(action: IssuedMergeChangeAction, dependenci
     if (entry.bucket !== "pass") {
       throw new ChangeProviderError("provider_observation_mismatch", "required provider checks are not passing for the exact terminal head");
     }
+  }
+}
+
+/**
+ * Destructive merge authorization is intentionally stricter than a one-time
+ * `gh auth status`: the actor that publishes the canonical change is part of
+ * the signed merge action and must still be the actor making the mutation.
+ */
+function assertExpectedProviderActor(action: IssuedMergeChangeAction, providerActor: string): void {
+  if (action.expected_provider_actor !== providerActor) {
+    throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed after canonical publish-change observation");
+  }
+}
+
+/**
+ * Re-observe the effective branch policy before a destructive call. This
+ * refuses an absent/ambiguous policy rather than treating a passing check as
+ * authorization to bypass review or branch protection.
+ */
+async function assertMergeMutationPolicy(settings: ChangeProviderSettings, action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<void> {
+  const repository = plainObject(parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}`]),
+    "merge repository policy",
+  ), "merge repository policy");
+  const strategyFlag = action.intent.strategy === "squash"
+    ? "allow_squash_merge"
+    : action.intent.strategy === "rebase"
+      ? "allow_rebase_merge"
+      : action.intent.strategy === "merge-commit"
+        ? "allow_merge_commit"
+        : "allow_auto_merge";
+  if (repository[strategyFlag] !== true) {
+    throw new ChangeProviderError("provider_observation_mismatch", `provider policy does not permit the selected ${action.intent.strategy} merge strategy`);
+  }
+
+  // The branch-protection resource is GitHub's provider-authenticated policy
+  // view for this exact target ref. Requiring enforced-admin protection and a
+  // positive approval threshold rejects both no-policy and admin-bypass
+  // ambiguity. Ruleset-only configurations that do not expose an equivalent
+  // no-bypass policy remain deliberately unsupported rather than guessed.
+  const protection = plainObject(parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}/branches/${encodeURIComponent(action.intent.base_ref)}/protection`]),
+    "merge branch protection policy",
+  ), "merge branch protection policy");
+  const enforceAdmins = plainObject(protection.enforce_admins, "merge branch protection enforce-admins");
+  const reviewPolicy = plainObject(protection.required_pull_request_reviews, "merge branch protection review policy");
+  if (enforceAdmins.enabled !== true
+    || !Number.isSafeInteger(reviewPolicy.required_approving_review_count)
+    || Number(reviewPolicy.required_approving_review_count) < 1) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider branch protection does not establish an enforced no-bypass approval policy");
+  }
+
+  // Rulesets can add or supersede classic branch protection. GitHub's
+  // effective-rules endpoint is the provider's branch-specific projection, so
+  // do not infer a ruleset from repository configuration or an older cached
+  // protection response. Requiring a review rule keeps an unobservable bypass
+  // or policy-removal from becoming implicit merge authority.
+  const effectiveRules = plainObject(parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}/rules/branches/${encodeURIComponent(action.intent.base_ref)}`]),
+    "merge effective ruleset policy",
+  ), "merge effective ruleset policy");
+  if (!Array.isArray(effectiveRules.rules) || !effectiveRules.rules.some((rule) => {
+    if (!rule || typeof rule !== "object" || Array.isArray(rule)) return false;
+    const entry = rule as Record<string, unknown>;
+    const parameters = entry.parameters;
+    return entry.type === "pull_request"
+      && parameters !== null
+      && typeof parameters === "object"
+      && !Array.isArray(parameters)
+      && Number.isSafeInteger((parameters as Record<string, unknown>).required_approving_review_count)
+      && Number((parameters as Record<string, unknown>).required_approving_review_count) >= 1;
+  })) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset does not establish a review policy for the terminal target branch");
+  }
+
+  // This is deliberately the final provider observation before mutation: the
+  // same authenticated GraphQL response binds the current actor, source head,
+  // review decision, and provider mergeability state. A dismissed or stale
+  // approval resolves to a non-APPROVED reviewDecision and is rejected.
+  const query = "query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid isDraft merged mergeable mergeStateStatus reviewDecision}}}";
+  const response = plainObject(parseProviderJson(await invoke(dependencies, [
+    "api", "graphql",
+    "-f", `query=${query}`,
+    "-f", `owner=${settings.repository.owner}`,
+    "-f", `name=${settings.repository.name}`,
+    "-F", `number=${action.intent.change_number}`,
+  ]), "terminal merge policy observation"), "terminal merge policy observation");
+  const viewer = plainObject(response.data, "terminal merge policy data");
+  const actor = plainObject(viewer.viewer, "terminal merge policy actor");
+  assertExpectedProviderActor(action, providerString(actor.login, "terminal merge policy actor login", 512));
+  const repositoryData = plainObject(viewer.repository, "terminal merge policy repository");
+  const pullRequest = plainObject(repositoryData.pullRequest, "terminal merge policy pull request");
+  if (providerSha(pullRequest.headRefOid, "terminal merge policy head SHA") !== action.intent.terminal_head_sha
+    || pullRequest.isDraft === true
+    || pullRequest.merged === true
+    || pullRequest.reviewDecision !== "APPROVED"
+    || pullRequest.mergeable !== "MERGEABLE"
+    || pullRequest.mergeStateStatus !== "CLEAN") {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider terminal-head review, mergeability, or policy observation does not permit merge");
   }
 }
 

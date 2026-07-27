@@ -37,19 +37,77 @@ if git -C "$REPO" merge-base --is-ancestor "$FEATURE_HEAD" "$SQUASH_HEAD"; then
   exit 1
 fi
 
-# Build a distinct, session-bound trust bundle from this run's canonical
-# evidence. A foreign-session delivery must never become merge authority merely
-# because its bytes are otherwise valid.
-node --input-type=module - "$ROOT/.kontourai/flow-agents/kontourai-flow-agents-1000/trust.bundle" "$SESSION/trust.bundle" "$SLUG" <<'NODE'
+# Build an independently authored, typed terminal-delivery bundle. This fixture
+# deliberately does not read `.kontourai/`: its only acceptance semantics are
+# that this synthetic session has valid terminal delivery companions for the
+# topology exercised below.
+node --input-type=module - "$SESSION/trust.bundle" "$SLUG" <<'NODE'
 import fs from "node:fs";
-const [source, destination, slug] = process.argv.slice(2);
-const bundle = JSON.parse(fs.readFileSync(source, "utf8"));
-const replace = (value) => typeof value === "string"
-  ? value.replaceAll("kontourai-flow-agents-1000", slug).replaceAll("kontourai/flow-agents#1000", "kontourai/flow-agents#terminal")
-  : Array.isArray(value) ? value.map(replace)
-    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replace(entry)]))
-      : value;
-fs.writeFileSync(destination, `${JSON.stringify(replace(bundle))}\n`);
+const [destination, slug] = process.argv.slice(2);
+const timestamp = "2026-01-01T00:00:00.000Z";
+const claimId = `${slug}-terminal-delivery`;
+const policyId = "policy:terminal-delivery-fixture";
+const bundle = {
+  schemaVersion: 5,
+  source: "evals/integration/test_terminal_before_merge.sh",
+  claims: [{
+    id: claimId,
+    subjectType: "flow-step",
+    subjectId: `${slug}/terminal-delivery`,
+    facet: "flow-agents.workflow",
+    claimType: "workflow.acceptance.criterion",
+    fieldOrBehavior: "Synthetic terminal delivery is valid before the exact-head merge boundary is evaluated.",
+    value: "pass",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    impactLevel: "high",
+    verificationPolicyId: policyId,
+    metadata: {
+      origin: "acceptance",
+      criterion: {
+        id: "AC-terminal-delivery-fixture",
+        description: "Terminal delivery companions are present for the synthetic squash topology.",
+        status: "pass",
+        evidence_refs: [{ kind: "command", excerpt: "bash evals/integration/test_terminal_before_merge.sh" }],
+      },
+    },
+    status: "verified",
+  }],
+  evidence: [{
+    id: `ev:${claimId}`,
+    claimId,
+    evidenceType: "test_output",
+    method: "validation",
+    sourceRef: "evals/integration/test_terminal_before_merge.sh",
+    excerptOrSummary: "Synthetic terminal-delivery fixture for non-ancestral squash topology coverage.",
+    observedAt: timestamp,
+    collectedBy: "flow-agents/eval-fixture",
+    passing: true,
+    execution: { runner: "bash", label: "bash evals/integration/test_terminal_before_merge.sh", isError: false, exitCode: 0, environment: "test" },
+  }],
+  policies: [{
+    id: policyId,
+    claimType: "workflow.acceptance.criterion",
+    requiredEvidence: ["test_output"],
+    acceptanceCriteria: ["A verified test-output event supports this synthetic terminal-delivery claim."],
+    reviewAuthority: "system",
+    validityRule: { kind: "manual" },
+    stalenessTriggers: [],
+    conflictRules: [],
+    impactLevel: "high",
+  }],
+  events: [{
+    id: `evt:${claimId}`,
+    claimId,
+    status: "verified",
+    actor: "flow-agents/eval-fixture",
+    method: "validation",
+    evidenceIds: [`ev:${claimId}`],
+    createdAt: timestamp,
+    verifiedAt: timestamp,
+  }],
+};
+fs.writeFileSync(destination, `${JSON.stringify(bundle)}\n`);
 NODE
 cat > "$SESSION/trust.checkpoint.json" <<EOF
 {"schema_version":"1.0","slug":"$SLUG","status":"delivered","phase":"release","commit_sha":"$SQUASH_HEAD"}
