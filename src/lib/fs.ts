@@ -206,7 +206,9 @@ export function walkFiles(root: string): string[] {
   for (const name of fs.readdirSync(root).sort()) {
     const file = path.join(root, name);
     const stat = fs.statSync(file);
-    if (stat.isDirectory()) out.push(...walkFiles(file));
+    // Push individually rather than spreading: a spread passes one argument per path
+    // and overflows the engine's argument limit on large subtrees. See src/tools/common.ts.
+    if (stat.isDirectory()) for (const nested of walkFiles(file)) out.push(nested);
     else if (stat.isFile()) out.push(file);
   }
   return out;

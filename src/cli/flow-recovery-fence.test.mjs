@@ -105,7 +105,6 @@ test("all recovery readers reject invalid or active predecessor generations", ()
     }
   }
 });
-
 test("Flow Agents recovery adapter rejects a fence generation change during a read", () => {
   const value = fixture();
   try {

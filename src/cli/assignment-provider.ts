@@ -98,7 +98,7 @@ export type AssignmentStatus = {
   issue_number?: number | null;
 };
 
-type GithubIssueDoc = {
+export type GithubIssueDoc = {
   number?: number;
   assignees?: Array<{ login?: string } | string>;
   labels?: Array<{ name?: string } | string>;
@@ -106,7 +106,7 @@ type GithubIssueDoc = {
   state?: string;
 };
 
-type RenderClaimInput = {
+export type RenderClaimInput = {
   repo?: { owner?: string; name?: string };
   issue_number?: number;
   assignee_login?: string;
@@ -125,6 +125,15 @@ type RenderClaimInput = {
 
 const DEFAULT_LABEL_NAME = "agent:claimed";
 const CLAIM_COMMENT_MARKER_DEFAULT = "<!-- flow-agents:assignment-claim -->";
+
+export type AssignmentRenderResult = {
+  role: "AssignmentRenderResult";
+  transition: "claim";
+  subject_id: string;
+  gh_commands: string[][];
+  claim_comment_body: string;
+  record: AssignmentClaimRecord;
+};
 
 /**
  * Delegate to the shared pure-CJS resolver (scripts/hooks/lib/actor-identity.js), mirroring the
@@ -1109,6 +1118,49 @@ function renderClaimCommentBody(record: AssignmentClaimRecord, marker: string): 
   ].join("\n");
 }
 
+export function renderGithubClaim(
+  subjectId: string,
+  input: RenderClaimInput,
+  actor: ActorStruct,
+  claimedAt: string = isoNow(),
+): AssignmentRenderResult {
+  const repo = requireRepo(input);
+  const issueNumber = requireIssueNumber(input);
+  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, actor, repo, issueNumber);
+  const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
+  const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
+  const ttlSeconds = input.ttl_seconds ?? 1800;
+  const branch = input.branch;
+  const artifactDir = input.artifact_dir;
+  if (!branch) throw new Error("input-json.branch is required for render-claim");
+  if (!artifactDir) throw new Error("input-json.artifact_dir is required for render-claim");
+
+  const record: AssignmentClaimRecord = {
+    schema_version: "1.0",
+    role: "AssignmentClaimRecord",
+    subject_id: subjectId,
+    actor,
+    actor_key: actorKey,
+    work_item_ref: workItemRef,
+    claimed_at: claimedAt,
+    ttl_seconds: ttlSeconds,
+    branch,
+    artifact_dir: artifactDir,
+    status: "claimed",
+  };
+  const repoSlug = `${repo.owner}/${repo.name}`;
+  const commentBody = renderClaimCommentBody(record, marker);
+  const ghCommands: string[][] = [];
+  if (input.assignee_login) ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-assignee", input.assignee_login]);
+  ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-label", labelName]);
+  ghCommands.push(
+    input.existing_comment_id
+      ? ["gh", "api", "--method", "PATCH", `repos/${repoSlug}/issues/comments/${input.existing_comment_id}`, "-f", `body=${commentBody}`]
+      : ["gh", "issue", "comment", String(issueNumber), "--repo", repoSlug, "--body", commentBody],
+  );
+  return { role: "AssignmentRenderResult", transition: "claim", subject_id: subjectId, gh_commands: ghCommands, claim_comment_body: commentBody, record };
+}
+
 function renderHandoffCommentBody(subjectId: string, input: RenderClaimInput): string {
   const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
   const record = input.previous_record
@@ -1130,41 +1182,7 @@ function renderClaim(argv: string[]): number {
   const subjectId = requireFlag(args, "subject-id");
   const input = loadJsonInput(requireFlag(args, "input-json")) as RenderClaimInput;
   const actor = loadActorStructFromFile(requireFlag(args, "actor-json"));
-  const repo = requireRepo(input);
-  const issueNumber = requireIssueNumber(input);
-  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, actor, repo, issueNumber);
-  const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
-  const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
-  const ttlSeconds = input.ttl_seconds ?? 1800;
-  const branch = input.branch;
-  const artifactDir = input.artifact_dir;
-  if (!branch) throw new Error("input-json.branch is required for render-claim");
-  if (!artifactDir) throw new Error("input-json.artifact_dir is required for render-claim");
-
-  const record: AssignmentClaimRecord = {
-    schema_version: "1.0",
-    role: "AssignmentClaimRecord",
-    subject_id: subjectId,
-    actor,
-    actor_key: actorKey,
-    work_item_ref: workItemRef,
-    claimed_at: isoNow(),
-    ttl_seconds: ttlSeconds,
-    branch,
-    artifact_dir: artifactDir,
-    status: "claimed",
-  };
-  const repoSlug = `${repo.owner}/${repo.name}`;
-  const commentBody = renderClaimCommentBody(record, marker);
-  const ghCommands: string[][] = [];
-  if (input.assignee_login) ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-assignee", input.assignee_login]);
-  ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-label", labelName]);
-  ghCommands.push(
-    input.existing_comment_id
-      ? ["gh", "api", "--method", "PATCH", `repos/${repoSlug}/issues/comments/${input.existing_comment_id}`, "-f", `body=${commentBody}`]
-      : ["gh", "issue", "comment", String(issueNumber), "--repo", repoSlug, "--body", commentBody],
-  );
-  console.log(JSON.stringify({ role: "AssignmentRenderResult", transition: "claim", subject_id: subjectId, gh_commands: ghCommands, claim_comment_body: commentBody, record }, null, 2));
+  console.log(JSON.stringify(renderGithubClaim(subjectId, input, actor), null, 2));
   return 0;
 }
 

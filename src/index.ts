@@ -636,9 +636,16 @@ export {
   LEGACY_TELEMETRY_DIR,
   telemetryDataDir,
 } from "./lib/local-artifact-root.js";
-export { bindHostWorkflowSession, retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
+export {
+  bindHostWorkflowSession,
+  buildUnsignedHostWorkflowAuthority,
+  hostWorkflowAuthorityPayload,
+  retireHostWorkflowSession,
+  validateHostWorkflowAuthority,
+} from "./lib/host-workflow-binding.js";
 export type {
   HostWorkflowBinding,
+  HostWorkflowAuthority,
   HostWorkflowBindingInput,
   RetireHostWorkflowBindingInput,
 } from "./lib/host-workflow-binding.js";

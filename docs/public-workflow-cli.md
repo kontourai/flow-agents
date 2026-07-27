@@ -171,14 +171,15 @@ attestation, and mutually exclusive companion digests. Publication transports th
 the root-owned coordinator rechecks every binding, appends a signed-authorization event under the
 Flow run lock, and installs a purpose-specific signed completion before the package records the
 delivery. It then writes only that session's `delivery/<slug>/` transport. Commit
-and push those companion files so the provider's Trust Verify check can reconcile the PR
-revision. It is not a release decision, does not add a `ci-merge-readiness` claim, and cannot
-complete or declare the run. `delivery/DECLARED` remains unavailable to agent work.
+and push those companion files before provider checks and before recording `ci-merge-readiness`,
+so the provider's Trust Verify check can reconcile the PR revision. It is not a release decision,
+does not add a `ci-merge-readiness` claim, and cannot complete or declare the run.
+`delivery/DECLARED` remains unavailable to agent work.
 
-After provider checks, the explicit readiness decision, and learning evidence are recorded and the
-canonical `builder.build` run has advanced through `learn` to completed `done`,
-publish the terminal CI-visible delivery evidence through the primary public CLI, commit that
-superseding delivery output, and push the resulting head:
+After those provider checks, record the explicit readiness decision and complete learning. Only
+when the canonical `builder.build` run has advanced through `learn` to completed `done`, publish
+the terminal CI-visible delivery evidence through the primary public CLI, commit that superseding
+delivery output, and push the resulting head:
 
 ```bash
 flow_agents workflow publish-delivery \
@@ -206,9 +207,16 @@ target checkout's current `HEAD`, replaces stale companions with one newly emitt
 in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
 bundle before copying the set into `delivery/<session>/`. Trust Verify accepts a provisional
 candidate only when the checked PR revision differs from the authenticated published head by
-exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory. Ordinary
-ancestry, tree equivalence, inherited bundles, extra source changes, altered companions, and
-unrelated session bundles cannot satisfy the check.
+exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory.
+
+At terminal publication, the Git delta may contain all four transport files, or exactly the three
+mutable files: `trust.bundle`, `trust.checkpoint.json`, and the signed or in-toto companion selected
+by the attestation descriptor. The three-file form is permitted only when
+`trust.checkpoint.attestation.json` is raw-byte identical in the terminal revision and the
+checkpoint revision. Even when Git omits that descriptor from the delta, Trust Verify still treats
+it as one of the validated four transport files at the checked revision and compares its raw bytes
+with the checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
+changes, altered or missing companions, and unrelated session bundles cannot satisfy the check.
 
 Terminal publication is unavailable while `learn` is active, even when a release decision is
 positive; provisional publication is the only CI-transport path before learning closes.
@@ -243,6 +251,38 @@ flow_agents workflow evidence \
   --criterion-json '{"id":"<criterion-id>","status":"pass","evidence_refs":[{"kind":"command","excerpt":"npm test","summary":"Exact substantive project test command run for this criterion."}]}' \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
+
+An embedding host whose current runtime identity cannot reproduce the active
+assignment actor must establish an expiring recovery-capable session binding,
+then authorize each ordinary evidence mutation separately. Run
+`evidence-request` with the exact evidence arguments, sign the emitted
+`signing_payload` with a registered lifecycle-authority key, add that signature
+to the emitted `authorization`, and pass the protected signed file to the
+otherwise identical evidence command:
+
+```bash
+flow_agents workflow evidence-request \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  > evidence-request.json
+
+flow_agents workflow evidence \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  --authorization-file /absolute/outside-project/evidence-authorization.json
+```
+
+The authorization binds the exact assignment generation, assignment actor key and struct,
+the independently named host routing key and routing-binding generation, Flow head and manifest, Trust Bundle, evidence
+arguments, canonical project/run/subject, nonce, and expiry. The external
+coordinator verifies and durably redeems it before the normal evidence
+transaction runs. A pointer alone is routing metadata, never bearer authority;
+replay, binding retirement/replacement, assignment takeover, or changed Flow,
+trust, or evidence arguments fail closed before another mutation.
 
 When a current root-signed lifecycle completion already binds a Trust Bundle and its external
 resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
@@ -338,6 +378,15 @@ accepts only an exact
 all-old or all-new generation. Mixed, malformed, or unknown generations are quarantined with the
 fence left active for offline recovery. An active legacy recursive reseal journal is never
 auto-restored.
+Publication also preflights the fixed, protected
+`verification-reseal-atomic-replace.cjs` host capability. That administrator-supplied capability
+must implement `kontourai.atomic-expected-preimage-replace.v1`: atomically compare the named leaf's
+exact preimage and install or delete only the authorized postimage. It receives a pinned parent
+descriptor and basename, while the coordinator independently rechecks the parent and postimage.
+Root validates its fixed protected artifact; only the caller-identity worker executes its code.
+The reference coordinator ships no pathname or descriptor-only fallback and refuses on every
+platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
+capability is absent or invalid. Portable request creation and external signing remain available.
 After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
 removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable

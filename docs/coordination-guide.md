@@ -249,15 +249,68 @@ legacy-fallback behavior unchanged (compat + anti-gaming: identity cannot be uns
 
 Embedding hosts that own their own session lifecycle use the public
 `bindHostWorkflowSession()` library contract to establish this pointer. The
-host supplies a stable, filesystem-safe actor key and the selected task
-directory each time it starts or resumes that task, then supplies the same key
-as `FLOW_AGENTS_ACTOR` while invoking canonical hooks. The contract writes only
+host supplies a stable actor key and the selected task directory each time it
+starts or resumes that task, then supplies the same key as
+`FLOW_AGENTS_ACTOR` while invoking canonical hooks. The contract writes only
 the actor-scoped pointer: it does not claim assignment, create workflow state,
 or overwrite the shared compatibility pointer. This keeps lifecycle authority
 with the host while preserving Flow Agents' cross-actor isolation. Each bind
 returns a unique `binding_id`. The host retains that value and passes it as
 `bindingId` to `retireHostWorkflowSession()` so a delayed end callback cannot
 retire a newer binding of the same actor and task.
+
+When a continuing host can no longer reproduce the assignment actor struct
+(for example, its desktop host label differs from the CLI hostname), it may
+bind the **pair** of `actorKey` and exact assignment `actor` struct with a
+bounded `expiresAt`. This pointer is routing metadata only. It never contains
+signed authority and neither it nor a caller-controlled `FLOW_AGENTS_ACTOR`
+may authorize `workflow evidence`.
+
+For ordinary, non-operation-bound gate evidence, the routed host first runs
+`workflow evidence-request` with the exact arguments it intends to pass to
+`workflow evidence`. The request captures one opened assignment generation
+(path identity, raw digest, assignment actor key, and actor struct) under the assignment
+lock and binds it independently from the host routing key to the current routing-binding id and raw digest, Flow head
+and manifest digest, Trust Bundle digest, canonical project/run/subject, exact
+evidence-request digest, nonce, and expiry. The command emits unsigned
+authorization bytes only. The continuing host signs those canonical bytes
+with its registered lifecycle key outside the project, then passes the signed
+record to the same `workflow evidence` command with `--authorization-file`.
+The lifecycle coordinator verifies the signature and exact current preimages,
+durably redeems the nonce, and returns a signed completion binding that exact
+authorization. The package rechecks that completion before invoking the
+ordinary staged evidence transaction while holding both the subject lock and
+the exact host-pointer generation lock. Replay, retirement, assignment
+takeover, binding replacement, expiry, and any Flow or trust preimage change
+therefore fail before a second canonical mutation.
+
+Verification evidence that must replace a claim already covered by a current
+root-signed lifecycle completion remains a separate protocol. The routed host
+uses `workflow reseal-verification-evidence-request` to stage the exact
+writer-produced candidate, signs the emitted authorization, and calls
+`workflow reseal-verification-evidence --authorization-file <path>`. The
+coordinator owns redemption, revalidates the exact Flow and trust preimages,
+and publishes the fixed six-artifact reducer plan through its durable recovery
+fence and CAS transaction.
+Redemption requires an administrator-injected atomic expected-preimage
+replacement capability. The coordinator gives it only a pinned parent
+descriptor, basename, exact preimage, and exact postimage; the capability must
+atomically refuse a changed leaf. Parent pinning remains an additional path
+safety check and is not represented as leaf CAS. The reference coordinator
+ships no fallback and refuses on every platform before coordinator state,
+nonce, plan, stage, fence, or artifact mutation when the protected capability
+is absent or invalid. Request creation and external signing remain portable.
+
+Routing bindings have a maximum one-hour lifetime, reject creation after
+expiry, and tolerate at most five minutes of future `updatedAt` clock skew.
+Malformed, retired, expired, symlinked, path-replaced, or assignment-replaced
+bindings fail before request issuance. `hostWorkflowAuthorityPayload()` is the
+canonical payload helper for the ordinary-evidence host/coordinator
+integration, but its output is not accepted as a pointer capability or
+package-side mutation authority.
+Async pointer-lock holders use live ownership tokens for reentrancy; detached
+continuations cannot reuse an ended lock scope, and concurrent same-process
+attempts receive an immediate retryable refusal.
 
 ## 8. Guard point 3 — the verify-hold publish gate (the one hard fence)
 

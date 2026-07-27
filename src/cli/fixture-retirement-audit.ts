@@ -49,7 +49,7 @@ function walkFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
     const full = path.join(abs, entry.name);
-    if (entry.isDirectory()) out.push(...walkFiles(path.relative(root, full).split(path.sep).join("/")));
+    if (entry.isDirectory()) for (const nested of walkFiles(path.relative(root, full).split(path.sep).join("/"))) out.push(nested);
     else if (entry.isFile()) out.push(path.relative(root, full).split(path.sep).join("/"));
   }
   return out;

@@ -452,6 +452,33 @@ administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
 
+### Host-authorized ordinary evidence
+
+A host session whose runtime identity differs from the exact assignment actor
+may establish an expiring actor-scoped routing binding containing that
+assignment actor pair. The pointer remains non-authoritative metadata.
+`workflow evidence-request` is available only through a live matching binding
+and emits the canonical unsigned `authorize-workflow-evidence` record. That
+record binds the canonical project, run, and subject; exact assignment
+generation, actor key, and actor struct; the independently named host routing
+key, routing-binding id, and raw digest; Flow run head and
+manifest digest; Trust Bundle digest; exact semantic evidence arguments; nonce;
+and bounded validity window.
+
+The host signs that record with a registered lifecycle-authority key and
+supplies it to ordinary `workflow evidence --authorization-file`. The
+coordinator verifies the signature and every protected current preimage,
+durably redeems the nonce, and signs a completion whose result core binds both
+the canonical authorization digest and evidence-request digest. The package
+validates the same exact preimages and completion, then holds the subject and
+host-pointer generation locks through the existing staged evidence
+transaction. Canonical evidence and Flow transitions therefore retain their
+normal writer semantics. Replay, expiry, binding retirement or replacement,
+assignment takeover, and changed Flow, trust, or evidence arguments fail
+closed. Operation-bound expectations still require their dedicated external
+completion, and completed-bundle verification replacement still requires the
+separate atomic reseal protocol below.
+
 ### Canonical manifest and completion-key boundaries
 
 The coordinator permits at most 16 MiB only when it reads the canonical Flow evidence
@@ -579,6 +606,18 @@ removes fixed stages before the signed plan; an open fence plus a retained plan 
 cleanup-replay state, not a permanent rejection.
 Candidate, bundle, ledger, completion, Flow, signature, expiry, nonce, or claim-scope drift fails
 closed.
+
+Publishing requires an administrator-injected host capability at the fixed protected configuration
+path `verification-reseal-atomic-replace.cjs`. Its
+`kontourai.atomic-expected-preimage-replace.v1` operation must atomically compare the named leaf's
+exact presence, mode, size, and digest and replace or delete it only when that preimage still
+matches. Root validates the fixed file as a non-symlinked, root-owned, non-writable artifact; only
+the caller-identity mutation worker loads and executes it. The coordinator passes a pinned parent descriptor and basename—not a caller-selected
+path—and independently verifies the unchanged parent and exact postimage afterward. Descriptor
+pinning is defense in depth; it is not itself the leaf CAS. The reference coordinator deliberately
+ships no fallback implementation and refuses on every platform before coordinator state, nonce,
+plan, stage, fence, or artifact mutation when the protected capability is absent or invalid.
+Request creation and external signing remain portable for later redemption by a configured host.
 
 After an applied or replayed reseal, the public package recovers `state.json`,
 current pointers, and the optional terminal outcome from the new canonical Flow

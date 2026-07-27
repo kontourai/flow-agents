@@ -67,7 +67,7 @@ function fenceSnapshot(projectRoot: string, runId: string): Snapshot {
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Flow recovery fence is malformed");
     const fence = parsed as Record<string, unknown>;
-    const hasPreviousGeneration = fence.status === "open" && Object.hasOwn(fence, "previous_generation");
+    const hasPreviousGeneration = Object.hasOwn(fence, "previous_generation");
     if (!exactKeys(fence, [
       "protocol", "run_id", "recovery_id", "status", "updated_at", "generation",
       ...(hasPreviousGeneration ? ["previous_generation"] : []),
@@ -77,7 +77,8 @@ function fenceSnapshot(projectRoot: string, runId: string): Snapshot {
         || !/^[a-f0-9]{64}$/.test(String(fence.recovery_id))
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.generation))
         || (hasPreviousGeneration
-          && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.previous_generation)))
+          && (fence.status !== "open"
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.previous_generation))))
         || !["active", "open"].includes(String(fence.status))
         || typeof fence.updated_at !== "string"
         || !Number.isFinite(Date.parse(fence.updated_at))) {

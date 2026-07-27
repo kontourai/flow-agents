@@ -39,9 +39,19 @@ import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { assertAcceptedTurnEvidenceCapacity, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
+import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
+
+let releaseRuntimeTestSeams;
+const runtimeTestSeamsReady = new Promise((resolve) => {
+  releaseRuntimeTestSeams = resolve;
+});
+const runtimeTestSeamsPromise = runtimeTestSeamsReady.then(() => loadRuntimeTestSeams());
+const issuePublishChangeOperation = async (input) => (await runtimeTestSeamsPromise).issuePublishChangeOperation(input);
+const createPublishChangeOperationCompleter = (observe) => async (input) => (
+  await runtimeTestSeamsPromise
+).completePublishChangeOperation(input, observe);
 
 test("provisional delivery request serialization preserves every exact lifecycle binding", () => {
   const fields = {
@@ -60,12 +70,74 @@ test("provisional delivery request serialization preserves every exact lifecycle
   assert.deepEqual(request.unsigned, { schema_version: "1.0", operation: "publish-provisional-delivery", ...fields });
   assert.deepEqual(JSON.parse(request.signingPayload), request.unsigned);
 });
+
+test("exact-current recovery accepts the versioned lifecycle runtime ledger digest contract", () => {
+  const projectRoot = "/project";
+  const runId = "runtime-ledger-recovery";
+  const subject = "work-item:runtime-ledger-recovery";
+  const signedAuthorization = {
+    schema_version: "1.0",
+    operation: "resolve-critique",
+    project_root: projectRoot,
+    run_id: runId,
+    subject,
+    signature: { algorithm: "ed25519", key_id: "fixture", value: "fixture" },
+  };
+  const authorizationSha256 = createHash("sha256")
+    .update(JSON.stringify(signedAuthorization))
+    .digest("hex");
+  const edge = {
+    schema_version: "1.0",
+    kind: "cross-reviewer",
+    prior_record_id: "critique:prior",
+    resolving_record_id: "critique:resolving",
+    resolver: "independent-reviewer",
+    resolved_lane_ids: ["code-review"],
+    resolved_finding_ids: ["finding-1"],
+    resolved_at: NOW,
+    authorization_sha256: authorizationSha256,
+    resolution_event_id: `critique-resolution:${authorizationSha256}`,
+  };
+  const unsignedEvent = {
+    schema_version: "1.0",
+    event_id: edge.resolution_event_id,
+    sequence: 1,
+    predecessor_hash: "0".repeat(64),
+    operation: "resolve-critique",
+    run_id: runId,
+    subject,
+    authorization_sha256: authorizationSha256,
+    edge,
+    signed_authorization: signedAuthorization,
+  };
+  const event = {
+    ...unsignedEvent,
+    event_hash: createHash("sha256").update(JSON.stringify(unsignedEvent)).digest("hex"),
+  };
+  const bundle = {
+    claims: [{
+      metadata: {
+        origin: "critique",
+        critique_resolution: edge,
+      },
+    }],
+  };
+
+  assert.doesNotThrow(() => assertRecoveryLedgerCoverage(bundle, [event], projectRoot, runId, subject));
+  assert.throws(
+    () => assertRecoveryLedgerCoverage(bundle, [{ ...event, event_hash: "f".repeat(64) }], projectRoot, runId, subject),
+    /complete strict resolution ledger/,
+  );
+});
 import * as installedLifecycleRuntime from "../../packaging/lifecycle-authority/runtime-v1.mjs";
+import { canonicalJson as coordinatorCanonicalJson } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { buildTrustBundle, FlowProjectionRegenerationRequiredError, inferExecutedTestCount, main as workflowSidecarMain, mainFromPublicWorkflow, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 import { assertTrustedGitAncestor } from "../../build/src/lib/trusted-git.js";
 import { loadContinuationAdapterCommand } from "../../build/src/cli/continuation-adapter.js";
+import { bindHostWorkflowSession, retireHostWorkflowSession } from "../../build/src/index.js";
+import { validateLifecycleAuthorityCompletionVerificationKeyInstallation } from "../../build/src/external-lifecycle-authority.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -696,42 +768,276 @@ test("public terminal delivery refuses an active learn step even after a positiv
   );
 });
 
-test("Trust Verify accepts provisional delivery only at the exact companion-only checked revision", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  git("init"); git("config", "user.email", "test@example.invalid"); git("config", "user.name", "Flow Agents Test");
-  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
-  git("add", "."); git("commit", "-m", "reviewed source");
-  const publishedHead = git("rev-parse", "HEAD");
-  const directory = path.join(root, "delivery", "session-a");
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
-  git("add", "delivery"); git("commit", "-m", "exact provisional transport");
-  const exactCheckedRevision = git("rev-parse", "HEAD");
+test("Trust Verify accepts exact four-path and byte-identical terminal companion revisions only", () => {
   const reconcile = require("../../scripts/ci/trust-reconcile.js");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(fs.realpathSync(root), fs.realpathSync(path.join(directory, "trust.bundle")), publishedHead, exactCheckedRevision), true);
-  git("switch", "-c", "mode-trick");
-  fs.chmodSync(path.join(directory, "trust.checkpoint.intoto.json"), 0o755);
-  git("add", "delivery"); git("commit", "-m", "executable companion trick");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
-  git("switch", "--detach", exactCheckedRevision);
-  fs.writeFileSync(path.join(root, "source.txt"), "unreviewed source change\n");
-  git("add", "source.txt"); git("commit", "-m", "extra source change");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
-  git("switch", "--orphan", "unrelated");
-  fs.rmSync(path.join(root, "source.txt"), { force: true });
-  fs.rmSync(path.join(root, "delivery"), { recursive: true, force: true });
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
-  fs.writeFileSync(path.join(directory, "trust.bundle"), "{}\n");
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.json"), JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.attestation.json"), JSON.stringify({ status: "unsigned", path: "trust.checkpoint.intoto.json" }));
-  fs.writeFileSync(path.join(directory, "trust.checkpoint.intoto.json"), "{}\n");
-  git("add", "."); git("commit", "-m", "unrelated same tree");
-  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(root, path.join(directory, "trust.bundle"), publishedHead, git("rev-parse", "HEAD")), false);
+  const makeFixture = ({ status = "unsigned", mutateBeforeCommit } = {}) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
+    const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    git("init");
+    git("config", "user.email", "test@example.invalid");
+    git("config", "user.name", "Flow Agents Test");
+    fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
+    git("add", ".");
+    git("commit", "-m", "reviewed source");
+    const publishedHead = git("rev-parse", "HEAD");
+    const directory = path.join(root, "delivery", "session-a");
+    const bundle = path.join(directory, "trust.bundle");
+    const checkpoint = path.join(directory, "trust.checkpoint.json");
+    const descriptor = path.join(directory, "trust.checkpoint.attestation.json");
+    const companionName = status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json";
+    const companion = path.join(directory, companionName);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(bundle, "{}\n");
+    fs.writeFileSync(checkpoint, `${JSON.stringify({ status: "provisional", phase: "ci-readiness", commit_sha: publishedHead })}\n`);
+    fs.writeFileSync(descriptor, `${JSON.stringify({ status, path: companionName })}\n`);
+    fs.writeFileSync(companion, "{}\n");
+    mutateBeforeCommit?.({ root, directory, bundle, checkpoint, descriptor, companion, companionName, publishedHead });
+    git("add", ".");
+    git("commit", "-m", "provisional delivery transport");
+    return {
+      root,
+      git,
+      directory,
+      bundle,
+      checkpoint,
+      descriptor,
+      companion,
+      companionName,
+      publishedHead,
+      provisionalHead: git("rev-parse", "HEAD"),
+    };
+  };
+  const accepted = (fixture, bundleSha = fixture.publishedHead, changeSha = fixture.provisionalHead) => (
+    reconcile.provisionalDeliveryIsExactCheckedRevision(
+      fs.realpathSync(fixture.root),
+      fs.realpathSync(fixture.bundle),
+      bundleSha,
+      changeSha,
+    )
+  );
+  const makeThreePathRevision = (
+    status,
+    { checkpointStatus = "delivered", checkpointPhase = "release" } = {},
+  ) => {
+    const fixture = makeFixture({ status });
+    const descriptorAtCheckpoint = fs.readFileSync(fixture.descriptor);
+    fs.writeFileSync(fixture.bundle, `${checkpointStatus} ${status} bundle\n`);
+    fs.writeFileSync(fixture.checkpoint, `${JSON.stringify({
+      status: checkpointStatus,
+      phase: checkpointPhase,
+      commit_sha: fixture.provisionalHead,
+    })}\n`);
+    fs.writeFileSync(fixture.companion, `${checkpointStatus} ${status} companion\n`);
+    fixture.git("add", "delivery");
+    fixture.git("commit", "-m", `${checkpointStatus} ${checkpointPhase} ${status} delivery`);
+    const checkedHead = fixture.git("rev-parse", "HEAD");
+    assert.deepEqual(
+      fs.readFileSync(fixture.descriptor),
+      descriptorAtCheckpoint,
+      `${checkpointStatus}/${checkpointPhase} ${status} transport leaves descriptor raw bytes unchanged`,
+    );
+    assert.deepEqual(
+      fixture.git("diff", "--name-only", `${fixture.provisionalHead}..${checkedHead}`, "--").split("\n").sort(),
+      [
+        `delivery/session-a/${fixture.companionName}`,
+        "delivery/session-a/trust.bundle",
+        "delivery/session-a/trust.checkpoint.json",
+      ].sort(),
+      `${checkpointStatus}/${checkpointPhase} ${status} transport changes exactly the three mutable paths`,
+    );
+    return { ...fixture, checkedHead };
+  };
+
+  const exactFour = makeFixture();
+  assert.equal(accepted(exactFour), true, "the existing exact-four-path provisional transport remains accepted");
+
+  const unsignedTerminal = makeThreePathRevision("unsigned");
+  assert.equal(
+    accepted(unsignedTerminal, unsignedTerminal.provisionalHead, unsignedTerminal.checkedHead),
+    true,
+    "an unsigned terminal transport accepts an exact three-path delta with a raw-byte-identical descriptor",
+  );
+  const signedTerminal = makeThreePathRevision("signed");
+  assert.equal(
+    accepted(signedTerminal, signedTerminal.provisionalHead, signedTerminal.checkedHead),
+    true,
+    "a signed terminal transport accepts an exact three-path delta with a raw-byte-identical descriptor",
+  );
+  const provisionalThreePath = makeThreePathRevision("unsigned", {
+    checkpointStatus: "provisional",
+    checkpointPhase: "ci-readiness",
+  });
+  assert.equal(
+    accepted(provisionalThreePath, provisionalThreePath.provisionalHead, provisionalThreePath.checkedHead),
+    false,
+    "a provisional ci-readiness checkpoint cannot use the terminal exact-three-path exception",
+  );
+  const nonReleaseTerminal = makeThreePathRevision("unsigned", {
+    checkpointStatus: "delivered",
+    checkpointPhase: "learning",
+  });
+  assert.equal(
+    accepted(nonReleaseTerminal, nonReleaseTerminal.provisionalHead, nonReleaseTerminal.checkedHead),
+    false,
+    "a delivered checkpoint outside the release phase cannot use the terminal exact-three-path exception",
+  );
+  const mutateTerminalRevision = (message, mutate) => {
+    const fixture = makeThreePathRevision("unsigned");
+    mutate(fixture);
+    fixture.git("add", "-A");
+    fixture.git("commit", "-m", message);
+    return { ...fixture, mutatedHead: fixture.git("rev-parse", "HEAD") };
+  };
+
+  const terminalExtraPath = mutateTerminalRevision("terminal delivery with extra path", ({ directory }) => {
+    fs.writeFileSync(path.join(directory, "unexpected.json"), "{}\n");
+  });
+  assert.equal(
+    accepted(terminalExtraPath, terminalExtraPath.provisionalHead, terminalExtraPath.mutatedHead),
+    false,
+    "an extra delivery path cannot extend an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalSourcePath = mutateTerminalRevision("terminal delivery with source path", ({ root }) => {
+    fs.writeFileSync(path.join(root, "source.txt"), "unreviewed terminal source change\n");
+  });
+  assert.equal(
+    accepted(terminalSourcePath, terminalSourcePath.provisionalHead, terminalSourcePath.mutatedHead),
+    false,
+    "a source path cannot extend an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalMissingCompanion = mutateTerminalRevision("terminal delivery missing companion", ({ companion }) => {
+    fs.unlinkSync(companion);
+  });
+  assert.equal(
+    accepted(terminalMissingCompanion, terminalMissingCompanion.provisionalHead, terminalMissingCompanion.mutatedHead),
+    false,
+    "a terminal exact-three revision is rejected when its selected companion is missing",
+  );
+
+  const terminalAlteredCheckout = makeThreePathRevision("unsigned");
+  fs.writeFileSync(terminalAlteredCheckout.companion, "terminal checkout bytes differ from the checked commit\n");
+  assert.equal(
+    accepted(terminalAlteredCheckout, terminalAlteredCheckout.provisionalHead, terminalAlteredCheckout.checkedHead),
+    false,
+    "altered checkout bytes reject an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalExecutableCompanion = mutateTerminalRevision("terminal executable companion", ({ companion }) => {
+    fs.chmodSync(companion, 0o755);
+  });
+  assert.equal(
+    accepted(terminalExecutableCompanion, terminalExecutableCompanion.provisionalHead, terminalExecutableCompanion.mutatedHead),
+    false,
+    "an executable companion rejects an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalNonRegularCompanion = mutateTerminalRevision("terminal non-regular companion", ({ companion }) => {
+    fs.unlinkSync(companion);
+    fs.symlinkSync("trust.bundle", companion);
+  });
+  assert.equal(
+    accepted(terminalNonRegularCompanion, terminalNonRegularCompanion.provisionalHead, terminalNonRegularCompanion.mutatedHead),
+    false,
+    "a non-regular companion rejects an otherwise valid terminal exact-three revision",
+  );
+
+  const terminalUnrelated = makeThreePathRevision("unsigned");
+  const terminalTree = new Map(
+    ["trust.bundle", "trust.checkpoint.attestation.json", "trust.checkpoint.json", terminalUnrelated.companionName]
+      .map((name) => [name, fs.readFileSync(path.join(terminalUnrelated.directory, name))]),
+  );
+  terminalUnrelated.git("switch", "--orphan", "unrelated-terminal");
+  fs.rmSync(path.join(terminalUnrelated.root, "source.txt"), { force: true });
+  fs.rmSync(terminalUnrelated.directory, { recursive: true, force: true });
+  fs.mkdirSync(terminalUnrelated.directory, { recursive: true });
+  fs.writeFileSync(path.join(terminalUnrelated.root, "source.txt"), "reviewed source\n");
+  for (const [name, bytes] of terminalTree) fs.writeFileSync(path.join(terminalUnrelated.directory, name), bytes);
+  terminalUnrelated.git("add", ".");
+  terminalUnrelated.git("commit", "-m", "unrelated terminal-shaped tree");
+  assert.equal(
+    accepted(terminalUnrelated, terminalUnrelated.provisionalHead, terminalUnrelated.git("rev-parse", "HEAD")),
+    false,
+    "a terminal-shaped revision on unrelated non-ancestor history is rejected",
+  );
+
+  const extraPath = makeFixture({
+    mutateBeforeCommit({ directory }) {
+      fs.writeFileSync(path.join(directory, "unexpected.json"), "{}\n");
+    },
+  });
+  assert.equal(accepted(extraPath), false, "an extra delivery path is rejected");
+
+  const sourcePath = makeFixture({
+    mutateBeforeCommit({ root }) {
+      fs.writeFileSync(path.join(root, "source.txt"), "unreviewed source change\n");
+    },
+  });
+  assert.equal(accepted(sourcePath), false, "a source path in the delivery delta is rejected");
+
+  const missingDescriptor = makeFixture({
+    mutateBeforeCommit({ descriptor }) {
+      fs.unlinkSync(descriptor);
+    },
+  });
+  assert.equal(accepted(missingDescriptor), false, "a missing descriptor is rejected");
+
+  const missingCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.unlinkSync(companion);
+    },
+  });
+  assert.equal(accepted(missingCompanion), false, "a missing selected companion is rejected");
+
+  const alteredCheckout = makeFixture();
+  fs.writeFileSync(alteredCheckout.companion, "checkout bytes differ from the checked commit\n");
+  assert.equal(accepted(alteredCheckout), false, "altered checkout bytes are rejected");
+
+  const executableCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.chmodSync(companion, 0o755);
+    },
+  });
+  assert.equal(accepted(executableCompanion), false, "an executable companion is rejected");
+
+  const nonRegularCompanion = makeFixture({
+    mutateBeforeCommit({ companion }) {
+      fs.unlinkSync(companion);
+      fs.symlinkSync("trust.bundle", companion);
+    },
+  });
+  assert.equal(accepted(nonRegularCompanion), false, "a non-regular companion is rejected");
+
+  const mismatchedSelection = makeFixture({
+    status: "signed",
+    mutateBeforeCommit({ descriptor }) {
+      fs.writeFileSync(descriptor, `${JSON.stringify({ status: "signed", path: "trust.checkpoint.intoto.json" })}\n`);
+    },
+  });
+  assert.equal(accepted(mismatchedSelection), false, "descriptor status and selected companion must agree");
+
+  const unrelated = makeFixture();
+  unrelated.git("switch", "--orphan", "unrelated");
+  fs.rmSync(path.join(unrelated.root, "source.txt"), { force: true });
+  fs.rmSync(unrelated.directory, { recursive: true, force: true });
+  fs.mkdirSync(unrelated.directory, { recursive: true });
+  fs.writeFileSync(path.join(unrelated.root, "source.txt"), "reviewed source\n");
+  fs.writeFileSync(unrelated.bundle, "{}\n");
+  fs.writeFileSync(unrelated.checkpoint, `${JSON.stringify({
+    status: "provisional",
+    phase: "ci-readiness",
+    commit_sha: unrelated.publishedHead,
+  })}\n`);
+  fs.writeFileSync(unrelated.descriptor, `${JSON.stringify({ status: "unsigned", path: unrelated.companionName })}\n`);
+  fs.writeFileSync(unrelated.companion, "{}\n");
+  unrelated.git("add", ".");
+  unrelated.git("commit", "-m", "unrelated same tree");
+  assert.equal(
+    accepted(unrelated, unrelated.publishedHead, unrelated.git("rev-parse", "HEAD")),
+    false,
+    "an unrelated non-ancestor revision is rejected even with the same delivery tree",
+  );
 });
 syncBuiltinESMExports();
 process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_REGISTRY = TEST_AUTHORITY_FILE;
@@ -739,10 +1045,94 @@ const require = createRequire(import.meta.url);
 const commandLogChain = require("../../scripts/lib/command-log-chain.js");
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const currentPointer = require("../../scripts/hooks/lib/current-pointer.js");
-const runtimeTestSeams = await loadRuntimeTestSeams();
-const issuePublishChangeOperation = runtimeTestSeams.issuePublishChangeOperation;
-const createPublishChangeOperationCompleter = (observe) => (input) => runtimeTestSeams.completePublishChangeOperation(input, observe);
+const hostAuthorityKeys = generateKeyPairSync("ed25519");
+const hostAuthorityPublic = hostAuthorityKeys.publicKey.export({ type: "spki", format: "pem" });
+const hostAuthorityKeyFile = path.join(os.tmpdir(), `flow-agents-builder-host-authority-${process.pid}.pem`);
+fs.writeFileSync(hostAuthorityKeyFile, hostAuthorityPublic);
+const fsCjsForHostAuthority = require("node:fs");
+const realHostAuthorityOpen = fsCjsForHostAuthority.openSync;
+const realHostAuthorityLstat = fsCjsForHostAuthority.lstatSync;
+const realHostAuthorityAccess = fsCjsForHostAuthority.accessSync;
+const realHostAuthorityFstat = fsCjsForHostAuthority.fstatSync;
+const realHostAuthorityClose = fsCjsForHostAuthority.closeSync;
+const hostAuthorityDescriptors = new Set();
+const protectedHostAuthorityPaths = new Set([
+  "/etc/kontourai",
+  "/etc/kontourai/flow-agents-lifecycle-authority-v1",
+  "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem",
+  "/private/etc/kontourai",
+  "/private/etc/kontourai/flow-agents-lifecycle-authority-v1",
+  "/private/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem",
+]);
+const mockHostAuthorityLstat = (file, ...args) => {
+  if (protectedHostAuthorityPaths.has(file)) {
+    const stat = realHostAuthorityLstat(file.endsWith(".pem") ? hostAuthorityKeyFile : "/etc", ...args);
+    return new Proxy(stat, {
+      get: (target, property) => {
+        if (property === "uid") return 0;
+        if (property === "mode") return target.mode & ~0o022;
+        if (property === "isSymbolicLink") return () => false;
+        return Reflect.get(target, property);
+      },
+    });
+  }
+  return realHostAuthorityLstat(file, ...args);
+};
+const mockHostAuthorityAccess = (file, mode, ...args) => {
+  if (protectedHostAuthorityPaths.has(file) && mode === fs.constants.W_OK) {
+    throw Object.assign(new Error("fixture path is protected"), { code: "EACCES" });
+  }
+  return realHostAuthorityAccess(file, mode, ...args);
+};
+const mockHostAuthorityOpen = (file, flags, ...rest) => {
+  if (typeof file === "string" && file.endsWith("/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem")) {
+    const descriptor = realHostAuthorityOpen(hostAuthorityKeyFile, flags, ...rest);
+    hostAuthorityDescriptors.add(descriptor);
+    return descriptor;
+  }
+  return realHostAuthorityOpen(file, flags, ...rest);
+};
+const mockHostAuthorityFstat = (descriptor, ...args) => {
+  const stat = realHostAuthorityFstat(descriptor, ...args);
+  return hostAuthorityDescriptors.has(descriptor)
+    ? new Proxy(stat, { get: (target, property) => property === "uid" ? 0 : Reflect.get(target, property) })
+    : stat;
+};
+const mockHostAuthorityClose = (descriptor) => {
+  hostAuthorityDescriptors.delete(descriptor);
+  return realHostAuthorityClose(descriptor);
+};
+function installHostAuthorityFsMock() {
+  fsCjsForHostAuthority.lstatSync = mockHostAuthorityLstat;
+  fsCjsForHostAuthority.accessSync = mockHostAuthorityAccess;
+  fsCjsForHostAuthority.openSync = mockHostAuthorityOpen;
+  fsCjsForHostAuthority.fstatSync = mockHostAuthorityFstat;
+  fsCjsForHostAuthority.closeSync = mockHostAuthorityClose;
+  syncBuiltinESMExports();
+}
+installHostAuthorityFsMock();
+assert.deepEqual(
+  validateLifecycleAuthorityCompletionVerificationKeyInstallation().export({ type: "spki", format: "der" }),
+  hostAuthorityKeys.publicKey.export({ type: "spki", format: "der" }),
+  "host-authority tests use the independently provisioned mock completion verification key",
+);
+releaseRuntimeTestSeams();
+process.once("exit", () => {
+  fsCjsForHostAuthority.lstatSync = realHostAuthorityLstat;
+  fsCjsForHostAuthority.accessSync = realHostAuthorityAccess;
+  fsCjsForHostAuthority.openSync = realHostAuthorityOpen;
+  fsCjsForHostAuthority.fstatSync = realHostAuthorityFstat;
+  fsCjsForHostAuthority.closeSync = realHostAuthorityClose;
+  syncBuiltinESMExports();
+  fs.rmSync(hostAuthorityKeyFile, { force: true });
+});
 
+function bindAuthorizedHostWorkflowSession(input) {
+  installHostAuthorityFsMock();
+  const issuedAt = new Date(Date.now() - 1_000).toISOString();
+  const bindingId = input.bindingId ?? `binding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return bindHostWorkflowSession({ ...input, bindingId, updatedAt: issuedAt });
+}
 function currentGateVisitForTest(state, step) {
   assert.equal(typeof builderFlowRuntime.currentGateVisit, "function", "the runtime must expose its canonical current-gate visit seam to internal CLI consumers");
   return builderFlowRuntime.currentGateVisit(state, step);
@@ -1573,6 +1963,71 @@ async function captureWorkflowPublicResult(args) {
   }
 }
 
+function installSignedCurrentCompletion(session) {
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const unsigned = {
+    schema_version: "1.0",
+    kind: "kontourai.lifecycle-authority.completion",
+    action: "resolve-critique",
+    request_sha256: "a".repeat(64),
+    run_id: session.slug,
+    operation_status: "applied",
+    result_core_sha256: lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: [] }),
+    coordinator_runtime_sha256: "b".repeat(64),
+    completed_at: new Date().toISOString(),
+  };
+  const completion = {
+    ...unsigned,
+    signature: { algorithm: "ed25519", value: sign(null, Buffer.from(coordinatorCanonicalJson(unsigned)), hostAuthorityKeys.privateKey).toString("base64") },
+  };
+  writeJson(path.join(session.sessionDir, "lifecycle-authority.completion.json"), completion);
+}
+
+function makeLifecycleCoordinatorFixture() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "builder-host-redeem-"));
+  const stateRoot = path.join(directory, "state");
+  const coordinatorFile = path.join(directory, "coordinator.mjs");
+  const atomicReplaceFile = path.join(directory, "atomic-replace.cjs");
+  const runtimeSource = path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/runtime-v1.mjs");
+  fs.copyFileSync(runtimeSource, path.join(directory, "runtime-v1.mjs"));
+  fs.copyFileSync(path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/flow-reducer-v1.json"), path.join(directory, "flow-reducer-v1.json"));
+  const flowPackageRoot = path.resolve(import.meta.dirname, "../../node_modules/@kontourai/flow");
+  const completionPrivate = path.join(directory, "completion-private.pem");
+  const completionPublic = path.join(directory, "completion-public.pem");
+  fs.writeFileSync(completionPrivate, hostAuthorityKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublic, hostAuthorityKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const coordinatorSourceFile = path.resolve(import.meta.dirname, "../../packaging/lifecycle-authority/coordinator.mjs");
+  let source = fs.readFileSync(coordinatorSourceFile, "utf8");
+  source = source
+    .replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(TEST_AUTHORITY_FILE)};`)
+    .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`)
+    .replace(/export const COMPLETION_PRIVATE_KEY_FILE = .*?;/, `export const COMPLETION_PRIVATE_KEY_FILE = ${JSON.stringify(completionPrivate)};`)
+    .replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionPublic)};`)
+    .replace(/export const VERIFICATION_RESEAL_ATOMIC_REPLACE_CAPABILITY_FILE = .*?;/, `export const VERIFICATION_RESEAL_ATOMIC_REPLACE_CAPABILITY_FILE = ${JSON.stringify(atomicReplaceFile)};`)
+    .replace(/const FLOW_REDUCER_PACKAGE_ROOT = .*?;/, `const FLOW_REDUCER_PACKAGE_ROOT = ${JSON.stringify(flowPackageRoot)};`);
+  fs.writeFileSync(coordinatorFile, source);
+  return { directory, coordinatorFile, stateRoot };
+}
+
+function invokeCoordinator(coordinatorFile, request) {
+  const envelope = { schema_version: "1.0", action: request.action, request_sha256: createHash("sha256").update(coordinatorCanonicalJson(request)).digest("hex"), request };
+  const input = `${coordinatorCanonicalJson(envelope)}\n`;
+  return spawnSync(process.execPath, [fs.realpathSync(coordinatorFile)], {
+    input,
+    encoding: "utf8",
+    env: { ...process.env, SUDO_UID: String(process.getuid?.() ?? 501), SUDO_GID: String(process.getgid?.() ?? 20) },
+  });
+}
+
+function redeemWithCoordinator(coordinatorFile, session, authorizationFile) {
+  return invokeCoordinator(coordinatorFile, {
+    action: "reseal-verification-evidence",
+    project_root: session.projectRoot,
+    session_dir: session.sessionDir,
+    authorization_file: authorizationFile,
+  });
+}
+
 function assertPublicDiagnosticRedacted(result, sentinel, label) {
   assert.doesNotMatch(`${result.output.join("\n")}\n${result.error ? String(result.error) : ""}`, new RegExp(sentinel), label);
 }
@@ -1704,6 +2159,382 @@ test("public workflow evidence retains an explicit non-pass verdict while report
   assert.equal(gateClaim.value, "not_verified");
   assert.equal(gateClaim.status, "proposed");
   assert.deepEqual(gateClaim.metadata.observed_commands.map((entry) => [entry.command, entry.exit_code]), [["true", 0]]);
+});
+
+test("public workflow evidence requires one-time coordinator authorization for a live host binding", async () => {
+  const boundActor = { runtime: "codex", session_id: "thread-desktop", host: "Kontour", human: null };
+  const boundKey = "desktop-codex-holder";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  const restoreActor = () => {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  };
+  const prepare = async (slug, configure) => {
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const ambientAssignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+    performLocalRelease(session.artifactRoot, session.slug, ambientAssignment.actor, {
+      actorKey: ambientAssignment.actor_key,
+      reason: "desktop host handoff fixture",
+    });
+    performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+      ttlSeconds: 1800,
+      actorKey: boundKey,
+      branch: `agent/${session.slug}`,
+      artifactDir: session.slug,
+      workItemRef: SUBJECT,
+      reason: "desktop host fixture",
+    });
+    await configure(session);
+    return session;
+  };
+  const evidenceArgs = (session) => [
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified",
+    "--summary", "Host binding recovery fixture.",
+  ];
+  try {
+    const recovered = await prepare("host-binding-recovery", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot,
+        artifactDir: session.sessionDir,
+        actorKey: boundKey,
+        actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        owner: "station",
+        source: "desktop-resume",
+      });
+    });
+    process.env.FLOW_AGENTS_ACTOR = boundKey;
+    assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor, "the explicit flat key must not reconstruct the desktop actor struct");
+    const ordinary = await captureWorkflowPublicResult(evidenceArgs(recovered));
+    assert.ok(ordinary.error);
+    assert.match(String(ordinary.error), /requires workflow evidence-request.*signed --authorization-file/);
+    assert.equal(fs.existsSync(path.join(recovered.sessionDir, "trust.bundle")), false);
+    assert.equal((await loadRun(recovered.slug, recovered.projectRoot)).manifest.evidence.length, 0);
+
+    const firstRequestResult = await captureWorkflowPublicResult([
+      "evidence-request", ...evidenceArgs(recovered).slice(1),
+    ]);
+    assert.equal(firstRequestResult.error, null, String(firstRequestResult.error));
+    const firstRequest = JSON.parse(firstRequestResult.output[0]);
+    assert.equal(
+      firstRequest.authorization.trust_bundle_sha256,
+      createHash("sha256").update("kontourai.host-workflow.absent-trust-bundle.v1").digest("hex"),
+      "the signed preimage distinguishes an absent initial bundle from every valid bundle",
+    );
+    const firstSignature = sign(
+      null,
+      Buffer.from(firstRequest.signing_payload),
+      AUTHORITY_KEYS.privateKey,
+    ).toString("base64");
+    const firstAuthorizationFile = path.join(
+      os.tmpdir(),
+      `host-first-evidence-${recovered.slug}-${Date.now()}-${Math.random()}.json`,
+    );
+    fs.writeFileSync(firstAuthorizationFile, `${JSON.stringify({
+      ...firstRequest.authorization,
+      signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: firstSignature },
+    })}\n`, { mode: 0o600 });
+    const firstCoordinator = makeLifecycleCoordinatorFixture();
+    try {
+      const firstAuthorization = invokeCoordinator(firstCoordinator.coordinatorFile, {
+        action: "authorize-workflow-evidence",
+        project_root: recovered.projectRoot,
+        session_dir: recovered.sessionDir,
+        authorization_file: firstAuthorizationFile,
+      });
+      assert.equal(firstAuthorization.status, 0, firstAuthorization.stderr);
+      assert.equal(
+        fs.existsSync(path.join(recovered.sessionDir, "trust.bundle")),
+        false,
+        "authorization remains read-only before the evidence transaction creates the first bundle",
+      );
+    } finally {
+      fs.rmSync(firstCoordinator.directory, { recursive: true, force: true });
+      fs.rmSync(firstAuthorizationFile, { force: true });
+    }
+
+    const rejected = async (slug, configure, actorKey = boundKey) => {
+      const session = await prepare(slug, async (prepared) => {
+        const afterPrepare = await configure(prepared);
+        if (typeof afterPrepare === "function") await afterPrepare();
+      });
+      process.env.FLOW_AGENTS_ACTOR = actorKey;
+      const result = await captureWorkflowPublicResult(evidenceArgs(session));
+      assert.ok(result.error, `${slug}: recovery must reject before evidence mutation`);
+      assert.equal(fs.existsSync(path.join(session.sessionDir, "trust.bundle")), false, `${slug}: rejected recovery leaves canonical evidence absent`);
+    };
+    await rejected("host-binding-flat-only", async () => {});
+    await rejected("host-binding-unrelated", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+    }, "unrelated-actor");
+    await rejected("host-binding-mismatched", async (session) => {
+      const valid = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+        actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      writeJson(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), {
+        ...valid,
+        actor: { ...boundActor, host: "other-host" },
+      });
+    });
+    await rejected("host-binding-expired", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      const pointer = currentPointer.perActorCurrentFile(session.artifactRoot, boundKey);
+      writeJson(pointer, { ...binding, expires_at: new Date(Date.now() - 60_000).toISOString() });
+    });
+    await rejected("host-binding-retired", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      retireHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+        bindingId: binding.binding_id, reason: "desktop-ended",
+      });
+    });
+    await rejected("host-binding-malformed", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      fs.writeFileSync(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), "{invalid binding");
+    });
+    await rejected("host-binding-symlink", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      const pointer = currentPointer.perActorCurrentFile(session.artifactRoot, boundKey);
+      const replacement = path.join(session.artifactRoot, "foreign-pointer.json");
+      fs.writeFileSync(replacement, "{}\n");
+      fs.unlinkSync(pointer);
+      fs.symlinkSync(replacement, pointer);
+    });
+    await rejected("host-binding-generation-changed-before-attempt", async (session) => {
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        bindAuthorizedHostWorkflowSession({
+          artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-refresh",
+        });
+      };
+    });
+    await rejected("host-binding-retired-before-attempt", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        retireHostWorkflowSession({
+          artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey,
+          bindingId: binding.binding_id, reason: "desktop-ended-before-commit",
+        });
+      };
+    });
+    await rejected("host-binding-expired-before-attempt", async (session) => {
+      const binding = bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return () => {
+        writeJson(currentPointer.perActorCurrentFile(session.artifactRoot, boundKey), {
+          ...binding,
+          expires_at: new Date(Date.now() - 60_000).toISOString(),
+        });
+      };
+    });
+    const prepareVerifyRecovery = async (slug) => {
+      process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+      const session = makeSession(slug);
+      claimAmbientSessionAssignment(session);
+      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      const acceptanceFile = path.join(session.sessionDir, "acceptance.json");
+      writeJson(acceptanceFile, { criteria: [] });
+      await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+      await writeAndSync(session, [
+        bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+        bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+      ]);
+      await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+      await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+      writeBundle(session.sessionDir, verifiedTestsPrerequisites(session).slice(0, 1));
+      process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+      const predecessor = await captureWorkflowPublicResult([
+        "evidence", "--session-dir", session.sessionDir,
+        "--expectation", "acceptance-criteria", "--status", "not_verified",
+        "--summary", "Initial canonical acceptance evidence.",
+      ]);
+      assert.equal(predecessor.error, null);
+      const ambientAssignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+      performLocalRelease(session.artifactRoot, session.slug, ambientAssignment.actor, {
+        actorKey: ambientAssignment.actor_key,
+        reason: "desktop host handoff fixture",
+      });
+      performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+        ttlSeconds: 1800, actorKey: boundKey, branch: `agent/${session.slug}`,
+        artifactDir: session.slug, workItemRef: SUBJECT, reason: "desktop host fixture",
+      });
+      installSignedCurrentCompletion(session);
+      bindAuthorizedHostWorkflowSession({
+        artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(), owner: "station", source: "desktop-resume",
+      });
+      return session;
+    };
+    const issueAuthorization = async (session) => {
+      process.env.FLOW_AGENTS_ACTOR = boundKey;
+      const result = await captureWorkflowPublicResult([
+        "reseal-verification-evidence-request", "--session-dir", session.sessionDir,
+        "--expectation", "acceptance-criteria", "--status", "not_verified",
+        "--summary", "Continuing host requests a one-time replacement.",
+      ]);
+      assert.equal(result.error, null);
+      assert.equal(result.output.length, 1);
+      const request = JSON.parse(result.output[0]);
+      const signature = sign(null, Buffer.from(request.signing_payload), AUTHORITY_KEYS.privateKey).toString("base64");
+      const file = path.join(os.tmpdir(), `host-reseal-${session.slug}-${Date.now()}-${Math.random()}.json`);
+      fs.writeFileSync(file, `${JSON.stringify({ ...request.authorization, signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: signature } })}\n`, { mode: 0o600 });
+      return file;
+    };
+    const coordinator = makeLifecycleCoordinatorFixture();
+    try {
+      const redeemable = await prepareVerifyRecovery("host-binding-redeem");
+      const authorizationFile = await issueAuthorization(redeemable);
+      const projectBeforeRedemption = coordinatorCanonicalJson(snapshotTree(redeemable.projectRoot));
+      const unsupported = redeemWithCoordinator(coordinator.coordinatorFile, redeemable, authorizationFile);
+      assert.notEqual(unsupported.status, 0);
+      assert.match(unsupported.stderr, /administrator-injected atomic expected-preimage replacement capability.*no artifacts were mutated/);
+      assert.equal(coordinatorCanonicalJson(snapshotTree(redeemable.projectRoot)), projectBeforeRedemption);
+      assert.equal(fs.existsSync(coordinator.stateRoot), false, "missing host capability must refuse before creating coordinator state");
+    } finally {
+      fs.rmSync(coordinator.directory, { recursive: true, force: true });
+    }
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    restoreActor();
+  }
+});
+
+test("host evidence cannot inject a completion or replace the immutable production authority path", async () => {
+  const boundActor = { runtime: "codex", session_id: "thread-desktop-execute", host: "Kontour", human: null };
+  const boundKey = "desktop-codex-execute-holder";
+  const assignmentKey = "implementation-assignment-holder";
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  const coordinator = makeLifecycleCoordinatorFixture();
+  const restore = () => {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+    fs.rmSync(coordinator.directory, { recursive: true, force: true });
+  };
+  const prepare = async (slug) => {
+    process.env.FLOW_AGENTS_ACTOR = ACTOR_KEY;
+    const session = makeSession(slug);
+    claimAmbientSessionAssignment(session);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    writeJson(path.join(session.sessionDir, "acceptance.json"), { criteria: [] });
+    await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+    await writeAndSync(session, [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ]);
+    await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+    assert.equal((await loadRun(session.slug, session.projectRoot)).state.current_step, "execute");
+    fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Delivery\n\nstatus: executing\ntype: deliver\n");
+    const ambient = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+    performLocalRelease(session.artifactRoot, session.slug, ambient.actor, {
+      actorKey: ambient.actor_key, reason: "desktop execute handoff",
+    });
+    performLocalClaim(session.artifactRoot, session.slug, boundActor, {
+      ttlSeconds: 1800, actorKey: assignmentKey, branch: `agent/${session.slug}`,
+      artifactDir: session.slug, workItemRef: SUBJECT, reason: "desktop execute continuation",
+    });
+    bindAuthorizedHostWorkflowSession({
+      artifactRoot: session.artifactRoot, artifactDir: session.sessionDir, actorKey: boundKey, actor: boundActor,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(), owner: "station", source: "desktop-resume",
+    });
+    process.env.FLOW_AGENTS_ACTOR = boundKey;
+    return session;
+  };
+  const args = (session, verb = "evidence") => [
+    verb, "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "pass",
+    "--summary", "Externally authorized desktop execution completed the planned scope.",
+    "--evidence-ref-json", JSON.stringify({
+      kind: "artifact",
+      file: `.kontourai/flow-agents/${session.slug}/${session.slug}--deliver.md`,
+      summary: "Implemented scope.",
+    }),
+  ];
+  const issue = async (session) => {
+    const requestResult = await captureWorkflowPublicResult(args(session, "evidence-request"));
+    assert.equal(requestResult.error, null);
+    assert.equal(requestResult.output.length, 1);
+    const request = JSON.parse(requestResult.output[0]);
+    const signature = sign(null, Buffer.from(request.signing_payload), AUTHORITY_KEYS.privateKey).toString("base64");
+    const file = path.join(os.tmpdir(), `host-evidence-${session.slug}-${Date.now()}-${Math.random()}.json`);
+    fs.writeFileSync(file, `${JSON.stringify({
+      ...request.authorization,
+      signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: signature },
+    })}\n`, { mode: 0o600 });
+    return file;
+  };
+  try {
+    const workflowSource = fs.readFileSync(new URL("../../src/cli/workflow.ts", import.meta.url), "utf8");
+    assert.equal("setHostEvidenceAuthorityInvokerForTest" in workflowRuntime, false);
+    assert.doesNotMatch(workflowSource, /hostEvidenceAuthorityInvoker|setHostEvidenceAuthorityInvokerForTest/);
+    assert.match(workflowSource, /invokeExternalLifecycleAuthority\(authorityRequest\)/);
+    assert.match(workflowSource, /verifyLifecycleAuthorityCompletion\(authorized\.completion\)/);
+    assert.match(
+      workflowSource,
+      /return run\(\(\) => \{\s*assertCurrent\(\);\s*if \(Date\.now\(\) > Date\.parse\(authority\.expires_at\)\)[\s\S]*?hostEvidencePreimage\(sessionDir, repaired\.projectRoot, slug\)[\s\S]*?authority\.trust_bundle_sha256[\s\S]*?authority\.flow_manifest_sha256/,
+      "host binding identity and authority lifetime are rechecked after evidence execution",
+    );
+    assert.match(
+      workflowSource,
+      /input\.beforeCanonicalMutation\?\.\(\);\s*const synchronized = await syncBuilderFlowSession/,
+      "the host authorization recheck occurs immediately before canonical attachment",
+    );
+
+    const session = await prepare("host-execute-immutable-authority");
+    assert.notDeepEqual(resolveCurrentAssignmentActor().actor, boundActor);
+    const authorizationFile = await issue(session);
+    const authorization = readJson(authorizationFile);
+    assert.equal(authorization.actor_key, assignmentKey, "authority binds the active assignment key");
+    assert.equal(authorization.binding_actor_key, boundKey, "authority separately binds the host routing key");
+    const coordinatorResult = invokeCoordinator(coordinator.coordinatorFile, {
+      action: "authorize-workflow-evidence",
+      project_root: session.projectRoot,
+      session_dir: session.sessionDir,
+      authorization_file: authorizationFile,
+    });
+    assert.equal(coordinatorResult.status, 0, coordinatorResult.stderr);
+    const fabricatedCompletionFile = path.join(os.tmpdir(), `host-completion-${session.slug}-${Date.now()}.json`);
+    fs.writeFileSync(fabricatedCompletionFile, `${JSON.stringify(JSON.parse(coordinatorResult.stdout).result.completion)}\n`, { mode: 0o600 });
+    const beforeState = structuredClone((await loadRun(session.slug, session.projectRoot)).state);
+    const beforeBundle = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+    const rejected = await captureWorkflowPublicResult([
+      ...args(session), "--authorization-file", authorizationFile,
+      "--completion-file", fabricatedCompletionFile,
+    ]);
+    assert.match(String(rejected.error), /does not support --completion-file/);
+    assert.deepEqual((await loadRun(session.slug, session.projectRoot)).state, beforeState);
+    assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), beforeBundle);
+  } finally {
+    restore();
+  }
 });
 
 test("public workflow evidence restores evidence bytes when synchronization fails before canonical attachment", async () => {
@@ -2227,6 +3058,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
     "implementation-scope": "execute",
     "clean-critique": "verify",
     "tests-evidence": "verify",
+    "acceptance-criteria": "verify",
     "verified-criterion": "verify",
     "merge-readiness": "merge-ready",
     "decision-evidence": "learn",
@@ -2321,8 +3153,9 @@ function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString(
   critique.claim.metadata.critique_record_hash = critiqueRecordHash(critiqueRecord);
   critique.claim.metadata.critique_record_id = `critique:${critique.claim.metadata.critique_record_hash}`;
   critique.claim.status = "verified";
-  const criterion = bundleClaim({ expectation: "verified-criterion", claimType: "workflow.acceptance.criterion", subjectType: "flow-step", timestamp });
+  const criterion = bundleClaim({ expectation: "acceptance-criteria", claimType: "workflow.acceptance.criterion", subjectType: "flow-step", timestamp });
   criterion.claim.metadata = {
+    ...criterion.claim.metadata,
     workflow_subject_ref: SUBJECT,
     origin: "acceptance",
     criterion: { id: "ac-runtime", status: "pass", evidence_refs: [{ kind: "command", excerpt: "node --test src/cli/builder-flow-runtime.test.mjs", summary: "Runtime fixture assertion." }] },
@@ -3202,7 +4035,7 @@ test("sync attaches the staged trust.bundle bytes when the session bundle is rep
     const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
     await Promise.race([
       replaced,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 2_000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 10_000)),
     ]);
     const synced = await syncing;
     assert.equal(synced.attached, true);
@@ -3771,6 +4604,9 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
 test("verification evidence reseal authorization binds every atomic preimage", () => {
   const fields = {
     project_root: "/tmp/reseal-project", run_id: "run-1", subject: SUBJECT,
+    assignment_generation_sha256: "0".repeat(64),
+    assignment_actor_key: ACTOR_KEY,
+    assignment_actor: ACTOR,
     preimage_bundle_sha256: "1".repeat(64), candidate_bundle_sha256: "2".repeat(64),
     candidate_transaction_id: "3".repeat(32),
     preimage_ledger_sha256: "4".repeat(64), preimage_ledger_length: 5, preimage_ledger_tail_hash: "5".repeat(64),

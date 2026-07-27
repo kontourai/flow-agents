@@ -95,6 +95,8 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { category: "shared hook library", requiredNeedles: ["issueActiveTurnAuthority", "validateActiveTurnAuthority", "validateSignedActiveTurnAssignmentAuthority"] }],
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
+  ["scripts/hooks/lib/denial-escalation.js", { category: "shared hook library", requiredNeedles: ["recordDenial", "buildDenialResponse", "denialIdentity"] }],
+  ["scripts/hooks/lib/denial-guidance.js", { category: "shared hook library", requiredNeedles: ["shapeDenialMessage", "stripIncidentRegister"] }],
   ["scripts/hooks/lib/declared-artifact-roots.js", { category: "shared hook library", requiredNeedles: ["isCandidateWithinDeclaredRoots", "FAIL-CLOSED"] }],
   ["scripts/hooks/lib/flow-recovery-fence.js", { category: "shared hook library", requiredNeedles: ["assertFlowRecoveryFenceOpen", "flow.run-recovery-fence.v1"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
@@ -476,7 +478,7 @@ function validateNoFirstPartyPythonCommands(reporter: Reporter): void {
   for (const entry of pythonCommandScanRoots) {
     const abs = path.join(root, entry);
     if (!fs.existsSync(abs)) continue;
-    if (fs.statSync(abs).isDirectory()) files.push(...walkFiles(abs));
+    if (fs.statSync(abs).isDirectory()) for (const file of walkFiles(abs)) files.push(file);
     else files.push(abs);
   }
   for (const file of files.sort()) {

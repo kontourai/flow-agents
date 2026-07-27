@@ -14,13 +14,21 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion } from "../external-lifecycle-authority.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { isHeldSubjectLockAuthority, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type SubjectLockAuthority } from "./assignment-provider.js";
+import {
+  buildUnsignedHostWorkflowAuthority,
+  recoverHostWorkflowSessionActor,
+  validateHostWorkflowAuthority,
+  withHostWorkflowSessionActorBinding,
+  type HostWorkflowRecoveryCapability,
+} from "../lib/host-workflow-binding.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
@@ -37,7 +45,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "wave-declare", "wave-result", "wave-reconcile", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "wave-declare", "wave-result", "wave-reconcile", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
 const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
 const PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION = "provisional-delivery.authority-completion.json";
@@ -57,6 +65,7 @@ function usage(): void {
 Public workflow verbs:
   start               Start or resume a workflow for a Work Item.
   status              Show the current canonical run and projected next action.
+  evidence-request    Emit an exact host-recovery evidence authorization for external signing.
   evidence            Record evidence for the current Flow gate and synchronize it.
   reseal-verification-evidence  Atomically publish a signed staged verification-evidence candidate.
   recover-exact-current-completion  Refresh stale same-run lifecycle authority without changing evidence or history.
@@ -108,6 +117,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const sessionDir = resolveSessionDir(parsed.flags);
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
+  if (verb === "evidence-request") return evidenceRequest(sessionDir, argv.slice(1));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "reseal-verification-evidence-request") return resealVerificationEvidenceRequest(sessionDir, argv.slice(1));
   if (verb === "reseal-verification-evidence") return resealVerificationEvidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
@@ -1170,10 +1180,6 @@ async function start(argv: string[]): Promise<number> {
   ]);
 }
 
-function workItemSlug(workItem: string): string {
-  return workItem.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
 async function status(sessionDir: string, json: boolean): Promise<number> {
   const inspected = await inspectBuilderFlowSession({ sessionDir });
   const result = inspected.run;
@@ -1196,56 +1202,193 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
   return 0;
 }
 
-async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
-  const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command"]), "workflow evidence");
+const EVIDENCE_FLAGS = new Set([
+  "artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason",
+  "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "authorization-file",
+]);
+
+function evidenceAuthorizationRequest(parsed: ReturnType<typeof parseArgs>): JsonRecord {
+  return {
+    expectation: flagString(parsed.flags, "expectation"),
+    status: flagString(parsed.flags, "status"),
+    summary: flagString(parsed.flags, "summary"),
+    route_reason: flagString(parsed.flags, "route-reason") ?? null,
+    evidence_refs: flagList(parsed.flags, "evidence-ref-json"),
+    criteria: flagList(parsed.flags, "criterion-json"),
+    accepted_gap_reason: flagString(parsed.flags, "accepted-gap-reason") ?? null,
+    waived_by: flagString(parsed.flags, "waived-by") ?? null,
+    commands: flagList(parsed.flags, "command"),
+  };
+}
+
+function validateEvidenceArguments(parsed: ReturnType<typeof parseArgs>, projectRoot: string): {
+  expectation: string;
+  requestedStatus: string;
+  commands: string[];
+  requestSha256: string;
+} {
   if (!flagString(parsed.flags, "expectation")) throw new Error("workflow evidence requires --expectation <gate-expectation-id>");
   if (!flagString(parsed.flags, "status")) throw new Error("workflow evidence requires --status <pass|fail|not_verified>");
   if (!flagString(parsed.flags, "summary")) throw new Error("workflow evidence requires --summary <text>");
-  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
-  const { slug, projectRoot } = readBoundSession(sessionDir);
   const commands = flagList(parsed.flags, "command");
   if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) {
     throw new Error("workflow evidence --command requires a shell command value");
   }
   const expectation = flagString(parsed.flags, "expectation")!;
-  // Operation-bound expectations deliberately have no generic evidence writer.
-  // Check before recovery, locking, or actor resolution so a locally authored
-  // operation result cannot cause any canonical or projection mutation.
-  const inspected = await inspectBuilderFlowSession({ sessionDir });
-  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
-  if (operation) {
-    throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
-  }
-  assertExecuteFailureRouteBeforeMutation(
-    inspected.run.definition as JsonRecord,
-    inspected.run.state.current_step,
-    flagString(parsed.flags, "status")!,
-    flagString(parsed.flags, "route-reason"),
+  const requestedStatus = flagString(parsed.flags, "status")!;
+  assertRunnableEvidenceCommands(commands, projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
+  return { expectation, requestedStatus, commands, requestSha256: canonicalSha256(evidenceAuthorizationRequest(parsed)) };
+}
+
+const ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256 = createHash("sha256")
+  .update("kontourai.host-workflow.absent-trust-bundle.v1")
+  .digest("hex");
+
+function hostEvidencePreimage(sessionDir: string, projectRoot: string, slug: string): {
+  bundleSha256: string;
+  manifestSha256: string;
+} {
+  const bundle = readProtectedRegularFileBytes(
+    path.join(sessionDir, "trust.bundle"),
+    "host workflow evidence trust bundle",
+    4 * 1024 * 1024,
+    true,
   );
-  const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
-  // Argument and command-shape rejection must be read-only. Recovery below may
-  // repair stale projections, so it runs only after every command is accepted.
-  assertRunnableEvidenceCommands(commands, projectRoot, requiresTestEvidence);
-  const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async (subjectLockAuthority) => {
-    // Validate the owner after the lock is held, then keep the lock through command
-    // execution, evidence recording, and postcondition capture so assignment and
-    // session state cannot change mid-invocation.
+  const manifest = readProtectedRegularFileBytes(
+    path.join(projectRoot, ".kontourai", "flow", "runs", slug, "evidence", "manifest.json"),
+    "host workflow evidence Flow manifest",
+    16 * 1024 * 1024,
+  );
+  if (!manifest) throw new Error("host workflow evidence requires the current Flow evidence preimage");
+  return {
+    bundleSha256: bundle
+      ? createHash("sha256").update(bundle).digest("hex")
+      : ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256,
+    manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+  };
+}
+
+async function evidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, EVIDENCE_FLAGS, "workflow evidence-request");
+  if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence-request does not accept --authorization-file");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const validated = validateEvidenceArguments(parsed, projectRoot);
+  const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
-    return runEvidenceTransaction({
-      sessionDir,
-      slug,
-      projectRoot: repaired.projectRoot,
-      callerActor: caller.actorKey,
-      expectedRunHead: caller.expectedRunHead,
-      forwarded,
-      expectation,
-      requestedStatus: flagString(parsed.flags, "status")!,
-      beforeRun: repaired.run,
-      subjectLockAuthority,
+    if (!caller.hostRecovery) throw new Error("workflow evidence-request is only available for an active host recovery binding");
+    const preimage = hostEvidencePreimage(sessionDir, repaired.projectRoot, slug);
+    const canonicalProjectRoot = fs.realpathSync(repaired.projectRoot);
+    const now = new Date();
+    const expiresAt = new Date(Math.min(now.getTime() + 10 * 60_000, Date.parse(caller.hostRecovery.expiresAt)));
+    if (expiresAt.getTime() <= now.getTime()) throw new Error("host workflow recovery binding expires before an authorization can be issued");
+    return buildUnsignedHostWorkflowAuthority({
+      project_root: canonicalProjectRoot,
+      run_id: slug,
+      subject: repaired.run.state.subject,
+      assignment_generation: caller.assignmentSnapshot.rawSha256,
+      actor_key: caller.assignmentActorKey,
+      actor: caller.assignmentActor,
+      binding_actor_key: caller.hostRecovery.actorKey,
+      binding_id: caller.hostRecovery.bindingId,
+      binding_sha256: caller.hostRecovery.pointerDigest,
+      flow_run_head: caller.expectedRunHead,
+      flow_manifest_sha256: preimage.manifestSha256,
+      trust_bundle_sha256: preimage.bundleSha256,
+      evidence_request_sha256: validated.requestSha256,
+      nonce: `workflow-evidence-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
+      issued_at: now.toISOString(),
+      expires_at: expiresAt.toISOString(),
     });
   });
+  console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
+  return 0;
+}
+
+function redeemHostEvidenceAuthority(
+  authorityRequest: {
+    action: "authorize-workflow-evidence";
+    project_root: string;
+    session_dir: string;
+    authorization_file: string;
+  },
+  authority: ReturnType<typeof validateHostWorkflowAuthority>,
+  slug: string,
+): void {
+  const authorized = invokeExternalLifecycleAuthority(authorityRequest);
+  const completion = verifyLifecycleAuthorityCompletion(authorized.completion);
+  const requestSha256 = lifecycleAuthorityResultDigest(authorityRequest);
+  if (
+    authorized.run_id !== slug
+    || completion.action !== authorityRequest.action
+    || completion.request_sha256 !== requestSha256
+    || completion.run_id !== slug
+  ) {
+    throw new Error("host workflow evidence authority completion does not bind the exact action, request, and run");
+  }
+  const expectedResult = lifecycleAuthorityResultDigest({
+    authorization_sha256: canonicalSha256(authority),
+    evidence_request_sha256: authority.evidence_request_sha256,
+  });
+  if (completion.result_core_sha256 !== expectedResult) {
+    throw new Error("host workflow evidence authority completion does not bind the exact authorization");
+  }
+}
+
+async function runHostAuthorizedEvidence(input: {
+  sessionDir: string;
+  slug: string;
+  parsed: ReturnType<typeof parseArgs>;
+  validated: ReturnType<typeof validateEvidenceArguments>;
+  repaired: Awaited<ReturnType<typeof recoverBuilderFlowSession>>;
+  caller: Awaited<ReturnType<typeof assertMatchingAssignmentActor>>;
+  run: (beforeCanonicalMutation?: () => void) => ReturnType<typeof runEvidenceTransaction>;
+}): Promise<Awaited<ReturnType<typeof runEvidenceTransaction>>> {
+  const { sessionDir, slug, parsed, validated, repaired, caller, run } = input;
+  if (!caller.hostRecovery) throw new Error("host workflow recovery binding is required");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  if (!authorizationFile) throw new Error("host-session evidence requires workflow evidence-request and a signed --authorization-file");
+  const preimage = hostEvidencePreimage(sessionDir, repaired.projectRoot, slug);
+  const projectRoot = fs.realpathSync(repaired.projectRoot);
+  const authorityBytes = readProtectedRegularFileBytes(authorizationFile, "host workflow evidence authorization", 256 * 1024);
+  if (!authorityBytes) throw new Error("host workflow evidence authorization is missing");
+  const authority = validateHostWorkflowAuthority(JSON.parse(authorityBytes.toString("utf8")) as unknown, {
+    project_root: projectRoot, run_id: slug, subject: repaired.run.state.subject,
+    assignment_generation: caller.assignmentSnapshot.rawSha256,
+    actor_key: caller.assignmentActorKey, actor: caller.assignmentActor,
+    binding_actor_key: caller.hostRecovery.actorKey,
+    binding_id: caller.hostRecovery.bindingId, binding_sha256: caller.hostRecovery.pointerDigest,
+    flow_run_head: caller.expectedRunHead, flow_manifest_sha256: preimage.manifestSha256,
+    trust_bundle_sha256: preimage.bundleSha256, evidence_request_sha256: validated.requestSha256,
+  });
+  redeemHostEvidenceAuthority({
+    action: "authorize-workflow-evidence", project_root: projectRoot,
+    session_dir: sessionDir, authorization_file: path.resolve(authorizationFile),
+  }, authority, slug);
+  return withHostWorkflowSessionActorBinding({
+    artifactRoot: path.dirname(sessionDir), artifactDir: sessionDir,
+    actorKey: caller.hostRecovery.actorKey, assignmentActor: caller.hostRecovery.actor,
+    assignmentSnapshot: caller.assignmentSnapshot,
+  }, caller.hostRecovery, async (assertCurrent) => {
+    return run(() => {
+      assertCurrent();
+      if (Date.now() > Date.parse(authority.expires_at)) {
+        throw new Error("host workflow evidence authorization expired before canonical mutation");
+      }
+      const currentPreimage = hostEvidencePreimage(sessionDir, repaired.projectRoot, slug);
+      if (currentPreimage.bundleSha256 !== authority.trust_bundle_sha256
+          || currentPreimage.manifestSha256 !== authority.flow_manifest_sha256) {
+        throw new Error("host workflow evidence signed preimage changed before canonical mutation");
+      }
+    });
+  }) as Promise<Awaited<ReturnType<typeof runEvidenceTransaction>>>;
+}
+
+function reportEvidenceOutcome(
+  outcome: Awaited<ReturnType<typeof runEvidenceTransaction>>,
+  json: boolean,
+): number {
   if ("error" in outcome) {
     if (outcome.state === "safely_rolled_back") throw outcome.error;
     throw new Error(`workflow evidence recovery required; inspect canonical workflow state: ${errorMessage(outcome.error)}`);
@@ -1257,6 +1400,55 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     ? `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, EVIDENCE_FLAGS, "workflow evidence");
+  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "authorization-file"]));
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const validated = validateEvidenceArguments(parsed, projectRoot);
+  const { expectation, requestedStatus } = validated;
+  // Operation-bound expectations deliberately have no generic evidence writer.
+  // Check before recovery, locking, or actor resolution so a locally authored
+  // operation result cannot cause any canonical or projection mutation.
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
+  if (operation) {
+    throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
+  assertExecuteFailureRouteBeforeMutation(
+    inspected.run.definition as JsonRecord,
+    inspected.run.state.current_step,
+    requestedStatus,
+    flagString(parsed.flags, "route-reason"),
+  );
+  const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async (subjectLockAuthority) => {
+    // Validate the owner after the lock is held, then keep the lock through command
+    // execution, evidence recording, and postcondition capture so assignment and
+    // session state cannot change mid-invocation.
+    const repaired = await recoverBuilderFlowSession({ sessionDir });
+    const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
+      sessionDir,
+      slug,
+      projectRoot: repaired.projectRoot,
+      callerActor: caller.actorKey,
+      expectedRunHead: caller.expectedRunHead,
+      forwarded,
+      expectation,
+      requestedStatus,
+      beforeRun: repaired.run,
+      subjectLockAuthority,
+      beforeCanonicalMutation,
+    });
+    if (!caller.hostRecovery) {
+      if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence --authorization-file is only valid for host recovery");
+      return run();
+    }
+    return runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
+  });
+  return reportEvidenceOutcome(outcome, json);
 }
 
 async function resealVerificationEvidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
@@ -1305,12 +1497,14 @@ async function recoverExactCurrentCompletion(sessionDir: string, argv: string[],
   return 0;
 }
 
-export function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], projectRoot: string, runId: string, subject: string): void {
+function lifecycleRuntimeJsonSha256(value: unknown): string {
   // The privileged coordinator signs and hashes its append-only ledger objects as their exact
   // JSON.stringify serialization. Canonicalizing these parsed objects would verify a different
   // byte contract and reject every valid coordinator-written event whose keys are not sorted.
-  const ledgerObjectSha256 = (value: unknown): string =>
-    createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRecord[], projectRoot: string, runId: string, subject: string): void {
   const edges = (Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : [])
     .filter((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
       && ((claim.metadata as JsonRecord | undefined)?.critique_resolution as JsonRecord | undefined)?.kind === "cross-reviewer")
@@ -1324,9 +1518,9 @@ export function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRec
         || event.schema_version !== "1.0" || event.sequence !== index + 1 || event.predecessor_hash !== predecessor
         || !["resolve-critique", "repair-critique-resolution-history"].includes(String(event.operation))
         || event.run_id !== runId || event.subject !== subject || !signed || signed.project_root !== projectRoot || signed.run_id !== runId || signed.subject !== subject
-        || event.authorization_sha256 !== ledgerObjectSha256(signed)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+        || event.authorization_sha256 !== lifecycleRuntimeJsonSha256(signed)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
     const { event_hash: eventHash, ...unsigned } = event;
-    if (eventHash !== ledgerObjectSha256(unsigned)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
+    if (eventHash !== lifecycleRuntimeJsonSha256(unsigned)) throw new Error("exact-current completion recovery requires a complete strict resolution ledger");
     seen.add(event.event_id);
     predecessor = String(eventHash);
   }
@@ -1531,7 +1725,7 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     if (predecessorMatches.length !== 1 || currentMatches.length !== 1
         || currentClaims.length !== candidateClaims.length
         || predecessorMatches[0]!.index !== currentMatches[0]!.index) {
-      throw new Error("verification evidence reseal requires exactly one in-place target expectation claim replacement");
+      throw new Error(`verification evidence reseal requires exactly one in-place target expectation claim replacement (predecessor=${predecessorMatches.length}, current=${currentMatches.length}, claims=${currentClaims.length}->${candidateClaims.length})`);
     }
     const predecessorClaim = predecessorMatches[0]!;
     const currentClaim = currentMatches[0]!;
@@ -1563,6 +1757,9 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       project_root: projectRoot,
       run_id: slug,
       subject,
+      assignment_generation_sha256: caller.assignmentSnapshot.rawSha256,
+      assignment_actor_key: caller.assignmentActorKey,
+      assignment_actor: caller.assignmentActor,
       preimage_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"),
       candidate_bundle_sha256: staged.digest,
       candidate_transaction_id: staged.transaction_id,
@@ -1608,7 +1805,6 @@ type EvidenceReport = { run_id: string; status: string; current_step: string; at
 type EvidenceTransactionSuccess = { state: "attached" | "recovered"; report: EvidenceReport };
 type EvidenceTransactionFailure = { state: "safely_rolled_back" | "recovery_required"; error: unknown };
 type EvidenceTransactionResult = EvidenceTransactionSuccess | EvidenceTransactionFailure;
-
 /** Test-only fault boundary for the otherwise atomic public-evidence transaction. */
 export let workflowEvidenceTransactionTestHooks: {
   afterRecord?: () => void | Promise<void>; beforePostconditions?: () => void | Promise<void>; beforeSidecarRead?: () => void | Promise<void>;
@@ -1965,6 +2161,7 @@ async function runEvidenceTransaction(input: {
   sessionDir: string; slug: string; projectRoot: string; callerActor: string; expectedRunHead: string; forwarded: string[];
   expectation: string; requestedStatus: string; beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"];
   subjectLockAuthority: SubjectLockAuthority;
+  beforeCanonicalMutation?: () => void;
 }): Promise<EvidenceTransactionResult> {
   const trustBundleFile = path.join(input.sessionDir, "trust.bundle");
   const assertSubjectLockAuthority = (): void => {
@@ -1989,36 +2186,41 @@ async function runEvidenceTransaction(input: {
         await workflowEvidenceTransactionTestHooks?.afterRecord?.();
         assertSubjectLockAuthority();
         receipt = receiptForGateClaim(candidate.file, preMutationReceipt, candidate.digest);
-        const synchronized = await syncBuilderFlowSession({
-          sessionDir: input.sessionDir,
-          expectedRunHead: input.expectedRunHead,
-          stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
-        });
-        assertSubjectLockAuthority();
-        if (synchronized.attached) {
-          receipt = { ...receipt, expectationIds: [...(synchronized.attachmentExpectationIds ?? [])] };
-        }
-        const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
-        await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
-        assertSubjectLockAuthority();
-        assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
-        commitAttempted = true;
-        assertSubjectLockAuthority();
-        commitStagedWorkflowEvidence(candidate, trustBundleFile);
-        commitSucceeded = true;
-        await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
-        const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
-        const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
-        return {
-          state: "attached",
-          report: immutableReport({
-            run_id: run.runId, status: run.state.status, current_step: run.state.current_step,
-            attached: synchronized.attached, awaiting_evidence: !synchronized.attached,
-            next_action: updatedSidecar.next_action ?? null,
-            gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
-            command_observations: gateVerdict.observations,
-          }),
-        } satisfies EvidenceTransactionSuccess;
+        const commitCanonicalEvidence = async (): Promise<EvidenceTransactionSuccess> => {
+          assertSubjectLockAuthority();
+          input.beforeCanonicalMutation?.();
+          const synchronized = await syncBuilderFlowSession({
+            sessionDir: input.sessionDir,
+            expectedRunHead: input.expectedRunHead,
+            stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
+          });
+          assertSubjectLockAuthority();
+          if (synchronized.attached) {
+            receipt = { ...receipt!, expectationIds: [...(synchronized.attachmentExpectationIds ?? [])] };
+          }
+          const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
+          await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
+          assertSubjectLockAuthority();
+          assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt!);
+          commitAttempted = true;
+          assertSubjectLockAuthority();
+          commitStagedWorkflowEvidence(candidate, trustBundleFile);
+          commitSucceeded = true;
+          await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
+          const updatedSidecar = readBoundSession(input.sessionDir).sidecar;
+          const gateVerdict = readGateVerdict(trustBundleFile, input.expectation);
+          return {
+            state: "attached",
+            report: immutableReport({
+              run_id: run.runId, status: run.state.status, current_step: run.state.current_step,
+              attached: synchronized.attached, awaiting_evidence: !synchronized.attached,
+              next_action: updatedSidecar.next_action ?? null,
+              gate_verdict: { requested_status: input.requestedStatus, persisted_value: gateVerdict.value, persisted_status: gateVerdict.status },
+              command_observations: gateVerdict.observations,
+            }),
+          };
+        };
+        return await commitCanonicalEvidence();
       } catch (error) {
         const attachment = receipt
           ? await canonicalEvidenceAttachment(input.projectRoot, input.slug, receipt, beforeEvidence)
@@ -2028,6 +2230,7 @@ async function runEvidenceTransaction(input: {
           try {
             if (!commitSucceeded) {
               commitAttempted = true;
+              input.beforeCanonicalMutation?.();
               assertSubjectLockAuthority();
               commitStagedWorkflowEvidence(candidate, trustBundleFile);
               commitSucceeded = true;
@@ -2981,14 +3184,55 @@ function readAssignment(sessionDir: string, slug: string): JsonRecord {
   return readJsonFile(file, "workflow assignment");
 }
 
-type MatchingAssignmentActor = ReturnType<typeof resolveCurrentAssignmentActor> & { expectedRunHead: string };
+type ActiveAssignmentSnapshot = {
+  assignment: JsonRecord;
+  file: string;
+  identity: { dev: number; ino: number };
+  rawSha256: string;
+};
+
+function readActiveAssignmentSnapshot(sessionDir: string, slug: string): ActiveAssignmentSnapshot {
+  const file = path.join(path.dirname(sessionDir), "assignment", `${slug}.json`);
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(descriptor);
+    const named = fs.lstatSync(file);
+    const raw = fs.readFileSync(descriptor);
+    if (!opened.isFile() || named.isSymbolicLink() || !named.isFile()
+        || opened.dev !== named.dev || opened.ino !== named.ino) {
+      throw new Error("workflow assignment changed while accepting its active generation");
+    }
+    const assignment = JSON.parse(raw.toString("utf8")) as JsonRecord;
+    assertActiveAssignmentShape(assignment, slug);
+    return {
+      assignment,
+      file,
+      identity: { dev: opened.dev, ino: opened.ino },
+      rawSha256: createHash("sha256").update(raw).digest("hex"),
+    };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+type MatchingAssignmentActor = ReturnType<typeof resolveCurrentAssignmentActor> & {
+  expectedRunHead: string;
+  assignmentSnapshot: ActiveAssignmentSnapshot;
+  assignmentActorKey: string;
+  assignmentActor: ReturnType<typeof resolveCurrentAssignmentActor>["actor"];
+  hostRecovery?: HostWorkflowRecoveryCapability;
+};
 
 async function assertMatchingAssignmentActor(sessionDir: string, slug: string): Promise<MatchingAssignmentActor> {
-  const { assignment, caller, matches } = assignmentActorContext(sessionDir, slug);
+  const { assignment, snapshot, caller, matches } = assignmentActorContext(sessionDir, slug);
   const { projectRoot } = readBoundSession(sessionDir);
   const canonical = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
   const expectedRunHead = flowRunHead(canonical.state);
-  if (matches) return { ...caller, expectedRunHead };
+  const assignmentActorKey = String(assignment.actor_key);
+  const assignmentActor = normalizeAssignmentActor(assignment.actor)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"];
+  if (matches) return {
+    ...caller, expectedRunHead, assignmentSnapshot: snapshot, assignmentActorKey, assignmentActor,
+  };
 
   const authority = loadContinuationTurnAuthority().validateSignedActiveTurnAssignmentAuthority({
     sessionDir,
@@ -3004,6 +3248,31 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
       actorKey: authority.record.assignment_actor,
       actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"],
       expectedRunHead,
+      assignmentSnapshot: snapshot,
+      assignmentActorKey,
+      assignmentActor,
+    };
+  }
+  const hostRecovery = recoverHostWorkflowSessionActor({
+    artifactRoot: path.dirname(sessionDir),
+    artifactDir: sessionDir,
+    actorKey: caller.actorKey,
+    assignmentActor: normalizeAssignmentActor(assignment.actor)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"],
+    assignmentSnapshot: {
+      file: snapshot.file,
+      identity: snapshot.identity,
+      rawSha256: snapshot.rawSha256,
+    },
+  });
+  if (hostRecovery) {
+    return {
+      actorKey: hostRecovery.actorKey,
+      actor: hostRecovery.actor,
+      expectedRunHead,
+      assignmentSnapshot: snapshot,
+      assignmentActorKey,
+      assignmentActor,
+      hostRecovery,
     };
   }
   throw new Error("workflow mutation requires the session's active, matching assignment actor");
@@ -3017,12 +3286,14 @@ function assertOrdinaryMatchingAssignmentActor(sessionDir: string, slug: string)
 
 function assignmentActorContext(sessionDir: string, slug: string): {
   assignment: JsonRecord;
+  snapshot: ActiveAssignmentSnapshot;
   caller: ReturnType<typeof resolveCurrentAssignmentActor>;
   matches: boolean;
 } {
-  const assignment = readActiveAssignment(sessionDir, slug);
+  const snapshot = readActiveAssignmentSnapshot(sessionDir, slug);
+  const assignment = snapshot.assignment;
   const caller = resolveCurrentAssignmentActor();
-  return { assignment, caller, matches: assignment.actor_key === caller.actorKey && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(caller.actor)) };
+  return { assignment, snapshot, caller, matches: assignment.actor_key === caller.actorKey && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(caller.actor)) };
 }
 
 function normalizeAssignmentActor(value: unknown): JsonRecord | null {
@@ -3031,10 +3302,14 @@ function normalizeAssignmentActor(value: unknown): JsonRecord | null {
 
 function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
   const assignment = readAssignment(sessionDir, slug);
+  assertActiveAssignmentShape(assignment, slug);
+  return assignment;
+}
+
+function assertActiveAssignmentShape(assignment: JsonRecord, slug: string): void {
   if (assignment.status !== "claimed" || assignment.artifact_dir !== slug || typeof assignment.actor_key !== "string" || !assignment.actor_key || !assignment.actor || typeof assignment.actor !== "object" || Array.isArray(assignment.actor)) {
     throw new Error("workflow mutation requires the session's active implementation assignment");
   }
-  return assignment;
 }
 
 function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
