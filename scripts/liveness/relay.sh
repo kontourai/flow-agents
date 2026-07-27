@@ -25,44 +25,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 # then reuse the SAME console POST core the telemetry mirror uses.
 export TELEMETRY_DIR="${TELEMETRY_DIR:-$SCRIPT_DIR/../telemetry}"
 
-# Source config.sh FIRST (best-effort, like economics-record.sh) so the conf resolves enablement
-# (FLOW_AGENTS_CONSOLE_LIVENESS_RELAY) and the endpoint/token/tenant — trust-gated for default-path
-# confs. This is what makes conf-only operation work with NO env var set.
+# Shared prologue (#1025): config.sh resolution, the family enable gate, transport.sh, endpoint and
+# auth normalization all live in record-relay.sh now — this file used to carry its own copy, and
+# economics carried a second. Only the record shaping below is liveness-specific.
 # shellcheck source=/dev/null
-[[ -f "$TELEMETRY_DIR/lib/config.sh" ]] && source "$TELEMETRY_DIR/lib/config.sh" 2>/dev/null || true
-
-# Opt-in gate — off by default, now honoring the conf-derived value config.sh just resolved.
-case "${FLOW_AGENTS_CONSOLE_LIVENESS_RELAY:-}" in
-  1 | true | TRUE | yes | on) ;;
-  *) exit 0 ;;
-esac
-
-[[ -f "$TELEMETRY_DIR/lib/transport.sh" ]] || exit 0
-# shellcheck source=/dev/null
-source "$TELEMETRY_DIR/lib/transport.sh" 2>/dev/null || exit 0
-
-# Resolve the liveness records endpoint: an explicit override wins, else the base console URL + /records
-# ("POST /records with a liveness record type"). No console configured ⇒ no-op.
-endpoint="${FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL:-}"
-if [[ -z "$endpoint" ]]; then
-  base="${FLOW_AGENTS_CONSOLE_URL:-${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}}"
-  [[ -z "$base" ]] && exit 0
-  endpoint="${base%/}/records"
-fi
-
-# Auth reuses the env names console_post_json reads (CONSOLE_TELEMETRY_TOKEN / CONSOLE_TENANT_ID),
-# accepting FLOW_AGENTS_CONSOLE_* aliases and an optional token file. Never fatal on a missing/bad
-# token — console_post_json only adds a header when the value passes its safety check.
-if [[ -z "${CONSOLE_TELEMETRY_TOKEN:-}" ]]; then
-  token_file="${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-${CONSOLE_TELEMETRY_TOKEN_FILE:-}}"
-  if [[ -n "$token_file" && -r "$token_file" ]]; then
-    CONSOLE_TELEMETRY_TOKEN="$(tr -d '\r\n' < "$token_file" 2>/dev/null || true)"
-    export CONSOLE_TELEMETRY_TOKEN
-  fi
-fi
-if [[ -z "${CONSOLE_TENANT_ID:-}" && -n "${FLOW_AGENTS_CONSOLE_TENANT:-}" ]]; then
-  export CONSOLE_TENANT_ID="$FLOW_AGENTS_CONSOLE_TENANT"
-fi
+[[ -f "$TELEMETRY_DIR/lib/record-relay.sh" ]] && source "$TELEMETRY_DIR/lib/record-relay.sh" 2>/dev/null || exit 0
+record_relay_prepare LIVENESS || exit 0
 
 # The liveness event arrives as a single JSON argument.
 event_json="${1:-}"
