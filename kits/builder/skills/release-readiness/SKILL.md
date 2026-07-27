@@ -77,6 +77,10 @@ terms or treating absence as success.
    separately promoted Veritas governance to blocking enforcement, a missing,
    stale, or non-verified verdict is required evidence and therefore routes to
    `HOLD`.
+   If committing or publishing the reviewed change makes the canonical critique
+   or verification snapshot stale, record `NOT_VERIFIED` with route reason
+   `missing_evidence`; `merge-ready-ci` routes back to `verify` so the exact
+   committed head can be reviewed and verified before provisional delivery.
 3. Evaluate change publication, release and deployment implications through the
    available providers. Before `RELEASE` or `DEPLOY`, require an owner, an
    executable rollback or recovery path, observable success and failure

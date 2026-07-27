@@ -54,6 +54,19 @@ test("composed pr-open-gate declares the missing_evidence repair route to verify
   assert.deepEqual([...step.routeBackReasons].sort(), ["default", "missing_evidence"]);
 });
 
+test("composed merge-ready-ci gate can refresh evidence after the reviewed diff is committed", () => {
+  const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
+  assert.ok(definition);
+  const gate = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
+  assert.deepEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" });
+  assert.deepEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
+  assert.doesNotThrow(() => validateDefinition(definition));
+  const step = resolveFlowStep("builder.build", "merge-ready-ci", REPO_ROOT);
+  assert.ok(step);
+  assert.equal(step.gateId, "builder.publish-learn:merge-ready-ci-gate");
+  assert.deepEqual([...step.routeBackReasons].sort(), ["default", "missing_evidence"]);
+});
+
 test("installed package definitions resolve when a consumer repo has no kits directory", () => {
   const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-"));
   const resolved = resolveFlowFilePath("builder", "build", "builder.build", consumer, false);

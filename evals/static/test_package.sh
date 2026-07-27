@@ -238,9 +238,13 @@ if (prOpenGate.on_route_back?.default !== "verify") throw new Error("pr-open-gat
 if (prOpenGate.route_back_policy?.on_exceeded !== "block") throw new Error("pr-open-gate route_back_policy should block on exceeded attempts");
 // A failed composed CI readiness check is an implementation defect, so it must
 // reopen execute and preserve the same bounded retry contract as other repair gates.
+// Committing the reviewed diff changes its exact source snapshot. Release readiness
+// must be able to route back for canonical review before provisional delivery.
 const mergeReadyCiGate = publishLearn.gates?.["merge-ready-ci-gate"] || {};
 if (mergeReadyCiGate.on_route_back?.implementation_defect !== "execute") throw new Error("merge-ready-ci-gate implementation_defect should route to execute");
 if (mergeReadyCiGate.route_back_policy?.max_attempts !== 3) throw new Error("merge-ready-ci-gate route_back_policy should allow three attempts");
+if (mergeReadyCiGate.on_route_back?.missing_evidence !== "verify") throw new Error("merge-ready-ci-gate missing_evidence should route to verify");
+if (mergeReadyCiGate.on_route_back?.default !== "verify") throw new Error("merge-ready-ci-gate default route-back should target verify");
 if (mergeReadyCiGate.route_back_policy?.on_exceeded !== "block") throw new Error("merge-ready-ci-gate route_back_policy should block on exceeded attempts");
 for (const stepId of ["pr-open", "merge-ready-ci", "learn"]) {
   const step = (flow.steps || []).find((item) => item.id === stepId);
