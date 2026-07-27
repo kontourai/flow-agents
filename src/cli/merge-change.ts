@@ -321,7 +321,12 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
     const authorization = (dependencies.authorizeOperation ?? ((requestContext, issuedAction, file) => invokeExternalLifecycleAuthority({
       action: "merge-change", project_root: requestContext.projectRoot, session_dir: requestContext.sessionDir, authorization_file: file, issued_action_id: issuedAction.action_id,
     })))(context, action, authorizationFile);
-    if (authorization.run_id !== context.slug || !["applied", "replayed"].includes(authorization.operation_status) || authorization.authorized_action_id !== action.action_id) throw new Error("merge-change lifecycle authority did not bind the exact current issued action");
+    // The coordinator records its completion before the provider mutation. A
+    // replay therefore proves only that authority was consumed, not that the
+    // destructive provider call completed. Requiring a fresh applied
+    // authorization prevents an expired replay from becoming indefinite merge
+    // authority; recovery reissues authority and reobserves provider state.
+    if (authorization.run_id !== context.slug || authorization.operation_status !== "applied" || authorization.authorized_action_id !== action.action_id) throw new Error("merge-change requires fresh applied lifecycle authority bound to the exact current issued action");
     const observation = await (dependencies.executeProvider ?? executeMergeChangeProvider)(effective.provider as ChangeProviderSettings, action);
     const current = await resolveAction(context, strategy as MergeChangeStrategy);
     if (!isDeepStrictEqual(current, action)) throw new Error("merge-change action changed while provider mutation was in flight");

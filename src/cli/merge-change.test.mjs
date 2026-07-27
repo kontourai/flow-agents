@@ -123,7 +123,7 @@ test("session-bound merge execution refuses terminal validation before provider 
   }
 });
 
-test("session-bound merge execution consumes signed authorization under the lock before provider mutation", async () => {
+test("session-bound merge execution refuses replayed authority before provider mutation", async () => {
   const fixture = fixtureSession();
   const issued = action();
   let providerCalls = 0;
@@ -142,8 +142,8 @@ test("session-bound merge execution consumes signed authorization under the lock
         return mergedObservation(issued, "2026-07-26T00:00:00.000Z");
       },
     });
-    assert.equal(result, 0);
-    assert.equal(providerCalls, 1, "an exact replay may retry only the same action");
+    assert.equal(result, 1);
+    assert.equal(providerCalls, 0, "consumed authority cannot authorize another provider mutation");
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

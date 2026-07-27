@@ -7,8 +7,8 @@ const SHA = "a".repeat(40);
 const provider = { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe", "change.merge"], executor: "gh-cli" };
 const binding = { run_id: "kontourai-flow-agents-1000", definition_id: "builder.build", definition_version: "1.3", step_id: "done", gate_ids: ["learn-gate"], gate_visit_id: "f".repeat(64) };
 function action(strategy = "squash") { return issueMergeChangeAction({ binding, provider, assignment_actor: "codex:1000:Kontour", expected_provider_actor: "fixture", intent: { strategy, change_number: 1000, base_ref: "main", head_ref: "fix/terminal-before-merge-1000", terminal_head_sha: SHA } }); }
-function record(merged = false) { return { base: { ref: "main", repo: { full_name: "kontourai/flow-agents" } }, head: { ref: "fix/terminal-before-merge-1000", sha: SHA, repo: { full_name: "kontourai/flow-agents" } }, merged, merge_commit_sha: merged ? "c".repeat(40) : null }; }
-function fake({ failing = false, noRequired = false, changedAfterChecks = false, mergeAfterMutation = true, queueAccepted = true, alreadyQueued = false, actor = "fixture", terminalActor = actor, reviewDecision = "APPROVED", mergeable = "MERGEABLE", mergeStateStatus = "CLEAN", strategyEnabled = true, enforceAdmins = true, requiredApprovals = 1, rulesetApprovals = requiredApprovals, effectiveRules = [{ type: "pull_request", parameters: { required_approving_review_count: rulesetApprovals } }] } = {}) {
+function record(merged = false, mergeActor = "fixture") { return { base: { ref: "main", repo: { full_name: "kontourai/flow-agents" } }, head: { ref: "fix/terminal-before-merge-1000", sha: SHA, repo: { full_name: "kontourai/flow-agents" } }, merged, merge_commit_sha: merged ? "c".repeat(40) : null, merged_by: merged ? { login: mergeActor } : null }; }
+function fake({ failing = false, noRequired = false, changedAfterChecks = false, mergeAfterMutation = true, alreadyMerged = false, queueAccepted = true, alreadyQueued = false, actor = "fixture", terminalActor = actor, mergeActor = actor, queueActor = actor, reviewDecision = "APPROVED", mergeable = "MERGEABLE", mergeStateStatus = "CLEAN", strategyEnabled = true, enforceAdmins = true, requiredApprovals = 1, rulesetApprovals = requiredApprovals, effectiveRules = [{ type: "pull_request", parameters: { required_approving_review_count: rulesetApprovals } }] } = {}) {
   const calls = []; let pullReads = 0; let queueReads = 0;
   return {
     calls,
@@ -22,14 +22,14 @@ function fake({ failing = false, noRequired = false, changedAfterChecks = false,
       if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents") return { stdout: JSON.stringify({ full_name: "kontourai/flow-agents", allow_squash_merge: strategyEnabled, allow_rebase_merge: strategyEnabled, allow_merge_commit: strategyEnabled, allow_auto_merge: strategyEnabled }) };
       if (argv[0] === "api" && argv[1] === "graphql") {
         const query = argv.find((value) => value.startsWith("query=")) ?? "";
-        if (query.includes("mergeQueueEntry")) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { headRefOid: SHA, mergeQueueEntry: queueAccepted && (alreadyQueued || queueReads++ > 0) ? { id: "MQE_fixture", state: "QUEUED", headCommit: { oid: "d".repeat(40) } } : null } } } }) };
+        if (query.includes("mergeQueueEntry")) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { headRefOid: SHA, mergeQueueEntry: queueAccepted && (alreadyQueued || queueReads++ > 0) ? { id: "MQE_fixture", state: "QUEUED", enqueuer: { login: queueActor }, headCommit: { oid: "d".repeat(40) } } : null } } } }) };
         return { stdout: JSON.stringify({ data: { viewer: { login: terminalActor }, repository: { pullRequest: { headRefOid: SHA, isDraft: false, merged: false, reviewDecision, mergeable, mergeStateStatus } } } }) };
       }
       if (argv[0] === "pr" && argv[1] === "checks") return { stdout: JSON.stringify(noRequired ? [] : [{ bucket: failing ? "pending" : "pass", name: "required-ci", link: "https://example.test/check" }]) };
       if (argv[0] === "api" && argv[1] === "--method") return { stdout: JSON.stringify({ merged: true, sha: "c".repeat(40) }) };
       if (argv[0] === "pr" && argv[1] === "merge") return { stdout: "" };
       if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents/pulls/1000") {
-        const output = record(mergeAfterMutation && pullReads++ > 1);
+        const output = record(alreadyMerged || (mergeAfterMutation && pullReads++ > 1), mergeActor);
         if (changedAfterChecks && pullReads > 1) output.head.sha = "b".repeat(40);
         return { stdout: JSON.stringify(output) };
       }
@@ -103,10 +103,25 @@ test("merge-queue replay reauthenticates the persisted exact queue identity with
   assert.equal(fixture.calls.some((argv) => argv[0] === "pr" && argv[1] === "merge"), false);
 });
 
+test("existing merge and queue recovery require authenticated mutation actors", async () => {
+  const merged = fake({ alreadyMerged: true, mergeActor: "different-actor" });
+  await assert.rejects(
+    executeMergeChangeProvider(provider, action(), { executor: merged.executor, executable: "gh" }),
+    /existing merge was performed by a different actor|merge was performed by a different actor/,
+  );
+
+  const queued = fake({ mergeAfterMutation: false, alreadyQueued: true, queueActor: "different-actor" });
+  await assert.rejects(
+    executeMergeChangeProvider(provider, action("merge-queue"), { executor: queued.executor, executable: "gh" }),
+    /queue admission was performed by a different actor/,
+  );
+  assert.equal(queued.calls.some((argv) => argv[0] === "pr" && argv[1] === "merge"), false);
+});
+
 test("merge-queue fails closed when GraphQL omits its exact PR head or immutable queue identity", async () => {
   for (const response of [
-    { data: { repository: { pullRequest: { headRefOid: "b".repeat(40), mergeQueueEntry: { id: "MQE_fixture", state: "QUEUED", headCommit: { oid: "d".repeat(40) } } } } } },
-    { data: { repository: { pullRequest: { headRefOid: SHA, mergeQueueEntry: { state: "QUEUED", headCommit: { oid: "d".repeat(40) } } } } } },
+    { data: { repository: { pullRequest: { headRefOid: "b".repeat(40), mergeQueueEntry: { id: "MQE_fixture", state: "QUEUED", enqueuer: { login: "fixture" }, headCommit: { oid: "d".repeat(40) } } } } } },
+    { data: { repository: { pullRequest: { headRefOid: SHA, mergeQueueEntry: { state: "QUEUED", enqueuer: { login: "fixture" }, headCommit: { oid: "d".repeat(40) } } } } } },
   ]) {
     const fixture = fake({ mergeAfterMutation: false });
     const original = fixture.executor;

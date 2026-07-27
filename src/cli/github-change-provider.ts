@@ -213,6 +213,7 @@ export async function mergeGithubChangeExactHead(
     const checked = await mergeProviderRecord(action, authenticated);
     assertExactMergeHead(checked, action);
     if (checked.merged === true) {
+      assertMutationActor(checked.merged_by, action, "existing merge");
       return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: providerSha(checked.merge_commit_sha, "existing merge SHA"), observed_at: execution.now() };
     }
 
@@ -227,6 +228,7 @@ export async function mergeGithubChangeExactHead(
       const queued = await mergeProviderRecord(action, authenticated);
       assertExactMergeHead(queued, action);
       if (queued.merged === true) {
+        assertMutationActor(queued.merged_by, action, "merge queue merge");
         const mergeSha = providerSha(queued.merge_commit_sha, "merge queue merge SHA");
         return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: mergeSha, observed_at: execution.now() };
       }
@@ -241,6 +243,7 @@ export async function mergeGithubChangeExactHead(
     const after = await mergeProviderRecord(action, authenticated);
     assertExactMergeHead(after, action);
     if (after.merged !== true) throw new ChangeProviderError("provider_observation_mismatch", "provider did not confirm the exact merged change");
+    assertMutationActor(after.merged_by, action, "merge");
     return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: providerSha(after.merge_commit_sha ?? result.sha, "merge provider result SHA"), observed_at: execution.now() };
   } finally {
     releaseGithubAuthentication(authenticated);
@@ -268,7 +271,7 @@ async function assertMergeQueueAccepted(action: IssuedMergeChangeAction, depende
 }
 
 async function queryMergeQueueEntry(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies, required: boolean): Promise<QueueEntry | null> {
-  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid mergeQueueEntry{id state headCommit{oid}}}}}";
+  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid mergeQueueEntry{id state enqueuer{login} headCommit{oid}}}}}";
   const response = plainObject(parseProviderJson(await invoke(dependencies, [
     "api", "graphql",
     "-f", `query=${query}`,
@@ -290,6 +293,7 @@ async function queryMergeQueueEntry(action: IssuedMergeChangeAction, dependencie
   if (!["AWAITING_CHECKS", "LOCKED", "MERGEABLE", "QUEUED"].includes(String(entry.state))) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider did not confirm admission of the exact terminal head to its merge queue; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks and retry");
   }
+  assertMutationActor(entry.enqueuer, action, "merge queue admission");
   const headCommit = entry.headCommit === null || entry.headCommit === undefined ? undefined : plainObject(entry.headCommit, "merge queue merge-group commit");
   return Object.freeze({ id: providerString(entry.id, "merge queue entry id", 1024), headSha: action.intent.terminal_head_sha, ...(headCommit ? { admittedMergeGroupSha: providerSha(headCommit.oid, "merge queue merge-group SHA") } : {}) });
 }
@@ -335,6 +339,13 @@ async function assertExactHeadChecks(action: IssuedMergeChangeAction, dependenci
 function assertExpectedProviderActor(action: IssuedMergeChangeAction, providerActor: string): void {
   if (action.expected_provider_actor !== providerActor) {
     throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed after canonical publish-change observation");
+  }
+}
+
+function assertMutationActor(value: unknown, action: IssuedMergeChangeAction, label: string): void {
+  const actor = plainObject(value, `${label} actor`);
+  if (providerString(actor.login, `${label} actor login`, 512) !== action.expected_provider_actor) {
+    throw new ChangeProviderError("provider_observation_mismatch", `provider ${label} was performed by a different actor`);
   }
 }
 
