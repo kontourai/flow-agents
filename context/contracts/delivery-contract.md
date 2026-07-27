@@ -15,7 +15,8 @@ Delivery chains planning, execution, review, verification, Goal Fit, and final a
 7. Complete the Goal Fit Gate before final response.
 8. Publish verified changes before release readiness: commit the verified diff, push the branch, open or update the provider change record or record an explicit no-provider-change reason, and collect provider check evidence.
 9. Run release readiness against the provider change/branch/check state, not only local verification.
-10. Complete Final Acceptance and docs promotion after CI, merge, release, or explicit acceptance.
+10. After learning, publish terminal delivery on the same source branch, commit/push only its delivery companions, and refresh required provider checks against that exact terminal head before an authenticated merge mutation. The mutation must bind the completed run, current assignment actor, clean worktree, canonical session delivery bytes, committed companions, and the exact head; zero required checks is a visible fail-closed condition. Readiness is evidence for a decision, not merge authority. A provisional delivery is never merge authority.
+11. Complete Final Acceptance and docs promotion after CI, merge, release, or explicit acceptance.
 
 ## Delegation Gates
 

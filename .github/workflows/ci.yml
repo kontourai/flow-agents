@@ -645,6 +645,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check routing-efficiency-integration
 
+      - name: Terminal before merge integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check terminal-before-merge-integration
+
       - name: Session resume roundtrip integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check session-resume-roundtrip-integration

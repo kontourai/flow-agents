@@ -83,7 +83,13 @@ terms or treating absence as success.
    signals, and a bounded post-release or post-deploy verification plan.
 4. Require explicit authorization for merge, release, deploy, or rollback.
    Readiness evidence and an available provider capability are not authority to
-   perform the operation.
+   perform the operation. After learning, publish terminal delivery on the same
+   source branch, commit/push its delivery-only companions, and refresh provider
+   required checks for that exact terminal head. A separately authorized configured
+   `change.merge` provider may then run `flow-agents merge-change execute`; a
+   provisional delivery and its earlier checks never authorize a merge. The
+   merge operation fails closed if no required checks are returned or its
+   completed-run, active-assignment, and terminal-companion bindings drift.
 5. Use `HOLD` for unresolved required evidence, ownership, rollback,
    observability, post-operation verification, or authority. Use
    `NOT_VERIFIED` for evidence that cannot be collected; it cannot be promoted

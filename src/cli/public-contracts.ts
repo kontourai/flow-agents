@@ -69,7 +69,7 @@ export const WORKFLOW_CRITIQUE_PARAMETERS = [
 export const PUBLISH_CHANGE_OPERATION = "publish-change" as const;
 
 /** Provider-neutral capabilities required to create and authenticate a change record. */
-export const CHANGE_PROVIDER_CAPABILITIES = ["change.create", "change.observe"] as const;
+export const CHANGE_PROVIDER_CAPABILITIES = ["change.create", "change.observe", "change.merge"] as const;
 export type ChangeProviderCapability = (typeof CHANGE_PROVIDER_CAPABILITIES)[number];
 
 export type ChangeProviderSettings = {
@@ -115,7 +115,7 @@ export function resolveChangeProviderSupport(value: unknown): ChangeProviderSupp
   const capabilities = value.capabilities;
   if (!Array.isArray(capabilities)
     || capabilities.some((capability) => !(CHANGE_PROVIDER_CAPABILITIES as readonly string[]).includes(String(capability)))
-    || CHANGE_PROVIDER_CAPABILITIES.some((capability) => !capabilities.includes(capability))) {
+    || ["change.create", "change.observe"].some((capability) => !capabilities.includes(capability as ChangeProviderCapability))) {
     return { status: "unsupported", reason: "change_provider_capabilities_are_incomplete" };
   }
   return { status: "configured", provider: structuredClone(value) as ChangeProviderSettings };

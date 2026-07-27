@@ -714,6 +714,12 @@ authentication material are deliberately excluded from result artifacts, trust b
 diagnostics, logs, and test snapshots. Local deterministic coverage does not itself prove a live
 provider operation; privileged live recovery remains a separate verification activity.
 
+### Authenticated `merge-change`
+
+`merge-change execute --session-dir <session> --strategy <squash|rebase|merge-commit|merge-queue>` is the supported mutation path for a configured ChangeProvider that explicitly declares `change.merge`. Readiness records a decision; it never authorizes or performs a merge. A read-only `merge-change validate-terminal-delivery --session-dir <session> --head-ref <ref>` diagnoses the local terminal-delivery binding without calling a provider.
+
+The enforced order is publish change, provisional delivery if CI needs it, exact-head checks, readiness, learning, terminal delivery on the same source branch, commit/push its delivery-only companions, refreshed required checks on that exact terminal head, then merge. The operation requires a completed canonical Builder run, the current matching assignment actor, a clean source worktree, byte-identical session/working-tree/committed terminal companions, a checkpoint-bound in-toto or DSSE companion, and an ancestor-bound delivery-only delta. It rejects source drift, a changed head, provider-configuration drift, zero required checks, and non-passing required checks before mutation. Squash, rebase, merge-commit, and merge-queue each use exact-head provider behavior; no tree-equivalence or post-squash delivery-only provenance relaxation is accepted.
+
 Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
 `active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,
 signed run id in `FLOW_AGENTS_CONTINUATION_TURN_SECRET` and

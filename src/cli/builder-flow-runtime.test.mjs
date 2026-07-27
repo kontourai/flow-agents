@@ -3958,21 +3958,25 @@ test("sync attaches the staged trust.bundle bytes when the session bundle is rep
   const originalDigest = createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex");
   let replaceBundle;
   const replaced = new Promise((resolve) => { replaceBundle = resolve; });
-  const watcher = fs.watch(session.sessionDir, (_event, filename) => {
-    if (String(filename) !== ".trust-bundle-snapshots") return;
+  const snapshotDirectory = path.join(session.sessionDir, ".trust-bundle-snapshots");
+  let deadlockTimer;
+  const deadlock = new Promise((_, reject) => {
+    deadlockTimer = setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 10_000);
+  });
+  const watcher = setInterval(() => {
+    if (!fs.existsSync(snapshotDirectory)) return;
+    clearInterval(watcher);
     fs.writeFileSync(bundleFile, "{\"claims\":[]}");
     replaceBundle();
-  });
+  }, 1);
   try {
     const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
-    await Promise.race([
-      replaced,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 2_000)),
-    ]);
+    await Promise.race([replaced, deadlock]);
     const synced = await syncing;
     assert.equal(synced.attached, true);
   } finally {
-    watcher.close();
+    clearInterval(watcher);
+    clearTimeout(deadlockTimer);
   }
   const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
   assert.equal(manifest.evidence.at(-1).sha256, originalDigest);
