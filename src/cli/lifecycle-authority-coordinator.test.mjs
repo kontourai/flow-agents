@@ -95,6 +95,20 @@ test("prepared merge-change recovery cannot outlive its signed authorization", a
     () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "merge-change" }, authorization),
     /authorization is expired/,
   );
+  const currentUnsigned = { ...unsigned, requested_at: new Date(now).toISOString(), expires_at: new Date(now + 60_000).toISOString() };
+  const current = {
+    ...currentUnsigned,
+    signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(currentUnsigned)), keys.privateKey).toString("base64") },
+  };
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [
+    { id: "fixture", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) },
+    { id: "fixture-alias", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) },
+  ] }), { mode: 0o600 });
+  assert.throws(
+    () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "merge-change" }, current),
+    /duplicate key ids or cryptographic identities/,
+    "one signature cannot become a second authority identity through a registry alias",
+  );
   assert.doesNotThrow(
     () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "archive" }, authorization),
     "non-provider lifecycle recovery retains its existing exact-state semantics",
@@ -508,9 +522,13 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   copyPinnedFlowClosure(installRoot);
 
   const { privateKey: operatorPrivate, publicKey: operatorPublic } = generateKeyPairSync("ed25519");
+  const { privateKey: historyPrivate, publicKey: historyPublic } = generateKeyPairSync("ed25519");
   const { privateKey: completionPrivate, publicKey: completionPublic } = generateKeyPairSync("ed25519");
   const pem = (key, type) => key.export({ type, format: "pem" });
-  fs.writeFileSync(path.join(configRoot, "keys.json"), `${JSON.stringify({ schema_version: "1.0", keys: ["fixture-operator", "test-key"].map((id) => ({ id, algorithm: "ed25519", public_key_pem: pem(operatorPublic, "spki") })) })}\n`, { mode: 0o644 });
+  fs.writeFileSync(path.join(configRoot, "keys.json"), `${JSON.stringify({ schema_version: "1.0", keys: [
+    { id: "fixture-operator", algorithm: "ed25519", public_key_pem: pem(operatorPublic, "spki") },
+    { id: "test-key", algorithm: "ed25519", public_key_pem: pem(historyPublic, "spki") },
+  ] })}\n`, { mode: 0o644 });
   fs.writeFileSync(path.join(configRoot, "completion-signing-key.pem"), pem(completionPrivate, "pkcs8"), { mode: 0o600 });
   fs.writeFileSync(path.join(configRoot, "completion-verification-key.pem"), pem(completionPublic, "spki"), { mode: 0o644 });
 
@@ -555,7 +573,7 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
     prior_head_sha: "none", resolving_head_sha: "none", prior_bundle_sha256: "0".repeat(64), requested_at: "2026-07-24T00:00:00.000Z", nonce: "fixture-resolution", signature: { algorithm: "ed25519", key_id: "fixture-operator", value: "unused" },
   };
   const historical = resolveCritiqueTransition({ bundle: { ...seed, claims: [...seed.claims, prior, resolving] }, resolution_events: [], authorization: resolutionAuthorization, prior_record_id: prior.metadata.critique_record_id, resolving_record_id: resolving.metadata.critique_record_id });
-  const signedEvent = resignHistoricalEvent(structuredClone(historical.resolution_events[0]), historical.bundle, operatorPrivate);
+  const signedEvent = resignHistoricalEvent(structuredClone(historical.resolution_events[0]), historical.bundle, historyPrivate);
   const priorWithEdge = historical.bundle.claims.find((claim) => claim.id === prior.id);
   priorWithEdge.metadata.critique_resolution = signedEvent.edge;
   const later = structuredClone(resolving);

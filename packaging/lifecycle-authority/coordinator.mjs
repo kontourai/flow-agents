@@ -247,6 +247,26 @@ function authorityRegistry() {
   const parsed = JSON.parse(protectedRootTrustFile(REGISTRY_FILE, "authority registry").toString("utf8"));
   exact(parsed, ["schema_version", "keys"], "authority registry");
   if (parsed.schema_version !== PROTOCOL_VERSION || !Array.isArray(parsed.keys)) throw new Error("authority registry is invalid");
+  const ids = new Set();
+  const fingerprints = new Set();
+  for (const candidate of parsed.keys) {
+    if (!record(candidate)) throw new Error("authority registry key is invalid");
+    exact(candidate, ["id", "algorithm", "public_key_pem"], "authority registry key");
+    if (typeof candidate.id !== "string" || !candidate.id || candidate.algorithm !== "ed25519" || typeof candidate.public_key_pem !== "string" || /PRIVATE KEY/.test(candidate.public_key_pem)) {
+      throw new Error("authority registry key is invalid");
+    }
+    let fingerprint;
+    try {
+      fingerprint = crypto.createHash("sha256").update(crypto.createPublicKey(candidate.public_key_pem).export({ type: "spki", format: "der" })).digest("hex");
+    } catch {
+      throw new Error("authority registry key is invalid");
+    }
+    if (ids.has(candidate.id) || fingerprints.has(fingerprint)) {
+      throw new Error("authority registry contains duplicate key ids or cryptographic identities");
+    }
+    ids.add(candidate.id);
+    fingerprints.add(fingerprint);
+  }
   return parsed;
 }
 function verifySignedAuthorization(authorization, { projectRoot = null, requireCurrentExpiry = true } = {}) {
