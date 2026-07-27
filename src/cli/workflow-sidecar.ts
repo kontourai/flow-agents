@@ -4391,15 +4391,29 @@ function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
   });
 }
 
+function historicalRoutedBackCheckClaim(claim: AnyObj, currentRunHead: string | null): boolean {
+  const gateClaim = claim?.metadata?.gate_claim;
+  return claimOrigin(claim) === "check"
+    && claim.value === "fail"
+    && claim.status === "disputed"
+    && typeof gateClaim?.route_reason === "string"
+    && gateClaim.route_reason.length > 0
+    && typeof gateClaim.flow_run_head === "string"
+    && currentRunHead !== null
+    && gateClaim.flow_run_head !== currentRunHead;
+}
+
 function checksFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
+  const state = loadJson(path.join(dir, "state.json"), {});
+  const currentRunHead = typeof state?.flow_run?.run_head === "string" ? state.flow_run.run_head : null;
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
   for (const claim of allClaims) requireStampedClaim(claim, dir);
   if (!Array.isArray(bundle.evidence)) return [];
   const claimById = new Map<string, AnyObj>();
-  for (const c of allClaims) if (c && c.id) claimById.set(c.id, c);
+  for (const c of allClaims) if (c && c.id && !historicalRoutedBackCheckClaim(c, currentRunHead)) claimById.set(c.id, c);
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
   const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
@@ -4545,6 +4559,7 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const claim of allClaims) {
     if (!claim) continue;
     if (claimOrigin(claim) !== "check") continue;
+    if (historicalRoutedBackCheckClaim(claim, currentRunHead)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
     const kind = kindOf(claim);
@@ -7263,9 +7278,17 @@ function evidenceClean(dir: string): boolean {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
     if (checkClaims.length === 0) return false;
+    const state = loadJson(path.join(dir, "state.json"), {});
+    const currentRunHead = typeof state?.flow_run?.run_head === "string" ? state.flow_run.run_head : null;
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
-      return v === "pass" || v === "skip";
+      if (v === "pass" || v === "skip") return true;
+      // A failed claim with a route reason is retained as history after Flow
+      // moves to a new canonical head. It must remain auditable without
+      // poisoning a later repaired delivery forever. A failure bound to the
+      // current head, or one without an authenticated head transition, remains
+      // live and therefore non-clean.
+      return historicalRoutedBackCheckClaim(c, currentRunHead);
     });
   }
   // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)

@@ -531,7 +531,36 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   currentTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
   const currentPrerequisites = verifiedTestsPrerequisites(session);
   for (const entry of currentPrerequisites) entry.claim.status = "verified";
-  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites]);
+  const historicalRouteBack = bundleClaim({
+    expectation: "ci-merge-readiness",
+    claimType: "builder.merge-ready-ci.readiness",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+  });
+  historicalRouteBack.claim.status = "disputed";
+  historicalRouteBack.claim.metadata.gate_claim.flow_run_head = "0".repeat(64);
+  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
+  const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "post-route-rebuild",
+    "--reviewer", "post-route-reviewer",
+    "--verdict", "pass",
+    "--summary", "Current source remains clean after the historical route-back.",
+    "--artifact-ref", reviewedArtifact,
+    "--lane-json", JSON.stringify({
+      id: "post-route-review",
+      status: "pass",
+      summary: "The repaired current source remains review-clean.",
+      evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, reviewedArtifact), summary: "Reviewed current delivery artifact." }],
+    }),
+  ]);
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) => claim.metadata?.gate_claim?.expectation_id === "ci-merge-readiness"),
+    false,
+    "a compose-safe rebuild removes a historical routed-back failure from the live bundle while Flow retains its attached history",
+  );
 
   const requestOutput = [];
   const originalLog = console.log;
