@@ -40,7 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
-import { flowRunHead } from "@kontourai/flow";
+import { definitionDigest, flowRunHead, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -4417,7 +4417,10 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
   const projectedFlow = sidecar?.flow_run;
   const currentRunHead = typeof projectedFlow?.run_head === "string" ? projectedFlow.run_head : null;
   const runRef = typeof projectedFlow?.run_ref === "string" ? projectedFlow.run_ref : null;
-  if (!currentRunHead || !runRef) return { currentRunHead, claimsById: new Map() };
+  const runId = typeof projectedFlow?.run_id === "string" ? projectedFlow.run_id : null;
+  if (!currentRunHead || !runRef || !runId || runId !== sidecar.task_slug) {
+    return { currentRunHead, claimsById: new Map() };
+  }
   const projectRoot = narrativeGuardRoot(dir);
   const candidateRunDir = path.resolve(projectRoot, runRef);
   const relativeRunDir = path.relative(projectRoot, candidateRunDir);
@@ -4431,7 +4434,8 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
   if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)) {
     return { currentRunHead, claimsById: new Map() };
   }
-  const readCanonicalRunJson = (segments: string[], label: string): AnyObj => {
+  if (path.basename(resolvedRunDir) !== runId) return { currentRunHead, claimsById: new Map() };
+  const readCanonicalRunBytes = (segments: string[], label: string, maxBytes: number): Buffer => {
     const candidate = path.join(resolvedRunDir, ...segments);
     if (!fs.existsSync(candidate) || fs.lstatSync(candidate).isSymbolicLink()) {
       throw new Error(`${label} must be a regular file within the canonical Flow run`);
@@ -4441,11 +4445,41 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
       throw new Error(`${label} must stay within the canonical Flow run`);
     }
-    return JSON.parse(readRegularFileNoFollow(resolved, label).toString("utf8"));
+    const descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > maxBytes) throw new Error(`${label} exceeds its bounded regular-file limit`);
+      return fs.readFileSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
   };
-  const canonicalState = readCanonicalRunJson(["state.json"], "canonical Flow state");
+  const readCanonicalRunJson = (segments: string[], label: string, maxBytes: number): AnyObj =>
+    JSON.parse(readCanonicalRunBytes(segments, label, maxBytes).toString("utf8"));
+  const startDefinition = readCanonicalRunJson(["definition.json"], "canonical Flow start definition", 2 * 1024 * 1024);
+  const canonicalStateInput = readCanonicalRunJson(["state.json"], "canonical Flow state", 8 * 1024 * 1024);
+  let canonicalState: AnyObj;
+  let effectiveDefinition: AnyObj;
+  try {
+    const validated = validateRunStateConsistency(startDefinition, canonicalStateInput, { runId });
+    canonicalState = validated.state;
+    effectiveDefinition = validated.definition;
+  } catch {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (canonicalState.run_id !== runId || canonicalState.definition_id !== projectedFlow.definition_id
+    || canonicalState.definition_version !== projectedFlow.definition_version
+    || definitionDigest(effectiveDefinition) !== projectedFlow.definition_digest
+    || !Array.isArray(sidecar.work_item_refs) || sidecar.work_item_refs.length !== 1
+    || canonicalState.subject !== sidecar.work_item_refs[0]) {
+    return { currentRunHead, claimsById: new Map() };
+  }
   if (flowRunHead(canonicalState) !== currentRunHead) return { currentRunHead, claimsById: new Map() };
-  const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest");
+  const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest", 32 * 1024 * 1024);
+  if (manifest.run_id !== runId || manifest.definition_id !== canonicalState.definition_id
+    || manifest.definition_version !== canonicalState.definition_version) {
+    return { currentRunHead, claimsById: new Map() };
+  }
   const evidenceById = new Map<string, AnyObj>();
   for (const evidence of Array.isArray(manifest?.evidence) ? manifest.evidence : []) {
     if (evidence && typeof evidence.id === "string") evidenceById.set(evidence.id, evidence);
@@ -4456,7 +4490,24 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
       || typeof transition.route_reason !== "string" || !Array.isArray(transition.evidence_refs)) continue;
     for (const evidenceRef of transition.evidence_refs) {
       const attachment = evidenceById.get(evidenceRef);
-      const claims = attachment?.bundle?.claims;
+      if (!attachment || attachment.gate_id !== transition.gate_id
+        || typeof attachment.stored_path !== "string"
+        || !/^[a-f0-9]{64}$/i.test(String(attachment.sha256 ?? ""))) continue;
+      const transitionEvidenceSha256 = transition.analytics?.evidence_sha256;
+      if (transitionEvidenceSha256 !== undefined
+        && (typeof transitionEvidenceSha256 !== "string"
+          || transitionEvidenceSha256.toLowerCase() !== attachment.sha256.toLowerCase())) continue;
+      let storedBytes: Buffer;
+      let storedBundle: AnyObj;
+      try {
+        storedBytes = readCanonicalRunBytes(attachment.stored_path.split("/"), `canonical Flow evidence ${attachment.id}`, 32 * 1024 * 1024);
+        if (createHash("sha256").update(storedBytes).digest("hex") !== attachment.sha256.toLowerCase()) continue;
+        storedBundle = JSON.parse(storedBytes.toString("utf8"));
+      } catch {
+        continue;
+      }
+      if (!isDeepStrictEqual(storedBundle, attachment.bundle)) continue;
+      const claims = storedBundle.claims;
       if (!Array.isArray(claims)) continue;
       for (const historical of claims) {
         const gateClaim = historical?.metadata?.gate_claim;

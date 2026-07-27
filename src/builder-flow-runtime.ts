@@ -890,6 +890,7 @@ async function syncAndProject(
               ...(gateEvidence.failed ? { status: "failed" } : {}),
               ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
               expectationIds: gateEvidence.expectationIds,
+              analytics: { evidence_sha256: snapshot.sha256 },
             },
           });
           attached = true;

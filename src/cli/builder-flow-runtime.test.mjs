@@ -538,6 +538,11 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   const routedBack = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(routedBack.run.state.current_step, "verify");
   assert.equal(routedBack.run.state.transitions.at(-1).type, "route_back");
+  assert.equal(
+    routedBack.run.state.transitions.at(-1).analytics.evidence_sha256,
+    routedBack.run.manifest.evidence.at(-1).sha256,
+    "canonical route-back state binds the exact attached evidence digest",
+  );
 
   const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
@@ -547,25 +552,45 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   for (const entry of currentPrerequisites) entry.claim.status = "verified";
   const forgedHistoricalRouteBack = structuredClone(historicalRouteBack);
   forgedHistoricalRouteBack.claim.fieldOrBehavior = "forged historical route-back metadata";
+  const canonicalRunDir = runDir(session.slug, session.projectRoot);
+  const canonicalManifestFile = path.join(canonicalRunDir, FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const canonicalManifestBytes = fs.readFileSync(canonicalManifestFile);
+  const canonicalManifest = JSON.parse(canonicalManifestBytes);
+  const routedAttachment = canonicalManifest.evidence.find((entry) => entry.id === routedBack.run.state.transitions.at(-1).evidence_refs[0]);
+  const routedStoredFile = path.join(canonicalRunDir, routedAttachment.stored_path);
+  const routedStoredBytes = fs.readFileSync(routedStoredFile);
+  const tamperedStoredBundle = JSON.parse(routedStoredBytes);
+  tamperedStoredBundle.claims = tamperedStoredBundle.claims.map((claim) =>
+    claim.id === forgedHistoricalRouteBack.claim.id ? forgedHistoricalRouteBack.claim : claim);
+  const tamperedStoredBytes = Buffer.from(`${JSON.stringify(tamperedStoredBundle, null, 2)}\n`);
+  routedAttachment.bundle = tamperedStoredBundle;
+  routedAttachment.sha256 = createHash("sha256").update(tamperedStoredBytes).digest("hex");
+  fs.writeFileSync(routedStoredFile, tamperedStoredBytes);
+  writeJson(canonicalManifestFile, canonicalManifest);
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
-  await workflowSidecarMain([
-    "record-critique", session.sessionDir,
-    "--id", "forged-route-rebuild",
-    "--reviewer", "post-route-reviewer",
-    "--verdict", "pass",
-    "--summary", "A forged route-back lookalike must remain live.",
-    "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
-    "--lane-json", JSON.stringify({
-      id: "forged-route-review",
-      status: "pass",
-      summary: "Exercise forged historical metadata handling.",
-      evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed delivery artifact." }],
-    }),
-  ]);
+  try {
+    await workflowSidecarMain([
+      "record-critique", session.sessionDir,
+      "--id", "forged-route-rebuild",
+      "--reviewer", "post-route-reviewer",
+      "--verdict", "pass",
+      "--summary", "A forged route-back lookalike must remain live.",
+      "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
+      "--lane-json", JSON.stringify({
+        id: "forged-route-review",
+        status: "pass",
+        summary: "Exercise forged historical metadata handling.",
+        evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed delivery artifact." }],
+      }),
+    ]);
+  } finally {
+    fs.writeFileSync(routedStoredFile, routedStoredBytes);
+    fs.writeFileSync(canonicalManifestFile, canonicalManifestBytes);
+  }
   assert.equal(
     readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) => claim.fieldOrBehavior === "forged historical route-back metadata"),
     true,
-    "metadata that is not an exact canonical route-back attachment remains live",
+    "copied identity plus coordinated manifest/stored-byte tampering remains live when it does not match the state-bound digest",
   );
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
