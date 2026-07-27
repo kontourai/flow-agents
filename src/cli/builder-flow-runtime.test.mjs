@@ -7585,7 +7585,7 @@ function assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection) 
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
 }
 
-test("publish-change rejects symlinked and forged persisted results before canonical mutation", async (t) => {
+test("publish-change rejects unsafe result files and replaces untrusted regular recovery hints only after fresh observation", async (t) => {
   await t.test("symlink leaves its external target untouched", async () => {
     const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-symlink");
     const result = path.join(session.sessionDir, "publish-change.result.json");
@@ -7605,19 +7605,17 @@ test("publish-change rejects symlinked and forged persisted results before canon
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 
-  await t.test("forged bytes cannot be accepted as crash recovery", async () => {
+  await t.test("stale or forged regular bytes are replaced by the current authenticated operation", async () => {
     const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-forgery");
     writeJson(path.join(session.sessionDir, "publish-change.result.json"), {
       operation_action_id: "forged-action", provider: "untrusted", change_ref: { number: 999 },
     });
-    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
-    const beforeProjection = snapshotProjectionTargets(session);
-
-    await assert.rejects(
-      () => createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action }),
-      /already exists with different authenticated operation bytes/,
-    );
-    assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
+    const observation = publishChangeObservation(action);
+    const completed = await createPublishChangeOperationCompleter(() => observation)({ sessionDir: session.sessionDir, action });
+    const persisted = readJson(path.join(session.sessionDir, "publish-change.result.json"));
+    assert.equal(persisted.operation_action_id, action.action_id);
+    assert.equal(persisted.change_ref.provider_record_id, observation.change_ref.provider_record_id);
+    assert.notEqual(completed.run.state.current_step, "pr-open");
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 
