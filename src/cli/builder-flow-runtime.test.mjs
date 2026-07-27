@@ -3950,23 +3950,25 @@ test("sync attaches the staged trust.bundle bytes when the session bundle is rep
   writeBundle(session.sessionDir, originalEntries);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const originalDigest = createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex");
-  let replaceBundle;
-  const replaced = new Promise((resolve) => { replaceBundle = resolve; });
-  const watcher = fs.watch(session.sessionDir, (_event, filename) => {
-    if (String(filename) !== ".trust-bundle-snapshots") return;
-    fs.writeFileSync(bundleFile, "{\"claims\":[]}");
-    replaceBundle();
-  });
+  const snapshotDirectory = path.join(session.sessionDir, ".trust-bundle-snapshots");
+  const realChmodSync = fs.chmodSync;
+  let replaced = false;
+  fs.chmodSync = (file, mode) => {
+    const result = realChmodSync(file, mode);
+    if (!replaced && mode === 0o400 && path.dirname(path.resolve(String(file))) === snapshotDirectory) {
+      fs.writeFileSync(bundleFile, "{\"claims\":[]}");
+      replaced = true;
+    }
+    return result;
+  };
+  syncBuiltinESMExports();
   try {
-    const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
-    await Promise.race([
-      replaced,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 2_000)),
-    ]);
-    const synced = await syncing;
+    const synced = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+    assert.equal(replaced, true, "fixture must replace trust.bundle after the snapshot is durable");
     assert.equal(synced.attached, true);
   } finally {
-    watcher.close();
+    fs.chmodSync = realChmodSync;
+    syncBuiltinESMExports();
   }
   const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
   assert.equal(manifest.evidence.at(-1).sha256, originalDigest);
