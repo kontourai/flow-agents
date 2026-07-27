@@ -19,7 +19,7 @@ function writeJson(file, value) {
 test("effective Builder definition materializes uses_flow and Flow-native completion", () => {
   const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
   assert.ok(definition);
-  assert.equal(definition.version, "1.3");
+  assert.equal(definition.version, "1.4");
   assert.ok(definition.steps.every((step) => !("uses_flow" in step)));
   assert.ok(!definition.steps.some((step) => step.id === "done"));
   assert.equal(definition.steps.find((step) => step.id === "learn")?.next, null);
@@ -72,7 +72,7 @@ test("installed package definitions resolve when a consumer repo has no kits dir
   const resolved = resolveFlowFilePath("builder", "build", "builder.build", consumer, false);
   assert.ok(resolved);
   assert.equal(fs.realpathSync(resolved), fs.realpathSync(path.join(REPO_ROOT, "kits", "builder", "flows", "build.flow.json")));
-  assert.equal(resolveEffectiveFlowDefinition("builder.build", consumer, { allowOverride: false })?.version, "1.3");
+  assert.equal(resolveEffectiveFlowDefinition("builder.build", consumer, { allowOverride: false })?.version, "1.4");
 });
 
 test("consumer-vendored definitions remain authoritative over package fallback", () => {
@@ -134,7 +134,7 @@ test("canonical compilation ignores Flow definition overrides", () => {
   process.env.FLOW_AGENTS_FLOW_DEFS_DIR = definitions;
   try {
     assert.equal(resolveEffectiveFlowDefinition("builder.build", REPO_ROOT)?.version, "999.0");
-    assert.equal(resolveEffectiveFlowDefinition("builder.build", REPO_ROOT, { allowOverride: false })?.version, "1.3");
+    assert.equal(resolveEffectiveFlowDefinition("builder.build", REPO_ROOT, { allowOverride: false })?.version, "1.4");
   } finally {
     if (prior === undefined) delete process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
     else process.env.FLOW_AGENTS_FLOW_DEFS_DIR = prior;
