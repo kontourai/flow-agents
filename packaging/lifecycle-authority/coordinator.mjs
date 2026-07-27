@@ -51,7 +51,7 @@ const ACTION_FIELDS = {
   "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
   "authorize-workflow-evidence": ["action", "project_root", "session_dir", "authorization_file"],
   "execute-sealed-workload": ["action", "project_root", "session_dir", "authorization_file", "sealed_workload_file"],
-  "merge-change": ["action", "project_root", "session_dir", "authorization_file"],
+  "merge-change": ["action", "project_root", "session_dir", "authorization_file", "issued_action_id"],
 };
 // This is deliberately a closed launcher contract.  The caller supplies a
 // convenient request file, but every byte which can affect execution is
@@ -1276,7 +1276,36 @@ function sessionSubject(paths) {
  * Flow/assignment artifacts and consumes the protected nonce only after every
  * binding still matches the exact signed merge action.
  */
-async function assertMergeChangeAuthorizationBinding(paths, authorization) {
+function assertMergeChangeRequestAction(envelope, authorization) {
+  const actionId = envelope.request.issued_action_id;
+  if (typeof actionId !== "string" || !/^[a-f0-9]{64}$/.test(actionId)
+      || !record(authorization.issued_action) || authorization.issued_action.action_id !== actionId) {
+    throw new Error("merge-change request does not bind the signed exact issued action");
+  }
+  return actionId;
+}
+
+function assertMergeChangeVerificationRefreshProvenance(state, definition, definitionDigest) {
+  const amendments = Array.isArray(state.definition_amendments) ? state.definition_amendments : [];
+  const adopted = amendments.filter((entry) => record(entry) && entry.type === "definition_amended"
+    && record(entry.successor_definition)
+    && entry.successor_definition.id === definition.id
+    && entry.successor_definition.version === definition.version
+    && entry.successor_definition.digest === definitionDigest);
+  if (amendments.length === 0) {
+    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    return;
+  }
+  if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
+  const amendedAt = Date.parse(String(adopted[0].at));
+  const history = Array.isArray(state.gate_outcome_history) ? state.gate_outcome_history : [];
+  const refreshedPass = history.some((outcome) => record(outcome) && outcome.gate_id === "verify-gate" && outcome.status === "pass"
+    && record(outcome.transition_validation) && record(outcome.transition_validation.transition)
+    && Number.isFinite(amendedAt) && Date.parse(String(outcome.transition_validation.transition.at)) > amendedAt);
+  if (!refreshedPass) throw new Error("merge-change requires an accepted verify-gate pass ordered after the definition amendment that adopted evidence refresh");
+}
+
+async function assertMergeChangeAuthorizationBinding(paths, authorization, requestedActionId = null) {
   exact(authorization, MERGE_CHANGE_AUTHORIZATION_FIELDS, "privileged merge-change authorization");
   exact(authorization.signature, ["algorithm", "key_id", "value"], "merge-change authorization signature");
   if (authorization.schema_version !== PROTOCOL_VERSION || authorization.operation !== "merge-change"
@@ -1298,6 +1327,7 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization) {
   }
   const unsignedAction = { ...action }; delete unsignedAction.action_id;
   if (action.action_id !== jsonSha256(unsignedAction)) throw new Error("merge-change authorization issued action digest is invalid");
+  if (requestedActionId !== null && action.action_id !== requestedActionId) throw new Error("merge-change request action changed before authorization consumption");
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const definition = JSON.parse(definitionBytes.toString("utf8"));
@@ -1320,9 +1350,7 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization) {
       || canonicalJson(mergeReadyCi.route_back_policy) !== canonicalJson({ max_attempts: 3, on_exceeded: "block" })) {
     throw new Error("merge-change requires semantic merge-ready-ci evidence-refresh control");
   }
-  if (!Array.isArray(state.gate_outcomes) || !state.gate_outcomes.some((outcome) => record(outcome) && outcome.gate_id === "verify-gate" && outcome.status === "pass")) {
-    throw new Error("merge-change requires refreshed passing verification evidence");
-  }
+  assertMergeChangeVerificationRefreshProvenance(state, definition, flow.definitionDigest(definition));
   const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
   if (assignment.status !== "claimed" || assignment.artifact_dir !== paths.runId || assignment.actor_key !== action.assignment_actor) {
     throw new Error("merge-change authorization assignment actor is no longer current");
@@ -1469,7 +1497,7 @@ async function archiveCanonicalSession(paths, authorization) {
   return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(paths.projectRoot, destination) }) };
 }
 function completion(envelope, paths, operationStatus, resultCoreSha256) {
-  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString(), ...(envelope.action === "merge-change" ? { authorized_action_id: envelope.request.issued_action_id } : {}) };
   const privateKey = crypto.createPrivateKey(protectedRootTrustFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
@@ -2318,7 +2346,7 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
     if (envelope.action === "recover-exact-current-completion") throw new Error("exact-current completion recovery requires the signed prepare/publish protocol");
     if (envelope.action === "publish-provisional-delivery") return executeProvisionalDeliveryMutation(paths, authorization, resumePrepared);
     if (envelope.action === "merge-change") {
-      await assertMergeChangeAuthorizationBinding(paths, authorization);
+      await assertMergeChangeAuthorizationBinding(paths, authorization, assertMergeChangeRequestAction(envelope, authorization));
       return {
         // The root-owned nonce record is the single-use permit.  The provider
         // mutation remains in the caller, under its subject lock, so a crash
@@ -2386,9 +2414,9 @@ function durableCompletionRecord(prior, envelope, identity, authorizationSha256)
     : ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
   if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
   const completionRecord = prior.completion;
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature", ...(envelope.action === "merge-change" ? ["authorized_action_id"] : [])];
   exact(completionRecord, fields, "durable lifecycle completion");
-  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
+  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || (envelope.action === "merge-change" && completionRecord.authorized_action_id !== envelope.request.issued_action_id) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
   const { signature, ...unsigned } = completionRecord;
   const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
   if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("durable lifecycle completion signature is invalid");
@@ -2834,6 +2862,7 @@ async function processRootOperation(envelope) {
   const authorization = verifyAuthorization(authorizationPath, { requireCurrentExpiry: false });
   const identity = operationIdentity(envelope, authorization);
   if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
+  if (envelope.action === "merge-change") assertMergeChangeRequestAction(envelope, authorization);
   if (envelope.action === "reseal-verification-evidence") {
     assertVerificationResealAtomicReplaceCapabilityArtifact();
     const caller = callerIdentity();
@@ -2897,7 +2926,7 @@ async function processRootOperation(envelope) {
           throw new Error("unprivileged verification reseal capability preflight returned an invalid response");
         }
       }
-      if (envelope.action === "merge-change") await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization);
+      if (envelope.action === "merge-change") await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization, assertMergeChangeRequestAction(envelope, authorization));
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
@@ -2988,6 +3017,7 @@ function response(envelope, outcome) {
   return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: {
     run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord,
     ...(envelope.action === "execute-sealed-workload" ? { safe_result: outcome.safeResult } : {}),
+    ...(envelope.action === "merge-change" ? { authorized_action_id: outcome.completionRecord.authorized_action_id } : {}),
   } };
 }
 function provisionalReceiptEventIndex(events, paths, completion, label) {

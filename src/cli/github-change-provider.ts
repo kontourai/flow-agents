@@ -381,21 +381,28 @@ async function assertMergeMutationPolicy(settings: ChangeProviderSettings, actio
   // do not infer a ruleset from repository configuration or an older cached
   // protection response. Requiring a review rule keeps an unobservable bypass
   // or policy-removal from becoming implicit merge authority.
-  const effectiveRules = plainObject(parseProviderJson(
+  const effectiveRules = parseProviderJson(
     await invoke(dependencies, ["api", `repos/${repoSlug(action)}/rules/branches/${encodeURIComponent(action.intent.base_ref)}`]),
     "merge effective ruleset policy",
-  ), "merge effective ruleset policy");
-  if (!Array.isArray(effectiveRules.rules) || !effectiveRules.rules.some((rule) => {
-    if (!rule || typeof rule !== "object" || Array.isArray(rule)) return false;
-    const entry = rule as Record<string, unknown>;
-    const parameters = entry.parameters;
-    return entry.type === "pull_request"
-      && parameters !== null
-      && typeof parameters === "object"
-      && !Array.isArray(parameters)
-      && Number.isSafeInteger((parameters as Record<string, unknown>).required_approving_review_count)
-      && Number((parameters as Record<string, unknown>).required_approving_review_count) >= 1;
-  })) {
+  );
+  // GET /rules/branches/{branch} returns the rules themselves as a JSON array,
+  // not a wrapper object. Bound every element and require exactly one applicable
+  // pull-request rule: selecting an arbitrary rule from a conflicting provider
+  // response would turn policy ambiguity into merge authority.
+  if (!Array.isArray(effectiveRules) || effectiveRules.length === 0 || effectiveRules.length > 100) {
+    malformed("merge effective ruleset policy must be a non-empty bounded array");
+  }
+  const reviewRules = effectiveRules.map((rule, index) => {
+    const entry = plainObject(rule, `merge effective ruleset policy rule ${index}`);
+    const type = providerString(entry.type, `merge effective ruleset policy rule ${index} type`, 128);
+    return type === "pull_request" ? entry : null;
+  }).filter((rule): rule is Record<string, unknown> => rule !== null);
+  if (reviewRules.length !== 1) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset returned an ambiguous pull-request review policy");
+  }
+  const rulesetParameters = plainObject(reviewRules[0].parameters, "merge effective ruleset review policy parameters");
+  if (!Number.isSafeInteger(rulesetParameters.required_approving_review_count)
+    || Number(rulesetParameters.required_approving_review_count) < 1) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset does not establish a review policy for the terminal target branch");
   }
 

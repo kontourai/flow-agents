@@ -34,12 +34,44 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, assertMergeChangeRequestAction, assertMergeChangeVerificationRefreshProvenance, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, assertMergeChangeRequestAction: module.assertMergeChangeRequestAction, assertMergeChangeVerificationRefreshProvenance: module.assertMergeChangeVerificationRefreshProvenance, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+test("merge-change requires an exact signed request action and post-amendment verify pass", async () => {
+  const loaded = await loadProtectedReadFromCoordinator();
+  const actionId = "a".repeat(64);
+  const authorization = { issued_action: { action_id: actionId } };
+  assert.equal(loaded.assertMergeChangeRequestAction({ request: { issued_action_id: actionId } }, authorization), actionId);
+  assert.throws(
+    () => loaded.assertMergeChangeRequestAction({ request: { issued_action_id: "b".repeat(64) } }, authorization),
+    /does not bind the signed exact issued action/,
+  );
+
+  const definition = { id: "builder.build", version: "1.4" };
+  const digest = "c".repeat(64);
+  const amendment = {
+    type: "definition_amended",
+    at: "2026-07-27T12:00:00.000Z",
+    successor_definition: { ...definition, digest },
+  };
+  const stalePass = {
+    definition_digest: digest,
+    definition_amendments: [amendment],
+    gate_outcome_history: [{ gate_id: "verify-gate", status: "pass", transition_validation: { transition: { at: "2026-07-27T11:59:59.000Z" } } }],
+  };
+  assert.throws(
+    () => loaded.assertMergeChangeVerificationRefreshProvenance(stalePass, definition, digest),
+    /accepted verify-gate pass ordered after the definition amendment/,
+  );
+  const refreshedPass = structuredClone(stalePass);
+  refreshedPass.gate_outcome_history[0].transition_validation.transition.at = "2026-07-27T12:00:01.000Z";
+  assert.doesNotThrow(() => loaded.assertMergeChangeVerificationRefreshProvenance(refreshedPass, definition, digest));
+  assert.doesNotThrow(() => loaded.assertMergeChangeVerificationRefreshProvenance({ definition_digest: digest, definition_amendments: [] }, definition, digest));
+});
 
 function provisionalAuthorization(overrides = {}) {
   const now = new Date();

@@ -8,7 +8,7 @@ const provider = { role: "ChangeProvider", kind: "github", repository: { owner: 
 const binding = { run_id: "kontourai-flow-agents-1000", definition_id: "builder.build", definition_version: "1.3", step_id: "done", gate_ids: ["learn-gate"], gate_visit_id: "f".repeat(64) };
 function action(strategy = "squash") { return issueMergeChangeAction({ binding, provider, assignment_actor: "codex:1000:Kontour", expected_provider_actor: "fixture", intent: { strategy, change_number: 1000, base_ref: "main", head_ref: "fix/terminal-before-merge-1000", terminal_head_sha: SHA } }); }
 function record(merged = false) { return { base: { ref: "main", repo: { full_name: "kontourai/flow-agents" } }, head: { ref: "fix/terminal-before-merge-1000", sha: SHA, repo: { full_name: "kontourai/flow-agents" } }, merged, merge_commit_sha: merged ? "c".repeat(40) : null }; }
-function fake({ failing = false, noRequired = false, changedAfterChecks = false, mergeAfterMutation = true, queueAccepted = true, alreadyQueued = false, actor = "fixture", terminalActor = actor, reviewDecision = "APPROVED", mergeable = "MERGEABLE", mergeStateStatus = "CLEAN", strategyEnabled = true, enforceAdmins = true, requiredApprovals = 1, rulesetApprovals = requiredApprovals } = {}) {
+function fake({ failing = false, noRequired = false, changedAfterChecks = false, mergeAfterMutation = true, queueAccepted = true, alreadyQueued = false, actor = "fixture", terminalActor = actor, reviewDecision = "APPROVED", mergeable = "MERGEABLE", mergeStateStatus = "CLEAN", strategyEnabled = true, enforceAdmins = true, requiredApprovals = 1, rulesetApprovals = requiredApprovals, effectiveRules = [{ type: "pull_request", parameters: { required_approving_review_count: rulesetApprovals } }] } = {}) {
   const calls = []; let pullReads = 0; let queueReads = 0;
   return {
     calls,
@@ -18,7 +18,7 @@ function fake({ failing = false, noRequired = false, changedAfterChecks = false,
       if (argv[0] === "auth") return { stdout: "" };
       if (argv[0] === "api" && argv[1] === "user") return { stdout: JSON.stringify({ login: actor }) };
       if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents/branches/main/protection") return { stdout: JSON.stringify({ enforce_admins: { enabled: enforceAdmins }, required_pull_request_reviews: { required_approving_review_count: requiredApprovals } }) };
-      if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents/rules/branches/main") return { stdout: JSON.stringify({ rules: [{ type: "pull_request", parameters: { required_approving_review_count: rulesetApprovals } }] }) };
+      if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents/rules/branches/main") return { stdout: JSON.stringify(effectiveRules) };
       if (argv[0] === "api" && argv[1] === "repos/kontourai/flow-agents") return { stdout: JSON.stringify({ full_name: "kontourai/flow-agents", allow_squash_merge: strategyEnabled, allow_rebase_merge: strategyEnabled, allow_merge_commit: strategyEnabled, allow_auto_merge: strategyEnabled }) };
       if (argv[0] === "api" && argv[1] === "graphql") {
         const query = argv.find((value) => value.startsWith("query=")) ?? "";
@@ -180,4 +180,33 @@ test("GitHub merge fails closed when strategy or no-bypass branch policy is ambi
     );
     assert.equal(fixture.calls.some((argv) => argv[0] === "api" && argv[1] === "--method"), false);
   }
+});
+
+test("GitHub merge consumes the real effective-rules array and rejects malformed or ambiguous arrays", async () => {
+  const valid = fake({ effectiveRules: [{ type: "commit_message_pattern", parameters: {} }, { type: "pull_request", parameters: { required_approving_review_count: 1 } }] });
+  await executeMergeChangeProvider(provider, action(), { executor: valid.executor, executable: "gh" });
+  assert.equal(valid.calls.some((argv) => argv[0] === "api" && argv[1] === "--method"), true);
+
+  for (const [effectiveRules, message] of [
+    [{ type: "pull_request", parameters: null }],
+    [null],
+    { rules: [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }] },
+  ].map((value) => [value, /review policy parameters|policy rule 0|bounded array/])) {
+    const fixture = fake({ effectiveRules });
+    await assert.rejects(
+      executeMergeChangeProvider(provider, action(), { executor: fixture.executor, executable: "gh" }),
+      message,
+    );
+    assert.equal(fixture.calls.some((argv) => argv[0] === "api" && argv[1] === "--method"), false);
+  }
+
+  const ambiguous = fake({ effectiveRules: [
+    { type: "pull_request", parameters: { required_approving_review_count: 1 } },
+    { type: "pull_request", parameters: { required_approving_review_count: 2 } },
+  ] });
+  await assert.rejects(
+    executeMergeChangeProvider(provider, action(), { executor: ambiguous.executor, executable: "gh" }),
+    /ambiguous pull-request review policy/,
+  );
+  assert.equal(ambiguous.calls.some((argv) => argv[0] === "api" && argv[1] === "--method"), false);
 });

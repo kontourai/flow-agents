@@ -442,6 +442,27 @@ test("lifecycle authority response accepts completed replays only with an authen
   }
 }));
 
+test("merge-change response and signed completion bind the requested issued action", () => withCompletionVerificationKey(() => {
+  const actionId = "d".repeat(64);
+  const completion = signedCompletion({ action: "merge-change", authorized_action_id: actionId });
+  const response = {
+    schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+    action: "merge-change",
+    request_sha256: digest,
+    status: "accepted",
+    result: { run_id: "run-1", operation_status: "replayed", authorized_action_id: actionId, completion },
+  };
+  assert.deepEqual(validateLifecycleAuthorityResponse(`${JSON.stringify(response)}\n`, "merge-change", digest, actionId), response.result);
+  assert.throws(
+    () => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...response, result: { ...response.result, authorized_action_id: "e".repeat(64) } })}\n`, "merge-change", digest, actionId),
+    /does not bind the exact merge action/,
+  );
+  assert.throws(
+    () => validateLifecycleAuthorityResponse(`${JSON.stringify(response)}\n`, "merge-change", digest, "e".repeat(64)),
+    /does not bind the exact merge action/,
+  );
+}));
+
 test("strict current consumers reject a correctly signed replayed completion while historical authentication retains it", () => withCompletionVerificationKey(() => {
   const replayed = signedCompletion({ action: "resolve-critique", operation_status: "replayed" });
   assert.throws(

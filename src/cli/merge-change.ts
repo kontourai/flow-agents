@@ -247,14 +247,39 @@ function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspe
     || !isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" })) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }
-  const outcomes = Array.isArray(inspected.run.state.gate_outcomes) ? inspected.run.state.gate_outcomes : [];
-  const refreshedVerification = outcomes.some((outcome) => outcome && typeof outcome === "object"
-    && (outcome as Record<string, unknown>).gate_id === "verify-gate"
-    && (outcome as Record<string, unknown>).status === "pass");
-  if (!refreshedVerification) throw new Error("merge-change requires a completed run with refreshed passing verification evidence after adopting the merge-ready-ci control");
+  assertEvidenceRefreshVerificationProvenance(inspected.run.state, inspected.run.definitionId, inspected.run.definitionVersion, inspected.run.definitionDigest);
   // Force the same protected regular-file constraints used for a signed request
   // before the helper binds its independently recomputed digest.
   readRegularFile(manifestFile, "canonical Flow evidence manifest");
+}
+
+function assertEvidenceRefreshVerificationProvenance(state: Record<string, unknown>, definitionId: string, definitionVersion: string, definitionDigest: string): void {
+  const amendments = Array.isArray(state.definition_amendments) ? state.definition_amendments : [];
+  const adopted = amendments.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry)
+    && (entry as Record<string, unknown>).type === "definition_amended"
+    && (() => {
+      const successor = (entry as Record<string, unknown>).successor_definition;
+      return successor && typeof successor === "object" && !Array.isArray(successor)
+        && (successor as Record<string, unknown>).id === definitionId
+        && (successor as Record<string, unknown>).version === definitionVersion
+        && (successor as Record<string, unknown>).digest === definitionDigest;
+    })());
+  if (amendments.length === 0) {
+    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    return;
+  }
+  if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
+  const amendedAt = Date.parse(String((adopted[0] as Record<string, unknown>).at));
+  const history = Array.isArray(state.gate_outcome_history) ? state.gate_outcome_history : [];
+  const refreshedPass = history.some((outcome) => {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) return false;
+    const entry = outcome as Record<string, unknown>;
+    const transition = entry.transition_validation && typeof entry.transition_validation === "object"
+      ? (entry.transition_validation as Record<string, unknown>).transition : undefined;
+    const at = transition && typeof transition === "object" ? Date.parse(String((transition as Record<string, unknown>).at)) : Number.NaN;
+    return entry.gate_id === "verify-gate" && entry.status === "pass" && Number.isFinite(amendedAt) && at > amendedAt;
+  });
+  if (!refreshedPass) throw new Error("merge-change requires an accepted verify-gate pass ordered after the definition amendment that adopted evidence refresh");
 }
 
 async function prepareAuthorizationRequest(context: SessionContext, strategy: MergeChangeStrategy, input: { nonce?: string; requestedAt?: string; expiresAt?: string }) {
@@ -293,10 +318,10 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
       ? { status: "configured", provider: dependencies.provider }
       : resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
     if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") throw new Error("merge-change requires a configured ChangeProvider");
-    const authorization = (dependencies.authorizeOperation ?? ((requestContext, _issuedAction, file) => invokeExternalLifecycleAuthority({
-      action: "merge-change", project_root: requestContext.projectRoot, session_dir: requestContext.sessionDir, authorization_file: file,
+    const authorization = (dependencies.authorizeOperation ?? ((requestContext, issuedAction, file) => invokeExternalLifecycleAuthority({
+      action: "merge-change", project_root: requestContext.projectRoot, session_dir: requestContext.sessionDir, authorization_file: file, issued_action_id: issuedAction.action_id,
     })))(context, action, authorizationFile);
-    if (authorization.run_id !== context.slug || !["applied", "replayed"].includes(authorization.operation_status)) throw new Error("merge-change lifecycle authority did not bind the exact session operation");
+    if (authorization.run_id !== context.slug || !["applied", "replayed"].includes(authorization.operation_status) || authorization.authorized_action_id !== action.action_id) throw new Error("merge-change lifecycle authority did not bind the exact current issued action");
     const observation = await (dependencies.executeProvider ?? executeMergeChangeProvider)(effective.provider as ChangeProviderSettings, action);
     const current = await resolveAction(context, strategy as MergeChangeStrategy);
     if (!isDeepStrictEqual(current, action)) throw new Error("merge-change action changed while provider mutation was in flight");

@@ -11,13 +11,13 @@ const SHA = "a".repeat(40);
 const provider = { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe", "change.merge"], executor: "gh-cli" };
 const binding = { run_id: "merge-transaction-fixture", definition_id: "builder.build", definition_version: "1.3", step_id: "done", gate_ids: ["learn-gate"], gate_visit_id: "f".repeat(64) };
 
-function action(terminalHead = SHA) {
+function action(terminalHead = SHA, overrides = {}) {
   return issueMergeChangeAction({
     binding,
     provider,
-    assignment_actor: "codex:fixture:Kontour",
+    assignment_actor: overrides.assignment_actor ?? "codex:fixture:Kontour",
     expected_provider_actor: "fixture",
-    intent: { strategy: "squash", change_number: 1000, base_ref: "main", head_ref: "fixture", terminal_head_sha: terminalHead },
+    intent: { strategy: overrides.strategy ?? "squash", change_number: 1000, base_ref: "main", head_ref: "fixture", terminal_head_sha: terminalHead },
   });
 }
 
@@ -49,7 +49,7 @@ async function runExecute(sessionDir, dependencies) {
   console.error = () => {};
   try {
     return await mergeChangeMain(["execute", "--session-dir", sessionDir, "--strategy", "squash", "--authorization-file", path.join(sessionDir, "signed-merge-authorization.json")], {
-      authorizeOperation: () => ({ run_id: binding.run_id, operation_status: "applied", completion: {} }),
+      authorizeOperation: (_context, issued) => ({ run_id: binding.run_id, operation_status: "applied", authorized_action_id: issued.action_id, completion: {} }),
       ...dependencies,
     });
   } finally {
@@ -135,7 +135,7 @@ test("session-bound merge execution consumes signed authorization under the lock
         assert.equal(fs.existsSync(fixture.lockDir), true, "authority consumption must occur under the subject lock");
         assert.equal(observed.action_id, issued.action_id);
         assert.match(file, /signed-merge-authorization\.json$/);
-        return { run_id: binding.run_id, operation_status: "replayed", completion: {} };
+        return { run_id: binding.run_id, operation_status: "replayed", authorized_action_id: observed.action_id, completion: {} };
       },
       executeProvider: async () => {
         providerCalls += 1;
@@ -169,3 +169,27 @@ test("merge execution requires a signed authorization before it can reach the pr
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+for (const [label, current] of [
+  ["action", action("b".repeat(40))],
+  ["strategy", action(SHA, { strategy: "rebase" })],
+  ["assignment", action(SHA, { assignment_actor: "codex:replacement:Kontour" })],
+]) {
+  test(`replayed lifecycle authorization cannot authorize ${label} drift`, async () => {
+    const fixture = fixtureSession();
+    const originallyAuthorized = action();
+    let providerCalls = 0;
+    try {
+      const result = await runExecute(fixture.sessionDir, {
+        provider,
+        currentAction: async () => current,
+        authorizeOperation: () => ({ run_id: binding.run_id, operation_status: "replayed", authorized_action_id: originallyAuthorized.action_id, completion: {} }),
+        executeProvider: async () => { providerCalls += 1; return mergedObservation(current, "2026-07-26T00:00:00.000Z"); },
+      });
+      assert.equal(result, 1);
+      assert.equal(providerCalls, 0, "a replay for another action must not reach the provider");
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
