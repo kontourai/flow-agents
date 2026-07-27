@@ -525,12 +525,6 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   } });
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
-  const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
-  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
-  currentTests.claim.status = "verified";
-  currentTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
-  const currentPrerequisites = verifiedTestsPrerequisites(session);
-  for (const entry of currentPrerequisites) entry.claim.status = "verified";
   const historicalRouteBack = bundleClaim({
     expectation: "ci-merge-readiness",
     claimType: "builder.merge-ready-ci.readiness",
@@ -539,7 +533,40 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     routeReason: "missing_evidence",
   });
   historicalRouteBack.claim.status = "disputed";
-  historicalRouteBack.claim.metadata.gate_claim.flow_run_head = "0".repeat(64);
+  historicalRouteBack.claim.metadata.gate_claim.step_id = "merge-ready-ci";
+  writeBundle(session.sessionDir, [historicalRouteBack]);
+  const routedBack = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(routedBack.run.state.current_step, "verify");
+  assert.equal(routedBack.run.state.transitions.at(-1).type, "route_back");
+
+  const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  currentTests.claim.status = "verified";
+  currentTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
+  const currentPrerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of currentPrerequisites) entry.claim.status = "verified";
+  const forgedHistoricalRouteBack = structuredClone(historicalRouteBack);
+  forgedHistoricalRouteBack.claim.fieldOrBehavior = "forged historical route-back metadata";
+  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "forged-route-rebuild",
+    "--reviewer", "post-route-reviewer",
+    "--verdict", "pass",
+    "--summary", "A forged route-back lookalike must remain live.",
+    "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
+    "--lane-json", JSON.stringify({
+      id: "forged-route-review",
+      status: "pass",
+      summary: "Exercise forged historical metadata handling.",
+      evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed delivery artifact." }],
+    }),
+  ]);
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) => claim.fieldOrBehavior === "forged historical route-back metadata"),
+    true,
+    "metadata that is not an exact canonical route-back attachment remains live",
+  );
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
   await workflowSidecarMain([
@@ -561,6 +588,25 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     false,
     "a compose-safe rebuild removes a historical routed-back failure from the live bundle while Flow retains its attached history",
   );
+  const repairedTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  repairedTests.claim.status = "verified";
+  repairedTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
+  const repairedPrerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of repairedPrerequisites) entry.claim.status = "verified";
+  const repairedVerification = [repairedTests, ...repairedPrerequisites].map((entry) => withIdentitySuffix(entry, "after-route-back"));
+  assert.equal((await writeAndSync(session, repairedVerification)).run.state.current_step, "merge-ready");
+  const repairedMergeReadiness = withIdentitySuffix(bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" }), "after-route-back");
+  repairedMergeReadiness.claim.status = "verified";
+  assert.equal((await writeAndSync(session, [...repairedVerification, repairedMergeReadiness])).run.state.current_step, "pr-open");
+  const currentAction = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Provisional delivery E2E",
+    body: "Exercise the exact public request and publication path.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action: currentAction });
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
 
   const requestOutput = [];
   const originalLog = console.log;
@@ -573,7 +619,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   assert.equal(requestOutput.length, 1);
   const request = JSON.parse(requestOutput[0]);
   assert.equal(request.authorization.operation, "publish-provisional-delivery");
-  assert.equal(request.authorization.published_head_sha, action.head_sha);
+  assert.equal(request.authorization.published_head_sha, currentAction.head_sha);
 
   const operatorKeys = generateKeyPairSync("ed25519");
   const completionKeys = generateKeyPairSync("ed25519");
@@ -668,8 +714,13 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
 
   execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
   execFileSync("git", ["commit", "-m", "exact provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
-  const learning = await writeAndSync(session, [
+  const repairedCiReadiness = withIdentitySuffix(
     bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
+    "after-route-back",
+  );
+  repairedCiReadiness.claim.status = "verified";
+  const learning = await writeAndSync(session, [
+    repairedCiReadiness,
   ]);
   assert.equal(learning.run.state.current_step, "learn");
   const learningEntries = [

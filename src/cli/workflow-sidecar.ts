@@ -40,6 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
+import { flowRunHead } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -4391,7 +4392,90 @@ function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
   });
 }
 
-function historicalRoutedBackCheckClaim(claim: AnyObj, currentRunHead: string | null): boolean {
+type RoutedBackClaimProvenance = {
+  currentRunHead: string | null;
+  claimsById: Map<string, AnyObj[]>;
+};
+
+function routedBackClaimIdentity(claim: AnyObj): AnyObj {
+  return {
+    id: claim.id,
+    subjectType: claim.subjectType,
+    subjectId: claim.subjectId,
+    facet: claim.facet,
+    claimType: claim.claimType,
+    fieldOrBehavior: claim.fieldOrBehavior,
+    value: claim.value,
+    impactLevel: claim.impactLevel,
+    verificationPolicyId: claim.verificationPolicyId,
+    metadata: claim.metadata,
+  };
+}
+
+function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
+  const sidecar = loadJson(path.join(dir, "state.json"), {});
+  const projectedFlow = sidecar?.flow_run;
+  const currentRunHead = typeof projectedFlow?.run_head === "string" ? projectedFlow.run_head : null;
+  const runRef = typeof projectedFlow?.run_ref === "string" ? projectedFlow.run_ref : null;
+  if (!currentRunHead || !runRef) return { currentRunHead, claimsById: new Map() };
+  const projectRoot = narrativeGuardRoot(dir);
+  const candidateRunDir = path.resolve(projectRoot, runRef);
+  const relativeRunDir = path.relative(projectRoot, candidateRunDir);
+  if (!relativeRunDir || relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)
+    || !fs.existsSync(candidateRunDir) || fs.lstatSync(candidateRunDir).isSymbolicLink()) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const resolvedProjectRoot = fs.realpathSync(projectRoot);
+  const resolvedRunDir = fs.realpathSync(candidateRunDir);
+  const resolvedRelative = path.relative(resolvedProjectRoot, resolvedRunDir);
+  if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const readCanonicalRunJson = (segments: string[], label: string): AnyObj => {
+    const candidate = path.join(resolvedRunDir, ...segments);
+    if (!fs.existsSync(candidate) || fs.lstatSync(candidate).isSymbolicLink()) {
+      throw new Error(`${label} must be a regular file within the canonical Flow run`);
+    }
+    const resolved = fs.realpathSync(candidate);
+    const relative = path.relative(resolvedRunDir, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`${label} must stay within the canonical Flow run`);
+    }
+    return JSON.parse(readRegularFileNoFollow(resolved, label).toString("utf8"));
+  };
+  const canonicalState = readCanonicalRunJson(["state.json"], "canonical Flow state");
+  if (flowRunHead(canonicalState) !== currentRunHead) return { currentRunHead, claimsById: new Map() };
+  const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest");
+  const evidenceById = new Map<string, AnyObj>();
+  for (const evidence of Array.isArray(manifest?.evidence) ? manifest.evidence : []) {
+    if (evidence && typeof evidence.id === "string") evidenceById.set(evidence.id, evidence);
+  }
+  const claimsById = new Map<string, AnyObj[]>();
+  for (const transition of Array.isArray(canonicalState?.transitions) ? canonicalState.transitions : []) {
+    if (!transition || transition.type !== "route_back" || typeof transition.from_step !== "string"
+      || typeof transition.route_reason !== "string" || !Array.isArray(transition.evidence_refs)) continue;
+    for (const evidenceRef of transition.evidence_refs) {
+      const attachment = evidenceById.get(evidenceRef);
+      const claims = attachment?.bundle?.claims;
+      if (!Array.isArray(claims)) continue;
+      for (const historical of claims) {
+        const gateClaim = historical?.metadata?.gate_claim;
+        if (claimOrigin(historical) !== "check" || typeof historical?.id !== "string"
+          || historical.value !== "fail" || historical.status !== "disputed"
+          || gateClaim?.step_id !== transition.from_step
+          || gateClaim?.route_reason !== transition.route_reason
+          || !Array.isArray(transition.expectation_ids)
+          || !transition.expectation_ids.includes(gateClaim?.expectation_id)) continue;
+        const entries = claimsById.get(historical.id) ?? [];
+        entries.push(historical);
+        claimsById.set(historical.id, entries);
+      }
+    }
+  }
+  return { currentRunHead, claimsById };
+}
+
+function historicalRoutedBackCheckClaim(claim: AnyObj, provenance: RoutedBackClaimProvenance): boolean {
   const gateClaim = claim?.metadata?.gate_claim;
   return claimOrigin(claim) === "check"
     && claim.value === "fail"
@@ -4399,21 +4483,22 @@ function historicalRoutedBackCheckClaim(claim: AnyObj, currentRunHead: string | 
     && typeof gateClaim?.route_reason === "string"
     && gateClaim.route_reason.length > 0
     && typeof gateClaim.flow_run_head === "string"
-    && currentRunHead !== null
-    && gateClaim.flow_run_head !== currentRunHead;
+    && provenance.currentRunHead !== null
+    && gateClaim.flow_run_head !== provenance.currentRunHead
+    && (provenance.claimsById.get(claim.id) ?? []).some((historical) =>
+      isDeepStrictEqual(routedBackClaimIdentity(historical), routedBackClaimIdentity(claim)));
 }
 
 function checksFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
-  const state = loadJson(path.join(dir, "state.json"), {});
-  const currentRunHead = typeof state?.flow_run?.run_head === "string" ? state.flow_run.run_head : null;
+  const provenance = routedBackClaimProvenance(dir);
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
   for (const claim of allClaims) requireStampedClaim(claim, dir);
   if (!Array.isArray(bundle.evidence)) return [];
   const claimById = new Map<string, AnyObj>();
-  for (const c of allClaims) if (c && c.id && !historicalRoutedBackCheckClaim(c, currentRunHead)) claimById.set(c.id, c);
+  for (const c of allClaims) if (c && c.id && !historicalRoutedBackCheckClaim(c, provenance)) claimById.set(c.id, c);
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
   const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
@@ -4559,7 +4644,7 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const claim of allClaims) {
     if (!claim) continue;
     if (claimOrigin(claim) !== "check") continue;
-    if (historicalRoutedBackCheckClaim(claim, currentRunHead)) continue;
+    if (historicalRoutedBackCheckClaim(claim, provenance)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
     const kind = kindOf(claim);
@@ -7278,8 +7363,7 @@ function evidenceClean(dir: string): boolean {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
     if (checkClaims.length === 0) return false;
-    const state = loadJson(path.join(dir, "state.json"), {});
-    const currentRunHead = typeof state?.flow_run?.run_head === "string" ? state.flow_run.run_head : null;
+    const provenance = routedBackClaimProvenance(dir);
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
       if (v === "pass" || v === "skip") return true;
@@ -7288,7 +7372,7 @@ function evidenceClean(dir: string): boolean {
       // poisoning a later repaired delivery forever. A failure bound to the
       // current head, or one without an authenticated head transition, remains
       // live and therefore non-clean.
-      return historicalRoutedBackCheckClaim(c, currentRunHead);
+      return historicalRoutedBackCheckClaim(c, provenance);
     });
   }
   // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)
