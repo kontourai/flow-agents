@@ -35,7 +35,7 @@ produces its local record only.
 
 - Original intent, acceptance evidence, confidence report, and release decision.
 - Observed outcomes from `RepositoryAdapter`, `CheckProvider`, `ReleaseProvider`,
-  and `DeployProvider` when those providers exist.
+  `BacklogProvider`, and `DeployProvider` when those providers exist.
 - Incidents, user feedback, review findings, operational observations, and
   durable documentation decisions.
 
@@ -50,19 +50,31 @@ produces its local record only.
    explicit rationale for no change.
 4. Give each correction a stable identifier, owner or ownership gap, target
    destination, evidence, disposition, and follow-up state. Route product work
-   to the backlog, workflow defects to the owning workflow, regression risks to
-   tests, durable operating knowledge to the knowledge system, and binding
-   decisions or changed contracts to documentation or an ADR.
-5. Record follow-up creation or linkage as observed evidence. A recommendation
+   to the backlog through `BacklogProvider`, workflow defects to the owning
+   workflow, regression risks to tests, durable operating knowledge to the
+   knowledge system, and binding decisions or changed contracts to
+   documentation or an ADR.
+5. When a `BacklogProvider` is configured, it is the required destination for
+   follow-up work — a lesson recorded only somewhere else has not been routed.
+   Naming an abstract destination ("the backlog", "the knowledge system")
+   without a provider-observed record leaves the follow-up open. Where no
+   provider is configured, say so explicitly and record where the follow-up
+   went instead; do not treat its absence as a reason to skip routing.
+6. A learning may also belong in the operator's own agent instruction files
+   when it changes how future work should be approached, but that is the
+   operator's call about their own files and never a substitute for the
+   backlog record. Do not write to those files on your own initiative, and do
+   not report a learning as captured because it was written there.
+7. Record follow-up creation or linkage as observed evidence. A recommendation
    without a durable destination remains open; do not report it as captured.
-6. Preserve `NOT_VERIFIED` for outcomes that could not be observed. Do not infer
+8. Preserve `NOT_VERIFIED` for outcomes that could not be observed. Do not infer
    deployment, release, provider, or user outcomes from local completion alone.
-7. Give `decision-evidence` and `learning-evidence` independent verdicts. A
+9. Give `decision-evidence` and `learning-evidence` independent verdicts. A
    complete decision record can pass while learning follow-up remains failed or
    `NOT_VERIFIED`. The learning-review stage is required, but discovering a new
    lesson is not: when the evidence supports no correction or follow-up, record
    that explicit no-op outcome and its basis instead of inventing backlog work.
-8. On a matching active run, publish both expectations through the public CLI:
+10. On a matching active run, publish both expectations through the public CLI:
 
 ```bash
 flow-agents workflow evidence --session-dir <session-dir> \
@@ -78,21 +90,21 @@ flow-agents workflow evidence --session-dir <session-dir> \
   --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/learning.json","summary":"Observed outcomes, follow-up routing, and unresolved gaps."}'
 ```
 
-9. After both learning expectations are accepted and the public workflow reports
-   completion, close the Repository-adapter workspace deliberately:
-   - An open, draft, closed-without-merge, dirty, primary-checkout, or
-     provider-unverifiable change is **retained** with the reason recorded in
-     `learning.json`.
-   - A merged change in a clean linked worktree is reclaimed with
-     `flow-agents workflow reclaim --session-dir <session-dir>`. The command
-     obtains a fresh authenticated provider observation for the exact head SHA,
-     removes the worktree without force, retains the branch, prunes Git metadata,
-     and writes a content-free receipt under the primary checkout.
-   - Never reclaim merely because a pull request exists, and never chain branch
-     deletion or forced worktree removal after push/merge commands.
-   - Reclaim is a terminal dependent effect, not work that may race the learning
-     review. Read-only merge and worktree preflight may happen concurrently, but
-     removal waits until the learning artifacts it depends on are durable.
+11. After both learning expectations are accepted and the public workflow reports
+    completion, close the Repository-adapter workspace deliberately:
+    - An open, draft, closed-without-merge, dirty, primary-checkout, or
+      provider-unverifiable change is **retained** with the reason recorded in
+      `learning.json`.
+    - A merged change in a clean linked worktree is reclaimed with
+      `flow-agents workflow reclaim --session-dir <session-dir>`. The command
+      obtains a fresh authenticated provider observation for the exact head SHA,
+      removes the worktree without force, retains the branch, prunes Git metadata,
+      and writes a content-free receipt under the primary checkout.
+    - Never reclaim merely because a pull request exists, and never chain branch
+      deletion or forced worktree removal after push/merge commands.
+    - Reclaim is a terminal dependent effect, not work that may race the learning
+      review. Read-only merge and worktree preflight may happen concurrently, but
+      removal waits until the learning artifacts it depends on are durable.
 
 ## Output
 
