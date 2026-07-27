@@ -40,7 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
-import { definitionDigest, flowRunHead, validateRunStateConsistency } from "@kontourai/flow";
+import { definitionDigest, flowRunHead, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -4430,8 +4430,10 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
   }
   const resolvedProjectRoot = fs.realpathSync(projectRoot);
   const resolvedRunDir = fs.realpathSync(candidateRunDir);
+  const canonicalRunDir = fs.realpathSync(runDir(runId, projectRoot));
   const resolvedRelative = path.relative(resolvedProjectRoot, resolvedRunDir);
-  if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)) {
+  if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)
+    || resolvedRunDir !== canonicalRunDir) {
     return { currentRunHead, claimsById: new Map() };
   }
   if (path.basename(resolvedRunDir) !== runId) return { currentRunHead, claimsById: new Map() };
@@ -4445,11 +4447,36 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
       throw new Error(`${label} must stay within the canonical Flow run`);
     }
+    const ancestors = segments.slice(0, -1).map((_, index) =>
+      path.join(resolvedRunDir, ...segments.slice(0, index + 1)));
+    const ancestorIdentities = ancestors.map((ancestor) => {
+      const stat = fs.lstatSync(ancestor);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} parent path must contain only real directories`);
+      return { path: ancestor, dev: stat.dev, ino: stat.ino };
+    });
     const descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
     try {
       const stat = fs.fstatSync(descriptor);
       if (!stat.isFile() || stat.size > maxBytes) throw new Error(`${label} exceeds its bounded regular-file limit`);
-      return fs.readFileSync(descriptor);
+      const bytes = Buffer.alloc(Number(stat.size));
+      let offset = 0;
+      while (offset < bytes.length) {
+        const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+        if (count <= 0) throw new Error(`${label} changed while reading`);
+        offset += count;
+      }
+      const after = fs.fstatSync(descriptor);
+      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size) {
+        throw new Error(`${label} changed while reading`);
+      }
+      for (const ancestor of ancestorIdentities) {
+        const current = fs.lstatSync(ancestor.path);
+        if (current.isSymbolicLink() || !current.isDirectory()
+          || current.dev !== ancestor.dev || current.ino !== ancestor.ino) {
+          throw new Error(`${label} parent path changed while reading`);
+        }
+      }
+      return bytes;
     } finally {
       fs.closeSync(descriptor);
     }
@@ -4494,9 +4521,8 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
         || typeof attachment.stored_path !== "string"
         || !/^[a-f0-9]{64}$/i.test(String(attachment.sha256 ?? ""))) continue;
       const transitionEvidenceSha256 = transition.analytics?.evidence_sha256;
-      if (transitionEvidenceSha256 !== undefined
-        && (typeof transitionEvidenceSha256 !== "string"
-          || transitionEvidenceSha256.toLowerCase() !== attachment.sha256.toLowerCase())) continue;
+      if (typeof transitionEvidenceSha256 !== "string"
+        || transitionEvidenceSha256.toLowerCase() !== attachment.sha256.toLowerCase()) continue;
       let storedBytes: Buffer;
       let storedBundle: AnyObj;
       try {
