@@ -1010,7 +1010,11 @@ test("headless init can establish all provider settings in the installed project
 });
 
 test("universal bundles do not contain Flow Agents dogfood provider bindings", () => {
-  const built = spawnSync(process.execPath, ["build/src/cli.js", "build-bundles"], { encoding: "utf8" });
+  const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-bundles-"));
+  const built = spawnSync(process.execPath, ["build/src/cli.js", "build-bundles"], {
+    encoding: "utf8",
+    env: { ...process.env, FLOW_AGENTS_DIST_DIR: bundleRoot },
+  });
   assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
   for (const runtime of ["base", "codex", "claude-code", "kiro", "opencode", "pi"]) {
     for (const name of [
@@ -1018,7 +1022,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
       "assignment-provider-settings.json",
       "change-provider-settings.json",
     ]) {
-      assert.equal(fs.existsSync(path.join("dist", runtime, "context", "settings", name)), false, `${runtime}/${name}`);
+      assert.equal(fs.existsSync(path.join(bundleRoot, runtime, "context", "settings", name)), false, `${runtime}/${name}`);
     }
   }
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-kiro-upgrade-"));
@@ -1026,7 +1030,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
   const consumerBytes = '{"consumer_owned":true}\n';
   fs.mkdirSync(path.dirname(consumerSettings), { recursive: true });
   fs.writeFileSync(consumerSettings, consumerBytes);
-  const installed = spawnSync("bash", ["dist/kiro/install.sh", dest], { encoding: "utf8" });
+  const installed = spawnSync("bash", [path.join(bundleRoot, "kiro", "install.sh"), dest], { encoding: "utf8" });
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
   assert.equal(fs.readFileSync(consumerSettings, "utf8"), consumerBytes);
 });
