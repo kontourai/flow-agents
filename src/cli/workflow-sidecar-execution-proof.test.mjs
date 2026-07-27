@@ -391,3 +391,112 @@ test("cargo and go require substantive local test sources", () => {
   assert.equal(testExecutionProof("cargo test", covered)?.static_test_units, 1);
   assert.equal(testExecutionProof("go test ./...", covered)?.static_test_units, 1);
 });
+
+// --- #761: tally-harness shell scripts as test evidence ---
+//
+// `set -e` is a proxy for "cannot fail silently", and it is the WRONG proxy for a harness that
+// runs every check and reports a count: `set -e` would abort at the first failure and destroy the
+// tally. Every integration eval in this repo is that shape, so the gate rejected precisely the
+// suites carrying the most coverage. These assert the alternative proof and, more importantly,
+// that it cannot be satisfied by a script that merely looks like a harness.
+
+const TALLY_HARNESS = [
+  "#!/bin/bash",
+  "set -uo pipefail",
+  "errors=0",
+  'pass() { echo "  PASS: $1"; }',
+  'fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }',
+  '[[ 1 -eq 1 ]] && pass "first" || fail "first"',
+  '[[ 2 -eq 2 ]] && pass "second" || fail "second"',
+  "if [[ $errors -eq 0 ]]; then exit 0; else exit 1; fi",
+  "",
+].join("\n");
+
+test("#761: a tally harness without set -e is accepted, and its checks are counted", () => {
+  const root = fixture({ "evals/test_tally.sh": TALLY_HARNESS });
+  const proof = testExecutionProof("bash evals/test_tally.sh", root);
+  assert.notEqual(proof, null, "a counted, non-zero-exiting harness must qualify as test evidence");
+  assert.equal(proof.kind, "local-process-exit");
+  // Both arms of each `&& pass || fail` pair count; the magnitude is what matters.
+  assert.ok(proof.static_test_units >= 2, `expected >= 2 static units, got ${proof.static_test_units}`);
+  assert.equal(isMeaningfulTestCommand("bash evals/test_tally.sh", root), true);
+});
+
+test("#761: a failure helper that only PRINTS is not a tally harness", () => {
+  const root = fixture({
+    "evals/test_printer.sh": TALLY_HARNESS.replace('fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }', 'fail() { echo "  FAIL: $1"; }'),
+  });
+  assert.equal(
+    testExecutionProof("bash evals/test_printer.sh", root),
+    null,
+    "a failure that is printed but never recorded proves nothing about loudness",
+  );
+});
+
+test("#761: a harness that can never exit non-zero is rejected", () => {
+  const root = fixture({
+    "evals/test_never_fails.sh": TALLY_HARNESS.replace("if [[ $errors -eq 0 ]]; then exit 0; else exit 1; fi", "exit 0"),
+  });
+  assert.equal(
+    testExecutionProof("bash evals/test_never_fails.sh", root),
+    null,
+    "without a non-zero exit the tally is inert and a failing run still reports success",
+  );
+});
+
+test("#761: defining the helpers without invoking them yields no units", () => {
+  const root = fixture({
+    "evals/test_unused.sh": [
+      "#!/bin/bash",
+      "set -uo pipefail",
+      "errors=0",
+      'pass() { echo "  PASS: $1"; }',
+      'fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }',
+      'echo "no checks here"',
+      "if [[ $errors -eq 0 ]]; then exit 0; else exit 1; fi",
+      "",
+    ].join("\n"),
+  });
+  assert.equal(testExecutionProof("bash evals/test_unused.sh", root), null);
+});
+
+test("#761: an inline `then exit 1` counts as a non-zero exit, like the multi-line form", () => {
+  const inline = fixture({ "evals/test_inline.sh": TALLY_HARNESS });
+  const multiline = fixture({
+    "evals/test_multiline.sh": TALLY_HARNESS.replace(
+      "if [[ $errors -eq 0 ]]; then exit 0; else exit 1; fi",
+      "if [[ $errors -eq 0 ]]; then\n  exit 0\nelse\n  exit 1\nfi",
+    ),
+  });
+  assert.notEqual(testExecutionProof("bash evals/test_inline.sh", inline), null);
+  assert.notEqual(testExecutionProof("bash evals/test_multiline.sh", multiline), null);
+});
+
+test("#761: the tally path does not weaken the existing non-test refusals", () => {
+  const root = fixture({
+    "evals/test_tally.sh": TALLY_HARNESS,
+    "scripts/deploy.sh": "#!/bin/bash\nset -e\necho deploying\n",
+  });
+  // A script with no test intent in its name is still refused regardless of shape.
+  assert.equal(testExecutionProof("bash scripts/deploy.sh", root), null);
+  // Vacuous and metadata commands remain refused.
+  for (const command of ["echo hi", "true", ":", "npm --version", "node -e \"process.exit(0)\""]) {
+    assert.equal(testExecutionProof(command, root), null, `${command} must not qualify as test evidence`);
+  }
+});
+
+test("#761: set -e scripts keep their existing score and are never lowered by the tally path", () => {
+  const root = fixture({
+    "evals/test_errexit.sh": [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      '[[ -f package.json ]] || exit 1',
+      'grep -q something file.txt',
+      'diff a.txt b.txt',
+      "",
+    ].join("\n"),
+  });
+  const proof = testExecutionProof("bash evals/test_errexit.sh", root);
+  assert.notEqual(proof, null, "an errexit script with inline assertions must still qualify");
+  assert.ok(proof.static_test_units >= 2, `expected inline assertions to still count, got ${proof.static_test_units}`);
+});

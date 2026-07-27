@@ -3392,6 +3392,64 @@ type TestExecutionProof = {
   static_test_units: number;
 };
 
+const SHELL_EXECUTABLES = ["bash", "sh", "zsh"];
+const SHELL_ERREXIT = /(?:^|\n)\s*set\s+(?:-[^\n\s]*e[^\n\s]*|-o\s+errexit)(?:\s|$)/;
+/** Where a shell command may legally begin: line start, a separator, or after then/else/do. */
+const SHELL_COMMAND_START = String.raw`(?:^|[;&|{(]|\b(?:then|else|do)\s)`;
+
+/**
+ * #761: recognize the tally-harness shape as a shell script's proof of loud failure, alongside
+ * `set -e`.
+ *
+ * `set -e` is a PROXY for "this script cannot fail silently". It is the wrong proxy for a harness
+ * that deliberately runs every check and reports a count, because `set -e` would abort at the
+ * first failing check and destroy the tally — so the scripts that report the MOST is exactly the
+ * shape the proxy rejected. Every integration eval in this repo is that shape: a `_pass`/`_fail`
+ * helper pair, a failure counter, and a non-zero exit when the counter is non-zero.
+ *
+ * The three conditions below are jointly what `set -e` was standing in for:
+ *   1. a failure helper that RECORDS the failure (increments a counter), so a failed check is not
+ *      merely printed and forgotten;
+ *   2. a paired success helper, so invocations of the pair are countable assertions; and
+ *   3. a non-zero exit, so a failing run fails the process — the property the whole gate rests on.
+ *
+ * Condition 1 is what keeps this from being a rubber stamp: a script that prints "FAIL" without
+ * recording it, or never exits non-zero, is NOT a tally harness and still scores 0. The observed
+ * exit code remains authoritative regardless — this only decides whether a script may be CITED as
+ * test evidence, never whether a given run passed.
+ *
+ * Returns the number of pass/fail helper invocations (the assertions), or 0 when the shape is
+ * absent.
+ */
+function shellTallyHarnessUnits(active: string): number {
+  const helperDef = /^\s*(?:function\s+)?(_?(?:pass|ok|fail|error|check))\s*\(\)\s*\{(.*)$/gm;
+  const successHelpers = new Set<string>();
+  const failureHelpers = new Set<string>();
+  for (const match of active.matchAll(helperDef)) {
+    const name = match[1]!;
+    const body = match[2] ?? "";
+    // A failure helper must RECORD the failure, not just print it: an incremented counter, or a
+    // flag set on a variable. Anything else is a printer and proves nothing about loudness.
+    if (/(?:fail|error)/i.test(name) && /(?:\+\s*1|\+\+|=\s*1\b)/.test(body)) failureHelpers.add(name);
+    else if (/(?:pass|ok|check)/i.test(name)) successHelpers.add(name);
+  }
+  if (failureHelpers.size === 0 || successHelpers.size === 0) return 0;
+  // A non-zero exit must exist, or a failing run would still exit 0 and the tally would be inert.
+  // Anchor on the same command-start contexts as invocations below: an inline
+  // `if ...; then exit 1; fi` is as valid as the multi-line form, and matching only the latter
+  // would reject a real harness for its formatting.
+  if (!new RegExp(`${SHELL_COMMAND_START}\\s*exit\\s+(?:[1-9]\\d*|"?\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?"?)`, "m").test(active)) return 0;
+
+  const names = [...successHelpers, ...failureHelpers].map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  // Count invocations wherever a shell command can legally START, not just at line start: this
+  // repo's evals overwhelmingly write `[[ cond ]] && pass "..." || fail "..."`, so a line-anchored
+  // match scores those files 0 and would have left the convention just as unusable as before.
+  // Both arms of such a pair count; `static_test_units` is a magnitude proof, and
+  // inferExecutedTestCount already clamps it to min(static, observed).
+  const invocation = new RegExp(`${SHELL_COMMAND_START}\\s*(?:${names.join("|")})\\s+(?:"|'|\\S)`, "gm");
+  return (active.match(invocation) ?? []).length;
+}
+
 function staticTestUnits(file: string, executable: string): number {
   try {
     const content = fs.readFileSync(file, "utf8").slice(0, 256 * 1024);
@@ -3400,9 +3458,15 @@ function staticTestUnits(file: string, executable: string): number {
       .map((line) => hashComments ? line.replace(/\s+#.*$/, "") : line.replace(/\s+\/\/.*$/, ""))
       .filter((line) => hashComments ? !line.trimStart().startsWith("#") : !line.trimStart().startsWith("//"))
       .join("\n");
-    if (["bash", "sh", "zsh"].includes(executable)
-      && !/(?:^|\n)\s*set\s+(?:-[^\n\s]*e[^\n\s]*|-o\s+errexit)(?:\s|$)/.test(active)) return 0;
     const assertions = active.match(/(?:\b(?:test|it)\s*\(|\b(?:assert|expect)\s*\(|^\s*(?:async\s+)?def\s+test_|^\s*(?:public\s+)?function\s+test|^\s*it\s+["']|^\s*func\s+(?:Test|Fuzz|Example)\w*\s*\(|#\[(?:\w+::)?test\]|^(?:if\s+! ?)?(?:test\s|\[\s|\[\[\s|(?:grep|rg|diff|cmp)\s))/gm) ?? [];
+    if (SHELL_EXECUTABLES.includes(executable)) {
+      const tally = shellTallyHarnessUnits(active);
+      // `set -e` keeps its existing meaning; the tally shape is an ALTERNATIVE proof, never a
+      // weaker substitute. Take the larger count so an errexit script that also tallies is not
+      // undercounted, and so neither proof can lower the other's score.
+      if (SHELL_ERREXIT.test(active)) return Math.max(assertions.length, tally);
+      return tally;
+    }
     return assertions.length;
   } catch {
     return 0;
