@@ -20,7 +20,7 @@ import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
-import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
+import { isHeldSubjectLockAuthority, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type SubjectLockAuthority } from "./assignment-provider.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
@@ -1227,7 +1227,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
   assertRunnableEvidenceCommands(commands, projectRoot, requiresTestEvidence);
-  const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+  const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async (subjectLockAuthority) => {
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
     // session state cannot change mid-invocation.
@@ -1243,6 +1243,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       expectation,
       requestedStatus: flagString(parsed.flags, "status")!,
       beforeRun: repaired.run,
+      subjectLockAuthority,
     });
   });
   if ("error" in outcome) {
@@ -1385,6 +1386,76 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
   return 0;
 }
 
+function resealClaimWithoutProjectionTimestamps(claim: JsonRecord): JsonRecord {
+  const copy = { ...claim };
+  delete copy.createdAt;
+  delete copy.updatedAt;
+  return copy;
+}
+
+function hasExactKeys(value: JsonRecord, keys: readonly string[]): boolean {
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+function isVerificationResealCompanionClaim(
+  predecessor: JsonRecord,
+  replacement: JsonRecord,
+  targetClaim: JsonRecord,
+): boolean {
+  const targetMetadata = targetClaim.metadata as JsonRecord | undefined;
+  const targetGateClaim = targetMetadata?.gate_claim as JsonRecord | undefined;
+  const recordedAt = typeof targetGateClaim?.recorded_at === "string" ? targetGateClaim.recorded_at : "";
+  if (!recordedAt || replacement.createdAt !== recordedAt || replacement.updatedAt !== recordedAt) return false;
+
+  if (JSON.stringify(resealClaimWithoutProjectionTimestamps(predecessor))
+      === JSON.stringify(resealClaimWithoutProjectionTimestamps(replacement))) {
+    return true;
+  }
+
+  if (targetGateClaim?.expectation_id !== "tests-evidence" || targetClaim.value !== "pass" || targetClaim.status !== "verified") return false;
+  const predecessorMetadata = predecessor.metadata as JsonRecord | undefined;
+  const replacementMetadata = replacement.metadata as JsonRecord | undefined;
+  const predecessorCriterion = predecessorMetadata?.criterion as JsonRecord | undefined;
+  const replacementCriterion = replacementMetadata?.criterion as JsonRecord | undefined;
+  const observedCommands = Array.isArray(targetMetadata?.observed_commands) ? targetMetadata.observed_commands as JsonRecord[] : [];
+  const criterionCommands = Array.isArray(replacementCriterion?.observed_commands) ? replacementCriterion.observed_commands as JsonRecord[] : [];
+  const evidenceRefs = Array.isArray(replacementCriterion?.evidence_refs) ? replacementCriterion.evidence_refs as JsonRecord[] : [];
+  const commandNames = new Set(observedCommands.filter((entry) => entry.exit_code === 0).map((entry) => String(entry.command ?? "")));
+  const stableFields = ["subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "impactLevel"] as const;
+  const timestampSlug = recordedAt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const evidenceRefKeys = new Set(["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"]);
+  return predecessorMetadata?.origin === "acceptance"
+    && replacementMetadata?.origin === "acceptance"
+    && hasExactKeys(replacement, ["id", "subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "value", "createdAt", "updatedAt", "impactLevel", "verificationPolicyId", "metadata", "status"])
+    && hasExactKeys(replacementMetadata, ["origin", "criterion", "workflow_subject_ref"])
+    && !!replacementCriterion
+    && hasExactKeys(replacementCriterion, ["id", "description", "status", "evidence_refs", "observed_commands", "identity_version", "verified_at"])
+    && predecessor.claimType === "workflow.acceptance.criterion"
+    && replacement.claimType === "workflow.acceptance.criterion"
+    && predecessor.value === "pending"
+    && predecessor.status === "proposed"
+    && replacement.value === "pass"
+    && replacement.status === "verified"
+    && stableFields.every((field) => predecessor[field] === replacement[field])
+    && predecessorMetadata?.workflow_subject_ref === replacementMetadata?.workflow_subject_ref
+    && typeof predecessorCriterion?.id === "string"
+    && predecessorCriterion.id === replacementCriterion?.id
+    && predecessorCriterion.description === replacementCriterion?.description
+    && predecessorCriterion.status === "pending"
+    && replacementCriterion?.status === "pass"
+    && replacementCriterion.identity_version === 2
+    && replacementCriterion.verified_at === recordedAt
+    && replacement.id === `${String(predecessor.id)}-verified-${timestampSlug}`
+    && replacement.verificationPolicyId === "policy:workflow.acceptance.criterion:test_output"
+    && criterionCommands.length > 0
+    && criterionCommands.every((entry) => observedCommands.some((observed) => JSON.stringify(observed) === JSON.stringify(entry)))
+    && evidenceRefs.length > 0
+    && evidenceRefs.every((ref) => ref && typeof ref === "object" && !Array.isArray(ref)
+      && Object.keys(ref).every((key) => evidenceRefKeys.has(key))
+      && ["source", "command", "artifact", "provider", "external"].includes(String(ref.kind ?? "")))
+    && evidenceRefs.some((ref) => ref.kind === "command" && commandNames.has(String(ref.excerpt ?? "")));
+}
+
 async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   const flags = new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]);
@@ -1465,7 +1536,9 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     const predecessorClaim = predecessorMatches[0]!;
     const currentClaim = currentMatches[0]!;
     currentClaims.forEach((claim, index) => {
-      if (index !== predecessorClaim.index && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
+      if (index !== predecessorClaim.index
+          && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])
+          && !isVerificationResealCompanionClaim(claim, candidateClaims[index]!, currentClaim.claim)) {
         throw new Error("verification evidence reseal writer changed the ordered claim set outside the target expectation");
       }
     });
@@ -1579,6 +1652,7 @@ async function withStagedWorkflowEvidenceCandidate<T>(
   sessionDir: string,
   argv: string[],
   consume: (candidate: StagedWorkflowEvidenceContext) => Promise<T>,
+  subjectLockAuthority?: SubjectLockAuthority,
 ): Promise<T> {
   const transactionId = randomBytes(16).toString("hex");
   let artifactDescriptor: number | null = null;
@@ -1647,7 +1721,7 @@ async function withStagedWorkflowEvidenceCandidate<T>(
       beforeReread: workflowEvidenceTransactionTestHooks?.beforeCandidateReread,
     };
     let writerError: unknown | null = null;
-    try { await mainFromPublicWorkflow(argv, { writerTransactionId: transactionId, writerTarget }); }
+    try { await mainFromPublicWorkflow(argv, { writerTransactionId: transactionId, writerTarget, subjectLockAuthority }); }
     catch (error) { writerError = error; }
     const bytes = readDescriptorBytes(candidateDescriptor);
     if (bytes.length > 0) fs.fsyncSync(candidateDirectoryDescriptor);
@@ -1890,8 +1964,14 @@ function writeDescriptorFully(descriptor: number, bytes: Buffer, write: typeof f
 async function runEvidenceTransaction(input: {
   sessionDir: string; slug: string; projectRoot: string; callerActor: string; expectedRunHead: string; forwarded: string[];
   expectation: string; requestedStatus: string; beforeRun: Awaited<ReturnType<typeof recoverBuilderFlowSession>>["run"];
+  subjectLockAuthority: SubjectLockAuthority;
 }): Promise<EvidenceTransactionResult> {
   const trustBundleFile = path.join(input.sessionDir, "trust.bundle");
+  const assertSubjectLockAuthority = (): void => {
+    if (!isHeldSubjectLockAuthority(input.subjectLockAuthority, path.dirname(input.sessionDir), input.slug)) {
+      throw new Error("workflow evidence subject-lock authority changed during the transaction");
+    }
+  };
   const beforeEvidence = manifestEvidenceIdentity(input.beforeRun.manifest);
   const preMutationReceipt = captureEvidenceReceipt(input.beforeRun, input.expectation, input.expectedRunHead);
   try {
@@ -1904,21 +1984,26 @@ async function runEvidenceTransaction(input: {
       let commitSucceeded = false;
       try {
         if (candidate.writerError) throw candidate.writerError;
+        assertSubjectLockAuthority();
         if (candidate.bytes.length === 0) throw new Error("workflow evidence staged writer produced no candidate bytes");
         await workflowEvidenceTransactionTestHooks?.afterRecord?.();
+        assertSubjectLockAuthority();
         receipt = receiptForGateClaim(candidate.file, preMutationReceipt, candidate.digest);
         const synchronized = await syncBuilderFlowSession({
           sessionDir: input.sessionDir,
           expectedRunHead: input.expectedRunHead,
           stagedTrustBundle: { file: candidate.file, descriptor: candidate.descriptor, identity: candidate.identity, expectedSha256: candidate.digest },
         });
+        assertSubjectLockAuthority();
         if (synchronized.attached) {
           receipt = { ...receipt, expectationIds: [...(synchronized.attachmentExpectationIds ?? [])] };
         }
         const run = await loadBuilderFlowRun({ cwd: input.projectRoot, runId: input.slug });
         await workflowEvidenceTransactionTestHooks?.beforePostconditions?.();
+        assertSubjectLockAuthority();
         assertEvidencePostconditions(synchronized.attached, beforeEvidence, run, receipt);
         commitAttempted = true;
+        assertSubjectLockAuthority();
         commitStagedWorkflowEvidence(candidate, trustBundleFile);
         commitSucceeded = true;
         await workflowEvidenceTransactionTestHooks?.beforeSidecarRead?.();
@@ -1943,6 +2028,7 @@ async function runEvidenceTransaction(input: {
           try {
             if (!commitSucceeded) {
               commitAttempted = true;
+              assertSubjectLockAuthority();
               commitStagedWorkflowEvidence(candidate, trustBundleFile);
               commitSucceeded = true;
             }
@@ -1972,7 +2058,7 @@ async function runEvidenceTransaction(input: {
           return { state: "recovery_required", error: evidenceRollbackError(error, abortError) };
         }
       }
-    });
+    }, input.subjectLockAuthority);
   } catch (error) {
     return error instanceof StagedEvidenceSetupRecoveryRequiredError
       ? { state: "recovery_required", error }

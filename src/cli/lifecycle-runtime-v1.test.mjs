@@ -204,6 +204,164 @@ test("runtime v1 reseals only verification evidence while preserving critique an
   });
   assert.deepEqual(next.bundle, candidateBundle);
   assert.deepEqual(next.resolution_events, ledger);
+
+  const recordedAt = "2026-07-25T08:07:47.117Z";
+  const observedCommand = {
+    command: "node --test src/cli/workflow-waves.test.mjs",
+    exit_code: 0,
+    output_sha256: "d".repeat(64),
+    test_count: 9,
+    execution_proof: { kind: "local-process-exit", runner: "node --test", static_test_units: 9 },
+  };
+  const companionCurrent = structuredClone(currentBundle);
+  companionCurrent.claims.push({
+    id: "other-gate",
+    subjectType: "flow-step",
+    subjectId: "run-1/other-gate",
+    facet: "flow-agents.workflow",
+    claimType: "builder.execute.scope",
+    fieldOrBehavior: "Preserved prior gate.",
+    value: "pass",
+    createdAt: "2026-07-25T07:56:21.839Z",
+    updatedAt: "2026-07-25T07:56:21.839Z",
+    impactLevel: "high",
+    verificationPolicyId: "policy:builder.execute.scope",
+    metadata: { origin: "check" },
+    status: "verified",
+  });
+  companionCurrent.claims.push({
+    id: "criterion-pending",
+    subjectType: "flow-step",
+    subjectId: "run-1/wave-declaration",
+    facet: "flow-agents.workflow",
+    claimType: "workflow.acceptance.criterion",
+    fieldOrBehavior: "Declare a wave.",
+    value: "pending",
+    createdAt: "2026-07-25T07:56:21.839Z",
+    updatedAt: "2026-07-25T07:56:21.839Z",
+    impactLevel: "high",
+    verificationPolicyId: "policy:workflow.acceptance.criterion",
+    metadata: {
+      origin: "acceptance",
+      criterion: { id: "wave-declaration", description: "Declare a wave.", status: "pending", evidence_refs: [] },
+      workflow_subject_ref: "work-item:ledger-test",
+    },
+    status: "proposed",
+  });
+  const companionCandidate = structuredClone(companionCurrent);
+  companionCandidate.claims[1] = {
+    id: "gate-claim-current",
+    value: "pass",
+    status: "verified",
+    metadata: {
+      observed_commands: [observedCommand],
+      gate_claim: {
+        expectation_id: "tests-evidence",
+        claim_type: "builder.verify.tests",
+        subject_type: "flow-step",
+        step_id: "verify",
+        recorded_at: recordedAt,
+      },
+    },
+  };
+  companionCandidate.claims[2].createdAt = recordedAt;
+  companionCandidate.claims[2].updatedAt = recordedAt;
+  companionCandidate.claims[3] = {
+    id: "criterion-pending-verified-2026-07-25t08-07-47-117z",
+    subjectType: "flow-step",
+    subjectId: "run-1/wave-declaration",
+    facet: "flow-agents.workflow",
+    claimType: "workflow.acceptance.criterion",
+    fieldOrBehavior: "Declare a wave.",
+    value: "pass",
+    createdAt: recordedAt,
+    updatedAt: recordedAt,
+    impactLevel: "high",
+    verificationPolicyId: "policy:workflow.acceptance.criterion:test_output",
+    metadata: {
+      origin: "acceptance",
+      criterion: {
+        id: "wave-declaration",
+        description: "Declare a wave.",
+        status: "pass",
+        evidence_refs: [{ kind: "command", excerpt: observedCommand.command }],
+        observed_commands: [observedCommand],
+        identity_version: 2,
+        verified_at: recordedAt,
+      },
+      workflow_subject_ref: "work-item:ledger-test",
+    },
+    status: "verified",
+  };
+  const companionAuthorization = {
+    ...authorization,
+    preimage_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(companionCurrent))),
+    candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(companionCandidate))),
+    predecessor_claim_id: companionCurrent.claims[1].id,
+    predecessor_claim_status: companionCurrent.claims[1].status,
+    predecessor_claim_sha256: rawSha256(Buffer.from(JSON.stringify(companionCurrent.claims[1]))),
+    current_claim_id: companionCandidate.claims[1].id,
+    current_claim_status: companionCandidate.claims[1].status,
+    current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(companionCandidate.claims[1]))),
+  };
+  const companionNext = lifecycleRuntime.resealVerificationEvidenceTransition({
+    current_bundle: companionCurrent,
+    candidate_bundle: companionCandidate,
+    resolution_events: ledger,
+    authorization: companionAuthorization,
+    current_bundle_bytes: Buffer.from(JSON.stringify(companionCurrent)),
+    candidate_bundle_bytes: Buffer.from(JSON.stringify(companionCandidate)),
+    ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+    flow: flowPolicy,
+  });
+  assert.deepEqual(companionNext.bundle, companionCandidate, "reseal accepts only its canonical observed-command criterion completions");
+  const forgedCompanion = structuredClone(companionCandidate);
+  forgedCompanion.claims[3].metadata.criterion.description = "Changed criterion.";
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: companionCurrent,
+      candidate_bundle: forgedCompanion,
+      resolution_events: ledger,
+      authorization: {
+        ...companionAuthorization,
+        candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(forgedCompanion))),
+      },
+      current_bundle_bytes: Buffer.from(JSON.stringify(companionCurrent)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(forgedCompanion)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /outside the authorized expectation/i,
+    "a signed candidate still cannot smuggle an acceptance-contract mutation",
+  );
+  for (const mutate of [
+    (claim) => { claim.id = "forged-id"; },
+    (claim) => { claim.verificationPolicyId = "policy:forged"; },
+    (claim) => { claim.extra = "forged"; },
+    (claim) => { claim.metadata.extra = "forged"; },
+    (claim) => { claim.metadata.criterion.extra = "forged"; },
+    (claim) => { claim.metadata.criterion.evidence_refs[0].extra = "forged"; },
+  ]) {
+    const forged = structuredClone(companionCandidate);
+    mutate(forged.claims[3]);
+    assert.throws(
+      () => lifecycleRuntime.resealVerificationEvidenceTransition({
+        current_bundle: companionCurrent,
+        candidate_bundle: forged,
+        resolution_events: ledger,
+        authorization: {
+          ...companionAuthorization,
+          candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(forged))),
+        },
+        current_bundle_bytes: Buffer.from(JSON.stringify(companionCurrent)),
+        candidate_bundle_bytes: Buffer.from(JSON.stringify(forged)),
+        ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+        flow: flowPolicy,
+      }),
+      /outside the authorized expectation/i,
+      "a digest-bound candidate cannot add or replace non-canonical companion identity, policy, or fields",
+    );
+  }
   assert.throws(
     () => lifecycleRuntime.resealVerificationEvidenceTransition({
       current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: ledger, authorization,

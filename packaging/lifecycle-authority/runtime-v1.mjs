@@ -149,6 +149,66 @@ function gateExpectation(claim) {
     : null;
 }
 
+function claimWithoutProjectionTimestamps(claim) {
+  const copy = { ...claim };
+  delete copy.createdAt;
+  delete copy.updatedAt;
+  return copy;
+}
+
+function exactKeys(value, keys) {
+  return record(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+function verificationResealCompanionClaim(predecessor, replacement, targetClaim) {
+  const targetMetadata = targetClaim?.metadata;
+  const targetGateClaim = targetMetadata?.gate_claim;
+  const recordedAt = typeof targetGateClaim?.recorded_at === "string" ? targetGateClaim.recorded_at : "";
+  if (!recordedAt || replacement?.createdAt !== recordedAt || replacement?.updatedAt !== recordedAt) return false;
+  if (JSON.stringify(claimWithoutProjectionTimestamps(predecessor)) === JSON.stringify(claimWithoutProjectionTimestamps(replacement))) return true;
+  if (targetGateClaim?.expectation_id !== "tests-evidence" || targetClaim.value !== "pass" || targetClaim.status !== "verified") return false;
+  const predecessorMetadata = predecessor?.metadata;
+  const replacementMetadata = replacement?.metadata;
+  const predecessorCriterion = predecessorMetadata?.criterion;
+  const replacementCriterion = replacementMetadata?.criterion;
+  const observedCommands = Array.isArray(targetMetadata?.observed_commands) ? targetMetadata.observed_commands : [];
+  const criterionCommands = Array.isArray(replacementCriterion?.observed_commands) ? replacementCriterion.observed_commands : [];
+  const evidenceRefs = Array.isArray(replacementCriterion?.evidence_refs) ? replacementCriterion.evidence_refs : [];
+  const commandNames = new Set(observedCommands.filter((entry) => entry?.exit_code === 0).map((entry) => String(entry.command ?? "")));
+  const stableFields = ["subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "impactLevel"];
+  const timestampSlug = recordedAt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const evidenceRefKeys = new Set(["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"]);
+  return predecessorMetadata?.origin === "acceptance"
+    && replacementMetadata?.origin === "acceptance"
+    && exactKeys(replacement, ["id", "subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "value", "createdAt", "updatedAt", "impactLevel", "verificationPolicyId", "metadata", "status"])
+    && exactKeys(replacementMetadata, ["origin", "criterion", "workflow_subject_ref"])
+    && exactKeys(replacementCriterion, ["id", "description", "status", "evidence_refs", "observed_commands", "identity_version", "verified_at"])
+    && predecessor.claimType === "workflow.acceptance.criterion"
+    && replacement.claimType === "workflow.acceptance.criterion"
+    && predecessor.value === "pending"
+    && predecessor.status === "proposed"
+    && replacement.value === "pass"
+    && replacement.status === "verified"
+    && stableFields.every((field) => predecessor[field] === replacement[field])
+    && predecessorMetadata?.workflow_subject_ref === replacementMetadata?.workflow_subject_ref
+    && typeof predecessorCriterion?.id === "string"
+    && predecessorCriterion.id === replacementCriterion?.id
+    && predecessorCriterion.description === replacementCriterion?.description
+    && predecessorCriterion.status === "pending"
+    && replacementCriterion?.status === "pass"
+    && replacementCriterion.identity_version === 2
+    && replacementCriterion.verified_at === recordedAt
+    && replacement.id === `${String(predecessor.id)}-verified-${timestampSlug}`
+    && replacement.verificationPolicyId === "policy:workflow.acceptance.criterion:test_output"
+    && criterionCommands.length > 0
+    && criterionCommands.every((entry) => observedCommands.some((observed) => JSON.stringify(observed) === JSON.stringify(entry)))
+    && evidenceRefs.length > 0
+    && evidenceRefs.every((ref) => record(ref)
+      && Object.keys(ref).every((key) => evidenceRefKeys.has(key))
+      && ["source", "command", "artifact", "provider", "external"].includes(String(ref.kind ?? "")))
+    && evidenceRefs.some((ref) => ref?.kind === "command" && commandNames.has(String(ref.excerpt ?? "")));
+}
+
 function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {
   if (!record(currentBundle) || !record(candidateBundle) || !Array.isArray(currentBundle.claims) || !Array.isArray(candidateBundle.claims)) {
     throw new Error("verification evidence reseal requires Trust Bundles with claims");
@@ -199,7 +259,9 @@ function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, 
     throw new Error("verification evidence reseal claim identity, status, or digest does not match the authorized delta");
   }
   currentBundle.claims.forEach((claim, claimIndex) => {
-    if (claimIndex !== index && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
+    if (claimIndex !== index
+        && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])
+        && !verificationResealCompanionClaim(claim, candidateBundle.claims[claimIndex], current)) {
       throw new Error("verification evidence reseal changed the complete ordered claim set outside the authorized expectation");
     }
   });

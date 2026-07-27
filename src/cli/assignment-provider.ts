@@ -73,6 +73,18 @@ export type FreshHolder = { actor: string; lastAt: string; ttlSeconds: number; f
 
 export type EffectiveState = "held" | "reclaimable" | "human-held" | "free";
 
+export type SubjectLockAuthority = Readonly<{
+  artifactRoot: string;
+  subjectId: string;
+  lockDir: string;
+  ownerFile: string;
+  token: string;
+  lockIdentity: Readonly<{ dev: number; ino: number }>;
+  ownerIdentity: Readonly<{ dev: number; ino: number }>;
+}>;
+
+const activeSubjectLockAuthorities = new WeakSet<object>();
+
 /** Provider-neutral assignment-layer read, before any liveness join (contract doc's status()). */
 export type AssignmentStatus = {
   subject_id: string;
@@ -325,7 +337,34 @@ function trustedSubjectLockStaleMs(): number {
  * the write) of all three local-file mutators in this, since all three mutate the same record
  * file for a given subject.
  */
-export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: () => T): T {
+export function isHeldSubjectLockAuthority(
+  authority: SubjectLockAuthority | undefined,
+  artifactRoot: string,
+  subjectId: string,
+): boolean {
+  if (!authority || !activeSubjectLockAuthorities.has(authority)) return false;
+  if (authority.artifactRoot !== path.resolve(artifactRoot) || authority.subjectId !== subjectId) return false;
+  if (!/^[a-f0-9]{32}$/.test(authority.token)) return false;
+  try {
+    const lockBefore = fs.lstatSync(authority.lockDir);
+    const ownerBefore = fs.lstatSync(authority.ownerFile);
+    if (lockBefore.isSymbolicLink() || !lockBefore.isDirectory()
+      || ownerBefore.isSymbolicLink() || !ownerBefore.isFile()
+      || lockBefore.dev !== authority.lockIdentity.dev || lockBefore.ino !== authority.lockIdentity.ino
+      || ownerBefore.dev !== authority.ownerIdentity.dev || ownerBefore.ino !== authority.ownerIdentity.ino
+      || readSubjectLockOwner(authority.ownerFile)?.token !== authority.token) return false;
+    const lockAfter = fs.lstatSync(authority.lockDir);
+    const ownerAfter = fs.lstatSync(authority.ownerFile);
+    return lockAfter.dev === authority.lockIdentity.dev
+      && lockAfter.ino === authority.lockIdentity.ino
+      && ownerAfter.dev === authority.ownerIdentity.dev
+      && ownerAfter.ino === authority.ownerIdentity.ino;
+  } catch {
+    return false;
+  }
+}
+
+export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: (authority: SubjectLockAuthority) => T): T {
   const lockDir = subjectLockDir(artifactRoot, subjectId);
   const staleMs = trustedSubjectLockStaleMs();
   const token = randomBytes(16).toString("hex");
@@ -363,15 +402,33 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
       sleepSync(20);
     }
   }
+  const lockStat = fs.lstatSync(lockDir);
+  const ownerStat = fs.lstatSync(ownerFile);
+  if (lockStat.isSymbolicLink() || !lockStat.isDirectory() || ownerStat.isSymbolicLink() || !ownerStat.isFile()) {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    throw new Error(`assignment lock identity is unsafe for subject ${subjectId}: ${lockDir}`);
+  }
+  const authority = Object.freeze({
+    artifactRoot: path.resolve(artifactRoot),
+    subjectId,
+    lockDir,
+    ownerFile,
+    token,
+    lockIdentity: Object.freeze({ dev: lockStat.dev, ino: lockStat.ino }),
+    ownerIdentity: Object.freeze({ dev: ownerStat.dev, ino: ownerStat.ino }),
+  });
+  activeSubjectLockAuthorities.add(authority);
   let heartbeat: NodeJS.Timeout | undefined;
-  const ownsLock = (): boolean => readSubjectLockOwner(ownerFile)?.token === token;
+  const ownsLock = (): boolean => isHeldSubjectLockAuthority(authority, artifactRoot, subjectId);
   const release = (): void => {
     if (heartbeat) clearInterval(heartbeat);
-    if (ownsLock()) fs.rmSync(lockDir, { recursive: true, force: true });
+    const owned = ownsLock();
+    activeSubjectLockAuthorities.delete(authority);
+    if (owned) fs.rmSync(lockDir, { recursive: true, force: true });
   };
   let result: T;
   try {
-    result = body();
+    result = body(authority);
   } catch (error) {
     release();
     throw error;

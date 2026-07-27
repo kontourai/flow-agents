@@ -307,7 +307,12 @@ does not attach or publish that candidate. Its unsigned authorization binds the 
 candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
 raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
 expiry. It also binds the exact target verify expectation and the predecessor/current claim
-id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+id, status, raw-JSON digest, ordered index, and `replace` delta. A passing `tests-evidence`
+replacement may also carry only the writer-derived pending-to-passing acceptance-criterion
+completions backed by the replacement's successful observed commands, plus timestamp-only
+reprojection of otherwise byte-identical claims. The signed candidate digest binds those
+companion changes exactly; arbitrary, reordered, critique, or unrelated claim changes remain
+rejected. The signed action invokes only the
 fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
 requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
 that does not match the current expectation's step, claim type, and subject type. It acquires

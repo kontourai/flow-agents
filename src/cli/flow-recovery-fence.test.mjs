@@ -38,6 +38,13 @@ function fence(runId, status = "open", recoveryId = "a".repeat(64)) {
   };
 }
 
+function finalizedFence(runId) {
+  return {
+    ...fence(runId),
+    previous_generation: "33333333-3333-4333-8333-333333333333",
+  };
+}
+
 function writeWritableFence(value) {
   fs.writeFileSync(value.file, `${JSON.stringify(fence(value.runId))}\n`, { mode: 0o600 });
   fs.chmodSync(value.file, 0o666);
@@ -56,6 +63,46 @@ test("Flow Agents recovery adapter allows absence/open and rejects active or unk
     assert.throws(() => assertFlowRunRecoveryFenceOpen(value.projectRoot, value.runId), /malformed or unsupported/);
   } finally {
     fs.rmSync(value.projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("all recovery readers accept Flow-finalized open fences with a predecessor generation", () => {
+  for (const [name, reader] of [
+    ["Flow Agents", (root, runId) => assertFlowRunRecoveryFenceOpen(root, runId)],
+    ["narrative", (root, runId) => withNarrativeFlowRunRecoveryFenceRead(root, runId, () => null)],
+    ["source hook", (root, runId) => hookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+    ["context hook", (root, runId) => contextHookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+  ]) {
+    const value = fixture();
+    try {
+      fs.writeFileSync(value.file, `${JSON.stringify(finalizedFence(value.runId))}\n`, { mode: 0o600 });
+      assert.doesNotThrow(() => reader(value.projectRoot, value.runId), name);
+    } finally {
+      fs.rmSync(value.projectRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("all recovery readers reject invalid or active predecessor generations", () => {
+  for (const [name, reader] of [
+    ["Flow Agents", (root, runId) => assertFlowRunRecoveryFenceOpen(root, runId)],
+    ["narrative", (root, runId) => withNarrativeFlowRunRecoveryFenceRead(root, runId, () => null)],
+    ["source hook", (root, runId) => hookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+    ["context hook", (root, runId) => contextHookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+  ]) {
+    for (const invalid of [
+      { ...finalizedFence("run-1"), previous_generation: "not-a-uuid" },
+      { ...finalizedFence("run-1"), status: "active" },
+      { ...finalizedFence("run-1"), unrelated_extra_key: "rejected" },
+    ]) {
+      const value = fixture();
+      try {
+        fs.writeFileSync(value.file, `${JSON.stringify(invalid)}\n`, { mode: 0o600 });
+        assert.throws(() => reader(value.projectRoot, value.runId), /malformed or unsupported/, name);
+      } finally {
+        fs.rmSync(value.projectRoot, { recursive: true, force: true });
+      }
+    }
   }
 });
 

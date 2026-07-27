@@ -35,7 +35,7 @@ import {
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
-import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
+import { assignmentFilePath, computeEffectiveState, isHeldSubjectLockAuthority, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder, type SubjectLockAuthority } from "./assignment-provider.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 
@@ -100,26 +100,76 @@ function assertTrustBundleWriterTarget(target: TrustBundleWriterTarget): void {
   const opened = fs.fstatSync(target.descriptor);
   const current = fs.lstatSync(target.file);
   const parent = fs.fstatSync(target.parentDescriptor);
+  const currentParent = fs.lstatSync(path.dirname(target.file));
   if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
     || opened.dev !== target.identity.dev || opened.ino !== target.identity.ino
     || current.dev !== target.identity.dev || current.ino !== target.identity.ino
-    || !parent.isDirectory() || parent.dev !== target.parentIdentity.dev || parent.ino !== target.parentIdentity.ino) {
+    || opened.nlink !== 1 || current.nlink !== 1
+    || (opened.mode & 0o022) !== 0 || (parent.mode & 0o022) !== 0
+    || !parent.isDirectory() || parent.dev !== target.parentIdentity.dev || parent.ino !== target.parentIdentity.ino
+    || currentParent.isSymbolicLink() || !currentParent.isDirectory()
+    || currentParent.dev !== target.parentIdentity.dev || currentParent.ino !== target.parentIdentity.ino) {
     throw new Error("trust.bundle candidate target identity changed");
   }
 }
 
-function writeTrustBundleAtomically(file: string, payload: AnyObj, target?: TrustBundleWriterTarget): void {
+function isBoundPublicWorkflowCandidate(
+  dir: string,
+  transactionId: string | undefined,
+  target: TrustBundleWriterTarget | undefined,
+  subjectLockAuthority: SubjectLockAuthority | undefined,
+): boolean {
+  if (!target || !transactionId || !/^[a-f0-9]{32}$/.test(transactionId)) return false;
+  const subjectId = path.basename(dir);
+  if (!isHeldSubjectLockAuthority(subjectLockAuthority, path.dirname(dir), subjectId)) return false;
+  const expectedDirectory = path.join(dir, `.workflow-evidence-transaction-${transactionId}`);
+  const expectedFile = path.join(expectedDirectory, "trust.bundle.candidate");
+  if (path.resolve(target.file) !== path.resolve(expectedFile)) return false;
+  try {
+    assertTrustBundleWriterTarget(target);
+    const opened = fs.fstatSync(target.descriptor);
+    const parent = fs.fstatSync(target.parentDescriptor);
+    const current = fs.lstatSync(expectedFile);
+    const currentParent = fs.lstatSync(expectedDirectory);
+    return opened.nlink === 1
+      && current.nlink === 1
+      && (opened.mode & 0o022) === 0
+      && (parent.mode & 0o022) === 0
+      && !current.isSymbolicLink()
+      && current.isFile()
+      && !currentParent.isSymbolicLink()
+      && currentParent.isDirectory()
+      && parent.dev === currentParent.dev
+      && parent.ino === currentParent.ino;
+  } catch {
+    return false;
+  }
+}
+
+function assertWriterAuthority(check: (() => boolean) | undefined): void {
+  if (check && !check()) throw new Error("trust.bundle candidate subject-lock authority changed");
+}
+
+function writeTrustBundleAtomically(
+  file: string,
+  payload: AnyObj,
+  target?: TrustBundleWriterTarget,
+  writerAuthorityCheck?: () => boolean,
+): void {
   const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`);
   if (target) {
+    assertWriterAuthority(writerAuthorityCheck);
     assertTrustBundleWriterTarget(target);
     writeBufferFully(target.descriptor, bytes, target.write);
     fs.ftruncateSync(target.descriptor, bytes.length);
     fs.fsyncSync(target.descriptor);
     target.beforeReread?.(target.descriptor);
+    assertWriterAuthority(writerAuthorityCheck);
     assertTrustBundleWriterTarget(target);
     const reread = readRegularFileDescriptor(target.descriptor);
     if (!reread.equals(bytes)) throw new Error("trust.bundle candidate reread did not match the staged bytes");
     fs.fsyncSync(target.parentDescriptor);
+    assertWriterAuthority(writerAuthorityCheck);
     assertTrustBundleWriterTarget(target);
     return;
   }
@@ -1573,8 +1623,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget, writerAuthorityCheck?: () => boolean): Promise<{ written: boolean; errors: string[] }> {
   try {
+    assertWriterAuthority(writerAuthorityCheck);
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
     let commandLog: AnyObj[] = [];
@@ -1614,13 +1665,15 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       } catch { effectiveResolutionEvents = []; }
     }
     const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, effectiveResolutionEvents, capturedWorkflowSubjectRef);
+    assertWriterAuthority(writerAuthorityCheck);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
+    assertWriterAuthority(writerAuthorityCheck);
     if (result.available && !result.valid) {
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
     }
-    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle, writerTarget);
+    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle, writerTarget, writerAuthorityCheck);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -4502,7 +4555,10 @@ function acceptanceContract(criteria: AnyObj[]): AnyObj {
   };
 }
 
-function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
+function readBundleState(
+  dir: string,
+  options: { allowAcceptanceContractReplacement?: boolean } = {},
+): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
   const acceptedCriteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
@@ -4517,10 +4573,11 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
   const plannedContract = checks.find((check) => check._gate_claim_expectation_id === "implementation-plan")?._acceptance_contract;
   if (plannedContract) {
     const currentContract = acceptanceContract(acceptedCriteria);
-    if (plannedContract.version !== currentContract.version
+    if (!options.allowAcceptanceContractReplacement
+      && (plannedContract.version !== currentContract.version
       || plannedContract.algorithm !== currentContract.algorithm
       || plannedContract.digest !== currentContract.digest
-      || !isDeepStrictEqual(plannedContract.criteria, currentContract.criteria)) {
+      || !isDeepStrictEqual(plannedContract.criteria, currentContract.criteria))) {
       die("acceptance.json no longer matches the criterion contract anchored by the implementation-plan claim — direct post-plan criterion mutation is not authorized; revise criteria through a provenance-bearing planning operation before recording later evidence");
     }
   }
@@ -4900,7 +4957,13 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false, writerTransactionId?: string, writerTarget?: TrustBundleWriterTarget): Promise<number> {
+async function recordGateClaim(
+  p: ReturnType<typeof parseArgs>,
+  publicWorkflowAuthority = false,
+  writerTransactionId?: string,
+  writerTarget?: TrustBundleWriterTarget,
+  subjectLockAuthority?: SubjectLockAuthority,
+): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -5060,7 +5123,20 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // in the bundle on every gate-claim write (the 21-claims-to-1 wipe). A gate claim against the
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
-  const _existingState = readBundleState(dir);
+  // A route-back to the canonical Builder plan step is the sole provenance-bearing operation
+  // allowed to replace an anchored criterion contract. Keep direct sidecar calls and every
+  // non-plan/public writer fail-closed: only the public workflow transaction has the exact Flow
+  // head, matching assignment actor, subject lock, staged candidate, and attachment rollback.
+  const allowAcceptanceContractReplacement = publicWorkflowAuthority
+    && isBoundPublicWorkflowCandidate(dir, writerTransactionId, writerTarget, subjectLockAuthority)
+    && exactFlowContext?.flowId === "builder.build"
+    && activeStep.stepId === "plan"
+    && targetExpectation.id === "implementation-plan"
+    && statusVal === "pass";
+  const writerAuthorityCheck = subjectLockAuthority
+    ? () => isHeldSubjectLockAuthority(subjectLockAuthority, path.dirname(dir), path.basename(dir))
+    : undefined;
+  const _existingState = readBundleState(dir, { allowAcceptanceContractReplacement });
   const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
@@ -5071,7 +5147,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget, writerAuthorityCheck));
   return 0;
 }
 
@@ -8292,7 +8368,11 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export type PublicWorkflowInvocation = { writerTransactionId?: string; writerTarget?: TrustBundleWriterTarget };
+export type PublicWorkflowInvocation = {
+  writerTransactionId?: string;
+  writerTarget?: TrustBundleWriterTarget;
+  subjectLockAuthority?: SubjectLockAuthority;
+};
 
 export function mainFromPublicWorkflow(argv: string[], invocation?: PublicWorkflowInvocation): Promise<number> {
   if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
@@ -8410,7 +8490,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId, invocation?.writerTarget);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId, invocation?.writerTarget, invocation?.subjectLockAuthority);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);

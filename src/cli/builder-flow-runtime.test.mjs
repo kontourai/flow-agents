@@ -957,6 +957,80 @@ test("candidate staging loops short writes and rejects zero writes and reread co
   await runFault("staged-candidate-reread-corrupt", {
     beforeCandidateReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
   }, false);
+  await runFault("staged-candidate-reread-writable", {
+    beforeCandidateReread: (descriptor) => { fs.fchmodSync(descriptor, 0o666); },
+  }, false);
+});
+
+test("public evidence aborts when its subject-lock ownership is displaced mid-transaction", async () => {
+  const session = makeSession("staged-candidate-subject-lock-displaced");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const lockDir = path.join(path.dirname(session.sessionDir), "assignment", `.${session.slug}.lockdir`);
+  const ownerFile = path.join(lockDir, "owner.json");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterRecord: () => {
+      const owner = readJson(ownerFile);
+      const displaced = `${lockDir}.displaced`;
+      fs.renameSync(lockDir, displaced);
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(ownerFile, `${JSON.stringify(owner)}\n`);
+      fs.rmSync(displaced, { recursive: true, force: true });
+    },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain([
+        "evidence", "--session-dir", session.sessionDir,
+        "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", "displaced subject-lock owner fixture",
+      ]),
+      /subject-lock authority changed/,
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+  assert.equal(fs.existsSync(canonical), false, "a displaced owner cannot publish canonical trust");
+});
+
+test("post-attachment evidence recovery cannot commit after subject-lock displacement", async () => {
+  const session = makeSession("staged-candidate-post-attachment-lock-displaced");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const canonical = path.join(session.sessionDir, "trust.bundle");
+  const lockDir = path.join(path.dirname(session.sessionDir), "assignment", `.${session.slug}.lockdir`);
+  const ownerFile = path.join(lockDir, "owner.json");
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforePostconditions: () => {
+      const owner = readJson(ownerFile);
+      const displaced = `${lockDir}.displaced`;
+      fs.renameSync(lockDir, displaced);
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(ownerFile, `${JSON.stringify(owner)}\n`);
+      fs.rmSync(displaced, { recursive: true, force: true });
+    },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain([
+        "evidence", "--session-dir", session.sessionDir,
+        "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", "post-attachment displaced subject-lock owner fixture",
+      ]),
+      /recovery required.*subject-lock authority changed/i,
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+  assert.equal(fs.existsSync(canonical), false, "post-attachment recovery cannot publish after losing the subject lock");
+  assert.equal(
+    fs.readdirSync(session.sessionDir).some((name) => name.startsWith(".workflow-evidence-transaction-")),
+    true,
+    "the attached staged candidate remains for explicit recovery",
+  );
 });
 
 test("sync accepts only the exact staged descriptor digest and pathname identity", async () => {
@@ -3385,6 +3459,117 @@ test("direct sidecar gate recording cannot inject a head without an exact Flow p
     (error) => error instanceof FlowProjectionRegenerationRequiredError
       && error.code === "flow_projection_regeneration_required"
       && /regenerate it and re-record evidence with: flow-agents workflow evidence.*inspect the recovered result with: flow-agents workflow status/.test(error.message),
+  );
+});
+
+test("public plan evidence may replace an anchored acceptance contract only after canonical plan_gap route-back", async () => {
+  const session = makeSession("public-plan-gap-criterion-revision");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+
+  const originalCriteria = [{
+    id: "original",
+    description: "Original planned behavior.",
+    status: "pending",
+    evidence_refs: [],
+  }];
+  const revisedCriteria = [...originalCriteria, {
+    id: "discovered-plan-gap",
+    description: "Behavior discovered after the original plan.",
+    status: "pending",
+    evidence_refs: [],
+  }];
+  const acceptanceFile = path.join(session.sessionDir, "acceptance.json");
+  const planFile = path.join(session.sessionDir, `${session.slug}--plan-work.md`);
+  writeJson(acceptanceFile, { schema_version: "1.0", task_slug: session.slug, criteria: originalCriteria });
+  fs.writeFileSync(planFile, "# Plan\n\nOriginal criterion.\n");
+  const planRef = JSON.stringify({
+    kind: "artifact",
+    file: path.relative(session.projectRoot, planFile),
+    summary: "Provenance-bearing implementation plan.",
+  });
+
+  await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-plan", "--status", "pass",
+    "--summary", "Original implementation plan.", "--evidence-ref-json", planRef,
+  ]);
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.current_step, "execute");
+
+  await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-scope", "--status", "fail", "--route-reason", "plan_gap",
+    "--summary", "A discovered behavior requires a criterion revision.",
+  ]);
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.current_step, "plan");
+  writeJson(acceptanceFile, { schema_version: "1.0", task_slug: session.slug, criteria: revisedCriteria });
+  fs.writeFileSync(planFile, "# Plan\n\nOriginal and discovered criteria.\n");
+
+  await assert.rejects(
+    workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "implementation-plan", "--status", "pass",
+      "--summary", "Direct replacement probe.", "--evidence-ref-json", planRef,
+    ]),
+    /direct post-plan criterion mutation is not authorized/,
+  );
+  await assert.rejects(
+    mainFromPublicWorkflow([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "implementation-plan", "--status", "pass",
+      "--summary", "Unstaged exported-helper replacement probe.", "--evidence-ref-json", planRef,
+    ]),
+    /direct post-plan criterion mutation is not authorized/,
+  );
+  const forgedTransactionId = "a".repeat(32);
+  const forgedDirectory = path.join(session.sessionDir, `.workflow-evidence-transaction-${forgedTransactionId}`);
+  const forgedFile = path.join(forgedDirectory, "trust.bundle.candidate");
+  fs.mkdirSync(forgedDirectory, { mode: 0o700 });
+  const forgedParentDescriptor = fs.openSync(forgedDirectory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const forgedDescriptor = fs.openSync(forgedFile, fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    const forgedStat = fs.fstatSync(forgedDescriptor);
+    const forgedParentStat = fs.fstatSync(forgedParentDescriptor);
+    await assert.rejects(
+      mainFromPublicWorkflow([
+        "record-gate-claim", session.sessionDir,
+        "--expectation", "implementation-plan", "--status", "pass",
+        "--summary", "Caller-minted staged-shape replacement probe.", "--evidence-ref-json", planRef,
+      ], {
+        writerTransactionId: forgedTransactionId,
+        writerTarget: {
+          file: forgedFile,
+          descriptor: forgedDescriptor,
+          identity: { dev: forgedStat.dev, ino: forgedStat.ino },
+          parentDescriptor: forgedParentDescriptor,
+          parentIdentity: { dev: forgedParentStat.dev, ino: forgedParentStat.ino },
+        },
+      }),
+      /direct post-plan criterion mutation is not authorized/,
+    );
+  } finally {
+    fs.closeSync(forgedDescriptor);
+    fs.closeSync(forgedParentDescriptor);
+    fs.rmSync(forgedDirectory, { recursive: true, force: true });
+  }
+
+  await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "implementation-plan", "--status", "pass",
+    "--summary", "Revised implementation plan after canonical plan_gap.", "--evidence-ref-json", planRef,
+  ]);
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.current_step, "execute");
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const planClaim = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === "implementation-plan");
+  assert.deepEqual(planClaim.metadata.acceptance_contract.criteria, revisedCriteria.map(({ id, description }) => ({ id, description })));
+  assert.deepEqual(
+    bundle.claims.filter((claim) => claim.claimType === "workflow.acceptance.criterion").map((claim) => claim.subjectId.split("/").at(-1)),
+    revisedCriteria.map((criterion) => criterion.id),
   );
 });
 
