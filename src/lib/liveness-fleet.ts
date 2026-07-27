@@ -177,7 +177,7 @@ export function classifyLane(events: LivenessEvent[], nowMs: number, helper: Liv
     const at = typeof event.at === "string" ? event.at : null;
     if (!subjectId || !actor || !at) continue;
 
-    const key = `${subjectId} ${actor}`;
+    const key = `${subjectId}\0${actor}`;
     const prior = latest.get(key);
     const ttlSeconds = typeof event.ttlSeconds === "number" && event.ttlSeconds > 0 ? event.ttlSeconds : prior?.ttlSeconds ?? 1800;
     // String compare is correct for the Z-normalized ISO-8601 stamps the writer emits, and is
@@ -199,7 +199,7 @@ export function classifyLane(events: LivenessEvent[], nowMs: number, helper: Liv
       holders = [];
     }
     for (const holder of holders) {
-      if (holder && holder.fresh && typeof holder.actor === "string") freshByKey.add(`${subjectId} ${holder.actor}`);
+      if (holder && holder.fresh && typeof holder.actor === "string") freshByKey.add(`${subjectId}\0${holder.actor}`);
     }
   }
 
