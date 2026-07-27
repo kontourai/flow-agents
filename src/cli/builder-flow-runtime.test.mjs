@@ -4058,7 +4058,7 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
       "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, summary: "selected work" }),
       "--command", `${process.execPath} ${mutator}`,
     ]),
-    /expected canonical builder\.build@1\.3 run, received builder\.build@1\.3-valid-unshipped-test/,
+    /expected canonical builder\.build@1\.4 run, received builder\.build@1\.3-valid-unshipped-test/,
   );
 
   assert.deepEqual(readJson(manifestFile), beforeManifest, "the amendment race must not attach evidence");
@@ -6460,7 +6460,7 @@ test("an amendment successor that is not the shipped Builder definition is rejec
 
   await assert.rejects(
     () => recoverBuilderFlowSession({ sessionDir: session.sessionDir }),
-    /expected canonical builder\.build@1\.3 run, received builder\.build@1\.1-amended-test/,
+    /expected canonical builder\.build@1\.4 run, received builder\.build@1\.1-amended-test/,
   );
 });
 
