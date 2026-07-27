@@ -1591,6 +1591,23 @@ function hasExactKeys(value: JsonRecord, keys: readonly string[]): boolean {
   return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
 }
 
+function canonicalSuccessfulObservedCommand(entry: JsonRecord): boolean {
+  const executionProof = entry.execution_proof;
+  return typeof entry.command === "string"
+    && entry.command.length > 0
+    && entry.exit_code === 0
+    && typeof entry.output_sha256 === "string"
+    && /^[a-f0-9]{64}$/i.test(entry.output_sha256)
+    && Number.isSafeInteger(entry.test_count)
+    && Number(entry.test_count) > 0
+    && !!executionProof && typeof executionProof === "object" && !Array.isArray(executionProof)
+    && (executionProof as JsonRecord).kind === "local-process-exit"
+    && typeof (executionProof as JsonRecord).runner === "string"
+    && ((executionProof as JsonRecord).runner as string).length > 0
+    && Number.isSafeInteger((executionProof as JsonRecord).static_test_units)
+    && Number((executionProof as JsonRecord).static_test_units) > 0;
+}
+
 function isVerificationResealCompanionClaim(
   predecessor: JsonRecord,
   replacement: JsonRecord,
@@ -1614,7 +1631,8 @@ function isVerificationResealCompanionClaim(
   const observedCommands = Array.isArray(targetMetadata?.observed_commands) ? targetMetadata.observed_commands as JsonRecord[] : [];
   const criterionCommands = Array.isArray(replacementCriterion?.observed_commands) ? replacementCriterion.observed_commands as JsonRecord[] : [];
   const evidenceRefs = Array.isArray(replacementCriterion?.evidence_refs) ? replacementCriterion.evidence_refs as JsonRecord[] : [];
-  const commandNames = new Set(observedCommands.filter((entry) => entry.exit_code === 0).map((entry) => String(entry.command ?? "")));
+  const criterionCommandNames = criterionCommands.map((entry) => typeof entry.command === "string" ? entry.command : null);
+  const commandRefs = evidenceRefs.filter((ref) => ref.kind === "command").map((ref) => typeof ref.excerpt === "string" ? ref.excerpt : null);
   const stableFields = ["subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "impactLevel"] as const;
   const timestampSlug = recordedAt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const evidenceRefKeys = new Set(["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"]);
@@ -1642,12 +1660,17 @@ function isVerificationResealCompanionClaim(
     && replacement.id === `${String(predecessor.id)}-verified-${timestampSlug}`
     && replacement.verificationPolicyId === "policy:workflow.acceptance.criterion:test_output"
     && criterionCommands.length > 0
+    && criterionCommands.every(canonicalSuccessfulObservedCommand)
+    && new Set(criterionCommandNames).size === criterionCommandNames.length
     && criterionCommands.every((entry) => observedCommands.some((observed) => JSON.stringify(observed) === JSON.stringify(entry)))
     && evidenceRefs.length > 0
     && evidenceRefs.every((ref) => ref && typeof ref === "object" && !Array.isArray(ref)
       && Object.keys(ref).every((key) => evidenceRefKeys.has(key))
       && ["source", "command", "artifact", "provider", "external"].includes(String(ref.kind ?? "")))
-    && evidenceRefs.some((ref) => ref.kind === "command" && commandNames.has(String(ref.excerpt ?? "")));
+    && commandRefs.length === criterionCommands.length
+    && commandRefs.every((command) => typeof command === "string")
+    && new Set(commandRefs).size === commandRefs.length
+    && criterionCommandNames.every((command) => command !== null && commandRefs.includes(command));
 }
 
 async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
@@ -1811,6 +1834,8 @@ export let workflowEvidenceTransactionTestHooks: {
   afterCandidateResourceAcquired?: (resource: "artifact-directory" | "session-directory" | "trust-snapshot" | "abort-capability" | "candidate-directory" | "candidate-file") => void;
   candidateWrite?: typeof fs.writeSync;
   beforeCandidateReread?: (descriptor: number) => void;
+  /** Test-only seam after the public writer has returned and before the staged candidate is read. */
+  afterStagedWriter?: (descriptor: number) => void;
   beforeCandidateCommit?: () => void;
   candidateCommitWrite?: typeof fs.writeSync;
   beforeCanonicalCommitReread?: (descriptor: number) => void;
@@ -1919,6 +1944,7 @@ async function withStagedWorkflowEvidenceCandidate<T>(
     let writerError: unknown | null = null;
     try { await mainFromPublicWorkflow(argv, { writerTransactionId: transactionId, writerTarget, subjectLockAuthority }); }
     catch (error) { writerError = error; }
+    if (!writerError) workflowEvidenceTransactionTestHooks?.afterStagedWriter?.(candidateDescriptor);
     const bytes = readDescriptorBytes(candidateDescriptor);
     if (bytes.length > 0) fs.fsyncSync(candidateDirectoryDescriptor);
     result = await consume({

@@ -160,6 +160,23 @@ function exactKeys(value, keys) {
   return record(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
 }
 
+function canonicalSuccessfulObservedCommand(entry) {
+  return record(entry)
+    && typeof entry.command === "string"
+    && entry.command.length > 0
+    && entry.exit_code === 0
+    && typeof entry.output_sha256 === "string"
+    && /^[a-f0-9]{64}$/i.test(entry.output_sha256)
+    && Number.isSafeInteger(entry.test_count)
+    && entry.test_count > 0
+    && record(entry.execution_proof)
+    && entry.execution_proof.kind === "local-process-exit"
+    && typeof entry.execution_proof.runner === "string"
+    && entry.execution_proof.runner.length > 0
+    && Number.isSafeInteger(entry.execution_proof.static_test_units)
+    && entry.execution_proof.static_test_units > 0;
+}
+
 function verificationResealCompanionClaim(predecessor, replacement, targetClaim) {
   const targetMetadata = targetClaim?.metadata;
   const targetGateClaim = targetMetadata?.gate_claim;
@@ -174,7 +191,8 @@ function verificationResealCompanionClaim(predecessor, replacement, targetClaim)
   const observedCommands = Array.isArray(targetMetadata?.observed_commands) ? targetMetadata.observed_commands : [];
   const criterionCommands = Array.isArray(replacementCriterion?.observed_commands) ? replacementCriterion.observed_commands : [];
   const evidenceRefs = Array.isArray(replacementCriterion?.evidence_refs) ? replacementCriterion.evidence_refs : [];
-  const commandNames = new Set(observedCommands.filter((entry) => entry?.exit_code === 0).map((entry) => String(entry.command ?? "")));
+  const criterionCommandNames = criterionCommands.map((entry) => entry?.command);
+  const commandRefs = evidenceRefs.filter((ref) => ref?.kind === "command").map((ref) => ref?.excerpt);
   const stableFields = ["subjectType", "subjectId", "facet", "claimType", "fieldOrBehavior", "impactLevel"];
   const timestampSlug = recordedAt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const evidenceRefKeys = new Set(["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"]);
@@ -201,12 +219,17 @@ function verificationResealCompanionClaim(predecessor, replacement, targetClaim)
     && replacement.id === `${String(predecessor.id)}-verified-${timestampSlug}`
     && replacement.verificationPolicyId === "policy:workflow.acceptance.criterion:test_output"
     && criterionCommands.length > 0
+    && criterionCommands.every(canonicalSuccessfulObservedCommand)
+    && new Set(criterionCommandNames).size === criterionCommandNames.length
     && criterionCommands.every((entry) => observedCommands.some((observed) => JSON.stringify(observed) === JSON.stringify(entry)))
     && evidenceRefs.length > 0
     && evidenceRefs.every((ref) => record(ref)
       && Object.keys(ref).every((key) => evidenceRefKeys.has(key))
       && ["source", "command", "artifact", "provider", "external"].includes(String(ref.kind ?? "")))
-    && evidenceRefs.some((ref) => ref?.kind === "command" && commandNames.has(String(ref.excerpt ?? "")));
+    && commandRefs.length === criterionCommands.length
+    && commandRefs.every((command) => typeof command === "string")
+    && new Set(commandRefs).size === commandRefs.length
+    && criterionCommandNames.every((command) => commandRefs.includes(command));
 }
 
 function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {

@@ -213,6 +213,14 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     test_count: 9,
     execution_proof: { kind: "local-process-exit", runner: "node --test", static_test_units: 9 },
   };
+  const secondObservedCommand = {
+    command: "node --test src/cli/lifecycle-runtime-v1.test.mjs",
+    exit_code: 0,
+    output_sha256: "e".repeat(64),
+    test_count: 9,
+    execution_proof: { kind: "local-process-exit", runner: "node --test", static_test_units: 9 },
+  };
+  const companionObservedCommands = [observedCommand, secondObservedCommand];
   const companionCurrent = structuredClone(currentBundle);
   companionCurrent.claims.push({
     id: "other-gate",
@@ -254,7 +262,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     value: "pass",
     status: "verified",
     metadata: {
-      observed_commands: [observedCommand],
+      observed_commands: companionObservedCommands,
       gate_claim: {
         expectation_id: "tests-evidence",
         claim_type: "builder.verify.tests",
@@ -284,8 +292,8 @@ test("runtime v1 reseals only verification evidence while preserving critique an
         id: "wave-declaration",
         description: "Declare a wave.",
         status: "pass",
-        evidence_refs: [{ kind: "command", excerpt: observedCommand.command }],
-        observed_commands: [observedCommand],
+        evidence_refs: companionObservedCommands.map((command) => ({ kind: "command", excerpt: command.command })),
+        observed_commands: companionObservedCommands,
         identity_version: 2,
         verified_at: recordedAt,
       },
@@ -315,6 +323,45 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     flow: flowPolicy,
   });
   assert.deepEqual(companionNext.bundle, companionCandidate, "reseal accepts only its canonical observed-command criterion completions");
+  const resealCompanion = (candidate) => lifecycleRuntime.resealVerificationEvidenceTransition({
+    current_bundle: companionCurrent,
+    candidate_bundle: candidate,
+    resolution_events: ledger,
+    authorization: {
+      ...companionAuthorization,
+      candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(candidate))),
+      current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(candidate.claims[1]))),
+    },
+    current_bundle_bytes: Buffer.from(JSON.stringify(companionCurrent)),
+    candidate_bundle_bytes: Buffer.from(JSON.stringify(candidate)),
+    ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+    flow: flowPolicy,
+  });
+  for (const [label, mutate] of [
+    ["failed", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands[0].exit_code = 1; }],
+    ["malformed digest", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands[0].output_sha256 = "not-a-sha256"; }],
+    ["zero test count", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands[0].test_count = 0; }],
+    ["non-local execution proof", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands[0].execution_proof.kind = "remote-process-exit"; }],
+    ["incomplete local execution proof", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands[0].execution_proof.static_test_units = 0; }],
+    ["extra companion observation", (candidate) => { candidate.claims[3].metadata.criterion.observed_commands.push({ ...observedCommand, command: "node --test src/cli/extra.test.mjs" }); }],
+  ]) {
+    const forged = structuredClone(companionCandidate);
+    mutate(forged);
+    assert.throws(
+      () => resealCompanion(forged),
+      /outside the authorized expectation/i,
+      `a ${label} companion observation cannot be resealed`,
+    );
+  }
+  const borrowedTargetCommand = structuredClone(companionCandidate);
+  const unrelatedSuccessfulCommand = { ...observedCommand, command: "node --test src/cli/unrelated.test.mjs", output_sha256: "f".repeat(64) };
+  borrowedTargetCommand.claims[1].metadata.observed_commands.push(unrelatedSuccessfulCommand);
+  borrowedTargetCommand.claims[3].metadata.criterion.evidence_refs[1].excerpt = unrelatedSuccessfulCommand.command;
+  assert.throws(
+    () => resealCompanion(borrowedTargetCommand),
+    /outside the authorized expectation/i,
+    "a companion criterion cannot borrow an unrelated successful target command reference",
+  );
   const forgedCompanion = structuredClone(companionCandidate);
   forgedCompanion.claims[3].metadata.criterion.description = "Changed criterion.";
   assert.throws(

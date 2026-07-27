@@ -1983,6 +1983,81 @@ function installSignedCurrentCompletion(session) {
   writeJson(path.join(session.sessionDir, "lifecycle-authority.completion.json"), completion);
 }
 
+test("reseal request rejects a staged companion without canonical local-process provenance", async () => {
+  const session = makeSession("reseal-request-companion-provenance");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  writeBundle(session.sessionDir, verifiedTestsPrerequisites(session));
+  await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "tests-evidence", "--status", "not_verified", "--summary", "Initial verification evidence.",
+  ]);
+  installSignedCurrentCompletion(session);
+  const before = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"));
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    afterStagedWriter: (descriptor) => {
+      const stat = fs.fstatSync(descriptor);
+      const bytes = Buffer.alloc(stat.size);
+      fs.readSync(descriptor, bytes, 0, bytes.length, 0);
+      const candidate = JSON.parse(bytes.toString("utf8"));
+      const target = candidate.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === "tests-evidence");
+      const predecessor = candidate.claims.find((claim) => claim.metadata?.origin === "acceptance");
+      const recordedAt = target.metadata.gate_claim.recorded_at;
+      const command = { command: "node --test synthetic.test.mjs", exit_code: 0, output_sha256: "a".repeat(64), test_count: 1, execution_proof: { kind: "local-process-exit", runner: "node --test", static_test_units: 1 } };
+      target.value = "pass";
+      target.status = "verified";
+      target.metadata.observed_commands = [command];
+      const timestampSlug = recordedAt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const companion = {
+        ...predecessor,
+        id: `${predecessor.id}-verified-${timestampSlug}`,
+        value: "pass",
+        status: "verified",
+        createdAt: recordedAt,
+        updatedAt: recordedAt,
+        verificationPolicyId: "policy:workflow.acceptance.criterion:test_output",
+        metadata: {
+          origin: "acceptance",
+          workflow_subject_ref: predecessor.metadata.workflow_subject_ref,
+          criterion: {
+            id: predecessor.metadata.criterion.id,
+            description: predecessor.metadata.criterion.description,
+            status: "pass",
+            evidence_refs: [{ kind: "command", excerpt: command.command }],
+            observed_commands: [{ ...command, execution_proof: { ...command.execution_proof, static_test_units: 0 } }],
+            identity_version: 2,
+            verified_at: recordedAt,
+          },
+        },
+      };
+      candidate.claims[candidate.claims.indexOf(predecessor)] = companion;
+      const altered = Buffer.from(JSON.stringify(candidate));
+      fs.writeSync(descriptor, altered, 0, altered.length, 0);
+      fs.ftruncateSync(descriptor, altered.length);
+      fs.fsyncSync(descriptor);
+    },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain([
+        "reseal-verification-evidence-request", "--session-dir", session.sessionDir,
+        "--expectation", "tests-evidence", "--status", "not_verified", "--summary", "Reseal request provenance fixture.",
+      ]),
+      /writer changed the ordered claim set outside the target expectation/,
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+  }
+  assert.deepEqual(fs.readFileSync(path.join(session.sessionDir, "trust.bundle")), before, "request-side rejection leaves the canonical bundle unchanged");
+});
+
 function makeLifecycleCoordinatorFixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "builder-host-redeem-"));
   const stateRoot = path.join(directory, "state");
@@ -4024,24 +4099,26 @@ test("sync attaches the staged trust.bundle bytes when the session bundle is rep
   writeBundle(session.sessionDir, originalEntries);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const originalDigest = createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex");
-  let replaceBundle;
-  const replaced = new Promise((resolve) => { replaceBundle = resolve; });
-  const watcher = fs.watch(session.sessionDir, (_event, filename) => {
-    if (String(filename) !== ".trust-bundle-snapshots") return;
-    fs.writeFileSync(bundleFile, "{\"claims\":[]}");
-    replaceBundle();
-  });
+  const snapshotDirectory = path.join(session.sessionDir, ".trust-bundle-snapshots");
+  const originalChmodSync = fs.chmodSync;
+  let replaced = false;
+  fs.chmodSync = (file, mode, ...args) => {
+    const result = originalChmodSync(file, mode, ...args);
+    if (!replaced && path.dirname(String(file)) === snapshotDirectory && mode === 0o400) {
+      fs.writeFileSync(bundleFile, "{\"claims\":[]}");
+      replaced = true;
+    }
+    return result;
+  };
+  syncBuiltinESMExports();
   try {
-    const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
-    await Promise.race([
-      replaced,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 10_000)),
-    ]);
-    const synced = await syncing;
+    const synced = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
     assert.equal(synced.attached, true);
   } finally {
-    watcher.close();
+    fs.chmodSync = originalChmodSync;
+    syncBuiltinESMExports();
   }
+  assert.equal(replaced, true, "the test barrier must replace the canonical bundle only after the staged bytes are durable");
   const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
   assert.equal(manifest.evidence.at(-1).sha256, originalDigest);
   assert.equal(fs.existsSync(path.join(session.sessionDir, ".trust-bundle-snapshots")), false);

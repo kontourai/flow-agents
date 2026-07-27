@@ -274,7 +274,9 @@ function readProtectedFile(file: string, label: string, maxBytes: number, writer
   }
 }
 
-function assertFixedSession(sessionDir: string, pin = false): FixedSession {
+type ProtectedSessionDirectory = { label: string; path: string };
+
+function fixedSessionPaths(sessionDir: string): FixedSession {
   const resolved = path.resolve(sessionDir);
   const artifactRoot = path.dirname(resolved);
   const kontouraiRoot = path.dirname(artifactRoot);
@@ -284,56 +286,60 @@ function assertFixedSession(sessionDir: string, pin = false): FixedSession {
   if (!safeSlug.test(slug) || path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai" || path.dirname(resolved) !== artifactRoot) {
     throw new Error("workflow waves requires --session-dir .kontourai/flow-agents/<safe-slug>");
   }
-  const protectedDirectories = [
-    ["project root", projectRoot],
-    [".kontourai root", kontouraiRoot],
-    ["artifact root", artifactRoot],
-    ["assignment directory", assignmentRoot],
-    ["session directory", resolved],
-  ] as const;
-  for (const [label, entry] of protectedDirectories) {
-    const stat = fs.lstatSync(entry);
+  return { sessionDir: resolved, projectRoot, kontouraiRoot, artifactRoot, assignmentRoot, slug, file: path.join(resolved, "waves.json") };
+}
+
+function protectedSessionDirectories(target: FixedSession): ProtectedSessionDirectory[] {
+  return [
+    { label: "project root", path: target.projectRoot },
+    { label: ".kontourai root", path: target.kontouraiRoot },
+    { label: "artifact root", path: target.artifactRoot },
+    { label: "assignment directory", path: target.assignmentRoot },
+    { label: "session directory", path: target.sessionDir },
+  ];
+}
+
+function assertProtectedSessionDirectories(directories: ProtectedSessionDirectory[]): void {
+  for (const { label, path: directory } of directories) {
+    const stat = fs.lstatSync(directory);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`workflow waves ${label} must be a non-symlink directory`);
     assertOwnedAndNotWritable(stat, label);
   }
-  const stateFile = path.join(resolved, "state.json");
-  const state = readProtectedFile(stateFile, "workflow state", MAX_STATE_BYTES);
+}
+
+function assertFixedSessionState(target: FixedSession): void {
+  const state = readProtectedFile(path.join(target.sessionDir, "state.json"), "workflow state", MAX_STATE_BYTES);
   try {
     const parsed = JSON.parse(state.bytes.toString("utf8")) as JsonRecord;
-    if (parsed.task_slug !== slug) throw new Error("workflow waves state.task_slug must exactly match the session directory basename");
+    if (parsed.task_slug !== target.slug) throw new Error("workflow waves state.task_slug must exactly match the session directory basename");
   } finally {
     fs.closeSync(state.descriptor);
   }
-  const result: FixedSession = {
-    sessionDir: resolved,
-    projectRoot,
-    kontouraiRoot,
-    artifactRoot,
-    assignmentRoot,
-    slug,
-    file: path.join(resolved, "waves.json"),
-  };
-  if (!pin) return result;
+}
+
+function pinSessionDirectories(target: FixedSession, directories: ProtectedSessionDirectory[]): FixedSession {
   const pinnedDirectories: NonNullable<FixedSession["pinnedDirectories"]> = [];
   try {
-    for (const [label, entry] of protectedDirectories) {
-      const pinned = openStableDirectory(entry, label, true);
-      pinnedDirectories.push({ ...pinned, path: entry, label });
+    for (const { label, path: directory } of directories) {
+      const pinned = openStableDirectory(directory, label, true);
+      pinnedDirectories.push({ ...pinned, path: directory, label });
     }
-    const artifact = pinnedDirectories.find((entry) => entry.path === artifactRoot)!;
-    const session = pinnedDirectories.find((entry) => entry.path === resolved)!;
-    return {
-      ...result,
-      artifactDescriptor: artifact.descriptor,
-      artifactIdentity: artifact.identity,
-      sessionDescriptor: session.descriptor,
-      sessionIdentity: session.identity,
-      pinnedDirectories,
-    };
+    const artifact = pinnedDirectories.find((entry) => entry.path === target.artifactRoot)!;
+    const session = pinnedDirectories.find((entry) => entry.path === target.sessionDir)!;
+    return { ...target, artifactDescriptor: artifact.descriptor, artifactIdentity: artifact.identity, sessionDescriptor: session.descriptor, sessionIdentity: session.identity, pinnedDirectories };
   } catch (error) {
     for (const pinned of pinnedDirectories) fs.closeSync(pinned.descriptor);
     throw error;
   }
+}
+
+function assertFixedSession(sessionDir: string, pin = false): FixedSession {
+  const target = fixedSessionPaths(sessionDir);
+  const directories = protectedSessionDirectories(target);
+  assertProtectedSessionDirectories(directories);
+  assertFixedSessionState(target);
+  if (!pin) return target;
+  return pinSessionDirectories(target, directories);
 }
 
 function assertPinnedSession(target: FixedSession): void {
