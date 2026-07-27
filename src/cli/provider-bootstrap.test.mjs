@@ -602,12 +602,24 @@ test("global bootstrap serializes the full read-modify-write transaction", async
   const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-serialized-"));
   const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-lock-gh-"));
   const gh = path.join(fakeBin, "gh");
+  const entered = path.join(settings, "first-bootstrap-entered");
+  const release = path.join(settings, "release-first-bootstrap");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1 $2" == "project list" ]]; then
   printf '{"projects":[{"number":9,"url":"https://github.com/orgs/example/projects/9"}]}'
 elif [[ "$1 $2" == "label list" ]]; then
-  sleep 1
+  if mkdir "$PROVIDER_BOOTSTRAP_ENTERED" 2>/dev/null; then
+    attempts=0
+    while [[ ! -e "$PROVIDER_BOOTSTRAP_RELEASE" ]]; do
+      attempts=$((attempts + 1))
+      if [[ "$attempts" -ge 600 ]]; then
+        printf 'timed out waiting for provider-bootstrap test release\\n' >&2
+        exit 98
+      fi
+      sleep 0.05
+    done
+  fi
   printf '[{"name":"agent:claimed"}]'
 fi
 `);
@@ -619,20 +631,34 @@ fi
     "--provider-project", "9",
     "--online",
   ];
+  const env = {
+    ...process.env,
+    PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
+    PROVIDER_BOOTSTRAP_ENTERED: entered,
+    PROVIDER_BOOTSTRAP_RELEASE: release,
+  };
   const first = spawn(process.execPath, [...common, "--repo-path", repoA], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
+    env,
     stdio: "ignore",
   });
-  await waitForPath(path.join(settings, ".provider-bootstrap.lock"));
-  const blocked = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
-    encoding: "utf8",
-  });
-  assert.equal(blocked.status, 2);
-  assert.match(blocked.stderr, /locked by another setup/);
-  assert.equal(await waitForExit(first), 0);
+  const firstExit = waitForExit(first);
+  let firstStatus;
+  try {
+    await waitForPath(path.join(settings, ".provider-bootstrap.lock"));
+    await waitForPath(entered);
+    const blocked = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(blocked.status, 2);
+    assert.match(blocked.stderr, /locked by another setup/);
+  } finally {
+    fs.writeFileSync(release, "release\n");
+    firstStatus = await firstExit;
+  }
+  assert.equal(firstStatus, 0);
   const second = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
+    env,
     encoding: "utf8",
   });
   assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
