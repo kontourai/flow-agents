@@ -563,6 +563,58 @@ else
   _fail "FIX 3: resolveSharedRepoRoot(PLAIN cwd) with ambient GIT_DIR returned nothing"
 fi
 
+# ==== AC7 (#1020): the LIFECYCLE AUTO-EMIT path also honors the shared root ========
+# AC3 above covers the EXPLICIT `liveness claim` subcommand, which resolves its root through
+# defaultArtifactRootForRead. The lifecycle auto-emit path (livenessLifecycle, reached from
+# init-plan/advance-state) took a different route entirely: it derived the stream root from
+# path.dirname(taskDir), i.e. from the caller's own artifact path, so a lane driven from a linked
+# worktree wrote into that worktree's private store and no reader in any other checkout ever saw
+# it. AC3 passing while lifecycle-driven lanes were invisible is exactly why this needs its own
+# case: the two paths agreed on the contract and disagreed in the code.
+echo ""
+echo "=== AC7 (#1020): lifecycle auto-emit from worktree cwd lands in the shared store ==="
+
+LIFECYCLE_SLUG="lifecycle-autoemit-subject"
+(
+  cd "$WORKTREE" \
+    && mkdir -p ".kontourai/flow-agents/$LIFECYCLE_SLUG" \
+    && printf '# plan\n' > ".kontourai/flow-agents/$LIFECYCLE_SLUG/plan.md"
+)
+if (cd "$WORKTREE" && FLOW_AGENTS_ACTOR=lifecycle-actor:test:Host flow_agents_node "$WRITER" \
+  init-plan ".kontourai/flow-agents/$LIFECYCLE_SLUG/plan.md" --task-slug "$LIFECYCLE_SLUG" \
+  >"$TMP/lifecycle.out" 2>"$TMP/lifecycle.err"); then
+  _pass "AC7: init-plan from the worktree cwd exits 0"
+else
+  _fail "AC7: init-plan from the worktree cwd failed: $(cat "$TMP/lifecycle.out" "$TMP/lifecycle.err")"
+fi
+
+if grep -q "\"subjectId\":\"$LIFECYCLE_SLUG\"" "$PRIMARY/.kontourai/flow-agents/liveness/events.jsonl" 2>/dev/null; then
+  _pass "AC7: the lifecycle-emitted claim is readable from the PRIMARY checkout's shared store"
+else
+  _fail "AC7: the lifecycle-emitted claim never reached the primary checkout's shared store"
+fi
+
+if [[ ! -e "$WORKTREE/.kontourai/flow-agents/liveness/events.jsonl" ]]; then
+  _pass "AC7: no isolated per-worktree liveness store was stranded by the lifecycle path"
+else
+  _fail "AC7: lifecycle auto-emit stranded a private stream in the worktree: $(cat "$WORKTREE/.kontourai/flow-agents/liveness/events.jsonl")"
+fi
+
+# Fail-open guard: a task dir outside any git working tree must still emit to
+# path.dirname(taskDir) -- byte-identical to pre-#1020 behavior. Liveness is advisory; a
+# resolution failure must never divert or drop the event.
+NONGIT_LANE="$TMP/nongit-lane"
+mkdir -p "$NONGIT_LANE/.kontourai/flow-agents/loose-lane"
+printf '# plan\n' > "$NONGIT_LANE/.kontourai/flow-agents/loose-lane/plan.md"
+(cd "$NONGIT_LANE" && FLOW_AGENTS_ACTOR=lifecycle-actor:test:Host flow_agents_node "$WRITER" \
+  init-plan ".kontourai/flow-agents/loose-lane/plan.md" --task-slug loose-lane \
+  >/dev/null 2>&1)
+if [[ -f "$NONGIT_LANE/.kontourai/flow-agents/liveness/events.jsonl" ]]; then
+  _pass "AC7: a non-git task dir still fails open to path.dirname(taskDir)"
+else
+  _fail "AC7: the non-git fail-open path regressed -- the event was diverted or dropped"
+fi
+
 # ---- Summary ----
 echo ""
 echo "----------------------------------------------"
