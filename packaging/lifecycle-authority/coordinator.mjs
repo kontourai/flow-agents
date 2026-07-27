@@ -725,10 +725,11 @@ async function assertExactCurrentCompletionRecoveryPreimages(paths, authorizatio
   }
   const files = canonicalFlowPaths(paths);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
-  const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
-  const gatePolicy = currentGatePolicy(definition, state);
+  const stateInput = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const startDefinition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
+  const gatePolicy = currentGatePolicy(definition, state);
   const preimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
   const definitionSha256 = sha256(protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024));
   const gatePolicySha256 = flowGatePolicyDigest(gatePolicy);
@@ -763,7 +764,7 @@ async function loadPinnedFlowReducer() {
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "validateRunStateConsistency", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
@@ -777,6 +778,16 @@ async function loadPinnedFlowReducer() {
     pin,
     artifact_sha256: sha256File(entry, "pinned Flow reducer artifact"),
   };
+}
+export function resolveCanonicalFlowRunIdentity(flow, startDefinition, state, runId) {
+  if (typeof flow?.validateRunStateConsistency !== "function") {
+    throw new Error("pinned Flow reducer does not expose canonical run consistency validation");
+  }
+  const validated = flow.validateRunStateConsistency(startDefinition, state, { runId });
+  if (!record(validated) || !record(validated.definition) || !record(validated.state)) {
+    throw new Error("pinned Flow reducer returned an invalid canonical run identity");
+  }
+  return { definition: validated.definition, state: validated.state };
 }
 export function assertVerificationResealFlowCapabilities(runStore) {
   for (const name of ["withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
@@ -1350,10 +1361,11 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
   if (requestedActionId !== null && action.action_id !== requestedActionId) throw new Error("merge-change request action changed before authorization consumption");
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
-  const definition = JSON.parse(definitionBytes.toString("utf8"));
-  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const startDefinition = JSON.parse(definitionBytes.toString("utf8"));
+  const stateInput = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
   if (definition.id !== "builder.build" || definition.id !== authorization.flow_definition_id
       || definition.version !== authorization.flow_definition_version
       || flow.definitionDigest(definition) !== authorization.flow_definition_digest
@@ -2006,9 +2018,10 @@ function assertProvisionalAuthorizationShape(paths, authorization) {
       || !record(authorization.workspace_snapshot)) throw new Error("provisional delivery authorization binding is invalid");
 }
 async function prepareProvisionalDeliveryMutation(paths, authorization) {
-  const definition = protectedJson(canonicalFlowPaths(paths).definition, "canonical Flow definition", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const state = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const startDefinition = protectedJson(canonicalFlowPaths(paths).definition, "canonical Flow definition", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const stateInput = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
   const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
   const subject = sessionSubject(paths);
   const providerObservationBytes = protectedRegularFile(path.join(paths.sessionDir, "publish-change.result.json"), "authenticated publish-change result", 256 * 1024);

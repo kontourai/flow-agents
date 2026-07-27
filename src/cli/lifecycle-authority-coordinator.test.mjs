@@ -7,8 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
-import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import * as pinnedFlow from "../../node_modules/@kontourai/flow/dist/index.js";
+import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
 const COORDINATOR = path.resolve("packaging/lifecycle-authority/coordinator.mjs");
@@ -40,6 +41,44 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+test("coordinator resolves effective definition identity through authorized amendments", async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "coordinator-effective-definition-"));
+  const runId = "effective-definition";
+  await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+    cwd: projectRoot,
+    runId,
+    params: { subject: "kontourai/flow-agents#1000" },
+  });
+  const started = await loadRun(runId, projectRoot);
+  const successor = { ...structuredClone(started.definition), version: `${started.definition.version}-coordinator-test` };
+  await amendRunDefinition(runId, {
+    cwd: projectRoot,
+    definition: successor,
+    request: {
+      reason: "exercise privileged effective-definition resolution",
+      expected_run_head: flowRunHead(started.state),
+      expected_definition: definitionIdentity(started.definition),
+      successor_digest: definitionDigest(successor),
+      authority: {
+        kind: "user_request",
+        actor: "coordinator-test",
+        request_ref: "test:coordinator-effective-definition",
+        requested_at: new Date().toISOString(),
+      },
+    },
+  });
+  const amended = await loadRun(runId, projectRoot);
+  const resolved = resolveCanonicalFlowRunIdentity(
+    pinnedFlow,
+    JSON.parse(fs.readFileSync(path.join(amended.dir, "definition.json"), "utf8")),
+    JSON.parse(fs.readFileSync(path.join(amended.dir, "state.json"), "utf8")),
+    runId,
+  );
+  assert.equal(resolved.definition.version, successor.version);
+  assert.equal(definitionDigest(resolved.definition), definitionDigest(successor));
+  assert.equal(flowRunHead(resolved.state), flowRunHead(amended.state));
+});
 
 test("merge-change requires an exact signed request action and post-amendment verify pass", async () => {
   const loaded = await loadProtectedReadFromCoordinator();
