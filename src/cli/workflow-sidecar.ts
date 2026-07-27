@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
-import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot } from "../lib/local-artifact-root.js";
+import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
@@ -7922,11 +7922,20 @@ function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivene
  */
 function livenessStreamRootFor(taskDir: string): string {
   const fallback = path.dirname(taskDir);
+  // Fail open, but never SILENTLY. #413 hardened the sibling resolver
+  // (`flowAgentsArtifactRoot`) for exactly this: a fail-open with no diagnostic inside a git
+  // working tree strands the event in a cwd-local store that no other checkout can read, which is
+  // the precise symptom #1020 exists to fix. Reusing that module's own warning rather than
+  // restating it keeps one wording — and one place to change it.
   try {
     const sharedRepoRoot = resolveSharedRepoRoot(taskDir);
-    if (!sharedRepoRoot) return fallback;
+    if (!sharedRepoRoot) {
+      warnIfFailingOpenInsideGitTree(taskDir, fallback);
+      return fallback;
+    }
     return path.resolve(sharedRepoRoot, FLOW_AGENTS_RUNTIME_DIR);
   } catch {
+    warnIfFailingOpenInsideGitTree(taskDir, fallback);
     return fallback;
   }
 }

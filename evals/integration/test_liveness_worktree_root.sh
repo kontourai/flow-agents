@@ -615,6 +615,30 @@ else
   _fail "AC7: the non-git fail-open path regressed -- the event was diverted or dropped"
 fi
 
+# Fail-open must never be SILENT inside a git working tree. Mirrors FIX 1/FIX 1c, which assert the
+# same discipline for the explicit `liveness claim` path: a corrupted gitlink strands the event in a
+# cwd-local store no other checkout can read, which is exactly the symptom #1020 exists to fix. The
+# event must still be written (advisory, never dropped), but the operator must be told.
+BROKEN_WT="$TMP/broken-gitlink"
+git -C "$PRIMARY" worktree add -q "$BROKEN_WT" -b broken-gitlink-branch >/dev/null 2>&1
+printf 'gitdir: /nonexistent/definitely/not/here\n' > "$BROKEN_WT/.git"
+mkdir -p "$BROKEN_WT/.kontourai/flow-agents/broken-lane"
+printf '# plan\n' > "$BROKEN_WT/.kontourai/flow-agents/broken-lane/plan.md"
+BROKEN_ERR="$TMP/broken-gitlink.err"
+(cd "$BROKEN_WT" && FLOW_AGENTS_ACTOR=lifecycle-actor:test:Host flow_agents_node "$WRITER" \
+  init-plan ".kontourai/flow-agents/broken-lane/plan.md" --task-slug broken-lane \
+  >/dev/null 2>"$BROKEN_ERR")
+if [[ -f "$BROKEN_WT/.kontourai/flow-agents/liveness/events.jsonl" ]]; then
+  _pass "AC7: a corrupted gitlink still fails open (the event is written, never dropped)"
+else
+  _fail "AC7: a corrupted gitlink dropped the event instead of failing open"
+fi
+if grep -q "WARNING" "$BROKEN_ERR" 2>/dev/null; then
+  _pass "AC7: the corrupted-gitlink fail-open is LOUD, not silent (matches FIX 1/FIX 1c)"
+else
+  _fail "AC7: lifecycle fail-open inside a git tree was SILENT -- a stranded store with no diagnostic is the #1020 symptom: $(cat "$BROKEN_ERR" 2>/dev/null)"
+fi
+
 # ---- Summary ----
 echo ""
 echo "----------------------------------------------"

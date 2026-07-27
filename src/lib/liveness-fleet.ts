@@ -168,9 +168,29 @@ export function laneState(observation: LaneObservation, nowMs: number): Liveness
  * @param nowMs   clock to evaluate freshness against — injected, never read here
  */
 export function classifyLane(events: LivenessEvent[], nowMs: number, helper: LivenessReadHelper = loadLivenessReadHelper()): Omit<FleetLane, "repoRoot" | "streamPath" | "stranded">[] {
+  // ONE notion of "latest" for the whole function.
+  //
+  // `freshHolders` decides release-vs-active by ARRAY ORDER (the order lines were appended to the
+  // stream), while the per-lane fields below want the chronologically newest event. Those two
+  // disagree whenever on-disk order diverges from timestamp order — which is exactly what a
+  // concurrent append produces, since stamp generation and the append are not atomic. When they
+  // disagreed the emitted row contradicted itself: a heartbeat 60s old under a 1800s TTL, reported
+  // `reclaimable`, because a release with an EARLIER stamp happened to sit later in the file.
+  // Reclaiming a live lane is the failure this subsystem exists to prevent.
+  //
+  // Sorting by timestamp first makes the stream's chronology authoritative for both, so `state`
+  // can never contradict the `lastEventAt`/`ageSeconds` reported beside it. The sort is stable on
+  // the original index, so genuinely equal stamps keep file order (the writer's own tie-break).
+  // Unparsable stamps sort oldest: such an event must never win "latest" on the strength of being
+  // unreadable, and `laneState` already refuses to call an unreadable lease `held`.
+  const ordered = events
+    .map((event, index) => ({ event, index, ms: parseStampMs(typeof event?.at === "string" ? event.at : "") }))
+    .sort((a, b) => (a.ms ?? -Infinity) - (b.ms ?? -Infinity) || a.index - b.index)
+    .map((entry) => entry.event);
+
   const latest = new Map<string, { subjectId: string; actor: string; at: string; type: string; ttlSeconds: number }>();
 
-  for (const event of events) {
+  for (const event of ordered) {
     if (!event || typeof event !== "object") continue;
     const subjectId = typeof event.subjectId === "string" ? event.subjectId : null;
     const actor = typeof event.actor === "string" ? event.actor : null;
@@ -180,21 +200,18 @@ export function classifyLane(events: LivenessEvent[], nowMs: number, helper: Liv
     const key = `${subjectId}\0${actor}`;
     const prior = latest.get(key);
     const ttlSeconds = typeof event.ttlSeconds === "number" && event.ttlSeconds > 0 ? event.ttlSeconds : prior?.ttlSeconds ?? 1800;
-    // String compare is correct for the Z-normalized ISO-8601 stamps the writer emits, and is
-    // what liveness-read.js's own grouping uses — keep the two consistent.
-    if (!prior || at > prior.at) {
-      latest.set(key, { subjectId, actor, at, type: typeof event.type === "string" ? event.type : "", ttlSeconds });
-    } else if (typeof event.ttlSeconds === "number" && event.ttlSeconds > 0) {
-      prior.ttlSeconds = event.ttlSeconds;
-    }
+    // `ordered` is ascending, so the last event seen for a key IS the latest one.
+    latest.set(key, { subjectId, actor, at, type: typeof event.type === "string" ? event.type : "", ttlSeconds });
   }
 
-  // One freshHolders call per subject; its result is the authority for `held`.
+  // One freshHolders call per subject; its result is the authority for `held`. It receives the
+  // SAME chronologically ordered array the fields above were derived from — passing the raw
+  // `events` here is what let the two disagree.
   const freshByKey = new Set<string>();
   for (const subjectId of new Set([...latest.values()].map((entry) => entry.subjectId))) {
     let holders: FreshHolder[] = [];
     try {
-      holders = helper.freshHolders(events, subjectId, null, nowMs) ?? [];
+      holders = helper.freshHolders(ordered, subjectId, null, nowMs) ?? [];
     } catch {
       holders = [];
     }
@@ -316,6 +333,18 @@ export function readFleet(options: FleetScanOptions = {}): FleetScanResult {
 
     for (const candidate of candidates) {
       if (!fs.existsSync(candidate.streamPath)) continue;
+      // `readLivenessEvents` fails open — it catches every read error and returns [] — which is
+      // right for the hot hook path but would make an unreadable stream here indistinguishable
+      // from an empty one. That is the failure this function's contract singles out: a partial
+      // fleet view that LOOKS complete. Probe readability ourselves so the warning is real.
+      try {
+        const stat = fs.statSync(candidate.streamPath);
+        if (!stat.isFile()) throw new Error("not a regular file");
+        fs.accessSync(candidate.streamPath, fs.constants.R_OK);
+      } catch (err) {
+        warnings.push({ root: repoRoot, detail: `unreadable stream ${candidate.streamPath}: ${err instanceof Error ? err.message : String(err)}` });
+        continue;
+      }
       streams.push(candidate.streamPath);
       let events: LivenessEvent[] = [];
       try {
