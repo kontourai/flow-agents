@@ -4439,7 +4439,11 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
   if (path.basename(resolvedRunDir) !== runId) return { currentRunHead, claimsById: new Map() };
   const readCanonicalRunBytes = (segments: string[], label: string, maxBytes: number): Buffer => {
     const candidate = path.join(resolvedRunDir, ...segments);
-    if (!fs.existsSync(candidate) || fs.lstatSync(candidate).isSymbolicLink()) {
+    if (typeof fs.constants.O_NOFOLLOW !== "number") {
+      throw new Error(`${label} requires O_NOFOLLOW support`);
+    }
+    const pathBefore = fs.lstatSync(candidate);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile()) {
       throw new Error(`${label} must be a regular file within the canonical Flow run`);
     }
     const resolved = fs.realpathSync(candidate);
@@ -4447,17 +4451,22 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
       throw new Error(`${label} must stay within the canonical Flow run`);
     }
-    const ancestors = segments.slice(0, -1).map((_, index) =>
-      path.join(resolvedRunDir, ...segments.slice(0, index + 1)));
+    const ancestors = [resolvedRunDir, ...segments.slice(0, -1).map((_, index) =>
+      path.join(resolvedRunDir, ...segments.slice(0, index + 1)))];
     const ancestorIdentities = ancestors.map((ancestor) => {
       const stat = fs.lstatSync(ancestor);
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} parent path must contain only real directories`);
       return { path: ancestor, dev: stat.dev, ino: stat.ino };
     });
-    const descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     try {
       const stat = fs.fstatSync(descriptor);
-      if (!stat.isFile() || stat.size > maxBytes) throw new Error(`${label} exceeds its bounded regular-file limit`);
+      if (!stat.isFile() || stat.size > maxBytes
+        || stat.dev !== pathBefore.dev || stat.ino !== pathBefore.ino
+        || stat.size !== pathBefore.size || stat.mtimeMs !== pathBefore.mtimeMs
+        || stat.ctimeMs !== pathBefore.ctimeMs) {
+        throw new Error(`${label} exceeds its bounded regular-file limit or changed identity`);
+      }
       const bytes = Buffer.alloc(Number(stat.size));
       let offset = 0;
       while (offset < bytes.length) {
@@ -4466,8 +4475,16 @@ function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
         offset += count;
       }
       const after = fs.fstatSync(descriptor);
-      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size) {
+      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size
+        || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) {
         throw new Error(`${label} changed while reading`);
+      }
+      const pathAfter = fs.lstatSync(candidate);
+      if (pathAfter.isSymbolicLink() || !pathAfter.isFile()
+        || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino
+        || pathAfter.size !== after.size || pathAfter.mtimeMs !== after.mtimeMs
+        || pathAfter.ctimeMs !== after.ctimeMs || fs.realpathSync(candidate) !== resolved) {
+        throw new Error(`${label} changed identity while reading`);
       }
       for (const ancestor of ancestorIdentities) {
         const current = fs.lstatSync(ancestor.path);
