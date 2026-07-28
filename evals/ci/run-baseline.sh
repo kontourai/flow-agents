@@ -106,7 +106,7 @@ CHECKS=(
   "Gate review inquiry records integration|bash evals/integration/test_gate_review_inquiry_records.sh"
   "Install merge integration|bash evals/integration/test_install_merge.sh"
   "Kit identity trust integration|bash evals/integration/test_kit_identity_trust.sh"
-  "Liveness worktree root integration|bash evals/integration/test_liveness_worktree_root.sh"
+  "Liveness worktree root integration|node --test evals/integration/liveness-worktree-root.test.mjs"
   "Migrate local artifacts integration|bash evals/integration/test_migrate_local_artifacts.sh"
   "Model routing escalation integration|bash evals/integration/test_model_routing_escalation.sh"
   "Promote gate integration|bash evals/integration/test_promote_gate.sh"
