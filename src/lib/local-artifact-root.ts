@@ -63,7 +63,59 @@ export function resolveSharedRepoRoot(cwd: string): string | null {
     }).trim();
     if (!out) return null;
     const absoluteCommonDir = path.resolve(cwd, out);
+
+    // #1055: `path.dirname(commonDir)` strips exactly ONE segment. That is right when the common
+    // dir is `<repo>/.git` — a primary checkout, or a linked worktree, whose common dir points at
+    // the primary's `.git`. It is wrong inside a git SUBMODULE, where the common dir is
+    // `<superproject>/.git/modules/<name>`, so stripping one segment lands on
+    // `<superproject>/.git/modules`: git internals, no working tree, nothing that reads
+    // `.kontourai/`. And it lands there SILENTLY, because resolution technically succeeded, so the
+    // fail-open warning never fires. That is the same silent-coordination-loss this resolver exists
+    // to prevent, reached through ordinary git usage.
+    //
+    // Git already knows the answer. A submodule's common dir carries `core.worktree` pointing back
+    // at its working tree; a plain repo's does not. Ask, rather than doing path arithmetic on a
+    // shape assumption:
+    //
+    //   primary checkout        common=<repo>/.git                      core.worktree unset -> <repo>
+    //   subdirectory of one     common=<repo>/.git                      core.worktree unset -> <repo>
+    //   linked worktree         common=<repo>/.git                      core.worktree unset -> <repo>
+    //   submodule               common=<super>/.git/modules/<n>         core.worktree set   -> <super>/<n>
+    //   linked wt of submodule  common=<super>/.git/modules/<n>         core.worktree set   -> <super>/<n>
+    //
+    // Every row yields the ONE working tree whose `.kontourai/flow-agents` all worktrees of that
+    // repository share — which is the property #357 was after.
+    // NOT symlink-resolved, deliberately. #1055 also reports that an ABSOLUTE cwd traversing a
+    // depth-changing symlink makes this lexical `path.resolve` disagree with git's OS-resolved
+    // answer. `fs.realpathSync` here would fix that — and would also silently MOVE every existing
+    // store on any host where the repo path crosses a symlink, which on macOS is every path under
+    // `/var` (a symlink to `/private/var`). AC6's byte-identical-to-plain-cwd guarantee catches
+    // exactly that, and it caught it here. Relocating live coordination state is a migration, not a
+    // bug fix, so it stays out of this change and open on #1055.
+    const coreWorktree = gitCoreWorktree(absoluteCommonDir, env);
+    if (coreWorktree) return path.resolve(absoluteCommonDir, coreWorktree);
     return path.dirname(absoluteCommonDir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `core.worktree` recorded in a git common dir, or null when unset/unavailable.
+ *
+ * Set for a submodule (pointing back at the submodule's working tree) and unset for a plain
+ * repository or linked worktree, which is exactly the discriminator `resolveSharedRepoRoot` needs.
+ * Never throws: git absent, an unreadable config, or an unset key all yield null so the caller
+ * falls back to the historical `path.dirname` behaviour rather than failing.
+ */
+function gitCoreWorktree(commonDir: string, env: NodeJS.ProcessEnv): string | null {
+  try {
+    const value = execFileSync("git", ["--git-dir", commonDir, "config", "--get", "core.worktree"], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return value || null;
   } catch {
     return null;
   }
