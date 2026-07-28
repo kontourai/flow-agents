@@ -25,13 +25,24 @@ _fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }
 UNIVERSAL_HOOKS=(config-protection quality-gate evidence-capture stop-goal-fit workflow-steering)
 
 echo ""
-echo "=== bundles are present (regenerate with 'npm run build:bundles' if this fails) ==="
+echo "=== bundles ==="
+# Build them, the way test_bundle_install.sh and test_bundle_lifecycle.sh already do: `dist/` is
+# generated and gitignored, so a suite that only CHECKS for bundles can never run in a CI lane from
+# a clean checkout. Building here is what lets this eval be registered rather than sitting outside
+# CI entirely — which is how #1024's own defect went unnoticed in the first place.
+if (cd "$ROOT" && npm run build:bundles >/dev/null 2>&1); then
+  _pass "bundle build completed"
+else
+  _fail "bundle build failed"
+fi
+
 if [[ -f dist/claude-code/.claude/settings.json && -f dist/codex/.codex/hooks.json \
    && -f dist/opencode/.opencode/plugins/flow-agents.js && -f dist/pi/.pi/extensions/flow-agents.ts ]]; then
   _pass "all four runtime bundles exist"
 else
-  echo "  SKIP: bundles not built; run 'npm run build:bundles' first." >&2
-  echo "  ACCEPTED GAP: recording as an explicit skip, not a pass." >&2
+  # Still a hard failure, never a skip-pass: without bundles there is nothing to assert against,
+  # and reporting that as success is the exact shape this eval exists to catch.
+  echo "  FAIL: bundles absent after build; nothing to assert against." >&2
   exit 1
 fi
 
