@@ -111,7 +111,7 @@ function isInsideGitWorkingTree(cwd: string): boolean {
  * gives an operator the signal needed to pass `--artifact-root` explicitly instead of silently
  * losing coordination visibility.
  */
-function warnIfFailingOpenInsideGitTree(cwd: string, fallbackPath: string): void {
+export function warnIfFailingOpenInsideGitTree(cwd: string, fallbackPath: string): void {
   if (!isInsideGitWorkingTree(cwd)) return;
   process.stderr.write(
     `[artifact-root] WARNING: inside a git working tree but could not resolve the shared repo root ` +

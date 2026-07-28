@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
-import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
@@ -7897,6 +7897,49 @@ function loadLivenessPolicyHelper(): {
 }
 function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivenessEnabled(process.env); }
 /**
+ * #1020: resolve the SHARED liveness stream root for a task directory.
+ *
+ * The lifecycle auto-emit path previously used `path.dirname(taskDir)` directly. `taskDir` is
+ * derived from the caller's own artifact path (`artifactDirFrom` at the `init-plan`/`advance-state`
+ * call sites), so in a linked worktree the event landed in THAT worktree's
+ * `.kontourai/flow-agents/liveness/` — a location no reader in any other checkout of the same repo
+ * consults. #357 built `resolveSharedRepoRoot` precisely so that "a `liveness claim` ... invoked
+ * from ANY worktree's cwd is visible to a reader in any other checkout" (local-artifact-root.ts),
+ * and `liveness claim`'s own explicit path honors it (eval AC3) — but this auto-emit path never
+ * consulted it, so the guarantee silently did not hold for lifecycle-driven lanes.
+ *
+ * Resolution is anchored on `taskDir` itself, NOT on `process.cwd()`: the stream belongs to the
+ * repo that physically contains the artifacts. This keeps eval/fixture isolation intact — a task
+ * dir under a throwaway `mktemp -d` outside any git tree fails open below, and one inside its own
+ * disposable repo resolves to that repo — while a real linked-worktree task dir now resolves to
+ * the primary checkout's shared store.
+ *
+ * FAIL-OPEN (contractual, do not tighten): any failure — git absent, `taskDir` not inside a git
+ * tree, resolution error — returns `path.dirname(taskDir)`, today's exact behavior. Liveness is
+ * advisory; a resolution failure must never divert or drop the event. In the single-checkout case
+ * the two agree byte-for-byte (`<repo>/.kontourai/flow-agents/<slug>` → `<repo>/.kontourai/flow-agents`),
+ * so this is a no-op for every non-worktree caller.
+ */
+function livenessStreamRootFor(taskDir: string): string {
+  const fallback = path.dirname(taskDir);
+  // Fail open, but never SILENTLY. #413 hardened the sibling resolver
+  // (`flowAgentsArtifactRoot`) for exactly this: a fail-open with no diagnostic inside a git
+  // working tree strands the event in a cwd-local store that no other checkout can read, which is
+  // the precise symptom #1020 exists to fix. Reusing that module's own warning rather than
+  // restating it keeps one wording — and one place to change it.
+  try {
+    const sharedRepoRoot = resolveSharedRepoRoot(taskDir);
+    if (!sharedRepoRoot) {
+      warnIfFailingOpenInsideGitTree(taskDir, fallback);
+      return fallback;
+    }
+    return path.resolve(sharedRepoRoot, FLOW_AGENTS_RUNTIME_DIR);
+  } catch {
+    warnIfFailingOpenInsideGitTree(taskDir, fallback);
+    return fallback;
+  }
+}
+/**
  * F1 (#288 fix iteration 1, cr-HIGH fail-open violation): the `livenessEnabled()`
  * guard (and therefore its `loadLivenessPolicyHelper()` module load) must sit
  * INSIDE this function's own fail-open try/catch — previously it sat outside,
@@ -7919,7 +7962,7 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
       process.stderr.write("[liveness] skipped auto-emit: actor unresolved (set FLOW_AGENTS_ACTOR or run inside a supported runtime)\n");
       return;
     }
-    const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
+    const root = livenessStreamRootFor(taskDir);
     const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
     if (kind === "claim") evt.ttlSeconds = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
     appendLivenessEvent(root, evt);
