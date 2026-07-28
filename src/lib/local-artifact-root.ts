@@ -111,13 +111,24 @@ function isInsideGitWorkingTree(cwd: string): boolean {
  * gives an operator the signal needed to pass `--artifact-root` explicitly instead of silently
  * losing coordination visibility.
  */
-function warnIfFailingOpenInsideGitTree(cwd: string, fallbackPath: string): void {
+/**
+ * Default remediation. Accurate for the callers that actually READ `--artifact-root`
+ * (`liveness`, `ensure-session`, `current`); overridden by callers that do not, so the advice a
+ * warning gives is always something the operator can act on at that call site.
+ */
+const ARTIFACT_ROOT_REMEDIATION = "Pass --artifact-root explicitly to fix.";
+
+export function warnIfFailingOpenInsideGitTree(
+  cwd: string,
+  fallbackPath: string,
+  remediation: string = ARTIFACT_ROOT_REMEDIATION,
+): void {
   if (!isInsideGitWorkingTree(cwd)) return;
   process.stderr.write(
     `[artifact-root] WARNING: inside a git working tree but could not resolve the shared repo root ` +
       `(git rev-parse --git-common-dir failed or returned nothing from ${cwd}); falling back to a ` +
       `cwd-local store at ${fallbackPath} — coordination claims may be invisible to other ` +
-      `worktrees/actors. Pass --artifact-root explicitly to fix.\n`
+      `worktrees/actors. ${remediation}\n`
   );
 }
 
