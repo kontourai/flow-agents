@@ -4036,8 +4036,8 @@ if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --observed-command-json "$MULTI_OBS_ONE" --observed-command-json "$MULTI_OBS_TWO" \
   --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
   --evidence-ref-json "$MULTI_REF_ONE" --evidence-ref-json "$MULTI_REF_TWO" \
-  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_TWO]}" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   --timestamp "2026-07-11T11:00:30Z" >"$TMPDIR_EVAL/multi-pass.out" 2>"$TMPDIR_EVAL/multi-pass.err"; then
   if node - "$MULTI_DIR/acceptance.json" "$MULTI_DIR/trust.bundle" <<'NODE'
 const fs = require('node:fs');
@@ -4050,6 +4050,7 @@ const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critiqu
 if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
 const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
 if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(4);
+if (criteria[0].metadata.criterion.id !== 'first-immutable-criterion' || criteria[1].metadata.criterion.id !== 'second-immutable-criterion') process.exit(7);
 for (const claim of criteria) {
   const evidence = bundle.evidence.filter((item) => item.claimId === claim.id);
   const event = bundle.events.find((item) => item.claimId === claim.id && item.status === 'verified');
@@ -4060,7 +4061,7 @@ const snapshot = review?.metadata?.review_target?.workspace_snapshot;
 if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
 NODE
   then
-    _pass "tests-evidence preserves immutable acceptance semantics and maps each criterion to its successful observed command"
+    _pass "tests-evidence canonicalizes reversed criterion input, preserves immutable acceptance semantics, and maps each criterion to its successful observed command"
   else
     _fail "tests-evidence multi-command or review snapshot assertion failed"
   fi

@@ -108,7 +108,7 @@ export interface CritiqueResolutionHistoryRepairAuthorization {
 }
 
 export interface VerificationEvidenceResealAuthorization {
-  schema_version: "1.0";
+  schema_version: "2.0";
   operation: "reseal-verification-evidence";
   project_root: string;
   run_id: string;
@@ -289,6 +289,7 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "acceptance_claim_delta_count", "acceptance_claim_delta_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ] as const;
+const VERIFICATION_RESEAL_AUTHORIZATION_VERSION = "2.0";
 
 export function verificationEvidenceResealAuthorizationPayload(value: Omit<VerificationEvidenceResealAuthorization, "signature">): string {
   return JSON.stringify(value);
@@ -297,17 +298,20 @@ export function verificationEvidenceResealAuthorizationPayload(value: Omit<Verif
 export function buildUnsignedVerificationEvidenceResealAuthorization(
   fields: Omit<VerificationEvidenceResealAuthorization, "schema_version" | "operation" | "signature">,
 ): { unsigned: Omit<VerificationEvidenceResealAuthorization, "signature">; signingPayload: string } {
-  const unsigned = { schema_version: "1.0", operation: "reseal-verification-evidence", ...fields } as const;
+  const unsigned = { schema_version: VERIFICATION_RESEAL_AUTHORIZATION_VERSION, operation: "reseal-verification-evidence", ...fields } as const;
   return { unsigned, signingPayload: verificationEvidenceResealAuthorizationPayload(unsigned) };
 }
 
 export function validateVerificationEvidenceResealAuthorization(value: JsonRecord, expected: {
   projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
 }): VerificationEvidenceResealAuthorization {
+  if (value.schema_version !== VERIFICATION_RESEAL_AUTHORIZATION_VERSION) {
+    throw new Error("verification evidence reseal authorization schema is obsolete or unsupported; regenerate it with workflow reseal-verification-evidence-request");
+  }
   if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS].sort())) {
     throw new Error("verification evidence reseal authorization contains unexpected or missing fields");
   }
-  if (value.schema_version !== "1.0" || value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
+  if (value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
   if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("verification evidence reseal authorization does not bind the canonical project, run, and subject");
   if (typeof value.assignment_actor_key !== "string" || !value.assignment_actor_key
       || typeof value.assignment_actor !== "object" || value.assignment_actor === null || Array.isArray(value.assignment_actor)) {

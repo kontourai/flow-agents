@@ -573,9 +573,11 @@ nonce, request time, and expiry. It also binds the exact target verify expectati
 predecessor/current claim id, status, raw-JSON digest, ordered index, and `replace` delta. The
 authorization binds the count and canonical digest of any coupled acceptance-criterion claim
 replacements. Those coupled replacements are allowed only for `tests-evidence`, must retain the
-same criterion identities and ordered indices, and are independently re-derived by the
-privileged runtime.
-coordinator derives the candidate path from the signed transaction id; the protocol has no
+same ordered indices and immutable claim contracts, including subject, workflow subject,
+criterion ID and description, and are independently re-derived by the privileged runtime.
+Only derived identity, status, evidence, and verification timestamps may change. This
+authorization shape is operation schema `2.0`; older files must be regenerated and have no
+legacy fallback. The coordinator derives the candidate path from the signed transaction id; the protocol has no
 caller-selected candidate path.
 
 The unprivileged mutation worker reopens and validates every exact preimage. Its pure runtime
@@ -633,7 +635,10 @@ reports recovery required rather than presenting the reseal as a complete local
 operation. Authenticated correlation producers hold Flow's canonical per-run
 mutation lock across their complete capture or commit, reject an active recovery
 fence, and reject a projected run head, status, or step that differs from
-canonical Flow.
+canonical Flow. Lifecycle recovery finalization also retains the coordinator
+assignment lock across its protected-input assertion and Flow's durable
+active-to-open publication, so every supported lifecycle writer participates
+in the same external-input guard.
 
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and

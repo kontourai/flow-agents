@@ -171,6 +171,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
   const ledger = [{ event_id: "event-1", event_hash: "b".repeat(64) }];
   const acceptanceDelta = lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(currentBundle.claims, candidateBundle.claims, 1);
   const authorization = {
+    schema_version: "2.0",
     operation: "reseal-verification-evidence",
     run_id: "run-1",
     subject: "work-item:ledger-test",
@@ -213,9 +214,11 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     id: "criterion-old",
     claimType: "workflow.acceptance.criterion",
     subjectType: "flow-step",
+    subjectId: "run-1/AC-1",
+    fieldOrBehavior: "AC-1 contract",
     value: "pending",
     status: "unverified",
-    metadata: { origin: "acceptance", criterion: { id: "AC-1", status: "pending", evidence_refs: [] } },
+    metadata: { origin: "acceptance", workflow_subject_ref: "work-item:ledger-test", criterion: { id: "AC-1", description: "AC-1 contract", status: "pending", evidence_refs: [] } },
   });
   const criteriaCandidate = structuredClone(criteriaCurrent);
   criteriaCandidate.claims[1] = structuredClone(candidateBundle.claims[1]);
@@ -223,9 +226,23 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     id: "criterion-current",
     claimType: "workflow.acceptance.criterion",
     subjectType: "flow-step",
+    subjectId: "run-1/AC-1",
+    fieldOrBehavior: "AC-1 contract",
     value: "pass",
     status: "verified",
-    metadata: { origin: "acceptance", criterion: { id: "AC-1", status: "pass", evidence_refs: [{ kind: "command", excerpt: "npm test" }] } },
+    metadata: {
+      origin: "acceptance",
+      workflow_subject_ref: "work-item:ledger-test",
+      criterion: {
+        id: "AC-1",
+        description: "AC-1 contract",
+        status: "pass",
+        evidence_refs: [{ kind: "command", excerpt: "npm test" }],
+        observed_commands: [{ command: "npm test" }],
+        identity_version: 2,
+        verified_at: "2026-07-24T01:00:00.000Z",
+      },
+    },
   };
   const criteriaDelta = lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(criteriaCurrent.claims, criteriaCandidate.claims, 1);
   const criteriaAuthorization = {
@@ -259,6 +276,19 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     }),
     /acceptance-claim delta does not match/i,
   );
+  for (const [label, mutate] of [
+    ["subject", (claim) => { claim.subjectId = "run-2/AC-1"; }],
+    ["workflow subject", (claim) => { claim.metadata.workflow_subject_ref = "work-item:other"; }],
+    ["contract description", (claim) => { claim.metadata.criterion.description = "changed contract"; }],
+  ]) {
+    const changed = structuredClone(criteriaCandidate);
+    mutate(changed.claims[2]);
+    assert.throws(
+      () => lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(criteriaCurrent.claims, changed.claims, 1),
+      /immutable acceptance criterion contract/i,
+      `${label} mutation must be outside the authorized acceptance delta`,
+    );
+  }
   assert.throws(
     () => lifecycleRuntime.resealVerificationEvidenceTransition({
       current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: ledger, authorization,

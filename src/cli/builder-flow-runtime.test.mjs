@@ -4434,6 +4434,7 @@ test("verification evidence reseal authorization binds every atomic preimage", (
     requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
   };
   const built = builderLifecycleAuthority.buildUnsignedVerificationEvidenceResealAuthorization(fields);
+  assert.equal(built.unsigned.schema_version, "2.0");
   assert.equal(built.unsigned.operation, "reseal-verification-evidence");
   assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
   assert.equal(built.unsigned.candidate_transaction_id, fields.candidate_transaction_id);
@@ -4445,6 +4446,15 @@ test("verification evidence reseal authorization binds every atomic preimage", (
       projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
     }),
     /unexpected or missing fields/i,
+  );
+  assert.throws(
+    () => builderLifecycleAuthority.validateVerificationEvidenceResealAuthorization({
+      ...malformed,
+      schema_version: "1.0",
+    }, {
+      projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
+    }),
+    /regenerate it with workflow reseal-verification-evidence-request/i,
   );
 });
 

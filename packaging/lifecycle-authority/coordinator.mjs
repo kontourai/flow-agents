@@ -94,6 +94,7 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "acceptance_claim_delta_count", "acceptance_claim_delta_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ];
+const VERIFICATION_RESEAL_AUTHORIZATION_VERSION = "2.0";
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 export function canonicalJson(value) {
@@ -225,6 +226,10 @@ function assertPrivilegedAuthorizationShape(authorization) {
         ? HOST_WORKFLOW_AUTHORIZATION_FIELDS
       : null;
   if (!fields) return authorization;
+  if (authorization.operation === "reseal-verification-evidence"
+      && authorization.schema_version !== VERIFICATION_RESEAL_AUTHORIZATION_VERSION) {
+    throw new Error("verification evidence reseal authorization schema is obsolete or unsupported; regenerate it with workflow reseal-verification-evidence-request");
+  }
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
   exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   if (authorization.operation !== "recover-exact-current-completion") {
@@ -651,6 +656,9 @@ async function loadPinnedFlowReducer() {
   for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
+  if (flow.FLOW_RUN_RECOVERY_FINALIZE_BEFORE_OPEN !== "flow.run-recovery.finalize-before-open.v1") {
+    throw new Error("pinned Flow reducer artifact does not support atomic recovery pre-open assertions");
+  }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
   exactObject(identity, pin.reducer, "installed Flow reducer");
   return {
@@ -944,7 +952,7 @@ async function writeVerificationResealFence(paths, recoveryId, status) {
     updated_at: new Date().toISOString(),
   }, paths.projectRoot);
 }
-async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration) {
+async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration, beforeOpen = undefined) {
   if (!/^[a-f0-9]{64}$/.test(String(recoveryId))
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(expectedGeneration))) {
     throw new Error("Flow recovery fence finalization is invalid");
@@ -955,7 +963,7 @@ async function finalizeVerificationResealFence(paths, recoveryId, expectedGenera
     recovery_id: recoveryId,
     expected_generation: expectedGeneration,
     updated_at: new Date().toISOString(),
-  }, paths.projectRoot);
+  }, paths.projectRoot, { beforeOpen });
 }
 function stageVerificationResealImage(file, bytes, mode, image) {
   const stage = verificationResealStageFile(file, image);
@@ -1207,6 +1215,7 @@ function assignmentLockOwner(file) {
 }
 async function acquireCoordinatorAssignmentLock(paths) {
   const lockDir = assignmentLockDir(paths);
+  fs.mkdirSync(path.dirname(lockDir), { recursive: true, mode: 0o700 });
   const ownerFile = path.join(lockDir, "owner.json");
   const token = crypto.randomBytes(16).toString("hex");
   const deadline = Date.now() + 30_000;
@@ -1607,6 +1616,12 @@ async function recoverVerificationResealTransaction(paths, binding) {
   }));
 }
 async function finalizeVerificationResealTransaction(paths, completion) {
+  return withCoordinatorAssignmentLock(
+    paths,
+    () => finalizeVerificationResealTransactionLocked(paths, completion),
+  );
+}
+async function finalizeVerificationResealTransactionLocked(paths, completion) {
   const observedFence = inspectVerificationResealFence(paths);
   if (observedFence.status !== "active") {
     if (fs.existsSync(verificationResealPlanFile(paths))) {
@@ -1637,7 +1652,11 @@ async function finalizeVerificationResealTransaction(paths, completion) {
     }
     return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
   });
-  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation, async () => {
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal pre-open completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal pre-open completion receipt changed");
+    if (classifyVerificationResealArtifacts(paths, finalized.plan) !== "new") throw new Error("verification reseal pre-open postimages changed");
+  });
   cleanupVerificationResealTransaction(paths, finalized.plan);
   return finalized.result;
 }
@@ -1869,6 +1888,15 @@ function assertExactCurrentRecoveryProtectedPreimages(paths, plan) {
     }
   }
 }
+function assertExactCurrentRecoveryFinalProtectedInputs(paths, plan) {
+  const files = exactCurrentRecoveryProtectedFiles(paths);
+  for (const artifact of plan.protected_preimages.filter((candidate) => candidate.id !== "stale-receipt")) {
+    const actual = readVerificationResealArtifact(files.get(artifact.id), `exact-current recovery final protected input ${artifact.id}`).descriptor;
+    if (canonicalJson(actual) !== canonicalJson(artifact.pre)) {
+      throw new Error(`exact-current recovery final protected input ${artifact.id} changed`);
+    }
+  }
+}
 function assertExactCurrentRecoveryStages(paths, plan) {
   const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
   for (const artifact of plan.artifacts) {
@@ -2039,6 +2067,12 @@ function cleanupExactCurrentRecoveryPublication(paths, plan) {
   if (fs.existsSync(exactCurrentRecoveryPlanFile(paths))) fs.unlinkSync(exactCurrentRecoveryPlanFile(paths));
 }
 async function finalizeExactCurrentRecoveryPublication(paths, completion) {
+  return withCoordinatorAssignmentLock(
+    paths,
+    () => finalizeExactCurrentRecoveryPublicationLocked(paths, completion),
+  );
+}
+async function finalizeExactCurrentRecoveryPublicationLocked(paths, completion) {
   const observedFence = inspectVerificationResealFence(paths);
   if (observedFence.status !== "active") {
     if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, finalized: false };
@@ -2074,7 +2108,12 @@ async function finalizeExactCurrentRecoveryPublication(paths, completion) {
     }
     return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
   });
-  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation, async () => {
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery pre-open completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery pre-open completion receipt changed");
+    assertExactCurrentRecoveryFinalProtectedInputs(paths, finalized.plan);
+    if (classifyExactCurrentRecoveryArtifacts(paths, finalized.plan) !== "new") throw new Error("exact-current recovery pre-open postimages changed");
+  });
   cleanupExactCurrentRecoveryPublication(paths, finalized.plan);
   return finalized.result;
 }

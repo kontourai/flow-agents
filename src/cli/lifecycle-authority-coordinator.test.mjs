@@ -725,6 +725,45 @@ test("exact-current recovery fence rejects a normal Flow writer until exact fina
   } finally { fixture.cleanup(); }
 });
 
+test("exact-current recovery keeps its fence active when a protected input changes before finalization opens it", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-final-protected-input");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-final-protected-input" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+    });
+    await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, {
+      request_sha256: fixture.envelope.request_sha256,
+      authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+    });
+    const completion = fixture.signCompletion({
+      schema_version: "1.0",
+      kind: "kontourai.lifecycle-authority.completion",
+      action: "recover-exact-current-completion",
+      request_sha256: prepared.plan.request_sha256,
+      run_id: paths.runId,
+      operation_status: "applied",
+      result_core_sha256: prepared.plan.result_core_sha256,
+      coordinator_runtime_sha256: coordinatorRuntimeSha256(),
+      completed_at: "2026-07-24T00:11:00.000Z",
+    });
+    fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const changedBundle = JSON.parse(fixture.bundleBytes);
+    changedBundle.claims.push({ id: "foreign-direct-mutation" });
+    fs.writeFileSync(fixture.bundleFile, `${JSON.stringify(changedBundle)}\n`, { mode: 0o644 });
+
+    await assert.rejects(
+      fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion),
+      /final protected input trust-bundle changed/,
+    );
+    const fence = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "recovery-fence.json"), "utf8"));
+    assert.equal(fence.status, "active");
+    assert.equal(fence.recovery_id, prepared.plan.recovery_id);
+  } finally { fixture.cleanup(); }
+});
+
 test("exact-current cleanup replay preserves a legitimate Flow write after its matching fence was finalized", async () => {
   const fixture = await createHermeticRecoveryFixture("recovery-cleanup-replay");
   try {
@@ -1344,6 +1383,16 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   assert.match(fenceWriter, /\bwriteRunRecoveryFence\s*\(/, "reseal must use Flow's native generated-fence writer");
   assert.match(fenceWriter, /\bfinalizeRunRecoveryFence\s*\(/, "reseal must use Flow's generation-bound native fence finalizer");
   assert.doesNotMatch(fenceWriter, /\batomicWrite\s*\(/, "reseal must not locally synthesize a Flow recovery fence");
+  for (const [entrypoint, lockedEntrypoint] of [
+    ["finalizeVerificationResealTransaction", "finalizeVerificationResealTransactionLocked"],
+    ["finalizeExactCurrentRecoveryPublication", "finalizeExactCurrentRecoveryPublicationLocked"],
+  ]) {
+    const wrapper = source.slice(
+      source.indexOf(`async function ${entrypoint}`),
+      source.indexOf(`async function ${lockedEntrypoint}`),
+    );
+    assert.match(wrapper, /\bwithCoordinatorAssignmentLock\s*\(/, `${entrypoint} must retain the coordinator guard through Flow finalization`);
+  }
   assert.throws(
     () => assertVerificationResealFlowCapabilities({ withRunMutationLock() {} }),
     /withRunRecoveryLock is unavailable/,

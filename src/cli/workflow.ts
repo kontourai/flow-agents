@@ -1506,6 +1506,31 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
   return 0;
 }
 
+function acceptanceClaimContractProjection(claim: JsonRecord, label: string): JsonRecord {
+  const metadata = claim.metadata as JsonRecord | undefined;
+  const criterion = metadata?.criterion as JsonRecord | undefined;
+  if (claim.claimType !== "workflow.acceptance.criterion"
+      || claim.subjectType !== "flow-step"
+      || metadata?.origin !== "acceptance"
+      || !criterion
+      || typeof criterion.id !== "string"
+      || !criterion.id) {
+    throw new Error(`verification evidence reseal ${label} is not a canonical acceptance criterion claim`);
+  }
+  const projection = structuredClone(claim);
+  delete projection.id;
+  delete projection.value;
+  delete projection.status;
+  delete projection.createdAt;
+  delete projection.updatedAt;
+  const projectedMetadata = projection.metadata as JsonRecord;
+  const projectedCriterion = projectedMetadata.criterion as JsonRecord;
+  for (const field of ["status", "evidence_refs", "observed_commands", "identity_version", "verified_at"]) {
+    delete projectedCriterion[field];
+  }
+  return projection;
+}
+
 function verificationAcceptanceClaimDeltaSummary(currentClaims: JsonRecord[], candidateClaims: JsonRecord[], targetIndex: number): {
   count: number;
   digest: string;
@@ -1530,7 +1555,13 @@ function verificationAcceptanceClaimDeltaSummary(currentClaims: JsonRecord[], ca
         || predecessorMetadata?.origin !== "acceptance"
         || currentMetadata?.origin !== "acceptance"
         || !criterionId
-        || currentCriterion?.id !== criterionId) {
+        || currentCriterion?.id !== criterionId
+        || current.value !== "pass"
+        || current.status !== "verified"
+        || currentCriterion.status !== "pass"
+        || currentCriterion.identity_version !== 2
+        || typeof currentCriterion.verified_at !== "string"
+        || !Number.isFinite(Date.parse(currentCriterion.verified_at))) {
       const predecessorGate = predecessorMetadata?.gate_claim as JsonRecord | undefined;
       const currentGate = currentMetadata?.gate_claim as JsonRecord | undefined;
       throw new Error(
@@ -1538,6 +1569,10 @@ function verificationAcceptanceClaimDeltaSummary(currentClaims: JsonRecord[], ca
         + ` (${String(predecessor.claimType ?? "unknown")}/${String(predecessorMetadata?.origin ?? predecessorGate?.expectation_id ?? "unknown")}`
         + ` -> ${String(current.claimType ?? "unknown")}/${String(currentMetadata?.origin ?? currentGate?.expectation_id ?? "unknown")})`,
       );
+    }
+    if (canonicalSha256(acceptanceClaimContractProjection(predecessor, `criterion ${criterionId} predecessor`))
+        !== canonicalSha256(acceptanceClaimContractProjection(current, `criterion ${criterionId} replacement`))) {
+      throw new Error(`verification evidence reseal writer changed immutable acceptance criterion contract ${criterionId}`);
     }
     deltas.push({
       index,

@@ -3824,16 +3824,18 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
     die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
+  const incomingById = new Map(incoming.map((criterion) => [String(criterion.id), criterion]));
   const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
-  return incoming.map((criterion, index) => {
-    if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
-    if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
-    if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+  return expectedIds.map((id) => {
+    const criterion = incomingById.get(id)!;
+    if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${id} may update only id, status, and evidence_refs`);
+    if (criterion.status !== "pass") die(`criterion ${id} must have status pass for a passing tests-evidence claim`);
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${id} evidence_refs`, projectRoot);
+    if (refs.length === 0) die(`criterion ${id} requires reviewable evidence_refs`);
+    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${id}`);
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
-    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
+    return markCanonicallyObservedCriterion({ ...expectedById.get(id)!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
 }
 

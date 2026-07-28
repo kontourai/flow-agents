@@ -307,7 +307,8 @@ completion. A provider-neutral Flow recovery fence becomes active before the fir
 remains active through durable root completion and exact receipt installation; all canonical
 readers and ordinary Flow mutations fail closed while active. Flow's native writer assigns a
 unique generation and durably publishes it; the dedicated finalizer requires that exact
-generation before reopening. Consumers bind the generation, file bytes, and run-directory
+generation and rechecks the protected postimages under Flow's finalization ticket before
+reopening. Consumers bind the generation, file bytes, and run-directory
 identity across their complete supported reads and reject symlinked fixed Flow ancestry.
 Before root records a nonce or any plan/stage exists, the helper preflights the installed
 mutation lock, recovery lock, active writer, and generation-bound finalizer APIs. Recovery
@@ -328,6 +329,10 @@ After reopening, the signed plan remains the cleanup recovery marker until every
 removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
 nonce/completion and transaction recovery make an exact completed retry a replay.
+
+Verification reseal authorizations use operation schema `2.0`. Earlier authorization files do
+not bind the acceptance-criterion replacement set and are not accepted. Regenerate an in-flight
+request with `workflow reseal-verification-evidence-request`; there is no legacy fallback.
 
 The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, `archive`,
 `resolve-critique`, `repair-critique-resolution-history`, and
