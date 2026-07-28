@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 # test_evidence_command_serialization.sh — kontourai/flow-agents#974
 #
-# The canonical writer executes every evidence --command it is given. It must run them
-# SEQUENTIALLY, never concurrently: evidence commands are test runs against one working
-# tree, so any two that build shared artifacts (every integration eval here starts with
-# `npm run build:bundles`) race and one fails — turning a green tree into an unrecordable
-# claim, which blocks the verify gate and publish.
+# The canonical writer must reject an invalid claim before executing any supplied evidence
+# command. Sequential execution for a valid multi-command tests-evidence claim is covered by
+# test_workflow_sidecar_writer.sh, which has the complete review and acceptance fixture.
 #
-# Proves this behaviourally against the REAL writer (not a reimplementation of its loop):
-# two probe commands each append START/END markers to a shared log with a delay between.
-# Concurrent execution interleaves them (START a, START b, ...); sequential execution
-# completes one before starting the next.
-#
-# Note on the invocation: the writer executes the supplied commands inside
-# normalizeObservedCommands BEFORE it validates the claim shape, so the marker log is
-# written even though this probe's claim is subsequently rejected (repeatable --command is
-# accepted only for tests-evidence claims). The rejection is expected and irrelevant here —
-# the code path under test is the observation loop, which has already run.
+# Proves behaviourally against the real writer that repeatable --command on a non-test gate
+# is rejected without running either command.
 #
 # Deterministic, no model spend, no network, self-cleaning.
 # Usage: bash evals/integration/test_evidence_command_serialization.sh
@@ -62,7 +52,7 @@ ARTIFACT_ROOT="$TMP/.kontourai/flow-agents"
 mkdir -p "$ARTIFACT_ROOT"
 
 echo ""
-echo "--- writer executes evidence commands sequentially, not concurrently ---"
+echo "--- writer rejects invalid evidence-command shape before execution ---"
 
 node "$WRITER" ensure-session --artifact-root "$ARTIFACT_ROOT" --task-slug probe-serialize \
   --summary "evidence command serialization probe" --criterion "c1" --flow-id builder.build \
@@ -75,35 +65,26 @@ else
   tail -3 "$TMP/ensure.log"
 fi
 
-# Drives the real writer. Its observation loop runs both commands before any claim-shape
-# validation, so the marker log reflects the writer's own execution ordering.
+# This is intentionally invalid at the first builder.build gate: repeatable --command is
+# available only to a passing tests-evidence expectation.
 node "$WRITER" record-gate-claim "$ARTIFACT_ROOT/probe-serialize" \
   --status pass --summary "serialization probe" \
   --command "bash $TMP/probe_a.sh" --command "bash $TMP/probe_b.sh" \
   > "$TMP/claim.log" 2>&1 || true
 
-if [[ -s "$MARK" ]]; then
-  _pass "writer executed the supplied evidence commands"
+if [[ ! -s "$MARK" ]]; then
+  _pass "writer did not execute commands from the rejected claim"
 else
-  _fail "writer did not execute the supplied commands (no markers recorded)"
+  _fail "writer executed commands before rejecting the claim"
   tail -3 "$TMP/claim.log"
 fi
 
-ORDER="$(tr '\n' ' ' < "$MARK" | sed 's/  */ /g; s/ *$//')"
-
-if [[ "$ORDER" == "START a END a START b END b" || "$ORDER" == "START b END b START a END a" ]]; then
-  _pass "execution did not overlap (observed order: $ORDER)"
+if grep -q "repeatable --command only for passing tests-evidence claims" "$TMP/claim.log"; then
+  _pass "writer reports the preflight shape rejection"
 else
-  _fail "evidence commands overlapped — the writer ran them concurrently (observed order: $ORDER)"
+  _fail "writer did not report the expected preflight rejection"
+  tail -3 "$TMP/claim.log"
 fi
-
-# The regression signature, independent of which probe happens to run first: a fan-out shows
-# up as two STARTs before either END.
-FIRST_TWO="$(head -2 "$MARK" | tr '\n' ' ' | sed 's/ *$//')"
-case "$FIRST_TWO" in
-  START*START*) _fail "two commands started before either finished — concurrent execution" ;;
-  *)            _pass "no second command started before the first finished" ;;
-esac
 
 echo ""
 echo "==========================="

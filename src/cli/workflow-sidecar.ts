@@ -3386,11 +3386,19 @@ function resolvesExplicitTestTarget(projectRoot: string, token: string): boolean
 }
 
 /** Validate test-evidence command shape without executing it. */
-type TestExecutionProof = {
-  kind: "local-process-exit";
-  runner: string;
-  static_test_units: number;
-};
+type TestExecutionProof =
+  | {
+      kind: "local-process-exit";
+      runner: string;
+      static_test_units: number;
+      count_source?: "static-bound";
+    }
+  | {
+      kind: "local-process-exit";
+      runner: "contained-shell-suite";
+      count_source: "observed-output";
+      suite_file: string;
+    };
 
 function staticTestUnits(file: string, executable: string): number {
   try {
@@ -3410,10 +3418,9 @@ function staticTestUnits(file: string, executable: string): number {
 }
 
 /**
- * Produce evidence from the locally executed command and statically reviewable
- * test units. Runner stdout is deliberately excluded: any executable can print
- * a Vitest/Jest-looking success summary, but it cannot turn a non-test script
- * into a supported test workflow or supply this locally-created proof.
+ * Classify a command without executing it. Most runners require statically
+ * reviewable test units. A direct, contained shell test-suite entrypoint may
+ * instead defer its count to output observed later by the canonical writer.
  */
 export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false): TestExecutionProof | null {
   const normalized = command.trim().replace(/\s+/g, " ");
@@ -3427,7 +3434,11 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
   if (/(?:^|\s)(?:--version|-v|--help|-h)(?:\s|$)/.test(normalized)) return null;
   const tokens = normalized.split(" ").filter(Boolean);
-  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
+  let environmentAssignments = 0;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) {
+    tokens.shift();
+    environmentAssignments += 1;
+  }
   const executable = tokens[0] ?? "";
   const executableName = path.basename(executable);
   if (["npm", "pnpm", "yarn", "bun"].includes(executableName)) {
@@ -3504,13 +3515,28 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     return units > 0 ? { kind: "local-process-exit", runner: "node --test", static_test_units: units } : null;
   }
   const scriptPath = ["bash", "sh", "zsh", "tsx", "ts-node"].includes(executableName) ? tokens[1] : executable;
-  if (!scriptPath || ["-c", "-lc", "-e"].includes(scriptPath) || !hasTestIntent(scriptPath)) return null;
+  if (!scriptPath || scriptPath.startsWith("-") || !hasTestIntent(scriptPath)) return null;
   try {
     const resolved = path.resolve(projectRoot, scriptPath);
     const stat = fs.lstatSync(resolved);
     if (stat.isSymbolicLink() || !stat.isFile() || !pathIsWithinRoot(fs.realpathSync(resolved), fs.realpathSync(projectRoot))) return null;
     const units = staticTestUnits(resolved, executableName);
-    return units > 0 ? { kind: "local-process-exit", runner: executableName, static_test_units: units } : null;
+    if (units > 0) return { kind: "local-process-exit", runner: executableName, static_test_units: units };
+    if (!["bash", "sh", "zsh"].includes(executableName)
+      || executable !== executableName
+      || environmentAssignments > 0
+      || packageScriptBody
+      || /[\r\n]/.test(command)
+      || path.isAbsolute(scriptPath)
+      || scriptPath.split(/[\\/]/).includes("..")
+      || tokens.slice(1).some((token) => !/^[A-Za-z0-9._/:=,+-]+$/.test(token))) return null;
+    const relative = path.relative(path.resolve(projectRoot), resolved);
+    let cursor = path.resolve(projectRoot);
+    for (const component of relative.split(path.sep)) {
+      cursor = path.join(cursor, component);
+      if (fs.lstatSync(cursor).isSymbolicLink()) return null;
+    }
+    return { kind: "local-process-exit", runner: "contained-shell-suite", count_source: "observed-output", suite_file: relative.split(path.sep).join("/") };
   } catch { return null; }
 }
 
@@ -3535,11 +3561,31 @@ export function observedExecutedTestCount(output: string): number {
   return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
 }
 
-export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
-  const proof = testExecutionProof(command, projectRoot, seenScripts);
+function observedContainedSuiteCount(output: string): number {
+  const counts: number[] = [];
+  for (const pattern of [
+    /^\s*(?:#|ℹ)\s*tests\s+(\d+)\s*$/gim,
+    /^\s*1\.\.(\d+)(?:\s|$)/gim,
+    /^\s*Results:\s*(\d+)\/\d+\s+passed,\s*\d+\s+failed\b/gim,
+  ]) {
+    for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
+  }
+  const labeledPasses = output.match(/^[ \t]*(?:\[PASS\]|PASS:)[ \t]+\S.*$/gm)?.length ?? 0;
+  if (labeledPasses > 0) counts.push(labeledPasses);
+  return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
+}
+
+function inferExecutedTestCountFromProof(proof: TestExecutionProof | null, output: string): number {
   if (!proof) return 0;
-  const observed = observedExecutedTestCount(output);
-  return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
+  const observed = proof.count_source === "observed-output"
+    ? observedContainedSuiteCount(output)
+    : observedExecutedTestCount(output);
+  if (observed <= 0) return 0;
+  return proof.count_source === "observed-output" ? observed : Math.min(proof.static_test_units, observed);
+}
+
+export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
+  return inferExecutedTestCountFromProof(testExecutionProof(command, projectRoot, seenScripts), output);
 }
 
 type ObservedCommand = { command: string; exit_code: number; output_sha256: string; test_count?: number; execution_proof?: TestExecutionProof };
@@ -3554,18 +3600,23 @@ function observedCommandReference(commands: readonly string[], command: string, 
 async function normalizeObservedCommands(commands: string[], projectRoot: string, requireTestIntent: boolean, expectedStatus: string): Promise<ObservedCommand[]> {
   if (commands.length === 0) die("record-gate-claim requires at least one --command for observed command evidence");
   if (new Set(commands).size !== commands.length) die("record-gate-claim --command values must be unique");
+  const preflightProofs = new Map<string, TestExecutionProof>();
   for (const command of commands) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
     if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
-    if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+    if (requireTestIntent) {
+      const proof = testExecutionProof(command, projectRoot);
+      if (!proof) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+      preflightProofs.set(command, proof);
+    }
   }
   // Passing test evidence is always executed exactly once by this canonical
   // writer. Caller-supplied observations remain available for non-test
   // attestations but can never stand in for locally observed test execution.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
-    const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
-    return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
+    const proof = preflightProofs.get(command);
+    return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCountFromProof(proof, result.output), execution_proof: proof } : {}) };
   };
   // Sequential, never concurrent: evidence commands are test runs against one working tree, so
   // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
@@ -3811,7 +3862,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string): AnyObj[] {
+function preparePassingCriteria(existing: AnyObj[], raw: string[], commands: readonly string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -3824,17 +3875,37 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
     die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
-  const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
+  const commandNames = new Set(commands);
   return incoming.map((criterion, index) => {
     if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
     if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+    requireObservedCommandRefs(refs, commandNames, `criterion ${ids[index]}`);
+    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs };
+  });
+}
+
+function completePassingCriteria(prepared: AnyObj[], observedCommands: readonly ObservedCommand[], verifiedAt: string): AnyObj[] {
+  return prepared.map((criterion) => {
+    const refs = criterion.evidence_refs as AnyObj[];
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
-    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
+    return markCanonicallyObservedCriterion({ ...criterion, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
+}
+
+function evidenceRefFileDigests(projectRoot: string, refs: readonly AnyObj[]): AnyObj[] {
+  return refs
+    .filter((ref) => typeof ref.file === "string")
+    .map((ref, index) => {
+      const file = validateLocalEvidenceFile(projectRoot, ref.file, `gate evidence snapshot ${index}`);
+      return {
+        file,
+        sha256: createHash("sha256").update(fs.readFileSync(path.join(projectRoot, file))).digest("hex"),
+      };
+    })
+    .sort((left, right) => left.file.localeCompare(right.file));
 }
 
 const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
@@ -4963,32 +5034,81 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
   const observedCommandRaw = opts(p, "observed-command-json");
   if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
-  // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
-  // completePassingCriteria) need a non-null, location-independent project root that never
-  // dies on a non-canonical session. normalizeObservedCommands still requires the strict
-  // canonical root, but only when there are commands to normalize.
-  const projectRoot = narrativeGuardRoot(dir);
-  const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
-  for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
-  const observedCommands = gateCommands.length > 0
-    ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
-    : [];
-  // #634: persist the writer's real executions into the hash-chained command-log so the
-  // capture fold has a deterministic observation even on exit-code-blind hosts.
-  appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
-  const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
-  let outputSha256: string | null = null;
-  // Note: commands have already executed by this point (normalizeObservedCommands above), and
-  // evals/integration/test_evidence_command_serialization.sh relies on that ordering to observe
-  // the writer's real execution interleaving. Moving this shape check earlier is defensible
-  // (do not run commands for a claim we will reject) but will fail that eval — update it in the
-  // same change rather than treating the failure as an unrelated regression.
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
   if (gateCommands.length === 0 && observedCommandRaw.length > 0) die("--observed-command-json requires --command");
   if (!mustRunTests && gateCommand && observedCommandRaw.length === 0) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
     if (!isRunnableCommandText(gateCommand)) die(`record-gate-claim --command "${gateCommand}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
   }
+  // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
+  // preparePassingCriteria) need a non-null, location-independent project root that never
+  // dies on a non-canonical session. normalizeObservedCommands still requires the strict
+  // canonical root, but only when there are commands to normalize.
+  const projectRoot = narrativeGuardRoot(dir);
+  const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
+  for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
+
+  // Validate the complete claim shape before any supplied command can have effects. Execution
+  // output is needed only to finish the observation binding below.
+  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
+  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
+  if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
+  if (mustRunTests) requireObservedCommandRefs(evidenceRefs, new Set(gateCommands), "a passing tests-evidence claim", true);
+
+  const rawCriteria = opts(p, "criterion-json");
+  const existingStateBeforeExecution = mustRunTests ? readBundleState(dir) : null;
+  const preparedCriteriaBeforeExecution = mustRunTests
+    ? preparePassingCriteria(existingStateBeforeExecution!.criteria, rawCriteria, gateCommands, projectRoot)
+    : [];
+  if (mustRunTests) {
+    const liveCritiques = existingStateBeforeExecution!.critiques.filter((critique) => !critique.superseded_by);
+    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
+    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
+      die("a passing tests-evidence claim requires a current clean critique first");
+    }
+    for (const criterion of preparedCriteriaBeforeExecution) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
+  }
+  const evidenceFileDigestsBeforeExecution = evidenceRefFileDigests(
+    projectRoot,
+    [...evidenceRefs, ...preparedCriteriaBeforeExecution.flatMap((criterion) => criterion.evidence_refs as AnyObj[])],
+  );
+
+  const observedCommands = gateCommands.length > 0
+    ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
+    : [];
+
+  // A test command can mutate the same workspace it verifies. Re-read every mutable authority
+  // input and require the reviewed workspace and referenced artifact bytes to remain current
+  // before binding the observation into a claim.
+  const existingState = readBundleState(dir);
+  if (mustRunTests && !isDeepStrictEqual(existingStateBeforeExecution, existingState)) {
+    die("record-gate-claim tests-evidence authority changed during command execution");
+  }
+  const preparedCriteria = mustRunTests
+    ? preparePassingCriteria(existingState.criteria, rawCriteria, gateCommands, projectRoot)
+    : existingState.criteria;
+  if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
+  if (mustRunTests) {
+    const liveCritiques = existingState.critiques.filter((critique) => !critique.superseded_by);
+    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
+    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
+      die("a passing tests-evidence claim requires a current clean critique after command execution");
+    }
+    for (const criterion of preparedCriteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
+  }
+  const evidenceFileDigestsAfterExecution = evidenceRefFileDigests(
+    projectRoot,
+    [...evidenceRefs, ...(mustRunTests ? preparedCriteria : []).flatMap((criterion) => criterion.evidence_refs as AnyObj[])],
+  );
+  if (!isDeepStrictEqual(evidenceFileDigestsBeforeExecution, evidenceFileDigestsAfterExecution)) {
+    die("record-gate-claim evidence artifact changed during command execution");
+  }
+
+  // #634: persist the writer's real executions into the hash-chained command-log so the
+  // capture fold has a deterministic observation even on exit-code-blind hosts.
+  appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
+  const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
+  let outputSha256: string | null = null;
   if (observedCommands.length > 0) outputSha256 = observedCommands[0]!.output_sha256;
 
   // Build a gate-targeted check that matchExpectsEntry maps to the declared claim tuple.
@@ -5014,10 +5134,6 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     check._acceptance_contract = acceptanceContract(criteria);
   }
 
-  // Include structured evidence refs if provided
-  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
-  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
-  if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
   if (mustRunTests) requireObservedCommandRefs(evidenceRefs, observedCommandNames, "a passing tests-evidence claim", true);
 
   if (evidenceRefs.length > 0) {
@@ -5055,18 +5171,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // in the bundle on every gate-claim write (the 21-claims-to-1 wipe). A gate claim against the
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
-  const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
-  if (mustRunTests) {
-    const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
-    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
-    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
-      die("a passing tests-evidence claim requires a current clean critique first");
-    }
-    for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
-  }
-  const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
+  const criteria = mustRunTests ? completePassingCriteria(preparedCriteria, observedCommands, ts) : preparedCriteria;
+  const mergedChecks = mergeChecksById(existingState.checks, [checkNormalized]);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, mergedChecks, criteria, existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
   return 0;
 }
 
