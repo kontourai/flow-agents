@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.5.0](https://github.com/kontourai/flow-agents/compare/v5.4.0...v5.5.0) (2026-07-28)
+
+
+### Features
+
+* **liveness:** add a fleet read surface over liveness lanes ([#1021](https://github.com/kontourai/flow-agents/issues/1021)) ([#1058](https://github.com/kontourai/flow-agents/issues/1058)) ([58c6bd3](https://github.com/kontourai/flow-agents/commit/58c6bd38f50794d4be9b66bdecb8a9a91e586616))
+
+
+### Fixes
+
+* **bundles:** ship codex's missing policy hooks, derive the JSON runtimes from one table ([#1024](https://github.com/kontourai/flow-agents/issues/1024)) ([#1026](https://github.com/kontourai/flow-agents/issues/1026)) ([d8dbba0](https://github.com/kontourai/flow-agents/commit/d8dbba0a16842b704ca4c6ce329de1ebce96f138))
+* **ci:** install the Flow reducer closure from a lockfile so its pin is a control ([#1054](https://github.com/kontourai/flow-agents/issues/1054)) ([#1061](https://github.com/kontourai/flow-agents/issues/1061)) ([f512d63](https://github.com/kontourai/flow-agents/commit/f512d63bcdd253c96e1672ce8099adfbe34724b4))
+* **hooks:** resolve protected paths instead of matching filename substrings ([#682](https://github.com/kontourai/flow-agents/issues/682)) ([#1004](https://github.com/kontourai/flow-agents/issues/1004)) ([78c90e4](https://github.com/kontourai/flow-agents/commit/78c90e4f025d422a36fa0e367a912260f73dd7f3))
+* **liveness:** anchor a submodule on its own working tree, not .git/modules ([#1055](https://github.com/kontourai/flow-agents/issues/1055)) ([#1068](https://github.com/kontourai/flow-agents/issues/1068)) ([64564db](https://github.com/kontourai/flow-agents/commit/64564db90e0142da2154d3a8dba426e4313a341f))
+* **liveness:** anchor lifecycle auto-emit on the shared repo root ([#1020](https://github.com/kontourai/flow-agents/issues/1020)) ([#1053](https://github.com/kontourai/flow-agents/issues/1053)) ([eb2099b](https://github.com/kontourai/flow-agents/commit/eb2099bf25f28b4773eb9e9f54f8d9845284793e))
+* **trust:** make an unmatched delivery/DECLARED marker a distinguishable outcome ([#1011](https://github.com/kontourai/flow-agents/issues/1011)) ([#1015](https://github.com/kontourai/flow-agents/issues/1015)) ([e5f348b](https://github.com/kontourai/flow-agents/commit/e5f348b49f8130f9d452e73b104ba328f9916981))
+* **workflow:** warn at record time when an evidence command cannot reconcile ([#1056](https://github.com/kontourai/flow-agents/issues/1056)) ([#1060](https://github.com/kontourai/flow-agents/issues/1060)) ([2feb899](https://github.com/kontourai/flow-agents/commit/2feb8990d420816cd695f009bb25b5fa7c6a5801))
+
 ## [5.4.0](https://github.com/kontourai/flow-agents/compare/v5.3.0...v5.4.0) (2026-07-26)
 
 
