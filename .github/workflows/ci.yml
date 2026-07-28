@@ -107,6 +107,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite
 
+      - name: Liveness fleet unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize

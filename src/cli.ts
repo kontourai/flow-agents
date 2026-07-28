@@ -7,6 +7,7 @@ import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
+import { main as livenessFleet } from "./cli/liveness-fleet.js";
 import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -47,6 +48,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["liveness-fleet", livenessFleet],
   ["narrative-render", narrativeRender],
   ["narrative-sources", narrativeSources],
   ["init", init],
@@ -81,6 +83,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],
+  ["flow-agents-liveness-fleet", "liveness-fleet"],
   ["flow-agents-narrative-render", "narrative-render"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
