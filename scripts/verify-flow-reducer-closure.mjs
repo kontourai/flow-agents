@@ -3,12 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const modules = path.resolve(process.argv[2] ?? "");
-const pin = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const args = process.argv.slice(2);
+const normalizeIndex = args.indexOf("--normalize-modes");
+const normalizeModes = normalizeIndex !== -1;
+if (normalizeModes) args.splice(normalizeIndex, 1);
+if (args.length !== 2) throw new Error("usage: verify-flow-reducer-closure.mjs [--normalize-modes] <node_modules> <pin.json>");
+const modules = path.resolve(args[0] ?? "");
+const pin = JSON.parse(fs.readFileSync(args[1], "utf8"));
 const rootStat = fs.lstatSync(modules);
 if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
   throw new Error("staged node_modules must be a real directory");
 }
+if (normalizeModes) fs.chmodSync(modules, 0o755);
 
 function packageMetadata(name) {
   const packageRoot = path.join(modules, ...name.split("/"));
@@ -45,6 +51,13 @@ for (const [identity, packageName] of Object.entries(identityPackages)) {
 }
 
 const digest = crypto.createHash("sha256");
+function canonicalMode(stat) {
+  // npm preserves executable classification but applies the caller's umask to
+  // permission bits. Bind the security-relevant classification, not ambient
+  // install policy; the privileged installer applies these canonical modes.
+  if (stat.isDirectory()) return 0o755;
+  return (stat.mode & 0o100) === 0o100 ? 0o755 : 0o644;
+}
 function walk(dir) {
   for (const name of fs.readdirSync(dir).sort()) {
     const entry = path.join(dir, name);
@@ -58,10 +71,12 @@ function walk(dir) {
       }
       digest.update(`symlink\0${relative}\0${target}\0`);
     } else if (stat.isDirectory()) {
-      digest.update(`directory\0${relative}\0${stat.mode & 0o777}\0`);
+      if (normalizeModes) fs.chmodSync(entry, canonicalMode(stat));
+      digest.update(`directory\0${relative}\0${canonicalMode(stat)}\0`);
       walk(entry);
     } else if (stat.isFile()) {
-      digest.update(`file\0${relative}\0${stat.mode & 0o777}\0`);
+      if (normalizeModes) fs.chmodSync(entry, canonicalMode(stat));
+      digest.update(`file\0${relative}\0${canonicalMode(stat)}\0`);
       digest.update(fs.readFileSync(entry));
       digest.update("\0");
     } else {

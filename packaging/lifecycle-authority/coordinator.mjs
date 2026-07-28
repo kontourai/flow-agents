@@ -488,6 +488,13 @@ export async function inProjectTransaction(paths, binding, action) {
     throw error;
   }
 }
+export async function inCanonicalFlowProjectTransaction(paths, binding, action, injectedLock = null) {
+  return withCanonicalFlowRunMutationLock(
+    paths,
+    () => inProjectTransaction(paths, binding, action),
+    injectedLock,
+  );
+}
 function protectedJson(file, label, maxBytes = 4 * 1024 * 1024) {
   return JSON.parse(protectedRegularFile(file, label, maxBytes).toString("utf8"));
 }
@@ -1791,6 +1798,7 @@ function exactCurrentRecoveryProtectedFiles(paths) {
     ["trust-bundle", path.join(paths.sessionDir, "trust.bundle")],
     ["resolution-ledger", resolutionEventLedgerFile(paths)],
     ["stale-receipt", path.join(paths.sessionDir, "lifecycle-authority.completion.json")],
+    ["flow-state", canonicalFlowPaths(paths).state],
   ]);
 }
 export function validateExactCurrentRecoveryPlan(plan) {
@@ -1805,12 +1813,12 @@ export function validateExactCurrentRecoveryPlan(plan) {
       || typeof plan.authorization_key_id !== "string" || !plan.authorization_key_id
       || typeof plan.authorization_nonce !== "string" || !plan.authorization_nonce
       || !record(plan.reducer) || !/^[a-f0-9]{64}$/.test(String(plan.result_core_sha256))
-      || !Array.isArray(plan.protected_preimages) || plan.protected_preimages.length !== 3
+      || !Array.isArray(plan.protected_preimages) || plan.protected_preimages.length !== 4
       || !Array.isArray(plan.artifacts) || plan.artifacts.length !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length) {
     throw new Error("exact-current recovery publication plan identity is invalid");
   }
   const protectedIds = plan.protected_preimages.map((artifact) => artifact?.id);
-  if (canonicalJson(protectedIds) !== canonicalJson(["trust-bundle", "resolution-ledger", "stale-receipt"])) {
+  if (canonicalJson(protectedIds) !== canonicalJson(["trust-bundle", "resolution-ledger", "stale-receipt", "flow-state"])) {
     throw new Error("exact-current recovery plan must bind exactly the protected evidence inputs");
   }
   for (const artifact of plan.protected_preimages) {
@@ -2072,7 +2080,7 @@ async function executeCritiqueMutation(envelope, paths, authorization, completio
       const sessionBundle = reduced.bundle;
       const nextResolutionEvents = reduced.resolution_events;
       const resultCoreSha256 = lifecycleAuthorityResultDigest(sessionBundle, nextResolutionEvents);
-      await inProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
+      await inCanonicalFlowProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
         const currentBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
         if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");

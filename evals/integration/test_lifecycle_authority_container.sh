@@ -62,14 +62,15 @@ sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current 
 # earlier (#1054). Regenerating the digest would only have restarted the countdown.
 #
 # Install from a committed lockfile instead. `flow-reducer-closure/` pins the entire transitive
-# tree, so the staged closure is byte-identical on every machine and the digest means what it says.
+# tree, while the verifier canonicalizes install-time permission masking and
+# still binds each file's executable classification.
 pinned_reducer_root="$(mktemp -d)"
 cp "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package.json" \
    "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package-lock.json" \
    "$pinned_reducer_root/"
 # `npm ci` resolves its manifest from the working directory, not from --prefix (which errors), so
 # this must be a subshell cd rather than the --prefix form the floating install used.
-(cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
+(umask 077 && cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
@@ -992,7 +993,7 @@ if (replay.operation_status !== 'replayed') throw new Error('resolve did not rep
 expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve-copied-path.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /consumed lifecycle authorization record does not match the exact request/);
 expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/copied-project.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /canonical project root/);
 const wrongStepProject = '/tmp/lifecycle-authority-wrong-step', wrongStepSession = path.join(wrongStepProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongStepState = path.join(wrongStepProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'state.json'); const wrongState = JSON.parse(fs.readFileSync(wrongStepState, 'utf8')); wrongState.current_step = 'execute'; fs.writeFileSync(wrongStepState, JSON.stringify(wrongState)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongStepProject, session_dir: wrongStepSession, authorization_file: '/root/lifecycle-authorizations/wrong-step.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
-const wrongFlowProject = '/tmp/lifecycle-authority-wrong-flow', wrongFlowSession = path.join(wrongFlowProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongDefinition = path.join(wrongFlowProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'definition.json'); const foreign = JSON.parse(fs.readFileSync(wrongDefinition, 'utf8')); foreign.id = 'builder.shape'; fs.writeFileSync(wrongDefinition, JSON.stringify(foreign)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongFlowProject, session_dir: wrongFlowSession, authorization_file: '/root/lifecycle-authorizations/wrong-flow.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
+const wrongFlowProject = '/tmp/lifecycle-authority-wrong-flow', wrongFlowSession = path.join(wrongFlowProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongDefinition = path.join(wrongFlowProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'definition.json'); const foreign = JSON.parse(fs.readFileSync(wrongDefinition, 'utf8')); foreign.id = 'builder.shape'; fs.writeFileSync(wrongDefinition, JSON.stringify(foreign)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongFlowProject, session_dir: wrongFlowSession, authorization_file: '/root/lifecycle-authorizations/wrong-flow.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder\.build verify step|flow\.run_location\.no_complete_candidate/);
 const bundle = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'trust.bundle'), 'utf8'));
 const resolutionEvents = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'lifecycle-authority.resolution-events.json'), 'utf8')).events;
 if (resolutionEvents.length !== 1 || !bundle.claims.some((claim) => claim.status === 'superseded' && claim.value === 'fail')) throw new Error('historical critique was not preserved exactly once');

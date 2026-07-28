@@ -442,7 +442,7 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
+The script stages the exact published `@kontourai/flow` 3.11.0 package and the transitive runtime
 dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
@@ -520,10 +520,12 @@ manifest, nonce, request time, and expiry.
 The coordinator repeats those checks while holding its durable per-run and
 Flow mutation locks. Its pure transition returns the current bundle and ledger
 unchanged. Before any Flow postimage write, the unprivileged worker stages the
-fixed five Flow-only old/new images and root signs a request-, authorization-,
+fixed four writable Flow-only old/new images and root signs a request-, authorization-,
 nonce-, reducer-, and result-bound publication plan. The plan binds, but never
-stages or restores, `trust.bundle`, the resolution ledger, and the stale
-receipt. Before the first postimage, the worker activates Flow's native
+stages or restores, `trust.bundle`, the resolution ledger, the stale receipt,
+or canonical Flow state. State remains a protected read-only preimage so a
+writer in the plan-before-fence window invalidates the plan. Before the first
+postimage, the worker activates Flow's native
 generation-bound recovery fence for the signed plan `recovery_id`. The fence
 remains active while root persists completion and nonce state and installs the
 exact receipt, so ordinary Flow writers cannot observe or mutate the

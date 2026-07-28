@@ -64,8 +64,8 @@ case "$action" in
     mkdir -p "$flow_stage"
     cp -R "$flow_node_modules" "$flow_stage/node_modules"
     chown -R root:wheel "$flow_stage" 2>/dev/null || chown -R root:root "$flow_stage"
-    chmod -R go-w "$flow_stage"
-    node "$closure_verifier" "$flow_stage/node_modules" "$reducer_pin_file"
+    chmod 755 "$flow_stage"
+    node "$closure_verifier" --normalize-modes "$flow_stage/node_modules" "$reducer_pin_file"
     if [ -f "$target" ]; then cp -p "$target" "$backup"; fi
     if [ -f "$target_runtime" ]; then cp -p "$target_runtime" "$backup_runtime"; fi
     if [ -f "$target_pin" ]; then cp -p "$target_pin" "$backup_pin"; fi
