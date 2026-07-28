@@ -1167,6 +1167,7 @@ function validateEvidenceArguments(parsed: ReturnType<typeof parseArgs>, project
   const expectation = flagString(parsed.flags, "expectation")!;
   const requestedStatus = flagString(parsed.flags, "status")!;
   assertRunnableEvidenceCommands(commands, projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
+  warnIfEvidenceCommandUnreconcilable(commands, projectRoot);
   return { expectation, requestedStatus, commands, requestSha256: canonicalSha256(evidenceAuthorizationRequest(parsed)) };
 }
 
@@ -1543,6 +1544,7 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     if (operation) throw new Error(`verification evidence reseal cannot satisfy operation-bound expectation ${expectation}`);
     assertExecuteFailureRouteBeforeMutation(repaired.run.definition as JsonRecord, repaired.run.state.current_step, requestedStatus, flagString(parsed.flags, "route-reason"));
     assertRunnableEvidenceCommands(commands, repaired.projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
+    warnIfEvidenceCommandUnreconcilable(commands, repaired.projectRoot);
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
     const bundleFile = path.join(sessionDir, "trust.bundle");
     const bundleBytes = readProtectedRegularFileBytes(bundleFile, "verification evidence reseal current trust bundle", 4 * 1024 * 1024);
@@ -2733,6 +2735,51 @@ function normalizedCritiqueClaims(claims: JsonRecord[]): JsonRecord[] {
   return claims.map((claim) => (claim.metadata as JsonRecord | undefined)?.origin === "critique"
     ? { ...claim, metadata: { ...(claim.metadata as JsonRecord), ...normalized[index++] } }
     : claim);
+}
+
+/**
+ * #1056: warn — at RECORD time — when an evidence command cannot be reconciled against the CI
+ * manifest.
+ *
+ * `publish-delivery` refuses any command claim whose text is not a manifest/required-lane command,
+ * because CI cannot self-declare an arbitrary command. That refusal is correct. What is not correct
+ * is *when* the operator learns about it: by then the run is `completed`, `workflow evidence`
+ * refuses to rebind an earlier step's expectation, and a complete, passing evidence set is stranded
+ * with no supported way to publish it. Recording a `git diff` here is the natural thing to do and
+ * costs nothing until the very last step, where it costs everything.
+ *
+ * So this is advisory only — never a refusal. A command may legitimately be session-local, and
+ * `record-gate-claim` still decides what is admissible. The warning exists so the operator can fix
+ * the claim while the run is still at the step that owns it, rather than discovering it after the
+ * point of no return. Fail-open in every direction: an unresolvable manifest, an unreadable repo,
+ * or a helper that will not load produces silence, never an error.
+ */
+export function warnIfEvidenceCommandUnreconcilable(commands: string[], projectRoot: string): void {
+  if (commands.length === 0) return;
+  let declared: Set<string>;
+  try {
+    const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/trust-reconcile.js");
+    const helper = REQUIRE(helperPath) as {
+      resolveManifest?: (args: { manifest: string | null }, repoRoot: string, canonical: string[]) => { entries?: Array<{ command?: unknown }> };
+      normalizeCmd?: (value: unknown) => string;
+    };
+    if (typeof helper.resolveManifest !== "function" || typeof helper.normalizeCmd !== "function") return;
+    const resolution = helper.resolveManifest({ manifest: null }, projectRoot, []);
+    const entries = Array.isArray(resolution?.entries) ? resolution.entries : [];
+    if (entries.length === 0) return; // nothing declared: cannot judge, so say nothing
+    declared = new Set(entries.map((entry) => helper.normalizeCmd!(entry?.command)).filter(Boolean));
+  } catch {
+    return;
+  }
+  const unreconcilable = commands.filter((command) => !declared.has(command.trim().replace(/\s+/g, " ")));
+  if (unreconcilable.length === 0) return;
+  process.stderr.write(
+    `[workflow evidence] NOTE: ${unreconcilable.length} recorded command(s) are not in the CI reconcile manifest, ` +
+      `so \`workflow publish-delivery\` will refuse this claim later and the run cannot be rebound once it advances:\n` +
+      unreconcilable.map((command) => `  - ${command}\n`).join("") +
+      `Fix it now, while this step still owns the expectation: either drop --command and put the observation in ` +
+      `--summary (correct for a measurement such as a diff), or use the exact verbatim manifest command.\n`
+  );
 }
 
 function assertRunnableEvidenceCommands(commands: string[], projectRoot: string, requiresTestEvidence: boolean): void {
