@@ -4430,7 +4430,7 @@ test("verification evidence reseal authorization binds every atomic preimage", (
     critique_projection_sha256: "b".repeat(64), target_expectation_id: "tests-evidence",
     predecessor_claim_id: "gate-tests", predecessor_claim_status: "disputed", predecessor_claim_sha256: "c".repeat(64), predecessor_claim_index: 4,
     current_claim_id: "gate-tests", current_claim_status: "verified", current_claim_sha256: "d".repeat(64), current_claim_index: 4,
-    claim_delta: "replace", nonce: "reseal-once",
+    claim_delta: "replace", acceptance_claim_delta_count: 0, acceptance_claim_delta_sha256: "e".repeat(64), nonce: "reseal-once",
     requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
   };
   const built = builderLifecycleAuthority.buildUnsignedVerificationEvidenceResealAuthorization(fields);

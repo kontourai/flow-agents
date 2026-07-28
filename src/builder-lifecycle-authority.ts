@@ -141,6 +141,8 @@ export interface VerificationEvidenceResealAuthorization {
   current_claim_sha256: string;
   current_claim_index: number;
   claim_delta: "replace";
+  acceptance_claim_delta_count: number;
+  acceptance_claim_delta_sha256: string;
   nonce: string;
   expires_at: string;
   requested_at: string;
@@ -284,6 +286,7 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
   "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
   "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
+  "acceptance_claim_delta_count", "acceptance_claim_delta_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ] as const;
 
@@ -317,6 +320,7 @@ export function validateVerificationEvidenceResealAuthorization(value: JsonRecor
   }
   if (!/^[a-f0-9]{32}$/.test(String(value.candidate_transaction_id))) throw new Error("verification evidence reseal candidate transaction identity is invalid");
   if (!Number.isSafeInteger(value.preimage_ledger_length) || Number(value.preimage_ledger_length) < 0) throw new Error("verification evidence reseal ledger length is invalid");
+  if (!Number.isSafeInteger(value.acceptance_claim_delta_count) || Number(value.acceptance_claim_delta_count) < 0) throw new Error("verification evidence reseal acceptance claim delta count is invalid");
   for (const field of ["predecessor_claim_index", "current_claim_index"]) {
     if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`verification evidence reseal authorization ${field} is invalid`);
   }

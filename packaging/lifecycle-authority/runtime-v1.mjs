@@ -149,6 +149,47 @@ function gateExpectation(claim) {
     : null;
 }
 
+function acceptanceCriterionId(claim) {
+  return claim?.claimType === "workflow.acceptance.criterion"
+    && claim?.subjectType === "flow-step"
+    && claim?.metadata?.origin === "acceptance"
+    && record(claim.metadata.criterion)
+    && typeof claim.metadata.criterion.id === "string"
+    && claim.metadata.criterion.id
+    ? claim.metadata.criterion.id
+    : null;
+}
+
+export function verificationAcceptanceClaimDeltaSummary(currentClaims, candidateClaims, targetIndex) {
+  if (!Array.isArray(currentClaims) || !Array.isArray(candidateClaims) || currentClaims.length !== candidateClaims.length) {
+    throw new Error("verification evidence reseal acceptance-claim delta requires equal ordered claim sets");
+  }
+  const deltas = [];
+  for (let index = 0; index < currentClaims.length; index += 1) {
+    if (index === targetIndex || JSON.stringify(currentClaims[index]) === JSON.stringify(candidateClaims[index])) continue;
+    const predecessorCriterionId = acceptanceCriterionId(currentClaims[index]);
+    const currentCriterionId = acceptanceCriterionId(candidateClaims[index]);
+    if (!predecessorCriterionId || predecessorCriterionId !== currentCriterionId) {
+      throw new Error("verification evidence reseal changed a claim outside the target expectation and its matching acceptance criteria");
+    }
+    deltas.push({
+      index,
+      criterion_id: predecessorCriterionId,
+      predecessor_claim_sha256: jsonDigest(currentClaims[index]),
+      current_claim_sha256: jsonDigest(candidateClaims[index]),
+    });
+  }
+  if (new Set(deltas.map((delta) => delta.criterion_id)).size !== deltas.length) {
+    throw new Error("verification evidence reseal acceptance-claim delta contains duplicate criterion identities");
+  }
+  const projection = { schema_version: "1.0", kind: "kontourai.verification-acceptance-claim-delta", deltas };
+  return {
+    count: deltas.length,
+    digest: crypto.createHash("sha256").update(canonical(projection)).digest("hex"),
+    projection,
+  };
+}
+
 function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {
   if (!record(currentBundle) || !record(candidateBundle) || !Array.isArray(currentBundle.claims) || !Array.isArray(candidateBundle.claims)) {
     throw new Error("verification evidence reseal requires Trust Bundles with claims");
@@ -198,18 +239,20 @@ function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, 
       || claimDigest(current) !== authorization.current_claim_sha256) {
     throw new Error("verification evidence reseal claim identity, status, or digest does not match the authorized delta");
   }
-  currentBundle.claims.forEach((claim, claimIndex) => {
-    if (claimIndex !== index && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
-      throw new Error("verification evidence reseal changed the complete ordered claim set outside the authorized expectation");
-    }
-  });
+  const related = verificationAcceptanceClaimDeltaSummary(currentBundle.claims, candidateBundle.claims, index);
+  if ((related.count > 0 && authorization.target_expectation_id !== "tests-evidence")
+      || related.count !== authorization.acceptance_claim_delta_count
+      || related.digest !== authorization.acceptance_claim_delta_sha256) {
+    throw new Error("verification evidence reseal acceptance-claim delta does not match the authorized tests-evidence scope");
+  }
 }
 
 /**
  * Pure package-side policy for the privileged evidence reseal. Filesystem,
  * signature, replay, Flow attachment, and completion concerns remain in the
- * coordinator; this transition accepts only the exact authorized bytes and a
- * gate-claim-only Trust Bundle change.
+ * coordinator; this transition accepts only the exact authorized bytes, the
+ * target gate-claim replacement, and its digest-bound acceptance-criterion
+ * replacements for tests-evidence.
  */
 export function resealVerificationEvidenceTransition(input) {
   const {

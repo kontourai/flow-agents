@@ -169,6 +169,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     ],
   };
   const ledger = [{ event_id: "event-1", event_hash: "b".repeat(64) }];
+  const acceptanceDelta = lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(currentBundle.claims, candidateBundle.claims, 1);
   const authorization = {
     operation: "reseal-verification-evidence",
     run_id: "run-1",
@@ -191,6 +192,8 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     current_claim_sha256: rawSha256(Buffer.from(JSON.stringify(candidateBundle.claims[1]))),
     current_claim_index: 1,
     claim_delta: "replace",
+    acceptance_claim_delta_count: acceptanceDelta.count,
+    acceptance_claim_delta_sha256: acceptanceDelta.digest,
   };
   const next = lifecycleRuntime.resealVerificationEvidenceTransition({
     current_bundle: currentBundle,
@@ -204,6 +207,58 @@ test("runtime v1 reseals only verification evidence while preserving critique an
   });
   assert.deepEqual(next.bundle, candidateBundle);
   assert.deepEqual(next.resolution_events, ledger);
+
+  const criteriaCurrent = structuredClone(currentBundle);
+  criteriaCurrent.claims.push({
+    id: "criterion-old",
+    claimType: "workflow.acceptance.criterion",
+    subjectType: "flow-step",
+    value: "pending",
+    status: "unverified",
+    metadata: { origin: "acceptance", criterion: { id: "AC-1", status: "pending", evidence_refs: [] } },
+  });
+  const criteriaCandidate = structuredClone(criteriaCurrent);
+  criteriaCandidate.claims[1] = structuredClone(candidateBundle.claims[1]);
+  criteriaCandidate.claims[2] = {
+    id: "criterion-current",
+    claimType: "workflow.acceptance.criterion",
+    subjectType: "flow-step",
+    value: "pass",
+    status: "verified",
+    metadata: { origin: "acceptance", criterion: { id: "AC-1", status: "pass", evidence_refs: [{ kind: "command", excerpt: "npm test" }] } },
+  };
+  const criteriaDelta = lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(criteriaCurrent.claims, criteriaCandidate.claims, 1);
+  const criteriaAuthorization = {
+    ...authorization,
+    preimage_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(criteriaCurrent))),
+    candidate_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(criteriaCandidate))),
+    acceptance_claim_delta_count: criteriaDelta.count,
+    acceptance_claim_delta_sha256: criteriaDelta.digest,
+  };
+  const criteriaResult = lifecycleRuntime.resealVerificationEvidenceTransition({
+    current_bundle: criteriaCurrent,
+    candidate_bundle: criteriaCandidate,
+    resolution_events: ledger,
+    authorization: criteriaAuthorization,
+    current_bundle_bytes: Buffer.from(JSON.stringify(criteriaCurrent)),
+    candidate_bundle_bytes: Buffer.from(JSON.stringify(criteriaCandidate)),
+    ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+    flow: flowPolicy,
+  });
+  assert.deepEqual(criteriaResult.bundle, criteriaCandidate, "tests-evidence may atomically replace its matching acceptance-criterion claims");
+  assert.throws(
+    () => lifecycleRuntime.resealVerificationEvidenceTransition({
+      current_bundle: criteriaCurrent,
+      candidate_bundle: criteriaCandidate,
+      resolution_events: ledger,
+      authorization: { ...criteriaAuthorization, acceptance_claim_delta_sha256: "f".repeat(64) },
+      current_bundle_bytes: Buffer.from(JSON.stringify(criteriaCurrent)),
+      candidate_bundle_bytes: Buffer.from(JSON.stringify(criteriaCandidate)),
+      ledger_bytes: Buffer.from(JSON.stringify({ schema_version: "1.0", events: ledger })),
+      flow: flowPolicy,
+    }),
+    /acceptance-claim delta does not match/i,
+  );
   assert.throws(
     () => lifecycleRuntime.resealVerificationEvidenceTransition({
       current_bundle: currentBundle, candidate_bundle: candidateBundle, resolution_events: ledger, authorization,

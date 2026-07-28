@@ -91,6 +91,7 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
   "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
   "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
+  "acceptance_claim_delta_count", "acceptance_claim_delta_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ];
 
@@ -458,6 +459,13 @@ export function recoverMatchingTransaction(paths, expectedBinding) {
     : recoverTransaction(paths, expectedBinding);
   if (!recovered) throw new Error("prepared lifecycle transaction changed during recovery");
   return true;
+}
+export async function recoverMatchingTransactionWithCanonicalFlowLock(paths, expectedBinding, injectedLock = null) {
+  return withCanonicalFlowRunMutationLock(
+    paths,
+    () => recoverMatchingTransaction(paths, expectedBinding),
+    injectedLock,
+  );
 }
 function recoverPreparedTransactionForEntry(paths, expectedBinding) {
   const file = transactionJournal(paths);
@@ -1102,7 +1110,9 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
-  const stateBytes = protectedRegularFile(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const statePreimage = readVerificationResealArtifact(files.state, "canonical Flow state");
+  if (statePreimage.bytes === null) throw new Error("canonical Flow state is missing");
+  const stateBytes = statePreimage.bytes;
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const definition = JSON.parse(definitionBytes.toString("utf8"));
   const state = JSON.parse(stateBytes.toString("utf8"));
@@ -1153,7 +1163,13 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
     const bytes = Buffer.from(typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`);
     postimages.push({ file: destination, bytes, label: artifact.path === "evidence/manifest.json" ? "canonical Flow evidence manifest" : "canonical Flow reducer artifact", max_bytes: artifact.path === "evidence/manifest.json" ? MAX_CANONICAL_FLOW_MANIFEST_BYTES : 16 * 1024 * 1024 });
   }
-  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, flow_preimage: flowPreimage, postimages };
+  return {
+    reducer: { ...reduced.identity, artifact_sha256 },
+    attachment_id: attachmentId,
+    flow_preimage: flowPreimage,
+    flow_state_preimage: statePreimage.descriptor,
+    postimages,
+  };
 }
 async function synchronizeCanonicalFlow(paths, bundle, envelope, expectedPreimage = null) {
   const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage, null, "attach-only");
@@ -1882,7 +1898,7 @@ function readSignedExactCurrentRecoveryPlan(paths) {
   if (!record(value.plan)) throw new Error("exact-current recovery signed plan payload is invalid");
   return { capability, plan: validateExactCurrentRecoveryPlan(value.plan) };
 }
-async function prepareExactCurrentRecoveryPublication(envelope, paths, authorization, { lockHeld = false } = {}) {
+async function prepareExactCurrentRecoveryPublication(envelope, paths, authorization, { lockHeld = false, afterSynchronization = null } = {}) {
   const binding = { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) };
   const prepare = async () => {
     const fence = inspectVerificationResealFence(paths);
@@ -1893,6 +1909,7 @@ async function prepareExactCurrentRecoveryPublication(envelope, paths, authoriza
       definition_id: authorization.flow_definition_id, step_id: authorization.flow_step_id, gate_id: authorization.flow_gate_id,
       subject: authorization.subject, run_head: authorization.flow_run_head, manifest_sha256: authorization.flow_manifest_sha256,
     }, binding.authorization_sha256, "attach-only");
+    if (typeof afterSynchronization === "function") await afterSynchronization();
     const artifactFiles = exactCurrentRecoveryArtifactFiles(paths, envelope.request_sha256, binding.authorization_sha256);
     const postimageByFile = new Map(synchronized.postimages.map((postimage) => [postimage.file, postimage.bytes]));
     if (postimageByFile.size !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length
@@ -1912,7 +1929,9 @@ async function prepareExactCurrentRecoveryPublication(envelope, paths, authoriza
     const protectedFiles = exactCurrentRecoveryProtectedFiles(paths);
     const protectedPreimages = [...protectedFiles].map(([id, file]) => ({
       id,
-      pre: readVerificationResealArtifact(file, `exact-current recovery protected input ${id}`).descriptor,
+      pre: id === "flow-state"
+        ? synchronized.flow_state_preimage
+        : readVerificationResealArtifact(file, `exact-current recovery protected input ${id}`).descriptor,
     }));
     const planCore = {
       schema_version: PROTOCOL_VERSION,
@@ -2673,7 +2692,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       if (value.binding.request_sha256 !== sha256(envelope.request) || !/^[a-f0-9]{64}$/.test(String(value.binding.authorization_sha256))) throw new Error("mutation worker rollback binding is invalid");
       const paths = canonicalMutationPaths(value.request);
       if (value.request.action === "reseal-verification-evidence") throw new Error("verification reseal rejects legacy recursive rollback");
-      const rolledBack = recoverMatchingTransaction(paths, value.binding);
+      const rolledBack = await recoverMatchingTransactionWithCanonicalFlowLock(paths, value.binding);
       return { run_id: paths.runId, rolled_back: rolledBack };
     }
     if (payload.kind === "receipt") {

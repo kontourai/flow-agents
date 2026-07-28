@@ -1506,6 +1506,55 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
   return 0;
 }
 
+function verificationAcceptanceClaimDeltaSummary(currentClaims: JsonRecord[], candidateClaims: JsonRecord[], targetIndex: number): {
+  count: number;
+  digest: string;
+} {
+  if (currentClaims.length !== candidateClaims.length) {
+    throw new Error("verification evidence reseal requires equal ordered claim sets");
+  }
+  const deltas: JsonRecord[] = [];
+  for (let index = 0; index < currentClaims.length; index += 1) {
+    if (index === targetIndex || JSON.stringify(currentClaims[index]) === JSON.stringify(candidateClaims[index])) continue;
+    const predecessor = currentClaims[index]!;
+    const current = candidateClaims[index]!;
+    const predecessorMetadata = predecessor.metadata as JsonRecord | undefined;
+    const currentMetadata = current.metadata as JsonRecord | undefined;
+    const predecessorCriterion = predecessorMetadata?.criterion as JsonRecord | undefined;
+    const currentCriterion = currentMetadata?.criterion as JsonRecord | undefined;
+    const criterionId = typeof predecessorCriterion?.id === "string" ? predecessorCriterion.id : "";
+    if (predecessor.claimType !== "workflow.acceptance.criterion"
+        || current.claimType !== "workflow.acceptance.criterion"
+        || predecessor.subjectType !== "flow-step"
+        || current.subjectType !== "flow-step"
+        || predecessorMetadata?.origin !== "acceptance"
+        || currentMetadata?.origin !== "acceptance"
+        || !criterionId
+        || currentCriterion?.id !== criterionId) {
+      const predecessorGate = predecessorMetadata?.gate_claim as JsonRecord | undefined;
+      const currentGate = currentMetadata?.gate_claim as JsonRecord | undefined;
+      throw new Error(
+        `verification evidence reseal writer changed unsupported claim index ${index}`
+        + ` (${String(predecessor.claimType ?? "unknown")}/${String(predecessorMetadata?.origin ?? predecessorGate?.expectation_id ?? "unknown")}`
+        + ` -> ${String(current.claimType ?? "unknown")}/${String(currentMetadata?.origin ?? currentGate?.expectation_id ?? "unknown")})`,
+      );
+    }
+    deltas.push({
+      index,
+      criterion_id: criterionId,
+      predecessor_claim_sha256: createHash("sha256").update(JSON.stringify(predecessor)).digest("hex"),
+      current_claim_sha256: createHash("sha256").update(JSON.stringify(current)).digest("hex"),
+    });
+  }
+  if (new Set(deltas.map((delta) => delta.criterion_id)).size !== deltas.length) {
+    throw new Error("verification evidence reseal writer produced duplicate acceptance criterion deltas");
+  }
+  return {
+    count: deltas.length,
+    digest: canonicalSha256({ schema_version: "1.0", kind: "kontourai.verification-acceptance-claim-delta", deltas }),
+  };
+}
+
 async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   const flags = new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]);
@@ -1585,11 +1634,10 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     }
     const predecessorClaim = predecessorMatches[0]!;
     const currentClaim = currentMatches[0]!;
-    currentClaims.forEach((claim, index) => {
-      if (index !== predecessorClaim.index && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
-        throw new Error("verification evidence reseal writer changed the ordered claim set outside the target expectation");
-      }
-    });
+    const acceptanceClaimDelta = verificationAcceptanceClaimDeltaSummary(currentClaims, candidateClaims, predecessorClaim.index);
+    if (acceptanceClaimDelta.count > 0 && expectation !== "tests-evidence") {
+      throw new Error("verification evidence reseal writer changed acceptance criteria outside a tests-evidence replacement");
+    }
     for (const [label, claim] of [["predecessor", predecessorClaim.claim], ["current", currentClaim.claim]] as const) {
       if (typeof claim.id !== "string" || !claim.id || typeof claim.status !== "string" || !claim.status) {
         throw new Error(`verification evidence reseal ${label} claim identity or status is invalid`);
@@ -1639,6 +1687,8 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       current_claim_sha256: createHash("sha256").update(JSON.stringify(currentClaim.claim)).digest("hex"),
       current_claim_index: currentClaim.index,
       claim_delta: "replace",
+      acceptance_claim_delta_count: acceptanceClaimDelta.count,
+      acceptance_claim_delta_sha256: acceptanceClaimDelta.digest,
       nonce: `verification-reseal-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
       requested_at: now.toISOString(),
       expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),

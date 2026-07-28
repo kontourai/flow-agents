@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inCanonicalFlowProjectTransaction, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inCanonicalFlowProjectTransaction, inProjectTransaction, recoverMatchingTransaction, recoverMatchingTransactionWithCanonicalFlowLock, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
@@ -643,6 +643,41 @@ test("exact-current recovery rejects a Flow state change in the plan-before-fenc
   } finally { fixture.cleanup(); }
 });
 
+test("exact-current recovery plan preserves the authorized reducer state preimage across an intra-preparation mutation", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-intra-preparation-state");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-intra-preparation-state" };
+    const stateFile = path.join(fixture.flowRoot, "state.json");
+    const authorizedStateBytes = fs.readFileSync(stateFile);
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(
+      fixture.envelope,
+      paths,
+      fixture.authorization,
+      {
+        async afterSynchronization() {
+          const changed = JSON.parse(authorizedStateBytes);
+          changed.updated_at = "2026-07-24T00:09:00.000Z";
+          fs.writeFileSync(stateFile, `${JSON.stringify(changed, null, 2)}\n`, { mode: 0o644 });
+        },
+      },
+    );
+    const protectedState = prepared.plan.protected_preimages.find((entry) => entry.id === "flow-state");
+    assert.equal(protectedState.pre.sha256, createHash("sha256").update(authorizedStateBytes).digest("hex"));
+    assert.notEqual(protectedState.pre.sha256, createHash("sha256").update(fs.readFileSync(stateFile)).digest("hex"));
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+    });
+    await assert.rejects(
+      fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, {
+        request_sha256: fixture.envelope.request_sha256,
+        authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+      }),
+      /protected input flow-state changed/,
+    );
+  } finally { fixture.cleanup(); }
+});
+
 test("exact-current recovery fence rejects a normal Flow writer until exact finalization opens it", async () => {
   const fixture = await createHermeticRecoveryFixture("recovery-fence");
   try {
@@ -1203,9 +1238,12 @@ for (const journalStatus of ["prepared", "committed"]) {
       fs.writeFileSync(journalFile, `${JSON.stringify(journal)}\n`);
 
       let childResultPromise;
-      await withCanonicalFlowRunMutationLock(
+      await recoverMatchingTransactionWithCanonicalFlowLock(
         { projectRoot, sessionDir, runId },
-        async () => {
+        binding,
+        async (lockedRunId, lockedProjectRoot, operation) => withRunMutationLock(lockedRunId, lockedProjectRoot, async () => {
+          assert.equal(lockedRunId, runId);
+          assert.equal(lockedProjectRoot, projectRoot);
           const lockRoot = path.join(flowRoot, ".mutation.lock");
           const currentTickets = fs.readdirSync(lockRoot, { withFileTypes: true })
             .filter((entry) => entry.isDirectory() && entry.name.startsWith("ticket-"))
@@ -1247,13 +1285,12 @@ for (const journalStatus of ["prepared", "committed"]) {
           assert.equal(childExited, false, "public pause must wait for recovery to release the native ticket");
 
           fs.writeFileSync(bundleFile, '{"claims":[{"id":"interrupted"}]}\n');
-          assert.equal(recoverMatchingTransaction({ projectRoot, sessionDir, runId }, binding), true);
+          assert.equal(await operation(), true);
           assert.equal(fs.existsSync(currentTicket), true, "current recovery ticket must remain intact");
           assert.equal(fs.existsSync(path.join(flowRoot, legacyObsoleteTicket)), false, "obsolete journal ticket must never be restored");
           assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"baseline"}]}\n');
           assert.equal(JSON.parse(fs.readFileSync(journalFile, "utf8")).status, "rolled_back");
-        },
-        withRunMutationLock,
+        }),
       );
 
       assert.deepEqual(await childResultPromise, { code: 0, stderr: "" });

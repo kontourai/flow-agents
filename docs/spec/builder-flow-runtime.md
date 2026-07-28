@@ -571,13 +571,18 @@ identity, raw ledger digest/length/tail, raw and core current-completion identit
 `verify` step and `verify-gate` identity, Flow run head and raw manifest digest, critique projection digest, project/run/subject,
 nonce, request time, and expiry. It also binds the exact target verify expectation and the
 predecessor/current claim id, status, raw-JSON digest, ordered index, and `replace` delta. The
+authorization binds the count and canonical digest of any coupled acceptance-criterion claim
+replacements. Those coupled replacements are allowed only for `tests-evidence`, must retain the
+same criterion identities and ordered indices, and are independently re-derived by the
+privileged runtime.
 coordinator derives the candidate path from the signed transaction id; the protocol has no
 caller-selected candidate path.
 
 The unprivileged mutation worker reopens and validates every exact preimage. Its pure runtime
 transition requires a byte-semantically identical critique projection and complete ordered claim
-set except for the one authorized in-place target replacement. Unrelated verify claims cannot be
-modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
+set except for the one authorized in-place target replacement and, for `tests-evidence`, its
+digest-bound matching acceptance-criterion replacements. Unrelated verify or acceptance claims
+cannot be modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
 `builder.build` verify gate. The protected policy derives the exact current gate requirements from
 the canonical Flow Definition, requires the target expectation exactly once there, and validates
 both predecessor and replacement `gate_claim` stamps against that requirement's expectation,

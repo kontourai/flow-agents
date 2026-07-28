@@ -286,7 +286,9 @@ does not attach or publish that candidate. Its unsigned authorization binds the 
 candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
 raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
 expiry. It also binds the exact target verify expectation and the predecessor/current claim
-id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+id, status, raw-JSON digest, ordered index, and `replace` delta. For `tests-evidence`, it also binds
+the count and canonical digest of same-identity, in-place acceptance-criterion replacements
+produced by the normal evidence writer. The signed action invokes only the
 fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
 requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
 that does not match the current expectation's step, claim type, and subject type. It acquires
@@ -295,9 +297,10 @@ artifact identities: session bundle, Flow manifest, Flow state, request-keyed st
 JSON report, and Markdown report. The root-signed plan contains no artifact paths; it binds the
 request, authorization key and nonce, pinned reducer identity, result core, and exact pre/post
 presence, mode, size, and digest for each fixed identity. Old and new images are durably staged
-in fixed siblings and reread before publication. It permits
-replacement of only that one ordered target claim; every other claim, including other verify-gate
-claims, must remain byte-identical and in the same order. It requires a byte-identical critique
+in fixed siblings and reread before publication. It permits replacement of only that ordered
+target claim plus the explicitly digest-bound matching acceptance-criterion claims required by
+passing `tests-evidence`; every other claim, including other verify-gate and acceptance claims,
+must remain byte-identical and in the same order. It requires a byte-identical critique
 projection, attaches the candidate to the `builder.build` verify gate, commits the exact candidate
 bytes without appending a sixth ledger event, and installs a new root-signed exact-current
 completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
