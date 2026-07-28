@@ -8,6 +8,7 @@ docker run --rm -i -v "$ROOT_DIR:/src:ro" node:22-bookworm bash -s <<'CONTAINER'
 set -euo pipefail
 apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
+ROOT_DIR=/work
 # Fresh-checkout proof: coordinator sources and focused recovery tests cannot
 # depend on pre-existing runtime artifacts from the developer checkout.
 rm -rf /work/.kontourai
@@ -50,12 +51,25 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure.
-# npm installs the package's declared transitive dependencies; callers do not
-# reproduce Flow's private dependency list.
+# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure, and that pin is
+# a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
+# clock, not a control.
+#
+# It was a clock. This installed with `--no-save` and no lockfile, so `@kontourai/flow` was pinned
+# exactly while its caret-ranged transitive dependencies floated. When `@kontourai/surface`
+# published 2.13.1 the staged closure changed underneath an unchanged pin and every branch in the
+# repository failed this eval at once -- including a re-run of a commit that had been green hours
+# earlier (#1054). Regenerating the digest would only have restarted the countdown.
+#
+# Install from a committed lockfile instead. `flow-reducer-closure/` pins the entire transitive
+# tree, so the staged closure is byte-identical on every machine and the digest means what it says.
 pinned_reducer_root="$(mktemp -d)"
-npm install --prefix "$pinned_reducer_root" --ignore-scripts --no-save --silent \
-  @kontourai/flow@3.9.0
+cp "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package.json" \
+   "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package-lock.json" \
+   "$pinned_reducer_root/"
+# `npm ci` resolves its manifest from the working directory, not from --prefix (which errors), so
+# this must be a subshell cd rather than the --prefix form the floating install used.
+(cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
@@ -68,6 +82,26 @@ cp -a "$pinned_reducer_modules/." "$tampered_modules/"
 printf '\n// tampered fixture\n' >> "$tampered_modules/@kontourai/flow/dist/index.js"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-tampered-reducer.log 2>&1; then
   echo "tampered staged reducer unexpectedly installed" >&2; exit 1
+fi
+optional_tampered_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$optional_tampered_modules/"
+optional_package="$(node - "$optional_tampered_modules/.package-lock.json" <<'NODE'
+const fs = require('node:fs');
+const lock = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).packages;
+const entry = Object.keys(lock).sort().find((name) => name.startsWith('node_modules/') && lock[name]?.optional);
+if (!entry) process.exit(1);
+process.stdout.write(entry.slice('node_modules/'.length));
+NODE
+)"
+printf '\n{"tampered":true}\n' > "$optional_tampered_modules/$optional_package/kontourai-tamper.json"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$optional_tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-optional-tamper.log 2>&1; then
+  echo "tampered optional package unexpectedly installed" >&2; exit 1
+fi
+extra_symlink_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$extra_symlink_modules/"
+ln -s "$extra_symlink_modules/@kontourai/flow" "$extra_symlink_modules/unexpected-flow-link"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$extra_symlink_modules" kontourai-lifecycle-operator >/tmp/rejected-extra-symlink.log 2>&1; then
+  echo "extra staged symlink unexpectedly installed" >&2; exit 1
 fi
 scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$pinned_reducer_modules" kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node

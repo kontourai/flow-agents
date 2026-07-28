@@ -56,39 +56,7 @@ case "$action" in
   install|upgrade)
     test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file"
     test -f "$flow_node_modules/@kontourai/flow/package.json" && test -f "$flow_node_modules/@kontourai/flow/dist/index.js"
-    node - "$flow_node_modules" "$reducer_pin_file" <<'NODE'
-const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
-const modules = path.resolve(process.argv[2]), root = path.resolve(modules, '@kontourai/flow');
-const pin = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-const lock = JSON.parse(fs.readFileSync(path.join(modules, '.package-lock.json'), 'utf8')).packages;
-const seen = new Set(), roots = [];
-function rejectSymlink(file) { const stat = fs.lstatSync(file); if (stat.isSymbolicLink()) throw new Error(`staged Flow dependency must not contain symlinks: ${file}`); }
-function check(packageRoot) {
-  packageRoot = path.resolve(packageRoot); if (seen.has(packageRoot)) return; seen.add(packageRoot); roots.push(packageRoot);
-  if (!packageRoot.startsWith(`${modules}${path.sep}`)) throw new Error('Flow dependency escapes staged node_modules');
-  rejectSymlink(packageRoot); const rel = path.relative(modules, packageRoot).split(path.sep).join('/');
-  const entry = lock[`node_modules/${rel}`]; if (!entry || typeof entry.integrity !== 'string' || !/^sha(?:256|512)-/.test(entry.integrity)) throw new Error(`Flow dependency lacks pinned npm integrity: ${rel}`);
-  const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')); rejectSymlink(path.join(packageRoot, 'package.json'));
-  for (const [name, range] of Object.entries(pkg.dependencies || {})) {
-    if (String(range).startsWith('file:') || String(range).startsWith('link:')) throw new Error(`Flow dependency is not registry-pinned: ${name}`);
-    const found = path.join(modules, name);
-    if (!found) throw new Error(`Flow dependency is missing from staged closure: ${name}`); check(found);
-  }
-}
-check(root);
-const metadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-if (metadata.name !== pin.package || metadata.version !== pin.package_version) process.exit(1);
-const entry = path.join(root, 'dist', 'index.js'); rejectSymlink(entry);
-if (!fs.statSync(entry).isFile()) throw new Error('Flow reducer entry is not a regular file');
-const digest = crypto.createHash('sha256');
-for (const packageRoot of roots.sort()) {
-  const relativeRoot = path.relative(modules, packageRoot).split(path.sep).join('/'), files = [];
-  const walk = (dir) => { for (const name of fs.readdirSync(dir).sort()) { const file = path.join(dir, name); rejectSymlink(file); const stat = fs.statSync(file); if (stat.isDirectory()) walk(file); else if (stat.isFile()) files.push(file); } };
-  walk(packageRoot);
-  for (const file of files) { digest.update(`${relativeRoot}/${path.relative(packageRoot, file).split(path.sep).join('/')}`); digest.update('\0'); digest.update(fs.readFileSync(file)); digest.update('\0'); }
-}
-if (typeof pin.closure_sha256 !== 'string' || digest.digest('hex') !== pin.closure_sha256) throw new Error('staged Flow dependency closure does not match the independently pinned digest');
-NODE
+    node "$closure_verifier" "$flow_node_modules" "$reducer_pin_file"
     mkdir -p "$install_dir"
     chown root:wheel "$install_dir" 2>/dev/null || chown root:root "$install_dir"
     chmod 755 "$install_dir"

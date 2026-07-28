@@ -1,0 +1,12 @@
+{
+  "name": "flow-reducer-closure",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lockfile-bearing manifest for the audited Flow reducer closure (#1054). The lifecycle-authority eval copies these files to an isolated directory and runs npm ci there so the staged closure is byte-identical everywhere. Regenerate the lock in an isolated temporary directory and verify the complete installed tree before updating the independent digest.",
+  "dependencies": {
+    "@kontourai/flow": "3.9.0"
+  },
+  "overrides": {
+    "@kontourai/surface": "2.12.0"
+  }
+}
