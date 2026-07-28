@@ -633,10 +633,20 @@ if [[ -f "$BROKEN_WT/.kontourai/flow-agents/liveness/events.jsonl" ]]; then
 else
   _fail "AC7: a corrupted gitlink dropped the event instead of failing open"
 fi
-if grep -q "WARNING" "$BROKEN_ERR" 2>/dev/null; then
+if grep -q "\[artifact-root\] WARNING: inside a git working tree but could not resolve the shared repo root" "$BROKEN_ERR" 2>/dev/null; then
   _pass "AC7: the corrupted-gitlink fail-open is LOUD, not silent (matches FIX 1/FIX 1c)"
 else
   _fail "AC7: lifecycle fail-open inside a git tree was SILENT -- a stranded store with no diagnostic is the #1020 symptom: $(cat "$BROKEN_ERR" 2>/dev/null)"
+fi
+
+# The warning must also be RARE. A guard that fires on every successful emit trains operators to
+# ignore it, and destroys the signal the case above depends on. Without this assertion a regression
+# that warns unconditionally still passes every other check in this file -- verified by injecting
+# exactly that mutant, which was caught here and nowhere else.
+if grep -q "\[artifact-root\] WARNING" "$TMP/lifecycle.err" 2>/dev/null; then
+  _fail "AC7: a SUCCESSFUL shared-root resolution emitted the fail-open warning -- the diagnostic cries wolf: $(cat "$TMP/lifecycle.err" 2>/dev/null)"
+else
+  _pass "AC7: a successful shared-root resolution emits no fail-open warning (the signal stays rare)"
 fi
 
 # ---- Summary ----

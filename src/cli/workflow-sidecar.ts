@@ -7920,6 +7920,16 @@ function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivene
  * the two agree byte-for-byte (`<repo>/.kontourai/flow-agents/<slug>` → `<repo>/.kontourai/flow-agents`),
  * so this is a no-op for every non-worktree caller.
  */
+/**
+ * The sibling resolvers' default advice — "pass --artifact-root" — is FALSE here. `init-plan` never
+ * reads that flag, and `advance-state`'s copy only steers `writeCurrent`, not this stream root,
+ * which is derived from `taskDir` alone. Telling an operator to pass a flag that cannot affect the
+ * problem being reported is worse than saying nothing: it costs them a debugging cycle and teaches
+ * them the diagnostic is unreliable.
+ */
+const LIFECYCLE_LIVENESS_REMEDIATION =
+  "Repair the repository's git metadata (`git rev-parse --git-common-dir` must succeed from this directory) so lifecycle liveness reaches the shared store; --artifact-root does not affect this path.";
+
 function livenessStreamRootFor(taskDir: string): string {
   const fallback = path.dirname(taskDir);
   // Fail open, but never SILENTLY. #413 hardened the sibling resolver
@@ -7930,12 +7940,12 @@ function livenessStreamRootFor(taskDir: string): string {
   try {
     const sharedRepoRoot = resolveSharedRepoRoot(taskDir);
     if (!sharedRepoRoot) {
-      warnIfFailingOpenInsideGitTree(taskDir, fallback);
+      warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
       return fallback;
     }
     return path.resolve(sharedRepoRoot, FLOW_AGENTS_RUNTIME_DIR);
   } catch {
-    warnIfFailingOpenInsideGitTree(taskDir, fallback);
+    warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
     return fallback;
   }
 }
