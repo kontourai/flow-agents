@@ -38,7 +38,7 @@ test("reference coordinator pins the published Flow reducer identity rather than
     package: "@kontourai/flow",
     package_version: "3.9.0",
     release_commit: "a7c101f",
-    closure_sha256: "244c750836148bd3f5a43681a712f86d8eb24f29238bd44b4fceb9636151f1a1",
+    closure_sha256: "f381f7834158dbf92c8748b886d19a1f9628c23bf8749d3ae24f0edda4f6fa32",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
       version: "1.0.0",

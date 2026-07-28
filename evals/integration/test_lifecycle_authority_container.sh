@@ -8,6 +8,7 @@ docker run --rm -i -v "$ROOT_DIR:/src:ro" node:22-bookworm bash -s <<'CONTAINER'
 set -euo pipefail
 apt-get update -qq && apt-get install -y -qq sudo git >/dev/null
 cp -a /src /work && cd /work
+ROOT_DIR=/work
 # Fresh-checkout proof: coordinator sources and focused recovery tests cannot
 # depend on pre-existing runtime artifacts from the developer checkout.
 rm -rf /work/.kontourai
@@ -50,12 +51,25 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure.
-# npm installs the package's declared transitive dependencies; callers do not
-# reproduce Flow's private dependency list.
+# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure, and that pin is
+# a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
+# clock, not a control.
+#
+# It was a clock. This installed with `--no-save` and no lockfile, so `@kontourai/flow` was pinned
+# exactly while its caret-ranged transitive dependencies floated. When `@kontourai/surface`
+# published 2.13.1 the staged closure changed underneath an unchanged pin and every branch in the
+# repository failed this eval at once -- including a re-run of a commit that had been green hours
+# earlier (#1054). Regenerating the digest would only have restarted the countdown.
+#
+# Install from a committed lockfile instead. `flow-reducer-closure/` pins the entire transitive
+# tree, so the staged closure is byte-identical on every machine and the digest means what it says.
 pinned_reducer_root="$(mktemp -d)"
-npm install --prefix "$pinned_reducer_root" --ignore-scripts --no-save --silent \
-  @kontourai/flow@3.9.0
+cp "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package.json" \
+   "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package-lock.json" \
+   "$pinned_reducer_root/"
+# `npm ci` resolves its manifest from the working directory, not from --prefix (which errors), so
+# this must be a subshell cd rather than the --prefix form the floating install used.
+(cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
