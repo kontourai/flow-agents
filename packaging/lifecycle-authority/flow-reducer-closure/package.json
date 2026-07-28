@@ -2,8 +2,11 @@
   "name": "flow-reducer-closure",
   "version": "1.0.0",
   "private": true,
-  "description": "Lockfile-bearing manifest for the audited Flow reducer closure (#1054). @kontourai/flow is version-pinned but its transitive dependencies are caret ranges, so a lockfile-free install floats them and invalidates the pinned closure digest whenever anything upstream publishes. The lifecycle-authority eval COPIES these two files to a temp dir and runs `npm ci` there, so the staged closure is byte-identical everywhere. DO NOT run npm inside this directory: npm walks up, treats the repository root as the project, and empties the root node_modules. To regenerate the lock, copy both files to a temp dir, run `npm install --package-lock-only` there, and copy package-lock.json back.",
+  "description": "Lockfile-bearing manifest for the audited Flow reducer closure (#1054). The lifecycle-authority eval copies these files to an isolated directory and runs npm ci there so the staged closure is byte-identical everywhere. Regenerate the lock in an isolated temporary directory and verify the complete installed tree before updating the independent digest.",
   "dependencies": {
     "@kontourai/flow": "3.9.0"
+  },
+  "overrides": {
+    "@kontourai/surface": "2.12.0"
   }
 }

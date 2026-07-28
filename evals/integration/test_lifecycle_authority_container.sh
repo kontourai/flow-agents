@@ -83,6 +83,26 @@ printf '\n// tampered fixture\n' >> "$tampered_modules/@kontourai/flow/dist/inde
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-tampered-reducer.log 2>&1; then
   echo "tampered staged reducer unexpectedly installed" >&2; exit 1
 fi
+optional_tampered_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$optional_tampered_modules/"
+optional_package="$(node - "$optional_tampered_modules/.package-lock.json" <<'NODE'
+const fs = require('node:fs');
+const lock = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).packages;
+const entry = Object.keys(lock).sort().find((name) => name.startsWith('node_modules/') && lock[name]?.optional);
+if (!entry) process.exit(1);
+process.stdout.write(entry.slice('node_modules/'.length));
+NODE
+)"
+printf '\n{"tampered":true}\n' > "$optional_tampered_modules/$optional_package/kontourai-tamper.json"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$optional_tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-optional-tamper.log 2>&1; then
+  echo "tampered optional package unexpectedly installed" >&2; exit 1
+fi
+extra_symlink_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$extra_symlink_modules/"
+ln -s "$extra_symlink_modules/@kontourai/flow" "$extra_symlink_modules/unexpected-flow-link"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$extra_symlink_modules" kontourai-lifecycle-operator >/tmp/rejected-extra-symlink.log 2>&1; then
+  echo "extra staged symlink unexpectedly installed" >&2; exit 1
+fi
 scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$pinned_reducer_modules" kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node
 test -f /etc/sudoers.d/kontourai-flow-agents-lifecycle-authority-v1
