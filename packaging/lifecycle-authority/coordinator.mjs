@@ -330,7 +330,6 @@ const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
 export const EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL = "flow-agents.exact-current-recovery-publication.v1";
 export const EXACT_CURRENT_RECOVERY_ARTIFACT_IDS = Object.freeze([
   "flow-manifest",
-  "flow-state",
   "flow-attachment",
   "flow-report-json",
   "flow-report-markdown",
@@ -628,7 +627,7 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.9.0" || pin.release_commit !== "a7c101f" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.11.0" || pin.release_commit !== "e7dacfd" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
@@ -697,7 +696,6 @@ export function exactCurrentRecoveryArtifactFiles(paths, requestSha256, authoriz
   const files = canonicalFlowPaths(paths);
   return new Map([
     ["flow-manifest", files.manifest],
-    ["flow-state", files.state],
     ["flow-attachment", path.join(files.root, "evidence", `lifecycle-authority:${requestSha256}:${authorizationSha256}.json`)],
     ["flow-report-json", files.reportJson],
     ["flow-report-markdown", files.reportMarkdown],
@@ -1092,7 +1090,8 @@ function currentGatePolicy(definition, state) {
 function flowGatePolicyDigest(policy) {
   return sha256(canonicalJson({ gate_id: policy.gate_id, requirements: policy.requirements }));
 }
-async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null, attachmentGeneration = null) {
+async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null, attachmentGeneration = null, evaluationMode = "evaluate") {
+  if (!["evaluate", "attach-only"].includes(evaluationMode)) throw new Error("canonical Flow synchronization evaluation mode is invalid");
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
@@ -1127,9 +1126,18 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   const reduced = flow.reduceTrustAttachment({
     run: { definition, state, manifest }, bundle,
     attachment: { id: attachmentId, gate_id: gateId, attached_at: attachedAt, original_path: path.relative(paths.projectRoot, path.join(paths.sessionDir, "trust.bundle")), stored_path: storedPath, sha256: sha256(bundleBytes), ...(supersede.length ? { supersede } : {}) },
+    evaluation_mode: evaluationMode,
     now: attachedAt, dependencies: flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES
   });
   exactObject(reduced.identity, pin.reducer, "Flow reducer result");
+  if (reduced.evaluation_mode !== evaluationMode) throw new Error("Flow reducer result evaluation mode does not match the requested synchronization mode");
+  const writesState = reduced.write?.artifacts?.some((artifact) => artifact?.path === "state.json") === true;
+  if (evaluationMode === "attach-only") {
+    exactObject(reduced.next_state, state, "attach-only Flow state");
+    if (reduced.evaluation !== null || writesState) throw new Error("attach-only Flow synchronization attempted to evaluate or write canonical state");
+  } else if (!record(reduced.evaluation) || !writesState) {
+    throw new Error("evaluating Flow synchronization omitted evaluation or canonical state");
+  }
   const evidenceFile = path.join(files.root, storedPath);
   if (!fs.readFileSync(files.definition).equals(definitionBytes) || !fs.readFileSync(files.state).equals(stateBytes) || !fs.readFileSync(files.manifest).equals(manifestBytes)) throw new Error("canonical Flow preimage changed during lifecycle trust synchronization");
   const postimages = [{ file: evidenceFile, bytes: bundleBytes, label: "canonical Flow stored trust bundle", max_bytes: 4 * 1024 * 1024 }];
@@ -1141,7 +1149,7 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, flow_preimage: flowPreimage, postimages };
 }
 async function synchronizeCanonicalFlow(paths, bundle, envelope, expectedPreimage = null) {
-  const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage);
+  const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage, null, "attach-only");
   for (const postimage of prepared.postimages) atomicWrite(postimage.file, postimage.bytes, 0o644);
   return prepared;
 }
@@ -1811,7 +1819,7 @@ export function validateExactCurrentRecoveryPlan(plan) {
   }
   const ids = plan.artifacts.map((artifact) => artifact?.id);
   if (canonicalJson(ids) !== canonicalJson(EXACT_CURRENT_RECOVERY_ARTIFACT_IDS)) {
-    throw new Error("exact-current recovery plan must enumerate exactly the fixed five Flow artifact ids");
+    throw new Error("exact-current recovery plan must enumerate exactly the fixed four Flow artifact ids");
   }
   for (const artifact of plan.artifacts) {
     exact(artifact, ["id", "pre", "post"], `exact-current recovery artifact ${artifact?.id}`);
@@ -1876,12 +1884,12 @@ async function prepareExactCurrentRecoveryPublication(envelope, paths, authoriza
     const synchronized = await prepareCanonicalFlowSynchronization(paths, initial.reduced.bundle, envelope, {
       definition_id: authorization.flow_definition_id, step_id: authorization.flow_step_id, gate_id: authorization.flow_gate_id,
       subject: authorization.subject, run_head: authorization.flow_run_head, manifest_sha256: authorization.flow_manifest_sha256,
-    }, binding.authorization_sha256);
+    }, binding.authorization_sha256, "attach-only");
     const artifactFiles = exactCurrentRecoveryArtifactFiles(paths, envelope.request_sha256, binding.authorization_sha256);
     const postimageByFile = new Map(synchronized.postimages.map((postimage) => [postimage.file, postimage.bytes]));
     if (postimageByFile.size !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length
         || [...artifactFiles.values()].some((file) => !postimageByFile.has(file))) {
-      throw new Error("exact-current recovery reducer did not produce exactly the fixed five Flow artifacts");
+      throw new Error("exact-current recovery reducer did not produce exactly the fixed four Flow artifacts");
     }
     const artifacts = [];
     for (const id of EXACT_CURRENT_RECOVERY_ARTIFACT_IDS) {

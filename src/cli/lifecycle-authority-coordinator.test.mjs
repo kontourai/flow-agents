@@ -550,11 +550,17 @@ async function invokeHermeticCoordinator(fixture) {
 test("hermetic privileged coordinator recovers a stale completion without rewriting evidence and replays exactly", async () => {
   const fixture = await createHermeticRecoveryFixture();
   try {
+    const flowStateFile = path.join(fixture.flowRoot, "state.json");
+    const flowStateBefore = fs.readFileSync(flowStateFile);
+    const routeBacksBefore = JSON.parse(flowStateBefore).transitions.filter((entry) => entry.type === "route_back").length;
     const applied = await invokeHermeticCoordinator(fixture);
     assert.equal(applied.result.operation_status, "applied");
     assert.equal(applied.result.completion.action, "recover-exact-current-completion");
     assert.equal(fs.readFileSync(fixture.bundleFile).compare(fixture.bundleBytes), 0, "recovery must retain exact trust.bundle bytes");
     assert.equal(fs.readFileSync(fixture.ledgerFile).compare(fixture.ledgerBytes), 0, "recovery must retain exact ledger bytes");
+    const flowStateAfter = fs.readFileSync(flowStateFile);
+    assert.deepEqual(flowStateAfter, flowStateBefore, "authority-only recovery must not rewrite canonical Flow state");
+    assert.equal(JSON.parse(flowStateAfter).transitions.filter((entry) => entry.type === "route_back").length, routeBacksBefore, "authority-only recovery must not consume route-back budget");
     const manifest = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "evidence", "manifest.json"), "utf8"));
     const attachmentId = `lifecycle-authority:${fixture.envelope.request_sha256}:${fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization))}`;
     assert.equal(manifest.evidence.filter((entry) => entry.id === attachmentId).length, 1, "one request-keyed canonical attachment is published");
