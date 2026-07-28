@@ -514,10 +514,41 @@ function assertedPolicySource(runtime: string, source: string): string {
   return source;
 }
 
+/**
+ * Is `script` actually WIRED to `event` in the generated source, rather than merely mentioned?
+ *
+ * Both source-generated runtimes dispatch policy through one call shape —
+ * `runAdapter(<adapter>, <event>, [detail,] <hookId>, <script>)` — so requiring the event and the
+ * script to appear as quoted arguments of the SAME `runAdapter(` call is a real wiring check.
+ *
+ * A whole-file `includes(script)` was not. It passed on a source with zero handlers whose only
+ * mention of the script sat in a dead comment: an independent review removed opencode's
+ * `config-protection` enforcement, left the name in a comment, and got a clean build plus 22/22
+ * green eval checks with the shipped plugin enforcing nothing. That is #1024's own failure —
+ * a runtime silently shipping without enforcement — one level down, inside the guard meant to
+ * prevent it.
+ *
+ * Binding to the event also stops a hook from silently moving to the wrong lifecycle point, and
+ * separates two hook ids that share one script (`workflow-steering-session` and
+ * `workflow-steering-prompt`) but map to different events — previously one mention satisfied both.
+ */
+function policyHookIsWired(generatedSource: string, event: string, script: string): boolean {
+  const quoted = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(String.raw`runAdapter\s*\([^\n]*['"]${quoted(event)}['"][^\n]*['"]${quoted(script)}['"]`).test(generatedSource);
+}
+
 export function assertGeneratedPolicyCoverage(runtime: string, generatedSource: string): void {
   if (!SOURCE_GENERATED_RUNTIMES.has(runtime)) return;
-  const missing = POLICY_HOOKS.filter((hook) => RUNTIME_POLICY_EVENTS[runtime]?.[hook.id] && !generatedSource.includes(hook.script)).map((hook) => hook.id);
-  if (missing.length) throw new Error(`${runtime}: generated source is missing policy hooks mapped in RUNTIME_POLICY_EVENTS: ${missing.join(", ")}`);
+  const mapped = RUNTIME_POLICY_EVENTS[runtime] ?? {};
+  const missing: string[] = [];
+  for (const hook of POLICY_HOOKS) {
+    const event = mapped[hook.id];
+    if (!event) continue;
+    if (!policyHookIsWired(generatedSource, event, hook.script)) missing.push(`${hook.id} -> ${event}`);
+  }
+  if (missing.length) {
+    throw new Error(`${runtime}: generated source does not wire policy hooks mapped in RUNTIME_POLICY_EVENTS: ${missing.join(", ")}`);
+  }
 }
 
 function buildRuntimeHookMap(

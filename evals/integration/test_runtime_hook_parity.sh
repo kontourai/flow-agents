@@ -81,6 +81,39 @@ else
   _fail "assertGeneratedPolicyCoverage did not refuse a source missing a mapped hook — the guard is inert"
 fi
 
+# The bypass an independent review reproduced: enforcement removed, the script name left behind in
+# a dead comment. A whole-file substring check passed this, so a runtime shipped enforcing nothing
+# behind a fully green evidence trail. Mention is not wiring.
+if node -e '
+  const m = require("./build/src/tools/build-universal-bundles.js");
+  const mentionOnly = "// mentions config-protection.js quality-gate.js evidence-capture.js stop-goal-fit.js workflow-steering.js\nexport default function(){ return {}; }";
+  try { m.assertGeneratedPolicyCoverage("opencode", mentionOnly); process.exit(1); } catch { process.exit(0); }
+' 2>/dev/null; then
+  _pass "a source that only MENTIONS the hook scripts in a comment is refused (mention is not wiring)"
+else
+  _fail "a comment-only mention satisfied the coverage guard — a runtime can ship enforcing nothing"
+fi
+
+# Wiring is bound to the mapped event, so a hook silently relocated to the wrong lifecycle point is
+# refused too. This is also what separates workflow-steering-session from workflow-steering-prompt,
+# which share one script but map to different events.
+if node -e '
+  const m = require("./build/src/tools/build-universal-bundles.js");
+  // Every hook wired, but config-protection moved off tool.execute.before onto the wrong event.
+  const wrongEvent = [
+    "runAdapter(a, \"session.created\", d, \"workflow-steering\", \"workflow-steering.js\");",
+    "runAdapter(a, \"session.idle\", d, \"config-protection\", \"config-protection.js\");",
+    "runAdapter(a, \"tool.execute.after\", d, \"quality-gate\", \"quality-gate.js\");",
+    "runAdapter(a, \"tool.execute.after\", d, \"evidence-capture\", \"evidence-capture.js\");",
+    "runAdapter(a, \"session.idle\", d, \"stop-goal-fit\", \"stop-goal-fit.js\");",
+  ].join("\n");
+  try { m.assertGeneratedPolicyCoverage("opencode", wrongEvent); process.exit(1); } catch { process.exit(0); }
+' 2>/dev/null; then
+  _pass "a hook wired to the WRONG lifecycle event is refused, not counted as covered"
+else
+  _fail "a hook wired to the wrong event satisfied the coverage guard"
+fi
+
 echo ""
 echo "----------------------------------------------"
 if [[ $errors -eq 0 ]]; then
