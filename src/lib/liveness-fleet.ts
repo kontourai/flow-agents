@@ -168,29 +168,25 @@ export function laneState(observation: LaneObservation, nowMs: number): Liveness
  * @param nowMs   clock to evaluate freshness against — injected, never read here
  */
 export function classifyLane(events: LivenessEvent[], nowMs: number, helper: LivenessReadHelper = loadLivenessReadHelper()): Omit<FleetLane, "repoRoot" | "streamPath" | "stranded">[] {
-  // ONE notion of "latest" for the whole function.
+  // APPEND ORDER is authoritative — for the reported fields AND for the state.
   //
-  // `freshHolders` decides release-vs-active by ARRAY ORDER (the order lines were appended to the
-  // stream), while the per-lane fields below want the chronologically newest event. Those two
-  // disagree whenever on-disk order diverges from timestamp order — which is exactly what a
-  // concurrent append produces, since stamp generation and the append are not atomic. When they
-  // disagreed the emitted row contradicted itself: a heartbeat 60s old under a 1800s TTL, reported
-  // `reclaimable`, because a release with an EARLIER stamp happened to sit later in the file.
-  // Reclaiming a live lane is the failure this subsystem exists to prevent.
+  // These must agree, or the row contradicts itself: the first version of this function picked the
+  // latest event by TIMESTAMP while `freshHolders` decided release-vs-active by ARRAY order, and a
+  // release carrying an earlier stamp than a later heartbeat produced `state: "reclaimable"` beside
+  // `ageSeconds: 60, ttlSeconds: 1800`.
   //
-  // Sorting by timestamp first makes the stream's chronology authoritative for both, so `state`
-  // can never contradict the `lastEventAt`/`ageSeconds` reported beside it. The sort is stable on
-  // the original index, so genuinely equal stamps keep file order (the writer's own tie-break).
-  // Unparsable stamps sort oldest: such an event must never win "latest" on the strength of being
-  // unreadable, and `laneState` already refuses to call an unreadable lease `held`.
-  const ordered = events
-    .map((event, index) => ({ event, index, ms: parseStampMs(typeof event?.at === "string" ? event.at : "") }))
-    .sort((a, b) => (a.ms ?? -Infinity) - (b.ms ?? -Infinity) || a.index - b.index)
-    .map((entry) => entry.event);
-
+  // The fix is NOT to sort by timestamp. `at` is written by the client, so trusting it hands the
+  // verdict to whichever machine has the worst clock: a claim stamped in 2075 — from skew or from
+  // spoofing — sorts last forever, and this surface would report `held` for a lane the real gate
+  // (`freshHolders` on raw file order, used by the push-blocking hook) correctly reclaims. A read
+  // surface that disagrees with the gate it describes is worse than one that is merely internally
+  // inconsistent, so append order wins here for the same reason it wins there: it is the one
+  // ordering no writer can forge after the fact.
+  //
+  // Last occurrence per lane therefore IS the latest — the same event `freshHolders` walks to.
   const latest = new Map<string, { subjectId: string; actor: string; at: string; type: string; ttlSeconds: number }>();
 
-  for (const event of ordered) {
+  for (const event of events) {
     if (!event || typeof event !== "object") continue;
     const subjectId = typeof event.subjectId === "string" ? event.subjectId : null;
     const actor = typeof event.actor === "string" ? event.actor : null;
@@ -200,18 +196,18 @@ export function classifyLane(events: LivenessEvent[], nowMs: number, helper: Liv
     const key = `${subjectId}\0${actor}`;
     const prior = latest.get(key);
     const ttlSeconds = typeof event.ttlSeconds === "number" && event.ttlSeconds > 0 ? event.ttlSeconds : prior?.ttlSeconds ?? 1800;
-    // `ordered` is ascending, so the last event seen for a key IS the latest one.
+    // Iterating in append order, the last event seen for a key IS the one freshHolders walks to.
     latest.set(key, { subjectId, actor, at, type: typeof event.type === "string" ? event.type : "", ttlSeconds });
   }
 
   // One freshHolders call per subject; its result is the authority for `held`. It receives the
-  // SAME chronologically ordered array the fields above were derived from — passing the raw
-  // `events` here is what let the two disagree.
+  // SAME append-ordered array the fields above were derived from, and the same one the real gate
+  // sees — so this surface can neither contradict itself nor disagree with the gate it describes.
   const freshByKey = new Set<string>();
   for (const subjectId of new Set([...latest.values()].map((entry) => entry.subjectId))) {
     let holders: FreshHolder[] = [];
     try {
-      holders = helper.freshHolders(ordered, subjectId, null, nowMs) ?? [];
+      holders = helper.freshHolders(events, subjectId, null, nowMs) ?? [];
     } catch {
       holders = [];
     }
@@ -332,27 +328,35 @@ export function readFleet(options: FleetScanOptions = {}): FleetScanResult {
     }
 
     for (const candidate of candidates) {
-      if (!fs.existsSync(candidate.streamPath)) continue;
+      // `lstat`, not `existsSync`: the latter FOLLOWS symlinks, so a dangling link reads as
+      // "nothing was ever here" and is skipped in silence. A broken link is evidence that
+      // something wrote there and the target later vanished — a moved shared root, a rotate race —
+      // which is exactly the kind of gap this function must not paper over.
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(candidate.streamPath);
+      } catch {
+        continue; // genuinely absent; an unclaimed repo is not a warning.
+      }
       // `readLivenessEvents` fails open — it catches every read error and returns [] — which is
       // right for the hot hook path but would make an unreadable stream here indistinguishable
-      // from an empty one. That is the failure this function's contract singles out: a partial
-      // fleet view that LOOKS complete. Probe readability ourselves so the warning is real.
+      // from an empty one. So probe readability ourselves; there is no error to catch later.
+      //
+      // ACCEPTED GAP: this is a check-then-read, so a stream that becomes unreadable AFTER the
+      // probe (deleted, replaced, permissions revoked, rotated by a concurrent writer) still
+      // yields [] with no warning. Closing that needs a read path that reports its own failure,
+      // which means changing the shared helper every hook depends on. Stated rather than implied:
+      // there is deliberately no try/catch around the read below, because it cannot throw.
       try {
-        const stat = fs.statSync(candidate.streamPath);
-        if (!stat.isFile()) throw new Error("not a regular file");
+        if (stat.isSymbolicLink()) fs.statSync(candidate.streamPath); // resolve, or throw
+        else if (!stat.isFile()) throw new Error("not a regular file");
         fs.accessSync(candidate.streamPath, fs.constants.R_OK);
       } catch (err) {
         warnings.push({ root: repoRoot, detail: `unreadable stream ${candidate.streamPath}: ${err instanceof Error ? err.message : String(err)}` });
         continue;
       }
       streams.push(candidate.streamPath);
-      let events: LivenessEvent[] = [];
-      try {
-        events = helper.readLivenessEvents(candidate.streamPath) ?? [];
-      } catch (err) {
-        warnings.push({ root: repoRoot, detail: `unreadable stream ${candidate.streamPath}: ${err instanceof Error ? err.message : String(err)}` });
-        continue;
-      }
+      const events: LivenessEvent[] = helper.readLivenessEvents(candidate.streamPath) ?? [];
       for (const lane of classifyLane(events, nowMs, helper)) {
         lanes.push({ repoRoot, streamPath: candidate.streamPath, stranded: candidate.stranded, ...lane });
       }
