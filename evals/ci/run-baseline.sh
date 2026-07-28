@@ -60,7 +60,7 @@ CHECKS=(
   "Flow Kit repository integration|bash evals/integration/test_flow_kit_repository.sh"
   "Kit provisioning integration|bash evals/integration/test_kit_provisioning.sh"
   "Runtime adapter activation integration|bash evals/integration/test_runtime_adapter_activation.sh"
-  "Runtime hook parity integration|bash evals/integration/test_runtime_hook_parity.sh"
+  "Runtime hook parity integration|node --test evals/integration/runtime-hook-parity.test.mjs"
   "Bundle install integration|bash evals/integration/test_bundle_install.sh"
   "Published Codex install integration|bash evals/integration/test_published_codex_install.sh"
   "Public workflow CLI integration|bash evals/integration/test_public_workflow_cli.sh"
