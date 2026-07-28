@@ -19,6 +19,7 @@ CHECKS=(
   "Capability matrix drift|npm run capability-matrix -- --check"
   "Host conformance drift|npm run host-conformance:check --"
   "Static eval suite|bash evals/run.sh static"
+  "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
   "Evidence command serialization integration|bash evals/integration/test_evidence_command_serialization.sh"
@@ -137,6 +138,7 @@ LANE_SOURCE_AND_STATIC=(
   "Capability matrix drift"
   "Host conformance drift"
   "Static eval suite"
+  "Liveness fleet unit tests"
 )
 
 LANE_WORKFLOW_CONTRACTS=(
