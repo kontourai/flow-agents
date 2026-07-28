@@ -169,6 +169,7 @@ function acceptanceClaimContractProjection(claim, label) {
   delete projection.status;
   delete projection.createdAt;
   delete projection.updatedAt;
+  delete projection.verificationPolicyId;
   for (const field of ["status", "evidence_refs", "observed_commands", "identity_version", "verified_at"]) {
     delete projection.metadata.criterion[field];
   }

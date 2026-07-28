@@ -218,6 +218,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     fieldOrBehavior: "AC-1 contract",
     value: "pending",
     status: "unverified",
+    verificationPolicyId: "acceptance-pending-policy",
     metadata: { origin: "acceptance", workflow_subject_ref: "work-item:ledger-test", criterion: { id: "AC-1", description: "AC-1 contract", status: "pending", evidence_refs: [] } },
   });
   const criteriaCandidate = structuredClone(criteriaCurrent);
@@ -230,6 +231,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     fieldOrBehavior: "AC-1 contract",
     value: "pass",
     status: "verified",
+    verificationPolicyId: "acceptance-test-output-policy",
     metadata: {
       origin: "acceptance",
       workflow_subject_ref: "work-item:ledger-test",
@@ -245,6 +247,7 @@ test("runtime v1 reseals only verification evidence while preserving critique an
     },
   };
   const criteriaDelta = lifecycleRuntime.verificationAcceptanceClaimDeltaSummary(criteriaCurrent.claims, criteriaCandidate.claims, 1);
+  assert.equal(criteriaDelta.count, 1, "a derived evidence-policy change is part of the authorized criterion completion");
   const criteriaAuthorization = {
     ...authorization,
     preimage_bundle_sha256: rawSha256(Buffer.from(JSON.stringify(criteriaCurrent))),

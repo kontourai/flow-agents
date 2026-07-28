@@ -1523,6 +1523,7 @@ function acceptanceClaimContractProjection(claim: JsonRecord, label: string): Js
   delete projection.status;
   delete projection.createdAt;
   delete projection.updatedAt;
+  delete projection.verificationPolicyId;
   const projectedMetadata = projection.metadata as JsonRecord;
   const projectedCriterion = projectedMetadata.criterion as JsonRecord;
   for (const field of ["status", "evidence_refs", "observed_commands", "identity_version", "verified_at"]) {
