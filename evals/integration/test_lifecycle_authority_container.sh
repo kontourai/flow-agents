@@ -72,6 +72,10 @@ cp "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package.json" \
 # this must be a subshell cd rather than the --prefix form the floating install used.
 (umask 077 && cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
+# The documented invocation must prepare this same committed closure itself,
+# rather than accidentally copying the root workspace dependency tree.
+scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs
+node scripts/verify-flow-reducer-closure.mjs /usr/local/libexec/kontourai/flow-reducer/node_modules packaging/lifecycle-authority/flow-reducer-v1.json
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
 ln -s "$pinned_reducer_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"

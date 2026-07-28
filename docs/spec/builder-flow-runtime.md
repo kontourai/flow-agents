@@ -442,8 +442,12 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.12.0 package and the transitive runtime
-dependencies declared by that package
+For install and upgrade, omitting `[node_modules]` makes the script create a temporary
+`npm ci --ignore-scripts` stage from the committed
+`packaging/lifecycle-authority/flow-reducer-closure/package-lock.json`; it never falls back to the
+root workspace dependency tree. An explicit pre-staged closure remains supported for offline
+installation. The script stages the exact published `@kontourai/flow` 3.12.0 package and the
+transitive runtime dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
 pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not

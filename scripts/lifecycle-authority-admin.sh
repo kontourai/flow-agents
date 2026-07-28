@@ -4,7 +4,8 @@ action="${1:-}"
 source_file="${2:-packaging/lifecycle-authority/coordinator.mjs}"
 runtime_file="$(dirname "$source_file")/runtime-v1.mjs"
 reducer_pin_file="$(dirname "$source_file")/flow-reducer-v1.json"
-flow_node_modules="${3:-node_modules}"
+closure_manifest_dir="$(dirname "$source_file")/flow-reducer-closure"
+flow_node_modules="${3:-}"
 closure_verifier="$(dirname "$0")/verify-flow-reducer-closure.mjs"
 operator_group="${4:-kontourai-lifecycle-operator}"
 install_dir="/usr/local/libexec/kontourai"
@@ -19,7 +20,23 @@ backup_flow="$install_dir/flow-reducer.previous"
 sudoers_dir="/etc/sudoers.d"
 sudoers_file="$sudoers_dir/kontourai-flow-agents-lifecycle-authority-v1"
 sudoers_backup="$sudoers_file.previous"
+temporary_closure_root=""
+cleanup() {
+  if [ -n "$temporary_closure_root" ]; then rm -rf "$temporary_closure_root"; fi
+}
+trap cleanup EXIT HUP INT TERM
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
+prepare_default_closure() {
+  test -f "$closure_manifest_dir/package.json" && test -f "$closure_manifest_dir/package-lock.json"
+  temporary_closure_root="$(mktemp -d)"
+  cp "$closure_manifest_dir/package.json" "$closure_manifest_dir/package-lock.json" "$temporary_closure_root/"
+  (
+    umask 077
+    cd "$temporary_closure_root"
+    npm ci --ignore-scripts --silent
+  )
+  flow_node_modules="$temporary_closure_root/node_modules"
+}
 ensure_operator_group() {
   case "$(uname -s)" in
     Darwin)
@@ -55,6 +72,7 @@ install_sudoers_rule() {
 case "$action" in
   install|upgrade)
     test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file"
+    if [ -z "$flow_node_modules" ]; then prepare_default_closure; fi
     test -f "$flow_node_modules/@kontourai/flow/package.json" && test -f "$flow_node_modules/@kontourai/flow/dist/index.js"
     node "$closure_verifier" "$flow_node_modules" "$reducer_pin_file"
     mkdir -p "$install_dir"
