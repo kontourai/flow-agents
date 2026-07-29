@@ -30,7 +30,7 @@
 # Deterministic (a fake flow-agents CLI + a fake npx stand-in on PATH; no real network / npm
 # registry access). Uses ONLY scratch tmp dirs -- never the running machine's durable
 # .kontourai roots or ~/.flow-agents conf.
-# Usage: bash evals/integration/test_console_board_sync.sh
+# Usage: evals/integration/test_console_board_sync.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
