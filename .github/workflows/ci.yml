@@ -489,6 +489,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-outbox-integration
 
+      - name: Console receipt relay integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-receipt-relay-integration
+
       - name: Capability declarations integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
