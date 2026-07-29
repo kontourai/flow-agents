@@ -203,6 +203,7 @@ function isPassingValue(v) {
 // CI reconciler and the stop-goal-fit verifier apply the identical exit-code-mask
 // heuristic — see that module for the rules.
 
+
 /**
  * Default manifest/canonical-command execution timeout (ms). Overridable via
  * TRUST_RECONCILE_COMMAND_TIMEOUT_MS. 10 minutes is comfortably above the slowest
@@ -228,9 +229,38 @@ function resolveCommandTimeoutMs() {
  * Run a single shell command under bash, capturing exit code.
  * @returns {{ cmd, exitCode, passed, timedOut, timeoutMs, stdout, stderr }}
  */
+/**
+ * Every command whose exit code this anchor attests runs under `pipefail`.
+ *
+ * Without it a pipeline reports its RIGHT-most command's status, so `npm test | tail`
+ * exits 0 whenever `tail` succeeds and the anchor attests a PASS it never observed.
+ * That is the shape behind this workspace's repeated real incidents (`git push ... |
+ * tail -1 && echo PUSHED`, `npm run verify:static | tail`).
+ *
+ * `export SHELLOPTS` propagates pipefail into a nested BASH, so `bash -c "false |
+ * tail"` — which defeats any amount of pattern-matching on the command string,
+ * because the pipe lives inside a quoted argument the outer shell never parses as a
+ * pipeline — also reports truthfully.
+ *
+ * Known residual: this does NOT reach a nested `sh -c` on Linux, where /bin/sh is
+ * dash — dash has no pipefail and ignores SHELLOPTS. (On macOS /bin/sh is bash, so
+ * the gap is invisible locally; CI caught an earlier test that asserted otherwise.)
+ * A canonical verify command that wraps itself in `sh -c` is not a shape this repo
+ * uses, and the manifest path is unaffected because CI re-executes the manifest's
+ * own clean command string.
+ *
+ * This is deliberately a structural fix rather than another evasion pattern. ADR 0018
+ * calls pattern lists a losing race; an earlier revision of this change proved the
+ * point by shipping one that `bash -c` defeated in a single token. Making the exit
+ * code CORRECT beats enumerating the ways it can be wrong, and it does not ban a
+ * legitimate `| tail` for log trimming — it just stops that pipe from hiding a
+ * failure.
+ */
+const PIPEFAIL_PREAMBLE = 'set -o pipefail; export SHELLOPTS; ';
+
 function runCommand(cmd, repoRoot) {
   const timeoutMs = resolveCommandTimeoutMs();
-  const result = spawnSync('bash', ['-c', cmd], {
+  const result = spawnSync('bash', ['-c', PIPEFAIL_PREAMBLE + cmd], {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: timeoutMs,
@@ -1345,9 +1375,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   // The canonical verify is the anchor's own truth source — it must not be
   // exit-code-laundered (e.g. `npm run build || true`). If it is, the fresh run
   // would report PASS regardless of the real result. Fail closed.
-  // (Residual: a wrapper script that exits 0 without `||` still evades — covered
-  // by the anti-gaming suite running in a required lane + CODEOWNERS on the verify
-  // config; noted honestly.)
+  // (Residual: a wrapper script that exits 0 without `||` still evades — that is
+  // covered only by CODEOWNERS on the verify config, not by an automated check.)
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
