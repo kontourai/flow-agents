@@ -33,13 +33,25 @@ echo "Building bundles..."
 (cd "$ROOT" && npm run build:bundles >/dev/null 2>&1) || { echo "build failed"; exit 1; }
 
 hook_cmd(){ # $1 settings/hooks json, $2 event, $3 script needle
+  # #1098: Claude entries are exec form (command "node" + args carrying the
+  # ${CLAUDE_PROJECT_DIR} placeholder), so the needle lives in args. This
+  # harness executes via `bash -c` with CLAUDE_PROJECT_DIR exported, so
+  # rendering exec form as `node "arg" ...` reproduces the host's placeholder
+  # substitution through ordinary shell expansion. Codex/legacy shell-form
+  # strings pass through unchanged.
   python3 - "$1" "$2" "$3" <<'PY'
 import json,sys
 s=json.load(open(sys.argv[1]))
 for g in s.get("hooks",{}).get(sys.argv[2],[]):
     for h in g["hooks"]:
-        if sys.argv[3] in h["command"]:
-            print(h["command"]); sys.exit(0)
+        args=[str(a) for a in h.get("args") or []]
+        hay=" ".join([h.get("command","")]+args)
+        if sys.argv[3] in hay:
+            if args:
+                print(h["command"]+" "+" ".join('"'+a+'"' for a in args))
+            else:
+                print(h["command"])
+            sys.exit(0)
 sys.exit(0)
 PY
 }
