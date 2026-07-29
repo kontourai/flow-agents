@@ -17,9 +17,46 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { isHookEnabled } = require('./lib/hook-flags');
+const { buildPolicyRecord, writePolicyRecord } = require('./lib/policy-record');
+const { flowAgentsArtifactRoot } = require('./lib/local-artifact-paths');
 
 const MAX_STDIN = 1024 * 1024;
 const CONTRACT_VERSION = '1.0';
+
+
+/**
+ * #1025: emit one `kontour.console.policy` record for this hook's decision.
+ *
+ * Placed here, at the runtime-neutral runner, rather than in the four per-runtime adapters: this is
+ * the single path all of them funnel through, and the only place the decision exists as a value.
+ * Wrapped whole and swallowed — a telemetry concern must never be able to change a gate's verdict,
+ * so this returns the exit code it was handed, always.
+ *
+ * @param {string} hookId
+ * @param {string} raw       the hook's raw stdin payload (host-native JSON)
+ * @param {number} exitCode
+ * @returns {number} exitCode, unchanged
+ */
+function recordPolicyDecision(hookId, raw, exitCode) {
+  try {
+    let payload = {};
+    try { payload = JSON.parse(raw) || {}; } catch { /* host payload may not be JSON; record what we can */ }
+    const record = buildPolicyRecord({
+      hookId,
+      event: typeof payload.hook_event_name === 'string' ? payload.hook_event_name : null,
+      runtime: typeof payload.runtime === 'string' ? payload.runtime : (process.env.FLOW_AGENTS_RUNTIME || null),
+      exitCode,
+      at: new Date().toISOString(),
+      toolName: typeof payload.tool_name === 'string' ? payload.tool_name : null,
+      sessionId: typeof payload.session_id === 'string' ? payload.session_id : null,
+      cwd: typeof payload.cwd === 'string' ? payload.cwd : process.cwd(),
+    });
+    writePolicyRecord(flowAgentsArtifactRoot(process.cwd()), record);
+  } catch {
+    /* best-effort: never let recording affect the decision */
+  }
+  return exitCode;
+}
 
 function readStdinRaw() {
   return new Promise(resolve => {
@@ -106,7 +143,7 @@ async function main() {
       const output = (outputOrPromise && typeof outputOrPromise.then === 'function')
         ? await outputOrPromise
         : outputOrPromise;
-      process.exit(emitHookResult(raw, output));
+      process.exit(recordPolicyDecision(hookId, raw, emitHookResult(raw, output)));
     } catch (e) {
       process.stderr.write(`[Hook] run() error for ${hookId}: ${e.message}\n`);
       process.stdout.write(raw);
@@ -133,7 +170,7 @@ async function main() {
     process.exit(1);
   }
 
-  process.exit(Number.isInteger(result.status) ? result.status : 0);
+  process.exit(recordPolicyDecision(hookId, raw, Number.isInteger(result.status) ? result.status : 0));
 }
 
 // Additive: --contract-version prints the engine contract version and exits.

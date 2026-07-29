@@ -3,6 +3,8 @@ import * as http from "node:http";
 import * as https from "node:https";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { telemetryDataDir as defaultTelemetryDataDir } from "../lib/local-artifact-root.js";
 
@@ -173,6 +175,34 @@ function isLocalHostname(hostname: string): boolean {
 // explicitly out-of-scope gap; see install-flow-foundations plan Thread C).
 // Symlink-then-existence guard order mirrors console-learning-projection.ts
 // and workflow-sidecar.ts's existing lstatSync-before-statSync precedent.
+/**
+ * #1025 follow-up: report the console conf the RUNTIME actually resolves, not just the shipped
+ * default this doctor used to read.
+ *
+ * The prior behavior was a documented accepted gap ("this doctor still reads the shipped
+ * scripts/telemetry/telemetry.conf default for its own report"), and it turned out to be the
+ * expensive kind: an operator with a fully configured hosted console at
+ * ~/.flow-agents/telemetry-console.conf was told "Console endpoint: not configured", which is the
+ * single most misleading thing this command can say. A diagnostic that disagrees with the runtime
+ * sends every investigation down the wrong path — the whole point of a doctor is to be the
+ * authority you consult INSTEAD of eyeballing a conf file.
+ *
+ * Resolution and relay enablement are delegated to scripts/hooks/lib/record-relay.js — the same
+ * module the runtime consults — rather than mirrored here, because a third copy of this logic is
+ * exactly how the disagreement arose in the first place.
+ */
+function loadRecordRelay(): { resolveConsoleConfPath: (env: NodeJS.ProcessEnv) => string | null; resolveRelayEnabled: (family: string, env: NodeJS.ProcessEnv) => boolean } | null {
+  try {
+    const req = createRequire(import.meta.url);
+    return req(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/record-relay.js"));
+  } catch {
+    return null;
+  }
+}
+
+/** Record families with a conf-driven console relay, reported so "is my data flowing" has one answer. */
+const RELAY_FAMILIES = ["liveness", "policy", "economics"];
+
 function isConfTrusted(file: string): boolean {
   try {
     if (fs.lstatSync(file).isSymbolicLink()) return false;
@@ -269,7 +299,34 @@ function printText(report: DoctorReport): void {
   console.log(`Telemetry enabled: ${report.telemetry.enabled}`);
   console.log(`Local telemetry dir: ${report.telemetry.dataDir}`);
   console.log(`Active sinks: ${report.telemetry.activeSinks.length ? report.telemetry.activeSinks.join(", ") : "none"}`);
-  console.log(`Console endpoint: ${report.console.endpointUrl || "not configured"}`);
+  // Fall back to the runtime-resolved conf so this line can never contradict the two below it.
+  // "not configured" printed directly above a resolved conf path is worse than the original gap.
+  const relay = loadRecordRelay();
+  const resolvedConf = relay ? relay.resolveConsoleConfPath(process.env) : null;
+  let effectiveEndpoint = report.console.endpointUrl;
+  if (!effectiveEndpoint && resolvedConf) {
+    try {
+      for (const raw of fs.readFileSync(resolvedConf, "utf8").split("\n")) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        const eq = line.indexOf("=");
+        if (eq < 0) continue;
+        const key = line.slice(0, eq).trim();
+        if (key === "console_telemetry_url" || key === "console_telemetry_endpoint_url" || key === "console_url") {
+          const value = line.slice(eq + 1).trim();
+          if (value) { effectiveEndpoint = safeReportUrl(value) ?? value; break; }
+        }
+      }
+    } catch { /* best-effort: fall through to "not configured" */ }
+  }
+  console.log(`Console endpoint: ${effectiveEndpoint || "not configured"}`);
+  if (relay) {
+    console.log(`Console conf (runtime-resolved): ${resolvedConf ?? "none found"}`);
+    const states = RELAY_FAMILIES.map((family) => `${family}=${relay.resolveRelayEnabled(family, process.env) ? "on" : "off"}`);
+    console.log(`Record relays: ${states.join(", ")}`);
+  } else {
+    console.log("Console conf (runtime-resolved): unavailable (record-relay helper not found)");
+  }
   console.log(`Console reachability: ${report.console.reachability.checked ? (report.console.reachability.ok ? "ok" : `failed (${report.console.reachability.error ?? report.console.reachability.statusCode ?? "unknown"})`) : "not checked"}`);
   for (const warning of report.warnings) console.log(`Warning: ${warning}`);
 }

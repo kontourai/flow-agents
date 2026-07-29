@@ -106,6 +106,8 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/liveness-policy.js", { category: "shared hook library", requiredNeedles: ["isLivenessEnabled", "resolveTtlSeconds"] }],
   ["scripts/hooks/lib/liveness-read.js", { category: "shared hook library", requiredNeedles: ["freshHolders", "readLivenessEvents"] }],
   ["scripts/hooks/lib/liveness-write.js", { category: "shared hook library", requiredNeedles: ["appendLivenessEvent", "livenessStreamFile"] }],
+  ["scripts/hooks/lib/policy-record.js", { category: "shared hook library", requiredNeedles: ["buildPolicyRecord", "writePolicyRecord"] }],
+  ["scripts/hooks/lib/record-relay.js", { category: "shared hook library", requiredNeedles: ["resolveRelayEnabled", "relayRecord"] }],
   ["scripts/hooks/lib/local-artifact-paths.js", { category: "shared hook library", requiredNeedles: ["flowAgentsArtifactRoot", "defaultArtifactRootForRead"] }],
   ["scripts/hooks/lib/patterns.sh", { category: "shared hook library", requiredNeedles: ["_detect_secrets"] }],
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
