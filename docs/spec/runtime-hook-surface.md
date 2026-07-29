@@ -495,15 +495,27 @@ Harness adapters are file sets that the `npm run build:bundles` command generate
    - Emits a valid host-native hook response (telemetry is always non-blocking).
 4. **Install script** — A shell script that places the generated files at the host-expected paths and applies any path token substitution (e.g., `__KIRO_PACKAGE_ROOT__`).
 
-**Generated hook command pattern** (from `src/tools/build-universal-bundles.ts` lines 198–242):
+**Generated hook command pattern** (from `src/tools/build-universal-bundles.ts`):
 
-```
+There is no shell in the hook path (#1098: `bash` on stock Windows resolves to the WSL2 shim, so shell-wrapped hooks exited 127 and the policy layer silently never fired).
+
+Claude Code uses exec form — the host spawns `command` directly with `args` as the argument vector and substitutes `${CLAUDE_PROJECT_DIR}` into each element (requires Claude Code >= 2.1.139):
+
+```json
 # Telemetry (fires first, always non-blocking):
-bash -lc 'root="${<HOST_ROOT_VAR>:-$(pwd)}"; node "$root/scripts/hooks/<host>-telemetry-hook.js" <EventName> dev'
+{ "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/claude-telemetry-hook.js", "<EventName>", "dev"] }
 
 # Policy (fires second, may block on preToolUse):
-bash -lc 'root="${<HOST_ROOT_VAR>:-$(pwd)}"; node "$root/scripts/hooks/<host>-hook-adapter.js" <EventName> <hook-id> <script.js> default'
+{ "command": "node", "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/claude-hook-adapter.js", "<EventName>", "<hook-id>", "<script.js>", "default"] }
 ```
+
+Codex hooks carry a single command string, so the multi-location root search (CODEX_HOME → git toplevel → cwd → `~/.codex`) runs as a `node -e` inline resolver that then `require()`s the hook script in-process — shell-neutral (works identically under sh, Git Bash, PowerShell, and cmd):
+
+```
+node -e "<inline root resolver>" scripts/hooks/codex-hook-adapter.js <hook-id> <script.js> default
+```
+
+Environment defaults that used to ride as shell prefixes (`FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_MODE:-block}"`) now travel as `--env-default=KEY=VALUE` adapter arguments, applied to the child environment only when KEY is unset (operator override always wins). The codex PermissionRequest telemetry command still invokes the bash telemetry pipeline directly and remains a disclosed Windows gap until `scripts/telemetry/telemetry.sh` has a node port.
 
 **Timeout defaults**: Telemetry hooks default to 10 seconds. Policy hooks default to 30 seconds. Override via `FLOW_AGENTS_<RUNTIME>_HOOK_TIMEOUT_MS` and `FLOW_AGENTS_<RUNTIME>_TELEMETRY_TIMEOUT_MS`.
 

@@ -300,14 +300,26 @@ if (statusLine.type !== "command" || !String(statusLine.command || "").includes(
 if (data.permissions?.defaultMode !== "auto") throw new Error("Claude permissions.defaultMode should default to auto");
 if (data.skipDangerousModePermissionPrompt !== true) throw new Error("Claude dangerous-mode prompt skip fallback should be enabled");
 const hooks = data.hooks || {};
+// #1098: Claude hooks are exec form (command "node" + args vector with the
+// ${CLAUDE_PROJECT_DIR} placeholder) — identify hooks by their args, and
+// assert no hook depends on a shell.
+const hookText = (hook) => [String(hook.command || ""), ...(Array.isArray(hook.args) ? hook.args.map(String) : [])].join(" ");
 const required = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"];
 const missing = required.filter((event) => !(event in hooks));
 if (missing.length) throw new Error(`missing Claude hook events: ${missing.join(", ")}`);
 for (const event of required) {
-  if (!(hooks[event] || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("claude-telemetry-hook.js")))) throw new Error(`${event} telemetry hook missing`);
+  if (!(hooks[event] || []).some((group) => (group.hooks || []).some((hook) => hookText(hook).includes("claude-telemetry-hook.js")))) throw new Error(`${event} telemetry hook missing`);
 }
-if (!(hooks.Stop || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("claude-hook-adapter.js") && String(hook.command || "").includes("stop-goal-fit.js")))) throw new Error("Stop goal-fit policy hook missing");
-if (!(hooks.UserPromptSubmit || []).some((group) => [undefined, null, "*"].includes(group.matcher) && (group.hooks || []).some((hook) => String(hook.command || "").includes("claude-hook-adapter.js") && String(hook.command || "").includes("workflow-steering.js")))) throw new Error("prompt-submit workflow-steering policy hook missing");
+if (!(hooks.Stop || []).some((group) => (group.hooks || []).some((hook) => hookText(hook).includes("claude-hook-adapter.js") && hookText(hook).includes("stop-goal-fit.js") && hookText(hook).includes("--env-default=FLOW_AGENTS_GOAL_FIT_MODE=block")))) throw new Error("Stop goal-fit policy hook missing (or missing its block-mode env default)");
+if (!(hooks.UserPromptSubmit || []).some((group) => [undefined, null, "*"].includes(group.matcher) && (group.hooks || []).some((hook) => hookText(hook).includes("claude-hook-adapter.js") && hookText(hook).includes("workflow-steering.js")))) throw new Error("prompt-submit workflow-steering policy hook missing");
+for (const [event, groups] of Object.entries(hooks)) {
+  for (const group of groups || []) {
+    for (const hook of group.hooks || []) {
+      if (hook.command !== "node" || !Array.isArray(hook.args) || !hook.args.length) throw new Error(`${event} hook is not a direct exec-form node invocation (Windows: bash resolves to the WSL2 shim): ${JSON.stringify(hook)}`);
+      if (!String(hook.args[0]).startsWith("${CLAUDE_PROJECT_DIR}/scripts/")) throw new Error(`${event} hook args[0] is not anchored to \${CLAUDE_PROJECT_DIR}: ${hook.args[0]}`);
+    }
+  }
+}
 console.log("ok");
 NODE
 then
@@ -415,12 +427,23 @@ if (missing.length) throw new Error(`missing Codex hook events: ${missing.join("
 if (!(hooks.PermissionRequest || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("telemetry.sh")))) throw new Error("PermissionRequest telemetry hook missing");
 if (!(hooks.Stop || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("codex-hook-adapter.js") && String(hook.command || "").includes("stop-goal-fit.js")))) throw new Error("Stop goal-fit policy hook missing");
 if (!(hooks.UserPromptSubmit || []).some((group) => [undefined, null, "*"].includes(group.matcher) && (group.hooks || []).some((hook) => String(hook.command || "").includes("codex-hook-adapter.js") && String(hook.command || "").includes("workflow-steering.js")))) throw new Error("prompt-submit workflow-steering policy hook missing");
-for (const groups of Object.values(hooks)) {
+// #1098: codex hooks are `node -e` trampolines (shell-neutral inline resolver),
+// except the declared PermissionRequest telemetry exception which still needs
+// the bash telemetry pipeline. The resolver must try CODEX_HOME first and must
+// not contain characters that behave differently across sh/PowerShell/cmd.
+for (const [event, groups] of Object.entries(hooks)) {
   for (const group of groups || []) {
     for (const hook of group.hooks || []) {
       const command = String(hook.command || "");
-      if (!command.includes('root="${CODEX_HOME:-}"')) throw new Error(`Codex hook does not prefer CODEX_HOME: ${command}`);
-      if (command.includes("'root=$(git rev-parse --show-toplevel")) throw new Error(`Codex hook uses stale repo-root-only resolver: ${command}`);
+      if (event === "PermissionRequest" && command.includes("telemetry.sh")) {
+        if (!command.includes('root="${CODEX_HOME:-}"')) throw new Error(`PermissionRequest telemetry does not prefer CODEX_HOME: ${command}`);
+        continue;
+      }
+      if (!command.startsWith('node -e "')) throw new Error(`Codex hook is not a node -e trampoline: ${command}`);
+      if (!command.includes("if(e.CODEX_HOME)c.push(e.CODEX_HOME)")) throw new Error(`Codex trampoline does not prefer CODEX_HOME: ${command}`);
+      const inline = command.slice('node -e "'.length, command.lastIndexOf('"'));
+      const hostile = inline.match(/[$`%\\"]/);
+      if (hostile) throw new Error(`Codex trampoline contains a shell-divergent character (${hostile[0]}): ${command}`);
     }
   }
 }

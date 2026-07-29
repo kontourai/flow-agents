@@ -718,3 +718,33 @@ jobs:
           path: evals/results/ci-baseline/usage-feedback/
           if-no-files-found: warn
           retention-days: 14
+
+  # ops Windows support / #1098: this package ships in a product with a Windows
+  # desktop binary, and until this lane existed nothing verified a hook could
+  # fire there — the emitted `bash -lc` wrappers exited 127 on stock Windows
+  # (bash resolves to the WSL2 shim) and the policy layer silently never ran.
+  # This job asserts, on windows-latest, that the generated bundles' hooks
+  # actually execute: exec-form claude hooks spawned per the documented host
+  # contract, and the codex trampoline through cmd.exe and PowerShell (never
+  # bash). A hard-failing lane on purpose: if this breaks, Windows is broken.
+  windows-hook-smoke:
+    name: Windows Hook Smoke
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build universal bundles
+        run: npm run build:bundles
+
+      - name: Hook smoke (a hook must actually fire on Windows)
+        run: node scripts/ci/windows-hook-smoke.mjs

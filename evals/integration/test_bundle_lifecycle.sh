@@ -544,7 +544,10 @@ if (!settings.statusLine || !String(settings.statusLine.command || "").includes(
 }
 if (!hooks.UserPromptSubmit || !hooks.UserPromptSubmit.length) throw new Error("UserPromptSubmit hooks missing");
 const wsHook = hooks.UserPromptSubmit.some((group) =>
-  (group.hooks || []).some((h) => String(h.command || "").includes("claude-hook-adapter.js") && String(h.command || "").includes("workflow-steering"))
+  (group.hooks || []).some((h) => {
+    const haystack = [String(h.command || ""), ...(Array.isArray(h.args) ? h.args.map(String) : [])].join(" ");
+    return haystack.includes("claude-hook-adapter.js") && haystack.includes("workflow-steering");
+  })
 );
 if (!wsHook) throw new Error("workflow-steering hook missing from UserPromptSubmit");
 console.log("ok");
@@ -604,21 +607,24 @@ if (!fs.existsSync(path.join(workspace, "docs/context-map.md"))) {
   fs.writeFileSync(path.join(workspace, "docs/context-map.md"), "# Context Map\n", "utf8");
 }
 
-// Find the workflow-steering hook command from the dogfood settings
+// Find the workflow-steering hook entry from the dogfood settings. The bundle
+// emits exec form (#1098): command "node" plus an args vector whose elements
+// carry the ${CLAUDE_PROJECT_DIR} placeholder that Claude Code substitutes.
 const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 const groups = settings.hooks?.UserPromptSubmit || [];
-let wsCommand = null;
+let wsEntry = null;
 for (const group of groups) {
   for (const h of (group.hooks || [])) {
-    const cmd = String(h.command || "");
-    if (cmd.includes("claude-hook-adapter.js") && cmd.includes("workflow-steering")) {
-      wsCommand = cmd;
+    const haystack = [String(h.command || ""), ...(Array.isArray(h.args) ? h.args.map(String) : [])].join(" ");
+    if (haystack.includes("claude-hook-adapter.js") && haystack.includes("workflow-steering")) {
+      wsEntry = h;
       break;
     }
   }
-  if (wsCommand) break;
+  if (wsEntry) break;
 }
-if (!wsCommand) throw new Error("workflow-steering hook command not found");
+if (!wsEntry) throw new Error("workflow-steering hook entry not found");
+if (!Array.isArray(wsEntry.args)) throw new Error("workflow-steering hook is not exec form (no args): " + JSON.stringify(wsEntry));
 
 // #440 FIXTURE-GAP: this fixture was written before #440's per-actor ownership scoping and
 // never established a per-actor current pointer for the invoking actor -- under a RESOLVED
@@ -634,15 +640,18 @@ const currentPayload = { schema_version: "1.0", active_slug: "dogfood-hook-demo"
 fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
 require(currentPointerHelperPath).writePerActorCurrent(flowAgentsDir, dogfoodActor, currentPayload);
 
-// Execute the hook. CLAUDE_PROJECT_DIR must point to the workspace that has scripts/hooks/.
-// In the real dogfood use case this is the repo root; here we use the installed test workspace.
+// Execute the hook per the documented exec-form contract: Claude Code
+// substitutes ${CLAUDE_PROJECT_DIR} into each args element as a plain string
+// and spawns the command directly — no shell (code.claude.com/docs/en/hooks).
+// In the real dogfood use case the project dir is the repo root; here we use
+// the installed test workspace, which has scripts/hooks/.
 const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: workspace, prompt: "continue" });
 const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: workspace, FLOW_AGENTS_ACTOR: dogfoodActor };
-const result = spawnSync(wsCommand, {
+const wsArgs = wsEntry.args.map((a) => String(a).split("${CLAUDE_PROJECT_DIR}").join(workspace));
+const result = spawnSync(String(wsEntry.command), wsArgs, {
   input: payload,
   cwd: workspace,
   env,
-  shell: true,
   encoding: "utf8",
   timeout: 30000,
 });

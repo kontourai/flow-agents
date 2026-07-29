@@ -601,8 +601,13 @@ export function ensureBundle(runtime: Runtime): string {
 // whichever project happens to be open, so the hook resolves to a path that
 // exists in at most one project (and never for most sessions). Global
 // installs need an absolute, session-independent path instead.
-const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
-const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
+// Bundle hook commands anchor script paths to the project via
+// `${CLAUDE_PROJECT_DIR}` — exec-form `args` elements use the literal
+// placeholder (substituted by Claude Code, no shell), and the statusLine shell
+// string uses `"$CLAUDE_PROJECT_DIR/…"`. A global install vendors the runtime
+// outside any project, so both forms are rewritten to the absolute source root.
+const GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX = "${CLAUDE_PROJECT_DIR}/";
+const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$CLAUDE_PROJECT_DIR\//g;
 
 type InstallMergeConflict = {
   path: string;
@@ -634,12 +639,10 @@ function mergeInstallSettings(
 }
 
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
-  return command
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
+  return command.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
 }
 
-/** Recursively rewrite every `command` string found under `value` in place. */
+/** Recursively rewrite every `command` string and exec-form `args` element found under `value` in place. */
 function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): void {
   if (Array.isArray(value)) {
     for (const item of value) rewriteCommandsForGlobalInstall(item, sourceRoot);
@@ -650,6 +653,14 @@ function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): vo
   for (const key of Object.keys(obj)) {
     if (key === "command" && typeof obj[key] === "string") {
       obj[key] = rewriteCommandForGlobalInstall(obj[key] as string, sourceRoot);
+      continue;
+    }
+    if (key === "args" && Array.isArray(obj[key])) {
+      obj[key] = (obj[key] as unknown[]).map((arg) =>
+        typeof arg === "string" && arg.startsWith(GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX)
+          ? `${sourceRoot}/${arg.slice(GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX.length)}`
+          : arg,
+      );
       continue;
     }
     rewriteCommandsForGlobalInstall(obj[key], sourceRoot);
