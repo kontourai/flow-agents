@@ -79,12 +79,22 @@ function of when a scraper last ran. Flow Agents emits instead — the shape
 A `kontour-trust-bridge` bin should **not** be built; it would entrench the
 scrape path.
 
-**Records carry the provenance tier the merge gate enforced.** A receipt is not just a fact that
+**Console renders core primitives; kits contribute their own outcome views.** Console represents
+Flow and Flow Agents — runs, claims, trust bundles, attestation, provenance tier. Those are
+generic. A kit's *outcome* is not: "merge-ready" belongs to Builder Kit, and another kit composes
+the same evidence into something else entirely. So Console should not hardcode a kit's vocabulary
+as a first-class view; it should expose an extension surface a kit contributes to, the way
+Station's manifest-driven plugin UI lets a plugin contribute layouts. Ideally the same contract
+rather than a second parallel one — a kit that already describes its surfaces should not have to
+describe them twice in a different shape. Baking "Merge Readiness" into core Console would put a
+Builder Kit concept in the product every other kit also has to live with.
+
+**Records carry the provenance tier established at delivery.** A receipt is not just a fact that
 something happened; it is a fact with a provenance, and Console must never render
 `independently-verified` and `self-asserted` identically — if it does, the signing is decorative
-and Console is only as trustworthy as its weakest accepted producer. The tier is defined once, by
-the gate, in [trust-reconcile](./trust-reconcile.md#merge-readiness-is-an-attestation-not-a-claim);
-Console displays it rather than deciding it.
+and Console is only as trustworthy as its weakest accepted producer. The tier is defined once, in
+[trust-reconcile](./trust-reconcile.md#delivery-provenance-is-an-attestation-not-a-claim); Console
+displays it rather than deciding it, and a kit's view interprets it rather than redefining it.
 
 **Local-first is unchanged.** The durable local write happens first and remains
 authoritative; Console is the tenant's durable mirror, not the enforcement point.

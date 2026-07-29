@@ -29,11 +29,20 @@ never false-blocks legitimate work. The frozen ADRs ([0020](../adr/0020-trust-re
 [0022](../adr/0022-fail-closed-delivery-reconciliation-with-governed-exemptions.md)) hold the
 immutable rationale.
 
-## Merge-readiness is an attestation, not a claim (2026-07-29, #1094)
+## Delivery provenance is an attestation, not a claim (2026-07-29, #1094)
 
-**Decision.** Work is merge-ready when a **signed attestation exists whose subject digest matches
-this commit's trust bundle and whose predicate records `reconciled`**. Not when someone says the
-gate passed — when the gate's own signature says so.
+**Decision.** A delivery's provenance is established by a **signed attestation whose subject digest
+matches this commit's trust bundle and whose predicate records `reconciled`** — not by anyone
+saying the gate passed. The gate's own signature is the evidence.
+
+**Scope, deliberately.** This decides the *core* primitive: the attestation, the digest binding,
+and the tier below. It does **not** decide what any particular outcome means. "Merge-ready" is a
+**Builder Kit** notion — the composition of gates that kit considers sufficient to merge — not a
+generic Flow concept, and it is defined by the kit, in terms of these primitives. A different kit
+composes the same evidence into a different outcome. Core supplies provable provenance; kits
+interpret it. (The core-vs-kit boundary itself remains a `needs-decision` stub with provenance in
+frozen [ADR 0014](../adr/0014-core-vs-domain-kit-boundary.md); this record does not resolve it, and
+deliberately stays on the core side of it.)
 
 The machinery for this already existed and was going to waste. `scripts/ci/mint-attestation.js`
 signs an in-toto v1 statement over `delivery/trust.bundle`'s sha256 via Sigstore keyless (Fulcio +
@@ -65,8 +74,9 @@ unverifiable by anyone, indistinguishable from an earned one. The tier does not 
 impossible — anyone holding a token can still assert — but it makes an assertion unable to wear an
 authority trace it did not earn.
 
-**Repo-dependent, deliberately.** Requiring `independently-verified` everywhere would block private
-repos whose CI is off for cost reasons. The tier is the design that survives both states: a repo
+**Repo-dependent, deliberately.** Requiring a given tier is a kit/repo policy choice, not a core
+rule — requiring `independently-verified` everywhere would block private repos whose CI is off for
+cost reasons. The tier is the design that survives both states: a repo
 with free CI (public) can require the top tier today; one without sits at `self-attested` and its
 records say so. Nothing about the model changes when CI resumes — the top tier simply starts being
 reachable. Console renders the same tier the gate enforces, so the read surface is a view of the
