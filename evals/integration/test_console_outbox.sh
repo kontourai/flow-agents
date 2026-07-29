@@ -53,6 +53,9 @@ check() {
 }
 
 start_stub() {
+  # Guard against double-binding: a leftover stub makes the next listen fail
+  # with EADDRINUSE and the failure surfaces far from its cause.
+  [[ -n "${STUB_PID:-}" ]] && return 0
   node -e '
     const fs = require("node:fs");
     const http = require("node:http");
@@ -133,6 +136,58 @@ unset CONSOLE_OUTBOX_MAX_ATTEMPTS
 BEFORE_PENDING="$(console_outbox_pending_count)"
 console_outbox_enqueue "$ENDPOINT" 'not-json' "rec-bad"
 check "a non-JSON body is refused at enqueue" "$BEFORE_PENDING" "$(console_outbox_pending_count)"
+
+# ── Regression: enqueue must never REWRITE pending.jsonl (the CRITICAL race) ──
+# An unlocked trim on the append path raced the locked flush's rewrite and
+# silently dropped records — present in neither pending nor undelivered, never
+# sent. The invariant that fixes it: appends are safe unlocked, rewrites are
+# not, so enqueue only ever appends and trimming happens under the flush lock.
+stop_stub
+rm -rf "$TELEMETRY_DATA_DIR/console-outbox"
+export CONSOLE_OUTBOX_MAX_ENTRIES=3
+for i in 1 2 3 4 5; do
+  console_outbox_enqueue "$ENDPOINT" "{\"schema\":\"kontour.console.event\",\"id\":\"over-$i\"}" "over-$i"
+done
+check "enqueue past the cap does not trim (no unlocked rewrite)" "5" "$(console_outbox_pending_count)"
+check "and nothing was retired behind the flush's back" "0" "$(console_outbox_undelivered_count)"
+
+# The bound is still enforced — just under the lock, where it is safe. The hub
+# is down, so the 3 survivors stay pending and the 2 oldest retire.
+console_outbox_flush
+check "flush applies the cap under the lock" "3" "$(console_outbox_pending_count)"
+check "overflow retired to undelivered, not dropped" "2" "$(console_outbox_undelivered_count)"
+unset CONSOLE_OUTBOX_MAX_ENTRIES
+
+# ── Regression: an orphaned lock must not disable delivery forever (the HIGH) ─
+# flush runs detached with nothing supervising it, so a SIGKILL while holding
+# the lock left records unsendable with no self-healing.
+rm -rf "$TELEMETRY_DATA_DIR/console-outbox"
+console_outbox_enqueue "$ENDPOINT" '{"schema":"kontour.console.event","id":"locked-1"}' "locked-1"
+mkdir -p "$TELEMETRY_DATA_DIR/console-outbox/.flush.lock"
+start_stub || { printf 'stub restart failed\n'; exit 1; }
+: > "$RECV"
+
+# A FRESH lock is respected — flush skips rather than double-sending.
+console_outbox_flush
+check "a fresh lock is respected (flush skips)" "0" "$(wc -l < "$RECV" | tr -d ' ')"
+check "and the record is still queued" "1" "$(console_outbox_pending_count)"
+
+# A STALE lock is reclaimed rather than deadlocking delivery. The threshold is
+# "older than N seconds" (-gt, matching console-board-sync's precedent), so a
+# lock created moments ago has age 0 and is not yet stale even at N=0 — sleep
+# past it rather than loosening the production comparison to suit the test.
+sleep 1
+export CONSOLE_OUTBOX_STALE_LOCK_SECONDS=0
+console_outbox_flush
+check "a stale lock is reclaimed and the record delivered" "1" "$(wc -l < "$RECV" | tr -d ' ')"
+check "pending drains after stale-lock takeover" "0" "$(console_outbox_pending_count)"
+unset CONSOLE_OUTBOX_STALE_LOCK_SECONDS
+
+# Hand the port back before the next section starts its own stub — two
+# start_stub calls without an intervening stop bind the same port and the
+# second silently fails with EADDRINUSE, which then shows up as unrelated
+# delivery assertions failing.
+stop_stub
 
 # ── The best-effort core is untouched ────────────────────────────────────────
 start_stub || { printf 'stub restart failed\n'; exit 1; }
