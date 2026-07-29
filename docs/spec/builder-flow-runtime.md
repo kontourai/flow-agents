@@ -642,7 +642,10 @@ fence, and reject a projected run head, status, or step that differs from
 canonical Flow. Lifecycle recovery finalization also retains the coordinator
 assignment lock across its protected-input assertion and Flow's durable
 active-to-open publication, so every supported lifecycle writer participates
-in the same external-input guard.
+in the same external-input guard. Interactive reseal and exact-current recovery
+workers acquire that assignment lock before Flow's mutation lock, matching
+ordinary evidence writers and finalization so a fence cannot invert the lock
+order and block the operation that must reopen it.
 
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and

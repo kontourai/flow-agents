@@ -326,7 +326,9 @@ The reference coordinator ships no pathname or descriptor-only fallback and refu
 platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
 capability is absent or invalid. Portable request creation and external signing remain available.
 After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
-removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
+removed. Replay validates the exact receipt and the finalized Flow fence generation, then removes
+only the private plan and stages. It does not require live postimages to remain unchanged or rewrite
+them, because an ordinary Flow writer may legitimately supersede those bytes after the fence opens.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
 nonce/completion and transaction recovery make an exact completed retry a replay.
 

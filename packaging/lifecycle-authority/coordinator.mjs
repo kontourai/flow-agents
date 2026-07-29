@@ -1621,19 +1621,29 @@ async function finalizeVerificationResealTransaction(paths, completion) {
     () => finalizeVerificationResealTransactionLocked(paths, completion),
   );
 }
+function cleanupFinalizedVerificationResealReplay(paths, plan, completion, observedFence) {
+  validateVerificationResealPlan(plan);
+  if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
+      || typeof observedFence.previous_generation !== "string") {
+    throw new Error("verification reseal cleanup replay does not bind the finalized Flow recovery generation");
+  }
+  if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+    throw new Error("verification reseal cleanup replay does not bind the signed plan result");
+  }
+  const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
+  if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal cleanup replay receipt is not exact");
+  // Once Flow has durably finalized this exact generation, ordinary writers may
+  // supersede its postimages. Cleanup removes only the signed plan and private
+  // stage files, so live Flow and session evidence must remain untouched.
+  cleanupVerificationResealTransaction(paths, plan);
+  return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+}
 async function finalizeVerificationResealTransactionLocked(paths, completion) {
   const observedFence = inspectVerificationResealFence(paths);
   if (observedFence.status !== "active") {
     if (fs.existsSync(verificationResealPlanFile(paths))) {
       const { plan } = readSignedVerificationResealPlan(paths);
-      if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
-        throw new Error("verification reseal cleanup replay does not bind the signed plan result");
-      }
-      const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
-      if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal cleanup replay receipt is not exact");
-      if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cleanup replay does not retain exact postimages");
-      cleanupVerificationResealTransaction(paths, plan);
-      return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+      return cleanupFinalizedVerificationResealReplay(paths, plan, completion, observedFence);
     }
     return { run_id: paths.runId, finalized: false };
   }
@@ -2637,7 +2647,7 @@ async function interactiveExactCurrentRecoveryWorker() {
     throw new Error("exact-current recovery preparation operation is invalid");
   }
   const paths = canonicalMutationPaths(envelope.request);
-  return withCanonicalFlowRunMutationLock(paths, async () => {
+  return withCoordinatorAssignmentLock(paths, () => withCanonicalFlowRunMutationLock(paths, async () => {
     const prepared = await prepareExactCurrentRecoveryPublication(envelope, paths, value.authorization, { lockHeld: true });
     process.stdout.write(`${JSON.stringify(prepared)}\n`);
     const second = await lines.next();
@@ -2653,7 +2663,7 @@ async function interactiveExactCurrentRecoveryWorker() {
       authorization_sha256: prepared.plan.authorization_sha256,
     }, { lockHeld: true });
     process.stdout.write(`${JSON.stringify(mutation)}\n`);
-  });
+  }));
 }
 export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {

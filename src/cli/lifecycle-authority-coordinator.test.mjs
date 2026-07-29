@@ -34,9 +34,9 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, cleanupFinalizedVerificationResealReplay, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, cleanupFinalizedVerificationResealReplay: module.cleanupFinalizedVerificationResealReplay, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -1393,6 +1393,18 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
     );
     assert.match(wrapper, /\bwithCoordinatorAssignmentLock\s*\(/, `${entrypoint} must retain the coordinator guard through Flow finalization`);
   }
+  for (const [entrypoint, nextEntrypoint] of [
+    ["interactiveResealWorker", "interactiveExactCurrentRecoveryWorker"],
+    ["interactiveExactCurrentRecoveryWorker", "main"],
+  ]) {
+    const worker = source.slice(
+      source.indexOf(`async function ${entrypoint}`),
+      source.indexOf(`async function ${nextEntrypoint}`),
+    );
+    const assignmentLock = worker.indexOf("withCoordinatorAssignmentLock");
+    const flowLock = worker.indexOf("withCanonicalFlowRunMutationLock");
+    assert.ok(assignmentLock >= 0 && flowLock > assignmentLock, `${entrypoint} must acquire assignment before Flow mutation`);
+  }
   assert.throws(
     () => assertVerificationResealFlowCapabilities({ withRunMutationLock() {} }),
     /withRunRecoveryLock is unavailable/,
@@ -1411,6 +1423,82 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   );
   assert.match(replacement, /atomicReplaceExpectedPreimage\s*\(/);
   assert.doesNotMatch(replacement, /fs\.(?:renameSync|unlinkSync|writeFileSync)\s*\(/, "the reference coordinator must not implement leaf replacement");
+});
+
+test("finalized reseal cleanup preserves a legitimate writer that superseded live postimages", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reseal-finalized-cleanup-"));
+  const runId = "run-1";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", runId);
+  const paths = { projectRoot: root, sessionDir, runId };
+  const requestSha256 = "2".repeat(64);
+  const authorization = {
+    signature: { key_id: "operator" }, nonce: "nonce",
+    assignment_generation_sha256: "5".repeat(64), assignment_actor_key: "actor",
+    assignment_actor: { runtime: "test", session_id: "session", host: "host", human: null },
+  };
+  const present = { presence: "present", mode: 0o644, size: 7, sha256: "a".repeat(64) };
+  const plan = {
+    schema_version: "1.0",
+    kind: "flow-agents.verification-reseal-transaction.v1",
+    recovery_id: "1".repeat(64),
+    run_id: runId,
+    request_sha256: requestSha256,
+    authorization_sha256: sha256(canonicalJson(authorization)),
+    authorization_key_id: "operator",
+    authorization_nonce: "nonce",
+    authorization,
+    assignment: { generation_sha256: "5".repeat(64), actor_key: "actor", actor: authorization.assignment_actor },
+    reducer: { package: "@kontourai/flow", version: "test" },
+    result_core_sha256: "4".repeat(64),
+    artifacts: VERIFICATION_RESEAL_ARTIFACT_IDS.map((id) => ({ id, parent: { dev: 1, ino: 1 }, pre: present, post: present })),
+  };
+  const completion = {
+    schema_version: "1.0",
+    kind: "kontourai.lifecycle-authority.completion",
+    action: "reseal-verification-evidence",
+    request_sha256: requestSha256,
+    run_id: runId,
+    operation_status: "applied",
+    result_core_sha256: plan.result_core_sha256,
+    coordinator_runtime_sha256: "6".repeat(64),
+    completed_at: "2026-07-29T04:00:00.000Z",
+    signature: { algorithm: "ed25519", value: "test-signature" },
+  };
+  try {
+    const files = verificationResealArtifactFiles(paths, requestSha256);
+    for (const [id, file] of files) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `writer-${id}\n`, { mode: 0o644 });
+      fs.writeFileSync(`${file}.verification-reseal-old`, "old\n", { mode: 0o644 });
+      fs.writeFileSync(`${file}.verification-reseal-new`, "new\n", { mode: 0o644 });
+    }
+    const planFile = path.join(sessionDir, ".verification-reseal.transaction.json");
+    fs.writeFileSync(planFile, '{"signed":"plan"}\n', { mode: 0o644 });
+    fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const livePostWriterBytes = new Map([...files].map(([id, file]) => [id, fs.readFileSync(file)]));
+    const loaded = await loadProtectedReadFromCoordinator();
+
+    assert.deepEqual(
+      loaded.cleanupFinalizedVerificationResealReplay(paths, plan, completion, {
+        protocol: "flow.run-recovery-fence.v1",
+        run_id: runId,
+        recovery_id: plan.recovery_id,
+        status: "open",
+        updated_at: "2026-07-29T04:00:01.000Z",
+        generation: "11111111-1111-4111-8111-111111111111",
+        previous_generation: "22222222-2222-4222-8222-222222222222",
+      }),
+      { run_id: runId, finalized: true, cleanup_replayed: true },
+    );
+    for (const [id, file] of files) {
+      assert.deepEqual(fs.readFileSync(file), livePostWriterBytes.get(id), `${id} writer bytes must survive cleanup`);
+      assert.equal(fs.existsSync(`${file}.verification-reseal-old`), false);
+      assert.equal(fs.existsSync(`${file}.verification-reseal-new`), false);
+    }
+    assert.equal(fs.existsSync(planFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("reseal delegates literal expected-preimage replacement and pins the opened parent", () => {
