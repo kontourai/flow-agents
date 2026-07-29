@@ -61,12 +61,17 @@ const allEntries = [
   ...hookEntries(claudeSettings.hooks).map((e) => ({ ...e, runtime: "claude-code" })),
   ...hookEntries(codexHooks.hooks).map((e) => ({ ...e, runtime: "codex" })),
 ];
-const DECLARED_BASH_EXCEPTIONS = new Set(["codex:PermissionRequest"]);
+// The one declared exception is the codex PermissionRequest TELEMETRY entry,
+// which invokes the bash telemetry pipeline itself (disclosed Windows gap).
+// The exception is per-entry, not per-event: a policy hook on the same event
+// smuggling bash back in must still fail, and args elements count too.
 for (const { runtime, event, hook } of allEntries) {
   const key = `${runtime}:${event}`;
-  const usesBash = /(^|[^a-z])bash($|[^a-z])/.test(String(hook.command));
-  if (usesBash && !DECLARED_BASH_EXCEPTIONS.has(key)) {
-    fail(`${key} routes through bash: ${String(hook.command).slice(0, 120)}`);
+  const haystack = [String(hook.command), ...(Array.isArray(hook.args) ? hook.args.map(String) : [])].join(" ");
+  const usesBash = /(^|[^a-z])bash($|[^a-z])/.test(haystack);
+  const isDeclaredException = key === "codex:PermissionRequest" && String(hook.command).includes("scripts/telemetry/telemetry.sh");
+  if (usesBash && !isDeclaredException) {
+    fail(`${key} routes through bash: ${haystack.slice(0, 120)}`);
   }
 }
 if (failures === 0) pass(`no undeclared bash usage across ${allEntries.length} hook entries`);
@@ -111,6 +116,33 @@ else {
   const r = runClaudeExecForm(stopEntry, { hook_event_name: "Stop" });
   if ((r.status === 0 || r.status === 2) && !r.error) pass(`Stop goal-fit hook fired with --env-default (rc=${r.status})`);
   else fail(`Stop hook rc=${r.status} error=${r.error ?? ""} stdout=${r.stdout} stderr=${r.stderr}`);
+}
+
+// Execution proof, not just liveness: the adapter fails OPEN by design, so a
+// missing/broken policy script also exits 0 with {"continue":true} — a smoke
+// that only checks for success JSON cannot tell "policy ran" from "policy
+// silently absent" (found by independent review). Feed config-protection a
+// payload its policy must DENY (an interpreter write against a protected gate
+// file) and require a deny-shaped response; fail-open cannot produce one.
+console.log("== 2b. policy actually executes: config-protection denies a gate-tampering payload");
+if (!policyEntry) {
+  fail("no PreToolUse policy entry available for the deny control");
+} else {
+  const denyPayload = {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: 'python3 -c "open(1)" .claude/settings.json' },
+  };
+  const r = runClaudeExecForm(policyEntry, denyPayload);
+  let denied = false;
+  try {
+    const out = JSON.parse(r.stdout || "{}");
+    denied = out.continue === false || out.decision === "block" || out.hookSpecificOutput?.permissionDecision === "deny";
+  } catch {
+    denied = false;
+  }
+  if (r.status === 0 && denied) pass("config-protection executed and denied the tampering payload");
+  else fail(`deny control did not deny (policy may not be executing): rc=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
 }
 
 // ---------------------------------------------------------------------------

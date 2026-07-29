@@ -483,7 +483,7 @@ Harness adapters are file sets that the `npm run build:bundles` command generate
 
 **What an adapter must implement**:
 
-1. **Event wiring config** — A host-specific configuration file (e.g., `.claude/settings.json` hooks object, `.codex/hooks.json`) that maps host event names to shell commands that invoke the canonical hook adapter wrapper.
+1. **Event wiring config** — A host-specific configuration file (e.g., `.claude/settings.json` hooks object, `.codex/hooks.json`) that maps host event names to hook invocations of the canonical hook adapter wrapper — exec-form argv where the host supports it, otherwise a shell-neutral command string. Never a shell wrapper (see the generated pattern below).
 2. **Adapter wrapper** — A host-specific JS (or equivalent) wrapper (e.g., `claude-hook-adapter.js`, `codex-hook-adapter.js`) that:
    - Reads stdin JSON from the host.
    - Invokes `run-hook.js` with the canonical script path and profile.
