@@ -659,7 +659,16 @@ function sidecarGuidance(root, artifactDir, activeFlowStep) {
     }
   }
 
-  if (state && state.next_action && normalizedStatus(state.next_action.status) !== 'done') {
+  // #962 P1 follow-up (review): this was the THIRD site reading next_action.status
+  // raw instead of through nextActionIsDone (analyze()'s artifact-status line and
+  // sidecarGuidance's own "workflow state:" line above both already use the shared
+  // predicate). Provably behavior-preserving for every input shape next_action can
+  // take (absent, non-object, object with/without a status field, any status value):
+  // nextActionIsDone(state) is false in exactly the same cases normalizedStatus(...)
+  // !== 'done' was true, because nextActionIsDone's own "not an object" / "no status
+  // field" branches both fold to 'unknown', never 'done'. Routed through the shared
+  // predicate so this can never independently drift from the other two sites.
+  if (state && state.next_action && !nextActionIsDone(state)) {
     const next = state.next_action;
     warnings.push(`${base} next action: ${safeOneLine(next.summary)}${next.target_phase ? ` (target phase: ${safeOneLine(next.target_phase, 80)})` : ''}`);
     if (Array.isArray(next.skills) && next.skills.length) warnings.push(`${base} required skills: ${next.skills.map(skill => safeOneLine(skill, 80)).join(' -> ')}`);
