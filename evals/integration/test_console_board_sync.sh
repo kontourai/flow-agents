@@ -43,6 +43,38 @@ errors=0
 pass() { echo "  [PASS] $1"; }
 fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 
+populate_bin_without() {
+  local target_dir="$1"
+  local excluded_name="$2"
+  local source_path="$3"
+  local path_dir candidate name
+  local path_dirs=()
+  IFS=':' read -ra path_dirs <<< "$source_path"
+  for path_dir in "${path_dirs[@]}"; do
+    [[ -d "$path_dir" ]] || continue
+    for candidate in "$path_dir"/*; do
+      [[ -f "$candidate" && -x "$candidate" ]] || continue
+      name="$(basename "$candidate")"
+      [[ "$name" == "$excluded_name" ]] && continue
+      [[ -e "$target_dir/$name" ]] && continue
+      ln -sf "$candidate" "$target_dir/$name" 2>/dev/null || true
+    done
+  done
+}
+
+path_without_executable() {
+  local excluded_name="$1"
+  local source_path="$2"
+  local filtered="" path_dir
+  local path_dirs=()
+  IFS=':' read -ra path_dirs <<< "$source_path"
+  for path_dir in "${path_dirs[@]}"; do
+    [[ -d "$path_dir" && ! -x "$path_dir/$excluded_name" ]] || continue
+    filtered="${filtered:+$filtered:}$path_dir"
+  done
+  printf '%s' "$filtered"
+}
+
 if ! command -v jq >/dev/null 2>&1; then echo "jq not available; skipping console board sync tests"; exit 0; fi
 
 echo "=== console board sync (#919) ==="
@@ -463,11 +495,25 @@ grep -q 'console-process-projection OK' "$DATA_M2B/console-board-sync.log" 2>/de
 echo "--- no flow-agents CLI resolvable -> log-skip, exit 0, no bridge attempted ---"
 NO_CLI_REPO="$TMP/no-cli-repo"
 mkdir -p "$NO_CLI_REPO"
-NO_FLOW_AGENTS_BIN="$TMP/no-flow-agents-bin"
-mkdir -p "$NO_FLOW_AGENTS_BIN"
+PLANTED_GLOBAL_BIN="$TMP/planted-global-bin"
+mkdir -p "$PLANTED_GLOBAL_BIN"
+PLANTED_FLOW_AGENTS_MARKER="$TMP/planted-flow-agents-invoked"
+cat > "$PLANTED_GLOBAL_BIN/flow-agents" <<'SH'
+#!/usr/bin/env bash
+: > "${PLANTED_FLOW_AGENTS_MARKER:?PLANTED_FLOW_AGENTS_MARKER not set}"
+exit 99
+SH
+chmod +x "$PLANTED_GLOBAL_BIN/flow-agents"
+NO_FLOW_AGENTS_PATH="$FAKE_BIN:$(path_without_executable "flow-agents" "$PLANTED_GLOBAL_BIN:$PATH")"
+if PATH="$NO_FLOW_AGENTS_PATH" command -v flow-agents >/dev/null 2>&1; then
+  fail "no-cli fixture precondition: flow-agents is still resolvable"
+else
+  pass "no-cli fixture precondition: inherited and planted flow-agents executables are filtered"
+fi
 DATA_H="$TMP/data-caseH"
 : > "$CLI_LOG"; : > "$NPX_LOG"
-( export PATH="$NO_FLOW_AGENTS_BIN:$FAKE_BIN:$PATH" TELEMETRY_CONFIG_FILE="$FULL_CONF" FAKE_EXPECTED_TOKEN="test-token-xyz"
+( export PATH="$NO_FLOW_AGENTS_PATH" TELEMETRY_CONFIG_FILE="$FULL_CONF" FAKE_EXPECTED_TOKEN="test-token-xyz"
+  export PLANTED_FLOW_AGENTS_MARKER
   export FLOW_AGENTS_BOARD_SYNC_CWD="$NO_CLI_REPO"
   unset CONSOLE_AUTH_TOKEN
   run_sync "$DATA_H" )
@@ -476,22 +522,13 @@ rc=$?
 LOG_H="$DATA_H/console-board-sync.log"
 [[ -f "$LOG_H" ]] && grep -q 'SKIP: no flow-agents CLI found' "$LOG_H" && pass "no-cli: logged as a SKIP naming the CLI search" || fail "no-cli: expected SKIP log not found: $(cat "$LOG_H" 2>/dev/null)"
 [[ ! -s "$NPX_LOG" ]] && pass "no-cli: npx never invoked (nothing to bridge)" || fail "no-cli: npx was invoked despite no CLI"
+[[ ! -e "$PLANTED_FLOW_AGENTS_MARKER" ]] && pass "no-cli: planted global flow-agents canary was never invoked" || fail "no-cli: planted global flow-agents canary was invoked"
 
 # ── npx unavailable -> both bridges log-skipped, projections still ran ─────────────────────
 echo "--- npx unavailable -> bridge steps log-skipped; projections still ran ---"
 NO_NPX_BIN="$TMP/no-npx-bin"
 mkdir -p "$NO_NPX_BIN"
-IFS=':' read -ra path_dirs <<< "$PATH"
-for d in "${path_dirs[@]}"; do
-  [[ -d "$d" ]] || continue
-  for f in "$d"/*; do
-    [[ -f "$f" && -x "$f" ]] || continue
-    name="$(basename "$f")"
-    [[ "$name" == "npx" ]] && continue
-    [[ -e "$NO_NPX_BIN/$name" ]] && continue
-    ln -sf "$f" "$NO_NPX_BIN/$name" 2>/dev/null || true
-  done
-done
+populate_bin_without "$NO_NPX_BIN" "npx" "$PATH"
 DATA_I="$TMP/data-caseI"
 : > "$CLI_LOG"; : > "$NPX_LOG"
 ( export PATH="$NO_NPX_BIN" TELEMETRY_CONFIG_FILE="$FULL_CONF" FAKE_EXPECTED_TOKEN="test-token-xyz" FLOW_AGENTS_BOARD_SYNC_CWD="$FAKE_REPO"
