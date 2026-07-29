@@ -40,7 +40,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 errors=0
-pass() { echo "  [PASS] $1"; }
+passes=0
+pass() { passes=$((passes + 1)); echo "  [PASS] $1"; }
 fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 
 if ! command -v jq >/dev/null 2>&1; then echo "jq not available; skipping console board sync tests"; exit 0; fi
@@ -588,6 +589,9 @@ grep -q 'RUN start' "$LOG_STALE" 2>/dev/null \
   || fail "HIGH-4 stale takeover: the pipeline never ran despite the stale lock takeover"
 
 echo ""
+echo "# tests $((passes + errors))"
+echo "# pass $passes"
+echo "# fail $errors"
 if [[ "$errors" -eq 0 ]]; then
   echo "test_console_board_sync: all checks passed."
   exit 0
