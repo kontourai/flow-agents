@@ -79,6 +79,13 @@ function of when a scraper last ran. Flow Agents emits instead — the shape
 A `kontour-trust-bridge` bin should **not** be built; it would entrench the
 scrape path.
 
+**Records carry the provenance tier the merge gate enforced.** A receipt is not just a fact that
+something happened; it is a fact with a provenance, and Console must never render
+`independently-verified` and `self-asserted` identically — if it does, the signing is decorative
+and Console is only as trustworthy as its weakest accepted producer. The tier is defined once, by
+the gate, in [trust-reconcile](./trust-reconcile.md#merge-readiness-is-an-attestation-not-a-claim);
+Console displays it rather than deciding it.
+
 **Local-first is unchanged.** The durable local write happens first and remains
 authoritative; Console is the tenant's durable mirror, not the enforcement point.
 
