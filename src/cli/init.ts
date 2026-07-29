@@ -11,7 +11,7 @@ import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, durableFlowAgentsRoot, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
@@ -599,8 +599,12 @@ export function ensureBundle(runtime: Runtime): string {
 // the install destination). It is NOT correct for a --global install: there
 // is no per-destination copy of scripts/, and CLAUDE_PROJECT_DIR varies with
 // whichever project happens to be open, so the hook resolves to a path that
-// exists in at most one project (and never for most sessions). Global
-// installs need an absolute, session-independent path instead.
+// exists in at most one project (and never for most sessions). Global installs
+// need a durable, session-independent path instead -- NOT the source-checkout/
+// npx-cache `root` this process launched from, which npx may evict at any time
+// (kontourai/flow-agents#945). vendorClaudeCodeGlobalRuntime() copies the hook
+// runtime into <dest>/.flow-agents/runtime/ and that path is substituted in
+// via rewriteCommandsForGlobalInstall below.
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
 
@@ -633,10 +637,26 @@ function mergeInstallSettings(
   return merged;
 }
 
+/**
+ * Escape an absolute path for the two nested quoting contexts a hook command lives in:
+ * the emitted template is `bash -lc '... node "$root/..." ...'`, so the substituted value sits
+ * inside double quotes that are themselves inside the outer single-quoted `bash -lc` argument.
+ * Without this, a path containing an apostrophe -- a legitimate home directory such as
+ * /Users/o'brien, or an attacker-supplied --dest -- terminates the single-quoted string and
+ * injects arbitrary shell into every hook command persisted to settings.json
+ * (kontourai/flow-agents#945 review finding).
+ */
+function shellEscapeForHookCommand(sourceRoot: string): string {
+  // Inner: neutralize what the inner shell would still expand inside "..." .
+  const innerSafe = sourceRoot.replace(/([\\"$`])/g, "\\$1");
+  // Outer: close, escape, and reopen the single-quoted bash -lc argument around each quote.
+  return innerSafe.replace(/'/g, "'\\''");
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   return command
     .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
+    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${shellEscapeForHookCommand(sourceRoot)}/`);
 }
 
 /** Recursively rewrite every `command` string found under `value` in place. */
@@ -737,6 +757,39 @@ function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeK
   return skillNames;
 }
 
+const GLOBAL_RUNTIME_VENDOR_DIRS = ["build", "context", "kits", "packaging", "schemas", "scripts"];
+
+/**
+ * Vendor the claude-code hook/statusline runtime (scripts/, build/, and their siblings) from the
+ * built bundle into <dest>/.flow-agents/runtime/, using the same ownership-manifest-tracked
+ * installer opencode's global install already uses (installOpencodeGlobalAssets /
+ * scripts/install-owned-files.js). Throws on any failure -- caller must not proceed to
+ * merge/write settings.json when this throws (kontourai/flow-agents#945).
+ */
+function vendorClaudeCodeGlobalRuntime(dest: string, bundle: string): void {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-claude-runtime-"));
+  try {
+    // No existence guard: a bundle missing any vendored directory is a build defect, and silently
+    // vendoring less than intended would bake hook commands pointing at an incomplete runtime --
+    // the failure class the fail-loud ordering exists to prevent. cpSync throws on a missing source.
+    for (const entry of GLOBAL_RUNTIME_VENDOR_DIRS) {
+      fs.cpSync(path.join(bundle, entry), path.join(overlay, ".flow-agents", "runtime", entry), { recursive: true });
+    }
+    runOwnedFilesInstaller(overlay, dest, { runtime: "claude-code" }, "claude-code global runtime vendoring");
+  } finally {
+    fs.rmSync(overlay, { recursive: true, force: true });
+  }
+}
+
+/** Install a staged overlay through the ownership-manifest-tracked installer. Throws on failure. */
+function runOwnedFilesInstaller(overlay: string, dest: string, metadataFields: Record<string, unknown>, label: string): void {
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+  const metadata = JSON.stringify({ ...metadataFields, package_version: pkgJson["version"] ?? "0.0.0" });
+  const installer = path.join(root, "scripts", "install-owned-files.js");
+  const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `${label} failed with exit code ${result.status ?? "unknown"}`);
+}
+
 function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[]): number {
   const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
   let fileCount = 0;
@@ -760,11 +813,7 @@ function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSource
     for (const skillName of skillNames) stage(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName));
     for (const entry of runtimeSources) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
     for (const entry of runtimeFiles) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds });
-    const installer = path.join(root, "scripts", "install-owned-files.js");
-    const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
-    if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+    runOwnedFilesInstaller(overlay, dest, { runtime: "opencode", active_kit_ids: activeKitIds }, "OpenCode runtime asset install");
     return fileCount;
   } finally {
     fs.rmSync(overlay, { recursive: true, force: true });
@@ -944,15 +993,30 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         console.error(`flow-agents init: bundle settings missing: ${sourcePath}`);
         return 1;
       }
+      fs.mkdirSync(options.dest, { recursive: true });
+      // Vendor the hook/statusline runtime into a durable, destination-owned
+      // location BEFORE any settings.json mutation (kontourai/flow-agents#945):
+      // a global install must not depend on the ephemeral npx-cache/source-checkout
+      // path this process happened to launch from (see vendorClaudeCodeGlobalRuntime).
+      // This must succeed first -- if it fails, abort without touching settings.json.
+      try {
+        vendorClaudeCodeGlobalRuntime(options.dest, bundle);
+      } catch (error) {
+        console.error(`flow-agents init: could not vendor the claude-code hook runtime into ${options.dest}: ${(error as Error).message}`);
+        console.error(`flow-agents init: global claude-code install aborted; ${path.join(options.dest, "settings.json")} was not modified.`);
+        return 1;
+      }
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
       // Remove permissive defaults (not appropriate for global user settings).
       delete managed["permissions"];
       delete managed["skipDangerousModePermissionPrompt"];
-      // See rewriteCommandsForGlobalInstall: bundle hook commands assume
-      // CLAUDE_PROJECT_DIR points at this package; a global install must not
-      // depend on which project is currently open, so pin to an absolute path.
-      rewriteCommandsForGlobalInstall(managed, root);
-      fs.mkdirSync(options.dest, { recursive: true });
+      // Bundle hook commands assume CLAUDE_PROJECT_DIR points at this package;
+      // a global install must not depend on which project is currently open or on
+      // the ephemeral path this process launched from, so rewrite them to the
+      // durable vendored runtime root instead (see vendorClaudeCodeGlobalRuntime,
+      // kontourai/flow-agents#945).
+      const vendorRoot = path.join(durableFlowAgentsRoot(options.dest), "runtime");
+      rewriteCommandsForGlobalInstall(managed, vendorRoot);
       const destSettingsPath = path.join(options.dest, "settings.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
