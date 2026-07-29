@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "cefb717caf68d674accae7e6cad793a7f09d69907f1003d593d5bb4c486a5613"
+        "sha256": "77b82007514b2ed2097fd76f3fdc7a259e4dccc7ec243932c4b81bd3d8666d1b"
       }
     }
   ],
@@ -21,8 +21,8 @@
         "claimType": "builder.pull-work.selected",
         "fieldOrBehavior": "Work Item kontourai/flow-agents#1074 is durably assigned to the active workflow actor (assignment sha256:1969437e9f051684072e41bd7b549cadf26285d668b7fa37f9e3b6812dfa17d1).",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
         "metadata": {
@@ -71,8 +71,8 @@
         "claimType": "builder.design-probe.pickup-readiness",
         "fieldOrBehavior": "Pickup probe records goal fit, bounded scope, dependency, risks, accepted baseline gap, and planning readiness.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
         "metadata": {
@@ -111,8 +111,8 @@
         "claimType": "builder.design-probe.decisions",
         "fieldOrBehavior": "Probe decisions and the accepted historical-baseline gap are explicit in the handoff.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
         "metadata": {
@@ -151,8 +151,8 @@
         "claimType": "builder.plan.implementation",
         "fieldOrBehavior": "Implementation plan records bounded scope, sequence, acceptance mapping, stop-short risks, and exact verification requirements.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.plan.implementation:attestation",
         "metadata": {
@@ -228,8 +228,8 @@
         "claimType": "builder.execute.scope",
         "fieldOrBehavior": "The exact source commit implements only the #1074 resolver, export, docs, and tests, with criterion mapping and #1075 separated.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.execute.scope:attestation",
         "metadata": {
@@ -284,8 +284,8 @@
         "claimType": "builder.verify.tests",
         "fieldOrBehavior": "All five #1074 acceptance criteria pass on exact HEAD fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2 using the canonical public API test.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.verify.tests:test_output",
         "metadata": {
@@ -355,8 +355,8 @@
         "claimType": "builder.merge-ready.readiness",
         "fieldOrBehavior": "Exact-head acceptance, scope integrity, full static verification, and two clean review lanes support merge review; provider checks remain a separate release-readiness requirement.",
         "value": "pass",
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "updatedAt": "2026-07-29T11:02:54.022Z",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
         "metadata": {
@@ -383,6 +383,128 @@
             "identity_version": 2,
             "recorded_at": "2026-07-29T11:02:54.022Z",
             "flow_run_head": "48da31e055ebd5dbf6434fe2f78d160f6c265287674dfdb68e53c5730596da72"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-1074/gate-claim-ci-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready-ci.readiness",
+        "fieldOrBehavior": "MERGE authorized: exact implementation and provisional delivery are reconciled, all eight provider checks pass, and residual #1075 risk remains separately tracked.",
+        "value": "pass",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready-ci.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1074",
+          "expected_producer": "builder.release-readiness",
+          "recorded_by": "codexthread-a20b1e91fb7244bc15f442ecKontour",
+          "self_produced_trust_slices": [
+            "ci-merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1074/release.json",
+              "summary": "Merge decision, exact revisions, provider checks, authorization, rollback, and observability state."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "ci-merge-readiness",
+            "claim_type": "builder.merge-ready-ci.readiness",
+            "subject_type": "pull-request",
+            "step_id": "merge-ready-ci",
+            "identity_version": 2,
+            "recorded_at": "2026-07-29T11:27:20.852Z",
+            "flow_run_head": "3e4253e508179b65cc129695e911c0e6cadea5ac411c1b9e92a2935d1433b3cf"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-1074/gate-claim-decision-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.learn.decisions",
+        "fieldOrBehavior": "The public identity boundary, merge decision, and unresolved separately owned risks are recorded without claiming merge completion.",
+        "value": "pass",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.learn.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1074",
+          "expected_producer": "builder.learning-review",
+          "recorded_by": "codexthread-a20b1e91fb7244bc15f442ecKontour",
+          "self_produced_trust_slices": [
+            "decision-evidence",
+            "learning-evidence"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1074/learning.json",
+              "summary": "Delivery decisions, observed facts, correction state, and ownership routing."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "decision-evidence",
+            "claim_type": "builder.learn.decisions",
+            "subject_type": "decision",
+            "step_id": "learn",
+            "identity_version": 2,
+            "recorded_at": "2026-07-29T11:27:54.306Z",
+            "flow_run_head": "a6d68cb6528699a1539fb01bce34dfd3f37b3744c0e0eab256fcc820292b9df4"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z",
+        "subjectType": "release",
+        "subjectId": "kontourai-flow-agents-1074/gate-claim-learning-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.learn.evidence",
+        "fieldOrBehavior": "The CI manifest correction is resolved; #1075 and #1079 retain their separate generic follow-up, and merge remains NOT_VERIFIED until observed.",
+        "value": "pass",
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "updatedAt": "2026-07-29T11:27:54.660Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.learn.evidence:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1074",
+          "expected_producer": "builder.learning-review",
+          "recorded_by": "codexthread-a20b1e91fb7244bc15f442ecKontour",
+          "self_produced_trust_slices": [
+            "decision-evidence",
+            "learning-evidence"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1074/learning.json",
+              "summary": "Observed outcomes, correction disposition, durable follow-up links, and closeout boundary."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "learning-evidence",
+            "claim_type": "builder.learn.evidence",
+            "subject_type": "release",
+            "step_id": "learn",
+            "identity_version": 2,
+            "recorded_at": "2026-07-29T11:27:54.660Z",
+            "flow_run_head": "a6d68cb6528699a1539fb01bce34dfd3f37b3744c0e0eab256fcc820292b9df4"
           }
         },
         "status": "verified"
@@ -851,7 +973,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "Work Item kontourai/flow-agents#1074 is durably assigned to the active workflow actor (assignment sha256:1969437e9f051684072e41bd7b549cadf26285d668b7fa37f9e3b6812dfa17d1).",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -862,7 +984,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "Pickup probe records goal fit, bounded scope, dependency, risks, accepted baseline gap, and planning readiness.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -873,7 +995,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "Probe decisions and the accepted historical-baseline gap are explicit in the handoff.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -884,7 +1006,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "Implementation plan records bounded scope, sequence, acceptance mapping, stop-short risks, and exact verification requirements.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -895,7 +1017,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "The exact source commit implements only the #1074 resolver, export, docs, and tests, with criterion mapping and #1075 separated.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -906,7 +1028,7 @@
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1074/command-log.jsonl",
         "excerptOrSummary": "All five #1074 acceptance criteria pass on exact HEAD fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2 using the canonical public API test.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -923,7 +1045,40 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1074/evidence.json",
         "excerptOrSummary": "Exact-head acceptance, scope integrity, full static verification, and two clean review lanes support merge review; provider checks remain a separate release-readiness requirement.",
-        "observedAt": "2026-07-29T11:02:54.022Z",
+        "observedAt": "2026-07-29T11:27:54.660Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1074/evidence.json",
+        "excerptOrSummary": "MERGE authorized: exact implementation and provisional delivery are reconciled, all eight provider checks pass, and residual #1075 risk remains separately tracked.",
+        "observedAt": "2026-07-29T11:27:54.660Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1074/evidence.json",
+        "excerptOrSummary": "The public identity boundary, merge decision, and unresolved separately owned risks are recorded without claiming merge completion.",
+        "observedAt": "2026-07-29T11:27:54.660Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1074/evidence.json",
+        "excerptOrSummary": "The CI manifest correction is resolved; #1075 and #1079 retain their separate generic follow-up, and merge remains NOT_VERIFIED until observed.",
+        "observedAt": "2026-07-29T11:27:54.660Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
@@ -1168,6 +1323,57 @@
         "impactLevel": "high"
       },
       {
+        "id": "policy:builder.merge-ready-ci.readiness:attestation",
+        "claimType": "builder.merge-ready-ci.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready-ci.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.learn.decisions:attestation",
+        "claimType": "builder.learn.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.learn.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.learn.evidence:attestation",
+        "claimType": "builder.learn.evidence",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.learn.evidence claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
         "id": "policy:workflow.acceptance.criterion:test_output",
         "claimType": "workflow.acceptance.criterion",
         "requiredEvidence": [
@@ -1210,8 +1416,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1074-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1969437e9f051684072e41bd7b549cadf26285d668b7fa37f9e3b6812dfa17d1-gate-visit-2026-07-29t08-59-28z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-bounded-scope-dependency-risks-accepted-baseline-gap-and-planning-readiness-gate-visit-2026-07-29t09-00-11-093z",
@@ -1222,8 +1428,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-bounded-scope-dependency-risks-accepted-baseline-gap-and-planning-readiness-gate-visit-2026-07-29t09-00-11-093z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-and-the-accepted-historical-baseline-gap-are-explicit-in-the-handoff-gate-visit-2026-07-29t09-00-11-456z",
@@ -1234,8 +1440,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-and-the-accepted-historical-baseline-gap-are-explicit-in-the-handoff-gate-visit-2026-07-29t09-00-11-456z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-bounded-scope-sequence-acceptance-mapping-stop-short-risks-and-exact-verification-requirements-gate-visit-2026-07-29t09-01-14-178z",
@@ -1246,8 +1452,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-bounded-scope-sequence-acceptance-mapping-stop-short-risks-and-exact-verification-requirements-gate-visit-2026-07-29t09-01-14-178z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-implementation-scope.flow-agents-workflow.the-exact-source-commit-implements-only-the-1074-resolver-export-docs-and-tests-with-criterion-mapping-and-1075-separated-gate-visit-2026-07-29t09-02-34-865z",
@@ -1258,8 +1464,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-implementation-scope.flow-agents-workflow.the-exact-source-commit-implements-only-the-1074-resolver-export-docs-and-tests-with-criterion-mapping-and-1075-separated-gate-visit-2026-07-29t09-02-34-865z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-tests-evidence.flow-agents-workflow.all-five-1074-acceptance-criteria-pass-on-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-using-the-canonical-public-api-test-gate-visit-2026-07-29t11-01-57-682z",
@@ -1270,8 +1476,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-tests-evidence.flow-agents-workflow.all-five-1074-acceptance-criteria-pass-on-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-using-the-canonical-public-api-test-gate-visit-2026-07-29t11-01-57-682z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-gate-claim-merge-readiness.flow-agents-workflow.exact-head-acceptance-scope-integrity-full-static-verification-and-two-clean-review-lanes-support-merge-review-provider-checks-remain-a-separate-release-readiness-requirement-gate-visit-2026-07-29t11-02-54-022z",
@@ -1282,8 +1488,44 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1074-gate-claim-merge-readiness.flow-agents-workflow.exact-head-acceptance-scope-integrity-full-static-verification-and-two-clean-review-lanes-support-merge-review-provider-checks-remain-a-separate-release-readiness-requirement-gate-visit-2026-07-29t11-02-54-022z"
         ],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z"
+        ],
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z"
+        ],
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z",
+        "claimId": "kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z"
+        ],
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-ac1-public-resolver.flow-agents-workflow.the-package-root-exports-the-exact-continuation-adapter-identity-resolver-used-by-workflow-drive-verified-2026-07-29t11-01-57-682z",
@@ -1352,8 +1594,8 @@
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1074-review.flow-agents-workflow.two-of-two-declared-review-lanes-completed-clean-at-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-the-prior-missing-public-api-unit-tests-ci-invocation-was-corrected-and-manifest-ci-alignment-is-now-complete-reviewed-2026-07-29t10-59-44-197z",
@@ -1362,8 +1604,8 @@
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-07-29T11:02:54.022Z",
-        "verifiedAt": "2026-07-29T11:02:54.022Z"
+        "createdAt": "2026-07-29T11:27:54.660Z",
+        "verifiedAt": "2026-07-29T11:27:54.660Z"
       }
     ]
   }
