@@ -84,16 +84,15 @@
     "declared_at": "2026-07-26T23:55:00Z"
   },
   {
-<<<<<<< HEAD
-    "scope": "branch-prefix:fix/telemetry-doctor-config-parity",
-    "reason": "Scoped diagnostic fix (#1083, closes half of #1073): telemetry-doctor resolved only the shipped scripts/telemetry/telemetry.conf, so a machine whose Console credentials live in the user-global ~/.flow-agents/telemetry-console.conf reported 'Console endpoint: not configured' while the bash hooks were resolving it and mirroring fine \u2014 the diagnostic for 'is my telemetry configured' returning the wrong answer, which sends operators to rewrite working config. It now resolves in config.sh's documented order (explicit TELEMETRY_CONFIG_FILE, trusted per-workspace conf, trusted user-global conf, shipped default); the trust gate is unchanged so an untrusted candidate is still ignored exactly as the runtime ignores it. Reporting-only: no emission, transport, or record-shape behavior changes. Owner-governed exemption (no formal agent-delivery bundle recorded), same posture as the telemetry-project-attribution entry above. Verified: npm run test:unit 1327/1327 green; new unit test pins the full resolution precedence with HOME stubbed (the developer running it very likely has a real trusted global conf that would otherwise make the assertions describe the machine rather than the precedence); fault-injected by restoring the shipped-default-only line, which reproduces 'not configured', and reverting, which restores the real endpoint. All other CI checks on the PR are green; only this bundle-required gate is outstanding.",
-    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-29 session: lets-make-this-all-happen-so-we-dont-lose-track)",
-    "declared_at": "2026-07-29T16:12:00Z"
-=======
     "scope": "branch-prefix:docs/console-record-delivery",
     "reason": "Docs-only PR (#1086): adds docs/decisions/console-record-delivery.md (the ratified Console record delivery contract \u2014 delivery classes, and board-state-from-a-fold vs receipts-as-events), the CONTEXT.md subject noun the registry contract requires before a topic file, and the regenerated decisions index. No source or behavior changes and no command-backed (agent-delivery) claims to reconcile. check:decisions, check:content-boundary and context-map:check all pass.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-29 session: lets-make-this-all-happen-so-we-dont-lose-track)",
     "declared_at": "2026-07-29T16:10:00Z"
->>>>>>> origin/main
+  },
+  {
+    "scope": "branch-prefix:fix/telemetry-doctor-config-parity",
+    "reason": "Scoped diagnostic fix (#1083, closes half of #1073): telemetry-doctor resolved only the shipped scripts/telemetry/telemetry.conf, so a machine whose Console credentials live in the user-global ~/.flow-agents/telemetry-console.conf reported 'Console endpoint: not configured' while the bash hooks were resolving it and mirroring fine \u2014 the diagnostic for 'is my telemetry configured' returning the wrong answer, which sends operators to rewrite working config. It now resolves in config.sh's documented order (explicit TELEMETRY_CONFIG_FILE, trusted per-workspace conf, trusted user-global conf, shipped default); the trust gate is unchanged so an untrusted candidate is still ignored exactly as the runtime ignores it. Reporting-only: no emission, transport, or record-shape behavior change. Owner-governed exemption (no formal agent-delivery bundle recorded), same posture as the telemetry-project-attribution entry above. Verified: npm run test:unit 1327/1327 green; a new unit test pins the full resolution precedence with HOME stubbed (the developer running it very likely has a real trusted global conf that would otherwise make the assertions describe the machine rather than the precedence); fault-injected by restoring the shipped-default-only line, which reproduces 'not configured', and reverting, which restores the real endpoint.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-29 session: lets-make-this-all-happen-so-we-dont-lose-track)",
+    "declared_at": "2026-07-29T16:12:00Z"
   }
 ]
