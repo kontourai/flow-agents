@@ -13,6 +13,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [agent-coordination](./agent-coordination.md) | current | Agent coordination |
 | [anti-gaming-trust-security](./anti-gaming-trust-security.md) | needs-decision | Anti-gaming trust security |
 | [backlog-readiness-source](./backlog-readiness-source.md) | current | Backlog Readiness Source |
+| [console-record-delivery](./console-record-delivery.md) | current | Console record delivery |
 | [context-lifecycle](./context-lifecycle.md) | needs-decision | Context lifecycle |
 | [core-domain-kit-boundary](./core-domain-kit-boundary.md) | needs-decision | Core vs domain kit boundary |
 | [decision-records](./decision-records.md) | current | Decision records |
