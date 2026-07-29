@@ -379,3 +379,219 @@ transport_maybe_rotate() {
     mv "$log_file" "${base_name}.1.${extension}"
   done
 }
+
+# ── At-least-once delivery (console-record-delivery decision, #1087 slice A) ──
+#
+# `console_post_json` above is the best-effort core: it fires curl detached and
+# never observes the result. That is the CORRECT posture for high-frequency
+# observation (per-tool-use hooks, liveness heartbeats) where loss is
+# immaterial and an outbox would put I/O on the interactive path of every tool
+# call.
+#
+# It is the wrong posture for receipts — gate claims, critiques, verdicts,
+# releases. There, loss is both silent and material: nothing distinguishes "no
+# verdict was recorded" from "the verdict was lost". Those need at-least-once,
+# which `/records`' idempotent upsert on (tenant_id, record_id) makes safe to
+# retry.
+#
+# Delivery class is a declared property of the record class, not a per-caller
+# choice — one core, two modes.
+#
+# Durability order is deliberate: the outbox append happens SYNCHRONOUSLY and
+# before any send is attempted, so a crash, an offline machine, or a hub outage
+# leaves a replayable artifact rather than a silent hole. This is what the old
+# projection-file scrape got right by accident and what live emission must not
+# lose.
+
+console_outbox_dir() {
+  printf '%s' "${TELEMETRY_DATA_DIR:-${TELEMETRY_SESSION_DIR:-${TMPDIR:-/tmp}}}/console-outbox"
+}
+
+# One JSON line per undelivered record. Never contains a token: the auth header
+# is applied at send time from the resolved conf.
+console_outbox_file() { printf '%s/pending.jsonl' "$(console_outbox_dir)"; }
+
+# Records that exhausted their attempts. Kept, not deleted — this file IS the
+# gap-detection surface. At-least-once without a way to answer "which records
+# never acked" is theatre.
+console_outbox_dead_file() { printf '%s/undelivered.jsonl' "$(console_outbox_dir)"; }
+
+console_outbox_max_attempts() {
+  local raw="${CONSOLE_OUTBOX_MAX_ATTEMPTS:-5}"
+  [[ "$raw" =~ ^[0-9]+$ ]] && [[ "$raw" -ge 1 ]] && [[ "$raw" -le 50 ]] || raw=5
+  printf '%s' "$raw"
+}
+
+# Bounded so a long outage cannot fill the disk. On overflow the OLDEST entries
+# are moved to the dead file rather than dropped, so overflow is reportable
+# instead of invisible.
+console_outbox_max_entries() {
+  local raw="${CONSOLE_OUTBOX_MAX_ENTRIES:-1000}"
+  [[ "$raw" =~ ^[0-9]+$ ]] && [[ "$raw" -ge 1 ]] || raw=1000
+  printf '%s' "$raw"
+}
+
+# Enqueue a record for at-least-once delivery. Returns 0 always: telemetry must
+# never fail, slow, or block the caller's real work.
+# Usage: console_outbox_enqueue <endpoint_url> <body_json> <record_id>
+console_outbox_enqueue() {
+  local endpoint_url="$1" body="$2" record_id="$3"
+  local dir file line
+  [[ -z "$endpoint_url" || -z "$body" || -z "$record_id" ]] && return 0
+  dir="$(console_outbox_dir)"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  chmod 700 "$dir" 2>/dev/null
+  file="$(console_outbox_file)"
+  # Single-line append: small writes to a local file are atomic enough that
+  # concurrent hooks interleave whole lines rather than corrupting one.
+  line=$(printf '%s' "$body" | node -e '
+    let b = "";
+    process.stdin.on("data", (d) => { b += d; });
+    process.stdin.on("end", () => {
+      try {
+        JSON.parse(b);
+      } catch {
+        process.exit(1);
+      }
+      process.stdout.write(JSON.stringify({
+        id: process.argv[1],
+        endpoint: process.argv[2],
+        attempts: 0,
+        body: b,
+      }));
+    });
+  ' "$record_id" "$endpoint_url" 2>/dev/null) || return 0
+  [[ -z "$line" ]] && return 0
+  printf '%s\n' "$line" >> "$file" 2>/dev/null || return 0
+  chmod 600 "$file" 2>/dev/null
+  console_outbox_trim
+  return 0
+}
+
+# Overflow protection. Oldest-first to the dead file so the newest receipts —
+# the ones most likely still actionable — survive.
+console_outbox_trim() {
+  local file dead max count keep
+  file="$(console_outbox_file)"
+  [[ -f "$file" ]] || return 0
+  max="$(console_outbox_max_entries)"
+  count=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+  [[ "$count" =~ ^[0-9]+$ ]] || return 0
+  [[ "$count" -le "$max" ]] && return 0
+  dead="$(console_outbox_dead_file)"
+  keep=$((count - max))
+  head -n "$keep" "$file" >> "$dead" 2>/dev/null
+  tail -n "$max" "$file" > "$file.trim" 2>/dev/null && mv "$file.trim" "$file" 2>/dev/null
+  chmod 600 "$file" "$dead" 2>/dev/null
+  return 0
+}
+
+# Synchronous POST that OBSERVES the result — unlike console_post_json's
+# detached fire. Returns 0 only on a 2xx.
+console_outbox_send_one() {
+  local endpoint_url="$1" body="$2"
+  local connect_timeout max_time tmp_dir curl_config curl_body status
+  console_telemetry_endpoint_allowed "$endpoint_url" || return 1
+  connect_timeout=$(console_telemetry_timeout_seconds "${CONSOLE_OUTBOX_CONNECT_TIMEOUT:-2}" 2 30)
+  max_time=$(console_telemetry_timeout_seconds "${CONSOLE_OUTBOX_MAX_TIME:-10}" 10 60)
+  tmp_dir="${TELEMETRY_SESSION_DIR:-${TMPDIR:-/tmp}}"
+  curl_config=$(mktemp "${tmp_dir%/}/console-outbox-curl.XXXXXX") || return 1
+  curl_body=$(mktemp "${tmp_dir%/}/console-outbox-body.XXXXXX") || { rm -f "$curl_config"; return 1; }
+  chmod 600 "$curl_config" "$curl_body" 2>/dev/null
+  printf '%s' "$body" > "$curl_body" || { rm -f "$curl_config" "$curl_body"; return 1; }
+  {
+    printf 'url = "%s"\n' "$endpoint_url"
+    printf 'request = "POST"\n'
+    printf 'connect-timeout = "%s"\n' "$connect_timeout"
+    printf 'max-time = "%s"\n' "$max_time"
+    printf 'header = "Content-Type: application/json"\n'
+    if [[ -n "${CONSOLE_TELEMETRY_TOKEN:-}" ]] && console_telemetry_safe_token "$CONSOLE_TELEMETRY_TOKEN"; then
+      printf 'header = "Authorization: Bearer %s"\n' "$CONSOLE_TELEMETRY_TOKEN"
+    fi
+    if [[ -n "${CONSOLE_TENANT_ID:-}" ]] && console_telemetry_safe_tenant "$CONSOLE_TENANT_ID"; then
+      printf 'header = "x-console-tenant-id: %s"\n' "$CONSOLE_TENANT_ID"
+    fi
+    printf 'data-binary = "@%s"\n' "$curl_body"
+  } > "$curl_config" || { rm -f "$curl_config" "$curl_body"; return 1; }
+  status=$(curl -s -o /dev/null -w '%{http_code}' --proto =https,http --proto-redir =https,http \
+    --config "$curl_config" 2>/dev/null)
+  rm -f "$curl_config" "$curl_body"
+  [[ "$status" =~ ^2[0-9][0-9]$ ]]
+}
+
+# Flush the outbox. Lock-guarded so concurrent hooks cannot double-send or
+# corrupt the file; a held lock is simply skipped (the next run flushes).
+console_outbox_flush() {
+  local dir file dead lock line id endpoint body attempts max survivors
+  dir="$(console_outbox_dir)"
+  file="$(console_outbox_file)"
+  dead="$(console_outbox_dead_file)"
+  [[ -f "$file" ]] || return 0
+  lock="$dir/.flush.lock"
+  mkdir "$lock" 2>/dev/null || return 0
+  # shellcheck disable=SC2064
+  trap "rmdir '$lock' 2>/dev/null" RETURN
+  max="$(console_outbox_max_attempts)"
+  survivors="$file.flush"
+  : > "$survivors" 2>/dev/null || { rmdir "$lock" 2>/dev/null; return 0; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    id=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).id??""))}catch{}})' 2>/dev/null)
+    endpoint=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).endpoint??""))}catch{}})' 2>/dev/null)
+    body=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).body??""))}catch{}})' 2>/dev/null)
+    attempts=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).attempts??0))}catch{process.stdout.write("0")}})' 2>/dev/null)
+    [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=0
+    if [[ -z "$endpoint" || -z "$body" ]]; then
+      # Unparseable entry: retire it to the dead file rather than retrying it
+      # forever or dropping it silently.
+      printf '%s\n' "$line" >> "$dead" 2>/dev/null
+      continue
+    fi
+    if console_outbox_send_one "$endpoint" "$body"; then
+      continue  # delivered; drop from pending
+    fi
+    attempts=$((attempts + 1))
+    if [[ "$attempts" -ge "$max" ]]; then
+      printf '%s\n' "$line" >> "$dead" 2>/dev/null
+      continue
+    fi
+    printf '%s' "$line" | node -e '
+      let b = "";
+      process.stdin.on("data", (d) => { b += d; });
+      process.stdin.on("end", () => {
+        try {
+          const e = JSON.parse(b);
+          e.attempts = Number(process.argv[1]);
+          process.stdout.write(JSON.stringify(e) + "\n");
+        } catch {}
+      });
+    ' "$attempts" >> "$survivors" 2>/dev/null
+  done < "$file"
+  mv "$survivors" "$file" 2>/dev/null || rm -f "$survivors" 2>/dev/null
+  chmod 600 "$file" 2>/dev/null
+  [[ -f "$dead" ]] && chmod 600 "$dead" 2>/dev/null
+  rmdir "$lock" 2>/dev/null
+  trap - RETURN
+  return 0
+}
+
+# Gap detection: how many records have not been acknowledged, and how many gave
+# up entirely. Without this, at-least-once is unverifiable.
+console_outbox_pending_count() {
+  local file; file="$(console_outbox_file)"
+  [[ -f "$file" ]] && wc -l < "$file" 2>/dev/null | tr -d ' ' || printf '0'
+}
+
+console_outbox_undelivered_count() {
+  local dead; dead="$(console_outbox_dead_file)"
+  [[ -f "$dead" ]] && wc -l < "$dead" 2>/dev/null | tr -d ' ' || printf '0'
+}
+
+# The at-least-once entry point. Durable first, then a detached flush so the
+# caller is never blocked on the network.
+# Usage: console_post_json_durable <endpoint_url> <body_json> <record_id>
+console_post_json_durable() {
+  console_outbox_enqueue "$1" "$2" "$3" || return 0
+  ( console_outbox_flush >/dev/null 2>&1 ) &
+  return 0
+}
