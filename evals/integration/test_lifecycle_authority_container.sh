@@ -51,7 +51,7 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 3.12.0 reducer closure, and that pin is
+# The privileged coordinator is pinned to the audited Flow reducer closure, and that pin is
 # a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
 # clock, not a control.
 #
@@ -565,10 +565,10 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 3.12.0 mutation after reseal',
+  reason: 'installed pinned Flow mutation after reseal',
   authority: {
     kind: 'operator_request',
-    actor: 'installed-flow-3.12.0-container',
+    actor: 'installed-pinned-flow-container',
     request_ref: 'container:reseal-native-lock',
     requested_at: '2026-07-20T00:20:00Z'
   },
@@ -604,7 +604,8 @@ const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
 const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
 if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
 const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
-if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.12.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.12.0');
+const reducerPin = JSON.parse(fs.readFileSync('/work/packaging/lifecycle-authority/flow-reducer-v1.json', 'utf8'));
+if (packageJson.name !== reducerPin.package || packageJson.version !== reducerPin.package_version) throw new Error(`reseal interoperability must use installed exact ${reducerPin.package}@${reducerPin.package_version}`);
 if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
 const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
 for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -621,7 +622,7 @@ const spawnAsNode = (script, args) => {
 };
 const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
 if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
-  throw new Error('installed exact @kontourai/flow@3.12.0 does not expose the public recovery contract');
+  throw new Error(`installed exact ${reducerPin.package}@${reducerPin.package_version} does not expose the public recovery contract`);
 }
 const waitFor = async (label, predicate) => {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -643,24 +644,24 @@ if (recoveryAttachments.length !== 2 || new Set(recoveryAttachments.map((entry) 
 }
 const holder = spawnAsNode('/work/pinned-flow-lock-holder.mjs', [pinnedFlowRoot, project, runId, readyFile, releaseFile]);
 await Promise.race([
-  waitFor('installed 3.12.0 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
-  holder.result.then((result) => { throw new Error(`installed 3.12.0 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed pinned Flow holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
+  holder.result.then((result) => { throw new Error(`installed pinned Flow holder exited before readiness: ${result.stdout}${result.stderr}`); }),
 ]);
 const reseal = spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']);
 await Promise.race([
-  waitFor('root reseal ticket behind installed 3.12.0 holder', () => ticketCount() === 2),
-  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.12.0: ${result.stdout}${result.stderr}`); }),
+  waitFor('root reseal ticket behind installed pinned Flow holder', () => ticketCount() === 2),
+  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed pinned Flow: ${result.stdout}${result.stderr}`); }),
 ]);
 const pause = spawnAsNode('/work/pinned-flow-pause.mjs', [pinnedFlowRoot, project, runId]);
 await Promise.race([
-  waitFor('installed 3.12.0 public pause behind reseal', () => ticketCount() === 3),
-  pause.result.then((result) => { throw new Error(`installed 3.12.0 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed pinned Flow public pause behind reseal', () => ticketCount() === 3),
+  pause.result.then((result) => { throw new Error(`installed pinned Flow pause exited before queuing: ${result.stdout}${result.stderr}`); }),
 ]);
 fs.writeFileSync(releaseFile, 'release\n');
 const [holderResult, resealResult, pauseResult] = await Promise.all([holder.result, reseal.result, pause.result]);
-if (holderResult.status !== 0) throw new Error(`installed 3.12.0 holder failed: ${holderResult.stderr}`);
-if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.12.0 lock: ${resealResult.stdout}${resealResult.stderr}`);
-if (pauseResult.status !== 0) throw new Error(`installed 3.12.0 pause failed behind reseal: ${pauseResult.stderr}`);
+if (holderResult.status !== 0) throw new Error(`installed pinned Flow holder failed: ${holderResult.stderr}`);
+if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed pinned Flow lock: ${resealResult.stdout}${resealResult.stderr}`);
+if (pauseResult.status !== 0) throw new Error(`installed pinned Flow pause failed behind reseal: ${pauseResult.stderr}`);
 const resealReceipt = JSON.parse(resealResult.stdout);
 if (resealReceipt.operation_status !== 'applied') throw new Error('installed-closure reseal was not applied');
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
@@ -677,8 +678,20 @@ const completionResult = await spawnAsNode('/work/verify-reseal-completion.mjs',
 if (completionResult.status !== 0) throw new Error(`unprivileged completion verification failed: ${completionResult.stdout}${completionResult.stderr}`);
 const completion = JSON.parse(completionResult.stdout);
 if (completion.action !== 'reseal-verification-evidence') throw new Error('reseal did not install its exact completion');
+const resealAuthorization = JSON.parse(fs.readFileSync('/root/lifecycle-authorizations/reseal.json', 'utf8'));
+const nonceId = crypto.createHash('sha256')
+  .update(`${resealAuthorization.signature.key_id}\u0000${resealAuthorization.nonce}`)
+  .digest('hex');
+const nonceRecord = JSON.parse(fs.readFileSync(path.join(process.env.LIFECYCLE_STATE_ROOT, 'nonces', `${nonceId}.json`), 'utf8'));
+if (nonceRecord.status !== 'applied' || nonceRecord.recovery_generation !== completion.recovery_generation) {
+  throw new Error('reseal durable nonce and completion do not retain one root generation');
+}
+const finalizedFence = JSON.parse(fs.readFileSync(path.join(runRoot, 'recovery-fence.json'), 'utf8'));
+if (finalizedFence.status !== 'open' || finalizedFence.previous_generation !== completion.recovery_generation) {
+  throw new Error('reseal finalization does not bind the root completion generation');
+}
 const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
-if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.12.0 public mutation was not preserved');
+if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed pinned Flow public mutation was not preserved');
 if (state.transitions.filter((entry) => entry.type === 'route_back').length !== routeBacksBefore) throw new Error('recovery or reseal consumed a verify route-back');
 const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
 const resealEntries = manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`);
@@ -689,13 +702,13 @@ const resealEntry = resealEntries[0], storedBytes = fs.readFileSync(path.join(ru
 const bundleDigest = crypto.createHash('sha256').update(bundleBytes).digest('hex');
 if (resealEntry.sha256 !== bundleDigest || !storedBytes.equals(bundleBytes)) throw new Error('reseal did not atomically publish one byte-identical bundle and Flow attachment');
 if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
-console.log('PASS: two public exact-current recovery generations preserve route-back budget, then observed tests-evidence publishes atomically under the installed Flow 3.12.0 FIFO lock');
+console.log('PASS: two public exact-current recovery generations preserve route-back budget, then observed tests-evidence publishes atomically under the installed pinned Flow FIFO lock');
 NODE
 node /work/reseal-native-lock-e2e.mjs
 
 cat > /work/history-repair-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawnSync } from 'node:child_process';
-import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
+import { COMPLETION_SCHEMA_VERSION, canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
 import { coordinatorRuntimeSha256, validateResolutionEventLedger } from './packaging/lifecycle-authority/runtime-v1.mjs';
 const project = '/tmp/lifecycle-authority-e2e', slug = 'repair-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug);
 const critiques = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8')).claims
@@ -740,7 +753,7 @@ const survivor = structuredClone(legacyLedger.events[2]); survivor.sequence = 1;
 const overwrittenLedger = { schema_version: '1.0', events: [survivor] }; fs.writeFileSync(ledgerFile, `${JSON.stringify(overwrittenLedger, null, 2)}\n`, { mode: 0o644 });
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
 const priorCompletion = verifyCompletion(path.join(session, 'lifecycle-authority.completion.json'));
-const unsignedCompletion = { schema_version: '1.0', kind: 'kontourai.lifecycle-authority.completion', action: 'resolve-critique', request_sha256: priorCompletion.request_sha256, run_id: slug, operation_status: 'applied', result_core_sha256: sha256({ ...bundle, critique_resolution_events: overwrittenLedger.events }), coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
+const unsignedCompletion = { schema_version: COMPLETION_SCHEMA_VERSION, kind: 'kontourai.lifecycle-authority.completion', action: 'resolve-critique', request_sha256: priorCompletion.request_sha256, run_id: slug, operation_status: 'applied', result_core_sha256: sha256({ ...bundle, critique_resolution_events: overwrittenLedger.events }), coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
 const completion = { ...unsignedCompletion, signature: { algorithm: 'ed25519', value: crypto.sign(null, Buffer.from(canonicalJson(unsignedCompletion)), crypto.createPrivateKey(fs.readFileSync('/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-signing-key.pem'))).toString('base64') } };
 fs.writeFileSync(path.join(session, 'lifecycle-authority.completion.json'), `${JSON.stringify(completion, null, 2)}\n`, { mode: 0o644 });
 const historicalAuthorization = survivor.signed_authorization, historicalAuthorizationSha256 = sha256(canonicalJson(historicalAuthorization));

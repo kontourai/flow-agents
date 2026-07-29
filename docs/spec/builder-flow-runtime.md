@@ -446,7 +446,8 @@ For install and upgrade, omitting `[node_modules]` makes the script create a tem
 `npm ci --ignore-scripts` stage from the committed
 `packaging/lifecycle-authority/flow-reducer-closure/package-lock.json`; it never falls back to the
 root workspace dependency tree. An explicit pre-staged closure remains supported for offline
-installation. The script stages the exact published `@kontourai/flow` 3.12.0 package and the
+installation. The script stages the exact published `@kontourai/flow` package declared by the
+independently reviewed reducer pin and the
 transitive runtime dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
@@ -528,16 +529,18 @@ fixed four writable Flow-only old/new images and root signs a request-, authoriz
 nonce-, reducer-, and result-bound publication plan. The plan binds, but never
 stages or restores, `trust.bundle`, the resolution ledger, the stale receipt,
 or canonical Flow state. State remains a protected read-only preimage so a
-writer in the plan-before-fence window invalidates the plan. Before the first
-postimage, the worker activates Flow's native
-generation-bound recovery fence for the signed plan `recovery_id`. The fence
+writer in the plan-before-fence window invalidates the plan. Before delegation,
+root persists a unique expected generation in the durable nonce record and
+signs it into the publication capability. Before the first postimage, the
+worker activates Flow's native coordinator-bound recovery fence for the signed
+plan `recovery_id` and that exact generation. The fence
 remains active while root persists completion and nonce state and installs the
 exact receipt, so ordinary Flow writers cannot observe or mutate the
 intermediate generation. Prepared recovery uses the matching native recovery
 lock. It classifies each live artifact as exact old, exact new, or unknown;
 all-old and exact mixed states roll forward from staged new bytes, all-new
 succeeds idempotently, and unknown state fails closed without restoration.
-The root-signed completion binds the Flow-generated active fence generation.
+The root-signed completion binds the root-protected active fence generation.
 Finalization verifies that exact active generation, receipt, and all-new
 postimages, opens the fence through Flow's finalizer, and only then removes the
 stages and plan. Completion replay safely resumes receipt installation or

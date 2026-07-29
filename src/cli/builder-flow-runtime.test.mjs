@@ -1892,7 +1892,7 @@ async function captureWorkflowPublicResult(args) {
 function installSignedCurrentCompletion(session) {
   const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
   const unsigned = {
-    schema_version: "1.0",
+    schema_version: "2.0",
     kind: "kontourai.lifecycle-authority.completion",
     action: "resolve-critique",
     request_sha256: "a".repeat(64),
@@ -4673,7 +4673,7 @@ test("public history-repair request deterministically derives every historical/c
     };
     const requestSha256 = "b".repeat(64);
     const completion = {
-      schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
+      schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
       request_sha256: requestSha256, run_id: slug, operation_status: "applied",
       result_core_sha256: lifecycleAuthorityResultDigest({ ...historicalBundle, critique_resolution_events: [event] }),
       coordinator_runtime_sha256: "c".repeat(64), completed_at: "2030-01-01T00:01:30.000Z",

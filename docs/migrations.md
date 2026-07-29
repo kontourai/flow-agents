@@ -6,6 +6,13 @@ title: Migrations
 
 ## Unreleased
 
+- Root-signed lifecycle authority completions now use completion schema `2.0`.
+  Version `2.0` binds verification reseal and exact-current recovery completions
+  to the exact Flow recovery-fence generation. Version `1.0` completion receipts
+  are not accepted as current or historical authority and are not upgraded in
+  place. Complete or archive active runs with their previous lifecycle helper
+  before upgrading. After the helper upgrade, start a new Builder run instead
+  of carrying a version `1.0` receipt forward.
 - Economics records produced from runtime telemetry now use
   `version: "0.2"`. Version `0.2` requires exact run correlation,
   declared observation semantics, and producer authority. Its verification

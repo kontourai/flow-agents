@@ -244,15 +244,17 @@ authenticated stale same-run root completion, the raw current bundle and ledger 
 cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
 and canonical ordered gate-policy digests, Flow head/manifest,
 fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
-the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
-plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
-generation active through root completion/nonce persistence and receipt installation. The root-signed
-completion binds that exact Flow-generated generation. Prepared
+the coordinator first durably stages and root-signs an exact four-artifact Flow-only publication
+plan. Before delegation, root persists a unique expected generation in the durable nonce record
+and signs it into the publication capability. The worker activates Flow's native recovery fence
+before the first postimage and keeps that generation active through root completion, nonce
+persistence, and receipt installation. The root-signed completion binds the root-protected
+generation. Prepared
 retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
 old/new state forward from the staged postimages, and rejects unknown or mismatched state without
 restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
 opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
-ledger, and stale receipt; it never snapshots or restores them.
+ledger, stale receipt, and canonical Flow state; it never snapshots or restores them.
 
 The canonical attachment ID and stored filename include the signed authorization digest in addition
 to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
