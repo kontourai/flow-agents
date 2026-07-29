@@ -42,6 +42,10 @@ export TELEMETRY_DIR="${TELEMETRY_DIR:-$SCRIPT_DIR}"
 source "$TELEMETRY_DIR/lib/config.sh" 2>/dev/null || true
 # shellcheck source=/dev/null
 source "$TELEMETRY_DIR/lib/transport.sh" 2>/dev/null || exit 0
+# #970: same Kit-identity resolver telemetry.sh uses for `.kit` on every event — sourced here so the
+# economics record's `kit` field is byte-identical to the run's own events (joinable, never re-derived).
+# shellcheck source=/dev/null
+source "$TELEMETRY_DIR/lib/kit-identity.sh" 2>/dev/null || true
 
 # jq is mandatory — it is what guarantees valid JSON + \u-escaping of untrusted fields. No jq ⇒ no-op.
 command -v jq >/dev/null 2>&1 || exit 0
@@ -301,6 +305,16 @@ elif [[ "$explicit_sidecars" == "true" ]]; then
   producer_authority="fixture_input"
 fi
 
+# --- #970: Kit identity (package version + git sha/ref/dirty), joinable to this run's telemetry -----
+# Resolved via the SAME kit_identity_json (lib/kit-identity.sh) telemetry.sh stamps on every event, so
+# a run's economics record and its events carry byte-identical `.kit`/`kit` values. Best-effort: an
+# unavailable resolver (source failed above) degrades to the explicit incomplete shape, never omitted.
+if command -v kit_identity_json >/dev/null 2>&1; then
+  kit_identity_json_val="$(kit_identity_json)"
+else
+  kit_identity_json_val='{"resolution":"incomplete","reason":"the kit identity resolver is unavailable","version":null,"git_sha":null,"git_ref":null,"dirty":null}'
+fi
+
 # --- assemble the record with ONE jq -c filter (injection-safe, valid JSON) -------------------------
 # Untrusted fields (task_slug, model names, finding text) flow through jq string handling so hostile
 # control bytes are \u-escaped rather than emitted raw. NEVER printf/concatenate JSON.
@@ -310,6 +324,7 @@ record="$(printf '%s' "$usage_event" | jq -c \
   --argjson acceptance "$acceptance_json" \
   --argjson delegations "$delegations_json" \
   --argjson per_delegation_tokens "$per_delegation_tokens" \
+  --argjson kit "$kit_identity_json_val" \
   --arg producer_authority "$producer_authority" \
   --arg tenant "$tenant_self" '
   def valid_number: type == "number" and . >= 0;
@@ -359,6 +374,7 @@ record="$(printf '%s' "$usage_event" | jq -c \
       task_slug: ($e.task_slug // null),
       model: ($u.model // null),
       pricing_version: ($u.pricing_version // null),
+      kit: $kit,
       cost: {
         input_tokens: $it,
         output_tokens: $ot,

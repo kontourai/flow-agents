@@ -194,6 +194,45 @@ test("compiler emits a deterministic complete privacy-safe observation", (t) => 
   validateSchemas(manifest, compiled);
 });
 
+// #970: an economics record's `kit` field (Kit package version + git lineage, additive alongside
+// `pricing_version`) must not affect compilation -- existing consumers (this one included) parse
+// both the pre-#970 shape (no `kit`, exercised by every other fixture in this file) and the
+// post-#970 shape (with `kit`) without loss.
+test("compiler tolerates an additive economics `kit` field (#970) without loss", (t) => {
+  const { root, manifest } = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const economicsFile = path.join(root, "economics.jsonl");
+  const economics = JSON.parse(fs.readFileSync(economicsFile, "utf8"));
+  economics.kit = {
+    resolution: "resolved",
+    reason: null,
+    version: "5.5.0",
+    git_sha: "a".repeat(40),
+    git_ref: "main",
+    dirty: false,
+  };
+  fs.writeFileSync(economicsFile, `${JSON.stringify(economics)}\n`);
+
+  const withoutKit = compile(root, manifest);
+  const baseline = JSON.parse(JSON.stringify(withoutKit));
+  assert.equal(withoutKit.completeness.status, "complete");
+  assert.deepEqual(withoutKit.completeness.missing_dimensions, []);
+  assert.deepEqual(withoutKit.usage, {
+    status: "NOT_VERIFIED",
+    authority: "fixture_input",
+    semantics: "run_delta",
+    model: "fixture-model",
+    input_tokens: 100,
+    output_tokens: 25,
+    estimated_cost_usd: 0.01,
+    wall_clock_s: 12,
+    delegation_count: 0,
+  });
+  validateRetrospectiveObservation(withoutKit);
+  // Compiling again is deterministic and identical whether or not the source `kit` field is present.
+  assert.deepEqual(compile(root, manifest), baseline);
+});
+
 test("compiler reports absent producer dimensions without inference", (t) => {
   const { root, manifest } = fixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
