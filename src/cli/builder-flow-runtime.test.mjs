@@ -3994,6 +3994,11 @@ test("public evidence rejects an intervening Flow mutation and removes unattache
   const beforeBundle = fs.existsSync(bundleFile) ? fs.readFileSync(bundleFile) : null;
   const beforeManifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
 
+  // The intervening mutation is caught by Flow's own optimistic-concurrency
+  // guard (expectedRunHead passed to evaluateBuilderFlowRun), not by the
+  // current-gate claim's flow_run_head field: that field only asserts
+  // presence now, since visit-scoping already covers same-visit claims that
+  // legitimately carry an earlier head (see builder-flow-runtime.ts).
   await assert.rejects(
     workflowMain([
       "evidence", "--session-dir", session.sessionDir,
@@ -4001,7 +4006,7 @@ test("public evidence rejects an intervening Flow mutation and removes unattache
       "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, summary: "selected work" }),
       "--command", `${process.execPath} ${mutator}`,
     ]),
-    /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/,
+    /flow\.run_head\.stale: expectedRunHead does not match the current run state/,
   );
 
   assert.deepEqual(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)), beforeManifest);
@@ -4054,7 +4059,15 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
   assert.equal((await loadRun(session.slug, session.projectRoot)).definition.version, "1.3-valid-unshipped-test");
 });
 
-test("a gate claim recorded for an older Flow head stays inert until freshly re-recorded", async () => {
+test("a gate claim carrying an earlier same-visit Flow head still attaches", async () => {
+  // flowRunHead() hashes the entire run state, so an unrelated mutation
+  // within the SAME gate visit (here: pause/resume, which never transitions
+  // to_step) moves the head a claim was authorized against. Visit-scoping is
+  // enforced independently by claimIsCurrent (prior-visit claim/evidence ids
+  // and out-of-window timestamps), so a same-visit claim carrying an earlier
+  // head must still attach -- requiring identity with flowRunHead(state) at
+  // validation time would orphan claim 1 of a multi-expectation gate the
+  // moment claim 2 moves the head (kontourai/flow-agents#974 AC4).
   const session = makeSession("stale-gate-claim-head");
   const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   const staleHead = flowRunHead(started.run.state);
@@ -4063,25 +4076,12 @@ test("a gate claim recorded for an older Flow head stays inert until freshly re-
   await resumeRun(session.slug, { cwd: session.projectRoot, reason: "advance the canonical head", authority });
   const currentState = readJson(path.join(runDir(session.slug, session.projectRoot), "state.json"));
   const currentHead = flowRunHead(currentState);
-  assert.notEqual(currentHead, staleHead);
+  assert.notEqual(currentHead, staleHead, "the unrelated pause/resume mutation moved the canonical head within the same gate visit");
 
-  const staleClaim = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
-  staleClaim.claim.metadata.gate_claim.flow_run_head = staleHead;
-  writeBundle(session.sessionDir, [staleClaim]);
-  const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
-  const beforeManifest = readJson(manifestFile);
-
-  await assert.rejects(
-    syncBuilderFlowSession({ sessionDir: session.sessionDir }),
-    /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/,
-  );
-  assert.deepEqual(readJson(manifestFile), beforeManifest, "a stale head-bound claim must remain unattached");
-
-  const freshClaim = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
-  freshClaim.claim.metadata.gate_claim.flow_run_head = currentHead;
-  writeBundle(session.sessionDir, [freshClaim]);
-  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
-  assert.equal(synchronized.attached, true, "freshly recording the same gate claim at the current head restores progress");
+  const staleHeadClaim = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  staleHeadClaim.claim.metadata.gate_claim.flow_run_head = staleHead;
+  const synchronized = await writeAndSync(session, [staleHeadClaim]);
+  assert.equal(synchronized.attached, true, "a same-visit claim recorded against an earlier head still attaches");
 });
 
 test("an unbound current-gate claim is rejected instead of receiving the current head implicitly", async () => {
