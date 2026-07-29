@@ -333,6 +333,8 @@ export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
   "flow-report-markdown",
 ]);
 const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
+const FLOW_RECOVERY_GENERATION = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const GENERATION_BOUND_ACTIONS = new Set(["reseal-verification-evidence", "recover-exact-current-completion"]);
 export const EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL = "flow-agents.exact-current-recovery-publication.v1";
 export const EXACT_CURRENT_RECOVERY_ARTIFACT_IDS = Object.freeze([
   "flow-manifest",
@@ -562,10 +564,12 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
   return sha256({ ...bundle, critique_resolution_events: resolutionEvents });
 }
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const generationBound = GENERATION_BOUND_ACTIONS.has(completion?.action);
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   exact(completion, fields, label);
   if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
+  if (generationBound && !FLOW_RECOVERY_GENERATION.test(String(completion.recovery_generation))) throw new Error(`${label} recovery_generation is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
   const { signature, ...unsigned } = completion;
@@ -929,9 +933,9 @@ function inspectVerificationResealFence(paths) {
   ], "Flow recovery fence");
   if (fence.protocol !== FLOW_RECOVERY_FENCE_PROTOCOL || fence.run_id !== paths.runId
       || !/^[a-f0-9]{64}$/.test(String(fence.recovery_id))
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.generation))
+      || !FLOW_RECOVERY_GENERATION.test(String(fence.generation))
       || (fence.previous_generation !== undefined
-        && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.previous_generation)))
+        && !FLOW_RECOVERY_GENERATION.test(String(fence.previous_generation)))
       || !["active", "open"].includes(fence.status)
       || typeof fence.updated_at !== "string" || !Number.isFinite(Date.parse(fence.updated_at))) {
     throw new Error("Flow recovery fence is malformed or unsupported");
@@ -954,7 +958,7 @@ async function writeVerificationResealFence(paths, recoveryId, status) {
 }
 async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration, beforeOpen = undefined) {
   if (!/^[a-f0-9]{64}$/.test(String(recoveryId))
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(expectedGeneration))) {
+      || !FLOW_RECOVERY_GENERATION.test(String(expectedGeneration))) {
     throw new Error("Flow recovery fence finalization is invalid");
   }
   const { finalizeRunRecoveryFence } = await loadPinnedFlowReducer();
@@ -1339,8 +1343,12 @@ async function archiveCanonicalSession(paths, authorization) {
   fs.renameSync(paths.sessionDir, destination);
   return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(paths.projectRoot, destination) }) };
 }
-function completion(envelope, paths, operationStatus, resultCoreSha256) {
-  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
+function completion(envelope, paths, operationStatus, resultCoreSha256, recoveryGeneration = null) {
+  const generationBound = GENERATION_BOUND_ACTIONS.has(envelope.action);
+  if (generationBound !== (recoveryGeneration !== null) || (generationBound && !FLOW_RECOVERY_GENERATION.test(String(recoveryGeneration)))) {
+    throw new Error("lifecycle completion recovery generation is invalid");
+  }
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString(), ...(generationBound ? { recovery_generation: recoveryGeneration } : {}) };
   const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
@@ -1581,7 +1589,7 @@ async function publishVerificationResealTransaction(paths, capability, binding, 
     if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal publication did not install the exact postimages");
     const fence = inspectVerificationResealFence(paths);
     if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal publication lost its active Flow recovery fence");
-    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id };
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, recovery_generation: fence.generation };
   };
   return lockHeld ? publish() : withCoordinatorAssignmentLock(paths, () => withLock(publish));
 }
@@ -1610,7 +1618,7 @@ async function recoverVerificationResealTransaction(paths, binding) {
     if (classification === "new") {
       const fence = inspectVerificationResealFence(paths);
       if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("published verification reseal generation is missing its active recovery fence");
-      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256, recovery_generation: fence.generation };
     }
     return { run_id: paths.runId, recovered: true, state: "old", capability };
   }));
@@ -1624,7 +1632,7 @@ async function finalizeVerificationResealTransaction(paths, completion) {
 function cleanupFinalizedVerificationResealReplay(paths, plan, completion, observedFence) {
   validateVerificationResealPlan(plan);
   if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
-      || typeof observedFence.previous_generation !== "string") {
+      || observedFence.previous_generation !== completion.recovery_generation) {
     throw new Error("verification reseal cleanup replay does not bind the finalized Flow recovery generation");
   }
   if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
@@ -1652,6 +1660,7 @@ async function finalizeVerificationResealTransactionLocked(paths, completion) {
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
       throw new Error("verification reseal durable completion does not bind the signed plan result");
     }
+    if (completion.recovery_generation !== observedFence.generation) throw new Error("verification reseal completion does not bind the active Flow recovery generation");
     const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
     if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal exact completion receipt is not installed");
     if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cannot finalize without exact postimages");
@@ -2040,7 +2049,7 @@ async function publishExactCurrentRecoveryPublication(paths, capability, binding
     if (finalFence.status !== "active" || finalFence.recovery_id !== plan.recovery_id) {
       throw new Error("exact-current recovery publication lost its active Flow recovery fence");
     }
-    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, state: "new" };
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, recovery_generation: finalFence.generation, state: "new" };
   };
   return lockHeld ? publish() : withLock(publish);
 }
@@ -2063,7 +2072,8 @@ async function recoverExactCurrentRecoveryPublication(paths, binding) {
     if (classification === "unknown") throw new Error("exact-current recovery found foreign or unknown Flow artifact state");
     if (classification === "new") {
       if (fence.status !== "active") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+      const activeFence = inspectVerificationResealFence(paths);
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256, recovery_generation: activeFence.generation };
     }
     return publishExactCurrentRecoveryPublication(paths, capability, binding, { lockHeld: true });
   });
@@ -2088,7 +2098,7 @@ async function finalizeExactCurrentRecoveryPublicationLocked(paths, completion) 
     if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, finalized: false };
     const { plan } = readSignedExactCurrentRecoveryPlan(paths);
     if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
-        || typeof observedFence.previous_generation !== "string") {
+        || observedFence.previous_generation !== completion.recovery_generation) {
       throw new Error("exact-current recovery cleanup replay does not bind the finalized Flow recovery generation");
     }
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
@@ -2108,6 +2118,7 @@ async function finalizeExactCurrentRecoveryPublicationLocked(paths, completion) 
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
       throw new Error("exact-current recovery durable completion does not bind the signed plan result");
     }
+    if (completion.recovery_generation !== observedFence.generation) throw new Error("exact-current recovery completion does not bind the active Flow recovery generation");
     const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery completion receipt", 256 * 1024);
     if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery exact completion receipt is not installed");
     if (classifyExactCurrentRecoveryArtifacts(paths, plan) !== "new") throw new Error("exact-current recovery cannot finalize without exact postimages");
@@ -2228,9 +2239,10 @@ function durableCompletionRecord(prior, envelope, identity, authorizationSha256)
   exact(prior, ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
   if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
   const completionRecord = prior.completion;
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const generationBound = GENERATION_BOUND_ACTIONS.has(completionRecord?.action);
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   exact(completionRecord, fields, "durable lifecycle completion");
-  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
+  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || (generationBound && !FLOW_RECOVERY_GENERATION.test(String(completionRecord.recovery_generation))) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
   const { signature, ...unsigned } = completionRecord;
   const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
   if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("durable lifecycle completion signature is invalid");
@@ -2511,8 +2523,10 @@ async function processRootOperation(envelope) {
     } else {
       mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
     }
-    if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
-    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
+    const generationBound = GENERATION_BOUND_ACTIONS.has(envelope.action);
+    if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)
+        || (generationBound && !FLOW_RECOVERY_GENERATION.test(String(mutation.recovery_generation)))) throw new Error("unprivileged lifecycle mutation worker result is invalid");
+    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256, generationBound ? mutation.recovery_generation : null);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
     atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, mutation.result_core_sha256))}\n`);
     // The root process has already returned to a root-owned boundary. A second

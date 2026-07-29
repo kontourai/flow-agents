@@ -155,7 +155,7 @@ function canonical(value) {
 }
 
 function signedCompletion(overrides = {}) {
-  const unsigned = {
+  const unsignedBase = {
     schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
     kind: "kontourai.lifecycle-authority.completion",
     action,
@@ -167,6 +167,9 @@ function signedCompletion(overrides = {}) {
     completed_at: "2026-07-20T00:00:00.000Z",
     ...overrides,
   };
+  const unsigned = ["reseal-verification-evidence", "recover-exact-current-completion"].includes(unsignedBase.action)
+    ? { ...unsignedBase, recovery_generation: unsignedBase.recovery_generation ?? "11111111-1111-4111-8111-111111111111" }
+    : unsignedBase;
   return {
     ...unsigned,
     signature: {

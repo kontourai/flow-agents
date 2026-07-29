@@ -537,7 +537,8 @@ intermediate generation. Prepared recovery uses the matching native recovery
 lock. It classifies each live artifact as exact old, exact new, or unknown;
 all-old and exact mixed states roll forward from staged new bytes, all-new
 succeeds idempotently, and unknown state fails closed without restoration.
-Finalization verifies the exact active fence generation, receipt, and all-new
+The root-signed completion binds the Flow-generated active fence generation.
+Finalization verifies that exact active generation, receipt, and all-new
 postimages, opens the fence through Flow's finalizer, and only then removes the
 stages and plan. Completion replay safely resumes receipt installation or
 cleanup.
@@ -605,7 +606,8 @@ records nonce and completion, issues the immutable full-bundle-plus-ledger evide
 completion, and installs that exact receipt while the fence remains active. Finalization uses
 Flow's recovery-only native lock, verifies the exact postimages and receipt, then opens the fence.
 Flow's native writer assigns the active fence a unique generation and durably publishes it;
-the dedicated finalizer requires that exact generation before reopening. Readers bind the
+the root-signed completion binds that generation and the dedicated finalizer requires the exact
+match before reopening. Readers bind the
 generation, exact fence fingerprint, and run-directory identity across the full supported read,
 and reject symlinked fixed Flow ancestry. The installed closure must expose the mutation lock,
 recovery lock, active writer, and generation-bound finalizer before root creates a nonce or the

@@ -119,11 +119,13 @@ function validateSignedCompletion(value: unknown, action: string, requestSha256:
 
 function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operationStatuses: readonly string[], label: string): JsonRecord {
   if (!record(value)) throw new Error(`${label} is missing`);
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const generationBound = ["reseal-verification-evidence", "recover-exact-current-completion"].includes(String(value.action));
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   const observed = Object.keys(value).sort();
   if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error(`${label} contains unexpected or missing fields`);
   if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`${label} ${key} is invalid`);
+  if (generationBound && (typeof value.recovery_generation !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.recovery_generation))) throw new Error(`${label} recovery_generation is invalid`);
   if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error(`${label} signature is invalid`);
   const signatureValue = value.signature.value;

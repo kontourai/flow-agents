@@ -246,7 +246,8 @@ and canonical ordered gate-policy digests, Flow head/manifest,
 fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
 the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
 plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
-generation active through root completion/nonce persistence and receipt installation. Prepared
+generation active through root completion/nonce persistence and receipt installation. The root-signed
+completion binds that exact Flow-generated generation. Prepared
 retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
 old/new state forward from the staged postimages, and rejects unknown or mismatched state without
 restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
@@ -306,8 +307,8 @@ bytes without appending a sixth ledger event, and installs a new root-signed exa
 completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
 remains active through durable root completion and exact receipt installation; all canonical
 readers and ordinary Flow mutations fail closed while active. Flow's native writer assigns a
-unique generation and durably publishes it; the dedicated finalizer requires that exact
-generation and rechecks the protected postimages under Flow's finalization ticket before
+unique generation and durably publishes it; the root-signed completion binds that generation,
+and the dedicated finalizer requires the exact match and rechecks the protected postimages under Flow's finalization ticket before
 reopening. Consumers bind the generation, file bytes, and run-directory
 identity across their complete supported reads and reject symlinked fixed Flow ancestry.
 Before root records a nonce or any plan/stage exists, the helper preflights the installed
@@ -326,7 +327,8 @@ The reference coordinator ships no pathname or descriptor-only fallback and refu
 platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
 capability is absent or invalid. Portable request creation and external signing remain available.
 After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
-removed. Replay validates the exact receipt and the finalized Flow fence generation, then removes
+removed. Replay validates that the exact root-signed receipt generation equals the finalized
+Flow fence generation, then removes
 only the private plan and stages. It does not require live postimages to remain unchanged or rewrite
 them, because an ordinary Flow writer may legitimately supersede those bytes after the fence opens.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
