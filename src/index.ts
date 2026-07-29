@@ -474,6 +474,9 @@ export {
 export {
   verifyContinuationEvidenceCheckpoints,
 } from "./continuation-evidence-checkpoints.js";
+export {
+  continuationAdapterCommandIdentity,
+} from "./cli/continuation-adapter.js";
 export type {
   ContinuationEvidenceCheckpoint,
   VerifiedContinuationEvidenceCheckpoints,
