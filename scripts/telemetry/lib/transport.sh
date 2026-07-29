@@ -464,12 +464,22 @@ console_outbox_enqueue() {
   [[ -z "$line" ]] && return 0
   printf '%s\n' "$line" >> "$file" 2>/dev/null || return 0
   chmod 600 "$file" 2>/dev/null
-  console_outbox_trim
+  # Deliberately NO trim here. A trim rewrites the file (read -> split -> mv),
+  # and doing that outside the flush lock races the flush's own rewrite: flush
+  # holds an fd on the pre-trim inode, a concurrent append lands on the new one,
+  # and flush's closing `mv` clobbers it. The record then exists in neither
+  # pending.jsonl nor undelivered.jsonl and was never sent — the exact silent
+  # hole this whole mechanism exists to prevent. Trimming happens inside
+  # console_outbox_flush, under the lock. Appends are safe unlocked; rewrites
+  # are not.
   return 0
 }
 
 # Overflow protection. Oldest-first to the dead file so the newest receipts —
 # the ones most likely still actionable — survive.
+#
+# MUST be called while holding the flush lock: it rewrites pending.jsonl, and an
+# unlocked rewrite races the flush's rewrite and silently drops records.
 console_outbox_trim() {
   local file dead max count keep
   file="$(console_outbox_file)"
@@ -522,13 +532,38 @@ console_outbox_send_one() {
 # Flush the outbox. Lock-guarded so concurrent hooks cannot double-send or
 # corrupt the file; a held lock is simply skipped (the next run flushes).
 console_outbox_flush() {
-  local dir file dead lock line id endpoint body attempts max survivors
+  local dir file dead lock line parsed endpoint body attempts max survivors
   dir="$(console_outbox_dir)"
   file="$(console_outbox_file)"
   dead="$(console_outbox_dead_file)"
   [[ -f "$file" ]] || return 0
   lock="$dir/.flush.lock"
-  mkdir "$lock" 2>/dev/null || return 0
+  # Stale-takeover, mirroring console-board-sync.sh: flush always runs as a
+  # detached subshell nothing supervises, so a SIGKILL/OOM while holding the
+  # lock would otherwise disable delivery permanently — pending records would
+  # sit forever with no self-healing, turning "delivered on the next
+  # opportunity" into "never".
+  #
+  # Each stat variant is its OWN assignment+||, never combined in one
+  # $(cmd1 || cmd2): GNU stat's -f means "filesystem status", so on Linux
+  # `stat -f%m X` treats %m as a bogus second file, exits nonzero, and inside a
+  # combined substitution the fallback's output gets appended to the first's
+  # partial stdout instead of replacing it. (Real-CI-caught in board-sync.)
+  if ! mkdir "$lock" 2>/dev/null; then
+    local lock_epoch now age
+    lock_epoch=$(stat -f%m "$lock" 2>/dev/null) || lock_epoch=$(stat -c%Y "$lock" 2>/dev/null) || lock_epoch=0
+    now=$(date +%s)
+    age=$((now - lock_epoch))
+    if [[ "$lock_epoch" -gt 0 && "$age" -gt "${CONSOLE_OUTBOX_STALE_LOCK_SECONDS:-600}" ]]; then
+      rm -rf "$lock" 2>/dev/null || true
+      mkdir "$lock" 2>/dev/null || return 0
+    else
+      return 0
+    fi
+  fi
+  # Now that the lock is held, bound the queue. Unlocked trimming is what the
+  # CRITICAL race above was.
+  console_outbox_trim
   # shellcheck disable=SC2064
   trap "rmdir '$lock' 2>/dev/null" RETURN
   max="$(console_outbox_max_attempts)"
@@ -536,10 +571,26 @@ console_outbox_flush() {
   : > "$survivors" 2>/dev/null || { rmdir "$lock" 2>/dev/null; return 0; }
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" ]] && continue
-    id=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).id??""))}catch{}})' 2>/dev/null)
-    endpoint=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).endpoint??""))}catch{}})' 2>/dev/null)
-    body=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).body??""))}catch{}})' 2>/dev/null)
-    attempts=$(printf '%s' "$line" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(b).attempts??0))}catch{process.stdout.write("0")}})' 2>/dev/null)
+    # One node process per line, not four. The previous version also extracted
+    # an `id` it never used — a full Node startup per queued record to discard
+    # the result. Emits endpoint, attempts, then body; body is single-line JSON
+    # so a line-oriented read is safe.
+    parsed=$(printf '%s' "$line" | node -e '
+      let b = "";
+      process.stdin.on("data", (d) => { b += d; });
+      process.stdin.on("end", () => {
+        try {
+          const e = JSON.parse(b);
+          const attempts = Number.isInteger(e.attempts) ? e.attempts : 0;
+          process.stdout.write(`${e.endpoint ?? ""}\n${attempts}\n${e.body ?? ""}`);
+        } catch {
+          process.stdout.write("\n0\n");
+        }
+      });
+    ' 2>/dev/null)
+    endpoint="$(printf '%s' "$parsed" | sed -n '1p')"
+    attempts="$(printf '%s' "$parsed" | sed -n '2p')"
+    body="$(printf '%s' "$parsed" | sed -n '3,$p')"
     [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=0
     if [[ -z "$endpoint" || -z "$body" ]]; then
       # Unparseable entry: retire it to the dead file rather than retrying it
