@@ -613,6 +613,27 @@ function bundlePendingCriteriaCount(claims, declaredClaimTypes) {
  * bundle helpers so declared-type claims (e.g. builder.verify.tests) produce the
  * same sidecar guidance signals as workflow.* claims.
  */
+/**
+ * True when a session's own recorded next_action explicitly says no further
+ * agent turn is required right now (next_action.status === "done"), even
+ * though the session's overall status/phase has not reached a terminal state.
+ * This is the SAME predicate sidecarGuidance already used inline for its own
+ * "workflow state:" line (issue #291/#440 era) — single-sourced here (#962 P1)
+ * so analyze()'s separate artifact-status warning (below) cannot drift from it.
+ * A remaining human/CI-only step (e.g. "commit the migration") must not read
+ * as an outstanding AGENT obligation; a genuinely unfinished next_action
+ * (status continue/needs_user/blocked) must still gate normally.
+ *
+ * @param {object|null} state - parsed state.json payload, or null when absent
+ * @returns {boolean}
+ */
+function nextActionIsDone(state) {
+  if (!state || typeof state !== 'object') return false;
+  const next = state.next_action && typeof state.next_action === 'object' ? state.next_action : null;
+  const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
+  return nextStatus === 'done';
+}
+
 function sidecarGuidance(root, artifactDir, activeFlowStep) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: helpers use workflow.* prefix only).
@@ -628,8 +649,10 @@ function sidecarGuidance(root, artifactDir, activeFlowStep) {
     const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
     // The agent's work is complete when the recorded next action is done — the
     // gate must not block the agent for a remaining human/CI step (e.g. a verified
-    // task whose only next_action is "commit the migration").
-    const agentComplete = nextStatus === 'done';
+    // task whose only next_action is "commit the migration"). Single-sourced via
+    // nextActionIsDone (#962 P1) so analyze()'s artifact-status check below shares
+    // this exact predicate instead of re-deriving (and drifting from) it.
+    const agentComplete = nextActionIsDone(state);
     if (!TERMINAL_STATUSES.has(status) && !agentComplete) {
       const nextSummary = next && next.summary ? `; next_action:${nextStatus} "${safeOneLine(next.summary)}"` : '';
       warnings.push(`${base} workflow state: status:${status} phase:${phase}${nextSummary}`);
@@ -2267,7 +2290,13 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   const status = latest.status || 'unknown';
   const ageMinutes = Math.max(0, Math.round((now - latest.mtimeMs) / 60000));
 
-  if (ACTIVE_STATUSES.has(status)) {
+  // #962 P1: the artifact-status check below and sidecarGuidance's "workflow
+  // state:" line both answer "does an agent still owe work here?" — they must
+  // share nextActionIsDone so a session whose next_action already says "done"
+  // (no agent turn required) does not get double-gated by a second, differently
+  // sourced signal asking the same question.
+  const activeStatusState = readJsonFile(path.join(latestArtifactDir, 'state.json'));
+  if (ACTIVE_STATUSES.has(status) && !nextActionIsDone(activeStatusState)) {
     warnings.push(`${relPath} is still status:${status} (${ageMinutes}m old). Do not final-answer as complete unless the next step is explicit.`);
   }
 
