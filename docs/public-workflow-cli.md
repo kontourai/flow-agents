@@ -564,7 +564,11 @@ digest of its predecessor. Its machine-readable `evidence_scope: accepted_prefix
 as proof that the drive returned. Publication uses an unpredictable same-directory staging file, fsync,
 and an atomic no-replace link to `checkpoint-NNNNNN.json`. Incomplete staging files are ignored.
 Consumers must pin the launch public key and verify the directory with the package's
-`verifyContinuationEvidenceCheckpoints` export.
+`verifyContinuationEvidenceCheckpoints` export. Hosts can derive the required pinned
+`expectedAdapterCommandIdentity` from the exact command file before launch with the package-root
+`continuationAdapterCommandIdentity(commandFile)` export. It applies the same executable,
+regular-file, and integrity binding used by `workflow drive`; consumers should not reconstruct
+that identity algorithm.
 
 A verified checkpoint proves only the ordered accepted prefix and canonical state measured at its
 publication time. It does not prove that the whole drive completed. A later timeout or process

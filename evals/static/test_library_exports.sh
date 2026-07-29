@@ -60,6 +60,7 @@ const required = [
   "cancelBuilderFlowSession", "archiveBuilderFlowSession",
   "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
   "builderLifecycleAuthorizationPayload", "loadBuilderLifecycleAuthorization",
+  "continuationAdapterCommandIdentity", "verifyContinuationEvidenceCheckpoints",
   "orchestrateFlowMultiCursor", "FlowMultiCursorOrchestrationError", "orchestrateBuilderFlowMultiCursor",
   "statuses", "phases", "checkKinds", "checkStatuses", "verdicts",
 ];
