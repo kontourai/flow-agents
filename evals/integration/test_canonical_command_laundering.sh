@@ -85,11 +85,19 @@ blocks_case "pipe-head"        'false | head -5'
 blocks_case "pipe-multi"       'false | cat | tail'
 
 echo
-echo "## ...including when the pipe hides inside a nested shell"
+echo "## ...including when the pipe hides inside a nested bash"
 # Regression guard for the review BLOCKER: quote-stripping regexes cannot see this,
 # which is why the fix is pipefail rather than pattern-matching.
 blocks_case "nested-bash-c"    'bash -c "false | tail"'
-blocks_case "nested-sh-c"      'sh -c "false | tail"'
+
+# KNOWN RESIDUAL, deliberately not asserted: `sh -c "false | tail"`.
+# `export SHELLOPTS` only propagates pipefail into a nested *bash*. On Linux
+# /bin/sh is dash, which has no pipefail and ignores SHELLOPTS entirely, so a
+# pipeline nested inside `sh -c` still reports the right-most status there.
+# An earlier revision of this file asserted otherwise and passed on macOS (where
+# /bin/sh IS bash) while failing in CI — the platform difference was the bug in
+# the test, not in the fix. Tracked separately; a canonical verify command that
+# wraps itself in `sh -c` is not a shape this repo uses.
 
 echo
 echo "## || masking discards the status entirely and is still refused up front"

@@ -237,10 +237,17 @@ function resolveCommandTimeoutMs() {
  * That is the shape behind this workspace's repeated real incidents (`git push ... |
  * tail -1 && echo PUSHED`, `npm run verify:static | tail`).
  *
- * `export SHELLOPTS` propagates pipefail into nested shells, so `bash -c "false |
+ * `export SHELLOPTS` propagates pipefail into a nested BASH, so `bash -c "false |
  * tail"` — which defeats any amount of pattern-matching on the command string,
  * because the pipe lives inside a quoted argument the outer shell never parses as a
  * pipeline — also reports truthfully.
+ *
+ * Known residual: this does NOT reach a nested `sh -c` on Linux, where /bin/sh is
+ * dash — dash has no pipefail and ignores SHELLOPTS. (On macOS /bin/sh is bash, so
+ * the gap is invisible locally; CI caught an earlier test that asserted otherwise.)
+ * A canonical verify command that wraps itself in `sh -c` is not a shape this repo
+ * uses, and the manifest path is unaffected because CI re-executes the manifest's
+ * own clean command string.
  *
  * This is deliberately a structural fix rather than another evasion pattern. ADR 0018
  * calls pattern lists a losing race; an earlier revision of this change proved the
