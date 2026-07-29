@@ -204,6 +204,34 @@ function isPassingValue(v) {
 // heuristic — see that module for the rules.
 
 /**
+ * A pipeline reports the exit code of its RIGHT-most command, so `cmd | tail`
+ * exits 0 whenever `tail` succeeds — regardless of whether `cmd` failed. That is
+ * an exit-code mask that `hasLaunderingOperator` does not match: it recognises
+ * `| true` but not `| tail`, `| head`, `| tee`, or any other command that exits 0
+ * on its own.
+ *
+ * This lives HERE, not in ../lib/command-log-chain.js, on purpose. ADR 0018 freezes
+ * that heuristic and directs new laundering shapes to the external CI anchor rather
+ * than to the local rule set. This IS that anchor.
+ *
+ * Deliberately scoped to CANONICAL verify commands only. Those come from
+ * repo-controlled config (workflow `--commands`, TRUST_RECONCILE_COMMANDS, or
+ * package.json) — never from agent-supplied claim text — so rejecting a pipe here
+ * cannot over-block an agent's own commands, and a canonical verify command has no
+ * legitimate need to pipe its result anywhere. Fails closed.
+ *
+ * `||` is already handled by hasLaunderingOperator; this only adds the pipe case.
+ * A `|` inside single or double quotes is not a shell pipeline, so quoted regions
+ * are stripped before testing to avoid rejecting e.g. `grep -E 'a|b'`.
+ */
+function hasUnattributablePipeline(cmd) {
+  if (typeof cmd !== 'string') return false;
+  const unquoted = cmd.replace(/'[^']*'/g, '').replace(/"[^"]*"/g, '');
+  // Ignore `||` (control flow, already caught above) — look for a single pipe.
+  return /(^|[^|])\|([^|]|$)/.test(unquoted);
+}
+
+/**
  * Default manifest/canonical-command execution timeout (ms). Overridable via
  * TRUST_RECONCILE_COMMAND_TIMEOUT_MS. 10 minutes is comfortably above the slowest
  * required-lane check (this repo's own CI lanes allow up to ~10 min); the prior
@@ -1345,12 +1373,15 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   // The canonical verify is the anchor's own truth source — it must not be
   // exit-code-laundered (e.g. `npm run build || true`). If it is, the fresh run
   // would report PASS regardless of the real result. Fail closed.
-  // (Residual: a wrapper script that exits 0 without `||` still evades — covered
-  // by the anti-gaming suite running in a required lane + CODEOWNERS on the verify
-  // config; noted honestly.)
+  // (Residual: a wrapper script that exits 0 without `||` still evades — that is
+  // covered only by CODEOWNERS on the verify config, not by an automated check.)
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
+      return 1;
+    }
+    if (hasUnattributablePipeline(cmd)) {
+      process.stderr.write(`[trust-reconcile] FAILED — canonical verify command pipes into another command ('${cmd}') — a pipeline reports the RIGHT side's exit code, so a failure on the left is masked. Remove the pipe from the canonical verify command.\n`);
       return 1;
     }
   }
