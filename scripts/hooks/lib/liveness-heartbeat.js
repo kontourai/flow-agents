@@ -94,6 +94,7 @@ const { readLivenessEvents, readLivenessEventsTail, freshHolders } = require('./
 const { resolveActor, isUnresolvedActor, sanitizeSegment } = require('./actor-identity');
 const { flowAgentsArtifactRoot } = require('./local-artifact-paths');
 const { readOwnCurrentPointer } = require('./current-pointer');
+const { canonicalSubjectKey } = require('./subject-identity');
 
 /**
  * Resolve a caller-supplied `now` (Date, ISO string, or omitted) to epoch ms.
@@ -241,9 +242,9 @@ function filterMatchingPair(events, slug, actor) {
  * @param {string} ourLastAt
  * @returns {{actor: string, lastAt: string, ttlSeconds: number}|undefined}
  */
-function computeConflict(events, slug, actor, nowMs, ourLastAt) {
+function computeConflict(events, slug, actor, nowMs, ourLastAt, subjectKey = null) {
   const ourLastAtMs = Date.parse(ourLastAt);
-  const others = freshHolders(events, slug, actor, nowMs).filter((h) => {
+  const others = freshHolders(events, slug, actor, nowMs, { subjectKey }).filter((h) => {
     const holderAtMs = Date.parse(h.lastAt);
     return Number.isFinite(holderAtMs) && Number.isFinite(ourLastAtMs) && holderAtMs > ourLastAtMs;
   });
@@ -338,6 +339,12 @@ function maybeEmitHeartbeat(opts = {}) {
       return { emitted: false, reason: 'actor-unresolved' };
     }
 
+    // #1099: the canonical, backlog-derived collision key for this session, stamped on
+    // every event this actor writes and used to widen the conflict join. Null for a free-text
+    // (`local:`) subject, which is joinable only with itself by design. Memoized per process by
+    // subject-identity.js, so this hot postToolUse path reads state.json at most once.
+    const subjectKey = canonicalSubjectKey(root, slug);
+
     const streamPath = livenessStreamFile(root);
     const nowMs = resolveNowMs(opts.now);
     const throttleMs = resolveHeartbeatThrottleSeconds(env) * 1000;
@@ -365,7 +372,7 @@ function maybeEmitHeartbeat(opts = {}) {
         // confirm it as usual.
         const ourClaimVisibleInTail = matching.some((e) => e.type === 'claim');
         const conflict = ourClaimVisibleInTail
-          ? computeConflict(tailEvents, slug, actor, nowMs, last.at)
+          ? computeConflict(tailEvents, slug, actor, nowMs, last.at, subjectKey)
           : undefined;
         return attachConflictField({ emitted: false, reason: 'throttled' }, conflict);
       }
@@ -404,7 +411,7 @@ function maybeEmitHeartbeat(opts = {}) {
       if (Number.isFinite(lastAtMs) && nowMs - lastAtMs < throttleMs) {
         return attachConflictField(
           { emitted: false, reason: 'throttled' },
-          computeConflict(holderEvents, slug, actor, nowMs, last.at)
+          computeConflict(holderEvents, slug, actor, nowMs, last.at, subjectKey)
         );
       }
     }
@@ -417,13 +424,16 @@ function maybeEmitHeartbeat(opts = {}) {
     // episode throttle compares against, so an unchanged, still-fresh conflicting claim seen
     // on a prior call never re-fires; only a genuinely newer event from the conflicting actor
     // does, because our own heartbeat write below becomes the new watermark for the next call.
-    const conflict = computeConflict(holderEvents, slug, actor, nowMs, last.at);
+    const conflict = computeConflict(holderEvents, slug, actor, nowMs, last.at, subjectKey);
 
     const nowIso = new Date(nowMs).toISOString();
     const activity = sanitizeActivity(opts.activity);
     appendLivenessEvent(root, {
       type: 'heartbeat',
       subjectId: slug,
+      // #1099: the backlog-derived collision key, so a lane whose session directory uses
+      // a legacy naming scheme is still joinable to every other lane on the same item.
+      ...(subjectKey ? { subjectKey } : {}),
       actor,
       at: nowIso,
       source: 'tool-activity',

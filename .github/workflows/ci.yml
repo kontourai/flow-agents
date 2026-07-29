@@ -501,6 +501,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-conflict-injection-integration
 
+      - name: Subject collision detection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check subject-collision-detection-integration
+
       # The anti-gaming + trust regression suite runs in this REQUIRED lane so that
       # weakening the gate / CI anchor / their protections (or removing a regression
       # test) is caught and cannot merge. Convergence red-team (Round 5/7) closure.

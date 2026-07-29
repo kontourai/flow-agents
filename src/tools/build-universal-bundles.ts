@@ -430,12 +430,13 @@ const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_
  * generic outcome reached the way that runtime requires — and a declared `null` is the honest
  * kind of gap. Silent absence is neither.
  */
-type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
+type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "subject-binding" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
 
 const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envPrefix?: string }[] = [
   { id: "workflow-steering-session", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "workflow-steering-prompt", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "config-protection", script: "config-protection.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "subject-binding", script: "subject-binding.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "quality-gate", script: "quality-gate.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "evidence-capture", script: "evidence-capture.js", statusMessage: "Capturing Flow Agents command evidence" },
   { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envPrefix: GOAL_FIT_MODE_PREFIX },
@@ -456,6 +457,7 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "workflow-steering-session": "SessionStart",
     "workflow-steering-prompt": "UserPromptSubmit",
     "config-protection": "PreToolUse",
+    "subject-binding": "PreToolUse",
     "quality-gate": "PostToolUse",
     "evidence-capture": "PostToolUse",
     "stop-goal-fit": "Stop",
@@ -464,6 +466,7 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "workflow-steering-session": "SessionStart",
     "workflow-steering-prompt": "UserPromptSubmit",
     "config-protection": "PreToolUse",
+    "subject-binding": "PreToolUse",
     "quality-gate": "PostToolUse",
     "evidence-capture": "PostToolUse",
     "stop-goal-fit": "Stop",
@@ -476,6 +479,7 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "workflow-steering-session": "session.created",
     "workflow-steering-prompt": null,
     "config-protection": "tool.execute.before",
+    "subject-binding": "tool.execute.before",
     "quality-gate": "tool.execute.after",
     "evidence-capture": "tool.execute.after",
     "stop-goal-fit": "session.idle",
@@ -484,6 +488,7 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "workflow-steering-session": "before_agent_start",
     "workflow-steering-prompt": null,
     "config-protection": "tool_call",
+    "subject-binding": "tool_call",
     "quality-gate": "tool_result",
     "evidence-capture": "tool_result",
     "stop-goal-fit": "session_shutdown",
@@ -956,6 +961,10 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
       if (policyResult && policyResult.allow === false) {
         throw new Error(policyResult.reason || 'Blocked by Flow Agents hook policy.');
       }
+      const bindingResult = runAdapter('opencode-hook-adapter.js', 'tool.execute.before', detail, 'subject-binding', 'subject-binding.js', 'default');
+      if (bindingResult && bindingResult.allow === false) {
+        throw new Error(bindingResult.reason || 'Blocked by Flow Agents hook policy.');
+      }
     },
     'tool.execute.after': async (input, output) => {
       const detail = { tool: input && input.tool };
@@ -1092,6 +1101,10 @@ export default function (pi: ExtensionAPI) {
     const result = runAdapter("pi-hook-adapter.js", "tool_call", "config-protection", "config-protection.js");
     if (result && result.allow === false) {
       return { block: true, reason: result.reason || "Blocked by Flow Agents hook policy." };
+    }
+    const binding = runAdapter("pi-hook-adapter.js", "tool_call", "subject-binding", "subject-binding.js");
+    if (binding && binding.allow === false) {
+      return { block: true, reason: binding.reason || "Blocked by Flow Agents hook policy." };
     }
   });
 

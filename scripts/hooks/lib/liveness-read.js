@@ -10,7 +10,7 @@
  * Exports:
  *   readLivenessEvents(streamPath)  → AnyObj[]  (tolerates malformed lines)
  *   readLivenessEventsTail(streamPath, tailBytes?)  → AnyObj[]  (bounded I/O; see below)
- *   freshHolders(events, slug, selfActor, nowMs)  → holder[]
+ *   freshHolders(events, slug, selfActor, nowMs, options?)  → holder[]
  *
  * freshHolders returns, for each actor (other than selfActor) with a
  * within-TTL claim/heartbeat on subjectId === slug, an object:
@@ -149,20 +149,42 @@ function readLivenessEventsTail(streamPath, tailBytes = DEFAULT_TAIL_BYTES) {
 /**
  * Compute fresh liveness holders for a given slug.
  *
+ * SUBJECT ALIASING (#1099): this join IS the collision detector, and it matches on
+ * the subject STRING — so two lanes on one backlog item only see each other when they
+ * produce the same string. Historically they did not: one repo's artifact root held 95
+ * subjects in four incompatible naming schemes, so `s1254-tokens` and `octo-demo-1254`
+ * could be the same issue and never collide.
+ *
+ * `options.subjectKey` is the CANONICAL subject key (see
+ * scripts/hooks/lib/subject-identity.js) — derived from the backlog item, identical for every
+ * lane on that item. An event whose writer stamped the same `subjectKey` matches even when its
+ * `subjectId` is a differently-named legacy session. This is additive: `subjectId === slug`
+ * still matches exactly as before, so every 4-argument caller is unchanged, and no existing
+ * session directory has to be renamed for legacy subjects to start colliding correctly.
+ *
+ * Grouping stays per-ACTOR (not per-subjectId): when one actor's events arrive under both its
+ * own legacy subjectId and the canonical key they describe one holder of one item, which is
+ * exactly one group.
+ *
  * @param {object[]} events      Array of parsed liveness event objects
  * @param {string}   slug        Work-item subjectId to filter on
  * @param {string}   selfActor   Actor to exclude (current agent's identity)
  * @param {number}   nowMs       Current epoch ms (Date.now())
+ * @param {{ subjectKey?: string|null }} [options]  Canonical subject key alias to also match
  * @returns {{ actor: string, lastAt: string, ttlSeconds: number, fresh: boolean }[]}
  */
-function freshHolders(events, slug, selfActor, nowMs) {
+function freshHolders(events, slug, selfActor, nowMs, options = {}) {
+  const subjectKey = options && typeof options.subjectKey === 'string' && options.subjectKey
+    ? options.subjectKey
+    : null;
+
   // Group by actor for the given slug
   /** @type {Map<string, { actor: string, ttlSeconds: number, lastAt: string, released: boolean }>} */
   const groups = new Map();
 
   for (const e of events) {
     if (!e || typeof e !== 'object') continue;
-    if (e.subjectId !== slug) continue;
+    if (e.subjectId !== slug && !(subjectKey !== null && e.subjectKey === subjectKey)) continue;
     if (!e.actor || !e.at) continue;
 
     const actor = String(e.actor);
