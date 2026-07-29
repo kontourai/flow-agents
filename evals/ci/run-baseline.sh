@@ -418,7 +418,14 @@ run_check() {
 
   echo "==> $label"
   echo "+ $command" >"$log"
-  if (cd "$ROOT_DIR" && bash -lc "$command") >>"$log" 2>&1; then
+  # #1094 item C: default every eval to a console-free telemetry conf. Stubbing
+  # HOME is NOT isolation in this repo — config.sh resolves the per-workspace
+  # .kontourai/telemetry-console.conf first, and ours carries a real production
+  # endpoint and token, so a forgetful test can post real records from a test
+  # run. Defaulted rather than forced: a test that needs a console sets its own
+  # TELEMETRY_CONFIG_FILE and still wins.
+  local telemetry_conf="${TELEMETRY_CONFIG_FILE:-$ROOT_DIR/evals/fixtures/no-console.telemetry.conf}"
+  if (cd "$ROOT_DIR" && TELEMETRY_CONFIG_FILE="$telemetry_conf" bash -lc "$command") >>"$log" 2>&1; then
     echo -e "$id\t$label\tpass\t$command\t$log" >>"$STATUS_FILE"
     echo "PASS $label"
   else
