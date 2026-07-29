@@ -30,7 +30,7 @@
 # Deterministic (a fake flow-agents CLI + a fake npx stand-in on PATH; no real network / npm
 # registry access). Uses ONLY scratch tmp dirs -- never the running machine's durable
 # .kontourai roots or ~/.flow-agents conf.
-# Usage: bash evals/integration/test_console_board_sync.sh
+# Usage: evals/integration/test_console_board_sync.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -40,10 +40,12 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 errors=0
-pass() { echo "  [PASS] $1"; }
+passes=0
+pass() { passes=$((passes + 1)); echo "  [PASS] $1"; }
 fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 
 if ! command -v jq >/dev/null 2>&1; then echo "jq not available; skipping console board sync tests"; exit 0; fi
+BASH_BIN="$(command -v bash)"
 
 echo "=== console board sync (#919) ==="
 
@@ -154,7 +156,7 @@ run_sync() {
   TELEMETRY_SESSION_DIR="$data_dir/sessions" \
   FAKE_CLI_LOG="$CLI_LOG" \
   NPX_LOG="$NPX_LOG" \
-  bash "$SCRIPT"
+  "$BASH_BIN" "$SCRIPT"
 }
 
 # ── gating: no config at all -> exit 0, zero side effects ──────────────────────────────────
@@ -465,9 +467,25 @@ NO_CLI_REPO="$TMP/no-cli-repo"
 mkdir -p "$NO_CLI_REPO"
 NO_FLOW_AGENTS_BIN="$TMP/no-flow-agents-bin"
 mkdir -p "$NO_FLOW_AGENTS_BIN"
+for tool in chmod cut date dirname mkdir mktemp mv rm sed stat tr wc; do
+  ln -s "$(command -v "$tool")" "$NO_FLOW_AGENTS_BIN/$tool"
+done
+HOSTILE_GLOBAL_BIN="$TMP/hostile-global-bin"
+HOSTILE_GLOBAL_MARKER="$TMP/hostile-global-flow-agents-invoked"
+mkdir -p "$HOSTILE_GLOBAL_BIN"
+cat > "$HOSTILE_GLOBAL_BIN/flow-agents" <<SH
+#!/usr/bin/env bash
+: > "$HOSTILE_GLOBAL_MARKER"
+exit 99
+SH
+chmod +x "$HOSTILE_GLOBAL_BIN/flow-agents"
+OPERATOR_PATH_WITH_HOSTILE="$HOSTILE_GLOBAL_BIN:$PATH"
+[[ "$(PATH="$OPERATOR_PATH_WITH_HOSTILE" command -v flow-agents)" == "$HOSTILE_GLOBAL_BIN/flow-agents" ]] \
+  && pass "no-cli fixture: hostile operator/global flow-agents is resolvable before PATH isolation" \
+  || fail "no-cli fixture: hostile operator/global flow-agents sentinel is not resolvable"
 DATA_H="$TMP/data-caseH"
 : > "$CLI_LOG"; : > "$NPX_LOG"
-( export PATH="$NO_FLOW_AGENTS_BIN:$FAKE_BIN:$PATH" TELEMETRY_CONFIG_FILE="$FULL_CONF" FAKE_EXPECTED_TOKEN="test-token-xyz"
+( export PATH="$NO_FLOW_AGENTS_BIN" TELEMETRY_CONFIG_FILE="$FULL_CONF" FAKE_EXPECTED_TOKEN="test-token-xyz"
   export FLOW_AGENTS_BOARD_SYNC_CWD="$NO_CLI_REPO"
   unset CONSOLE_AUTH_TOKEN
   run_sync "$DATA_H" )
@@ -476,6 +494,9 @@ rc=$?
 LOG_H="$DATA_H/console-board-sync.log"
 [[ -f "$LOG_H" ]] && grep -q 'SKIP: no flow-agents CLI found' "$LOG_H" && pass "no-cli: logged as a SKIP naming the CLI search" || fail "no-cli: expected SKIP log not found: $(cat "$LOG_H" 2>/dev/null)"
 [[ ! -s "$NPX_LOG" ]] && pass "no-cli: npx never invoked (nothing to bridge)" || fail "no-cli: npx was invoked despite no CLI"
+[[ ! -e "$HOSTILE_GLOBAL_MARKER" ]] \
+  && pass "no-cli: an operator/global flow-agents outside the hermetic PATH cannot be invoked" \
+  || fail "no-cli: hostile operator/global flow-agents escaped the hermetic fixture"
 
 # ── npx unavailable -> both bridges log-skipped, projections still ran ─────────────────────
 echo "--- npx unavailable -> bridge steps log-skipped; projections still ran ---"
@@ -568,6 +589,9 @@ grep -q 'RUN start' "$LOG_STALE" 2>/dev/null \
   || fail "HIGH-4 stale takeover: the pipeline never ran despite the stale lock takeover"
 
 echo ""
+echo "# tests $((passes + errors))"
+echo "# pass $passes"
+echo "# fail $errors"
 if [[ "$errors" -eq 0 ]]; then
   echo "test_console_board_sync: all checks passed."
   exit 0
