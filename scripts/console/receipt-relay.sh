@@ -52,7 +52,7 @@ ENDPOINT="${CONSOLE_URL%/}/records"
 # Build the console record. The id is derived from the receipt's own identity so
 # repeated delivery is idempotent against /records' upsert on
 # (tenant_id, record_id) — which is exactly what makes at-least-once safe.
-RECORD="$(printf '%s' "$RECEIPT_JSON" | node -e '
+RECORD_AND_ID="$(printf '%s' "$RECEIPT_JSON" | node -e '
   let raw = "";
   process.stdin.on("data", (d) => { raw += d; });
   process.stdin.on("end", () => {
@@ -69,6 +69,12 @@ RECORD="$(printf '%s' "$RECEIPT_JSON" | node -e '
     // Stable, content-derived id: the same receipt re-sent after an outage
     // upserts onto itself instead of duplicating.
     const id = `receipt:${session}:${kind}:${revision}`;
+    // id first, then the record, from ONE parse. Deriving the id a second time
+    // from $RECORD would add an independent failure surface: an empty id makes
+    // console_outbox_enqueue silently no-op, dropping the receipt with no
+    // queueing and no warning — in the one script whose entire job is not
+    // doing that.
+    process.stdout.write(id + "\n");
     process.stdout.write(JSON.stringify({
       schema: "kontour.console.event",
       version: "1",
@@ -86,9 +92,13 @@ RECORD="$(printf '%s' "$RECEIPT_JSON" | node -e '
     }));
   });
 ' 2>/dev/null)" || exit 0
-[[ -z "$RECORD" ]] && exit 0
+[[ -z "$RECORD_AND_ID" ]] && exit 0
 
 # At-least-once: durable enqueue first, then a detached flush.
-console_post_json_durable "$ENDPOINT" "$RECORD" "$(printf '%s' "$RECORD" | node -e 'let r="";process.stdin.on("data",d=>r+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(r).id))}catch{}})' 2>/dev/null)" 2>/dev/null
+RECORD_ID="$(printf '%s' "$RECORD_AND_ID" | sed -n '1p')"
+RECORD="$(printf '%s' "$RECORD_AND_ID" | sed -n '2,$p')"
+[[ -z "$RECORD_ID" || -z "$RECORD" ]] && exit 0
+
+console_post_json_durable "$ENDPOINT" "$RECORD" "$RECORD_ID" 2>/dev/null
 
 exit 0
