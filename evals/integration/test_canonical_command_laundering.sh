@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# test_canonical_command_laundering.sh — the canonical verify command must not be
-# exit-code-masked (flow-agents#1088).
+# test_canonical_command_laundering.sh — a pipeline can never hide a failure from the
+# CI anchor (flow-agents#1088).
 #
 # Step 1 of trust-reconcile re-runs the canonical verify command and treats its exit
-# code as authoritative CI truth. If that command's exit code can be masked, the
-# anchor attests a PASS it never observed.
+# code as authoritative CI truth. A pipeline reports its RIGHT-most command's status,
+# so `npm test | tail` exits 0 whenever `tail` succeeds — the anchor would attest a
+# PASS it never observed. That is the shape behind this workspace's repeated real
+# incidents (`git push ... | tail -1 && echo PUSHED`, `npm run verify:static | tail`).
 #
-# `hasLaunderingOperator` (ADR 0018, frozen) catches `||`, `| true`, `; true`, `; :`,
-# `; exit 0`, `; /bin/true`. It does NOT catch a pipe into any other command that
-# exits 0 on its own — `| tail`, `| head`, `| tee`. A pipeline reports the RIGHT-most
-# command's exit code, so `npm test | tail` exits 0 whenever `tail` succeeds.
+# The fix is structural, not another evasion pattern: every command whose exit code
+# the anchor attests runs under `set -o pipefail; export SHELLOPTS;`. An earlier
+# revision of this change tried pattern-matching the command string and was defeated
+# in one token by `bash -c "false | tail"` — the pipe lives inside a quoted argument
+# the outer shell never parses as a pipeline, so no amount of regex sees it. ADR 0018
+# calls pattern lists a losing race; this suite exists partly to keep that lesson.
 #
-# That is not a hypothetical shape. It is the shape recorded repeatedly as a real
-# operator incident in this workspace: `git push ... | tail -1 && echo PUSHED`
-# reporting success for a failed push, and `npm run verify:static | tail` reporting
-# green for a red gate.
-#
-# ADR 0018 directs new laundering shapes to the external CI anchor rather than to the
-# frozen local rule set. `hasUnattributablePipeline` in scripts/ci/trust-reconcile.js
-# is that anchor, scoped to CANONICAL commands only (repo-controlled config, never
-# agent claim text) so it cannot over-block an agent's own commands.
+# Note the behaviour these assert: a laundered pipeline is NOT refused up front, it
+# RUNS and FAILS honestly. A legitimate `| tail` for log trimming keeps working — it
+# just can no longer hide a failure. `||` masking is different (it genuinely discards
+# the status rather than misreporting it) and remains refused by the frozen
+# hasLaunderingOperator heuristic.
 #
 # Deterministic, no model spend, no fixtures required.
 # Usage: bash evals/integration/test_canonical_command_laundering.sh
@@ -34,59 +34,74 @@ errors=0
 _pass() { echo "  PASS: $1"; }
 _fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }
 
-# reject_case <label> <canonical-command> <needle>
-# Asserts the reconciler refuses to run at all with the given canonical command.
-reject_case() {
+# blocks_case <label> <canonical-command>
+# The command's left side genuinely fails. Assert the anchor reports FAIL for it —
+# i.e. the pipeline did not hide the failure.
+blocks_case() {
+  local label="$1" cmd="$2"
+  echo "=== $label ==="
+  local out
+  out="$(TRUST_RECONCILE_COMMANDS="$cmd" node "$RECONCILE" --repo-root "$ROOT" 2>&1)"
+  if echo "$out" | grep -qF "FAIL: $cmd"; then
+    _pass "$label: failure surfaced through the pipeline"
+  else
+    _fail "$label: a failing command reported PASS through a pipe — exit code was masked. Output: $out"
+  fi
+}
+
+# refused_case <label> <canonical-command> <needle>
+# `||`-style masking discards the status entirely; assert it is still refused up front.
+refused_case() {
   local label="$1" cmd="$2" needle="$3"
   echo "=== $label ==="
   local out code
   out="$(TRUST_RECONCILE_COMMANDS="$cmd" node "$RECONCILE" --repo-root "$ROOT" 2>&1)"
   code=$?
-  if [[ $code -ne 0 ]]; then
-    _pass "$label: reconciler exits non-zero ($code)"
+  if [[ $code -ne 0 ]] && echo "$out" | grep -qF "$needle"; then
+    _pass "$label: refused up front (\"$needle\")"
   else
-    _fail "$label: expected non-zero exit, got 0 — a masked canonical command was accepted. Output: $out"
-  fi
-  if echo "$out" | grep -qF "$needle"; then
-    _pass "$label: emitted the expected refusal (\"$needle\")"
-  else
-    _fail "$label: expected \"$needle\" not found — output: $out"
+    _fail "$label: expected refusal \"$needle\", got exit $code — output: $out"
   fi
 }
 
-# accept_case <label> <canonical-command>
-# Asserts the reconciler does NOT refuse on laundering grounds. It may still exit
-# non-zero for unrelated reasons (no bundle present); we assert only that neither
-# laundering refusal fired — this is the false-positive guard.
-accept_case() {
+# honest_case <label> <canonical-command>
+# A genuinely passing command, piped or not, must still report PASS.
+honest_case() {
   local label="$1" cmd="$2"
   echo "=== $label ==="
   local out
   out="$(TRUST_RECONCILE_COMMANDS="$cmd" node "$RECONCILE" --repo-root "$ROOT" 2>&1)"
-  if echo "$out" | grep -qE "command is laundered|pipes into another command"; then
-    _fail "$label: legitimate canonical command was rejected as laundered — output: $out"
+  if echo "$out" | grep -qF "PASS: $cmd"; then
+    _pass "$label: honest success still reported as PASS"
   else
-    _pass "$label: not rejected as laundered"
+    _fail "$label: a passing command was not reported as PASS — over-block. Output: $out"
   fi
 }
 
-echo "## Pipe-into-exit-0 masking (flow-agents#1088) — the real-incident shapes"
-reject_case "pipe-tail"  "npm test | tail"          "pipes into another command"
-reject_case "pipe-tail-n" "npm test | tail -20"     "pipes into another command"
-reject_case "pipe-head"  "npm test | head -5"       "pipes into another command"
-reject_case "pipe-tee"   "npm test | tee out.log"   "pipes into another command"
+echo "## A pipeline cannot hide a failure — the real-incident shapes"
+blocks_case "pipe-tail"        'false | tail'
+blocks_case "pipe-tail-n"      'false | tail -20'
+blocks_case "pipe-head"        'false | head -5'
+blocks_case "pipe-multi"       'false | cat | tail'
 
 echo
-echo "## Regression guard: the six frozen shapes must still be refused"
-reject_case "or-true"    "npm test || true"         "is laundered"
-reject_case "semi-exit0" "npm test ; exit 0"        "is laundered"
-reject_case "pipe-true"  "npm test | true"          "is laundered"
+echo "## ...including when the pipe hides inside a nested shell"
+# Regression guard for the review BLOCKER: quote-stripping regexes cannot see this,
+# which is why the fix is pipefail rather than pattern-matching.
+blocks_case "nested-bash-c"    'bash -c "false | tail"'
+blocks_case "nested-sh-c"      'sh -c "false | tail"'
 
 echo
-echo "## False-positive guard: legitimate canonical commands must NOT be refused"
-accept_case "plain"        "npm test"
-accept_case "and-chain"    "npm run build && npm test"
-accept_case "quoted-alt"   "grep -E 'a|b' package.json"
+echo "## || masking discards the status entirely and is still refused up front"
+refused_case "or-true"    'false || true'      "is laundered"
+refused_case "semi-exit0" 'false ; exit 0'     "is laundered"
+refused_case "pipe-true"  'false | true'       "is laundered"
+
+echo
+echo "## Honest commands must still pass — no over-block"
+honest_case "plain-pass"   'true'
+honest_case "piped-pass"   'true | tail'
+honest_case "and-chain"    'true && true'
 
 echo
 if [[ $errors -eq 0 ]]; then

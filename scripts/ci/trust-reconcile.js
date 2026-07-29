@@ -203,33 +203,6 @@ function isPassingValue(v) {
 // CI reconciler and the stop-goal-fit verifier apply the identical exit-code-mask
 // heuristic — see that module for the rules.
 
-/**
- * A pipeline reports the exit code of its RIGHT-most command, so `cmd | tail`
- * exits 0 whenever `tail` succeeds — regardless of whether `cmd` failed. That is
- * an exit-code mask that `hasLaunderingOperator` does not match: it recognises
- * `| true` but not `| tail`, `| head`, `| tee`, or any other command that exits 0
- * on its own.
- *
- * This lives HERE, not in ../lib/command-log-chain.js, on purpose. ADR 0018 freezes
- * that heuristic and directs new laundering shapes to the external CI anchor rather
- * than to the local rule set. This IS that anchor.
- *
- * Deliberately scoped to CANONICAL verify commands only. Those come from
- * repo-controlled config (workflow `--commands`, TRUST_RECONCILE_COMMANDS, or
- * package.json) — never from agent-supplied claim text — so rejecting a pipe here
- * cannot over-block an agent's own commands, and a canonical verify command has no
- * legitimate need to pipe its result anywhere. Fails closed.
- *
- * `||` is already handled by hasLaunderingOperator; this only adds the pipe case.
- * A `|` inside single or double quotes is not a shell pipeline, so quoted regions
- * are stripped before testing to avoid rejecting e.g. `grep -E 'a|b'`.
- */
-function hasUnattributablePipeline(cmd) {
-  if (typeof cmd !== 'string') return false;
-  const unquoted = cmd.replace(/'[^']*'/g, '').replace(/"[^"]*"/g, '');
-  // Ignore `||` (control flow, already caught above) — look for a single pipe.
-  return /(^|[^|])\|([^|]|$)/.test(unquoted);
-}
 
 /**
  * Default manifest/canonical-command execution timeout (ms). Overridable via
@@ -256,9 +229,31 @@ function resolveCommandTimeoutMs() {
  * Run a single shell command under bash, capturing exit code.
  * @returns {{ cmd, exitCode, passed, timedOut, timeoutMs, stdout, stderr }}
  */
+/**
+ * Every command whose exit code this anchor attests runs under `pipefail`.
+ *
+ * Without it a pipeline reports its RIGHT-most command's status, so `npm test | tail`
+ * exits 0 whenever `tail` succeeds and the anchor attests a PASS it never observed.
+ * That is the shape behind this workspace's repeated real incidents (`git push ... |
+ * tail -1 && echo PUSHED`, `npm run verify:static | tail`).
+ *
+ * `export SHELLOPTS` propagates pipefail into nested shells, so `bash -c "false |
+ * tail"` — which defeats any amount of pattern-matching on the command string,
+ * because the pipe lives inside a quoted argument the outer shell never parses as a
+ * pipeline — also reports truthfully.
+ *
+ * This is deliberately a structural fix rather than another evasion pattern. ADR 0018
+ * calls pattern lists a losing race; an earlier revision of this change proved the
+ * point by shipping one that `bash -c` defeated in a single token. Making the exit
+ * code CORRECT beats enumerating the ways it can be wrong, and it does not ban a
+ * legitimate `| tail` for log trimming — it just stops that pipe from hiding a
+ * failure.
+ */
+const PIPEFAIL_PREAMBLE = 'set -o pipefail; export SHELLOPTS; ';
+
 function runCommand(cmd, repoRoot) {
   const timeoutMs = resolveCommandTimeoutMs();
-  const result = spawnSync('bash', ['-c', cmd], {
+  const result = spawnSync('bash', ['-c', PIPEFAIL_PREAMBLE + cmd], {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: timeoutMs,
@@ -1378,10 +1373,6 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
-      return 1;
-    }
-    if (hasUnattributablePipeline(cmd)) {
-      process.stderr.write(`[trust-reconcile] FAILED — canonical verify command pipes into another command ('${cmd}') — a pipeline reports the RIGHT side's exit code, so a failure on the left is masked. Remove the pipe from the canonical verify command.\n`);
       return 1;
     }
   }
