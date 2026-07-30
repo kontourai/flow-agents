@@ -34,6 +34,20 @@
     "task_slug": { "type": ["string", "null"] },
     "model": { "type": ["string", "null"] },
     "pricing_version": { "type": ["string", "null"] },
+    "kit": {
+      "description": "Kit identity (flow-agents #970): the INSTALLED Flow Agents Kit's own package version + git lineage, resolved from the emitting script's own on-disk location (never cwd/process ancestry/timestamps). Joinable to the same run's telemetry events' `.kit`. Optional for backward compatibility -- absent on records emitted before #970.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["resolution", "version", "git_sha", "git_ref", "dirty"],
+      "properties": {
+        "resolution": { "enum": ["resolved", "incomplete"] },
+        "reason": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "git_sha": { "type": ["string", "null"] },
+        "git_ref": { "type": ["string", "null"] },
+        "dirty": { "type": ["boolean", "null"] }
+      }
+    },
     "cost": {
       "type": "object",
       "additionalProperties": true,

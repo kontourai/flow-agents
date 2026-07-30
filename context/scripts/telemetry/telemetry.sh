@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# telemetry.sh — Kiro adapter for generic agent telemetry schema v0.3.0
+# telemetry.sh — Kiro adapter for generic agent telemetry schema v0.4.0
 # Usage: echo '<hook_event_json>' | bash telemetry.sh <event_type> <agent_name>
+#
+# Schema v0.4.0 (#970): every event's `.agent.version` is the RUNTIME's own
+# version (from `claude --version` / `codex --version`) — it never identified
+# which Kit BUILD produced the event. v0.4.0 adds `.kit` (package version +
+# git sha/ref/dirty of the INSTALLED Kit, resolved from this script's own
+# on-disk location via lib/kit-identity.sh) additively alongside the unchanged
+# v0.3.0 fields, so every existing consumer keeps parsing v0.3.0 AND v0.4.0
+# records without loss (see evals/integration/test_telemetry_kit_attribution.sh).
 set -o pipefail
 
 TELEMETRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +18,7 @@ source "${TELEMETRY_DIR}/lib/session.sh"
 source "${TELEMETRY_DIR}/lib/enrich.sh"
 source "${TELEMETRY_DIR}/lib/transport.sh"
 source "${TELEMETRY_DIR}/lib/usage.sh"
+source "${TELEMETRY_DIR}/lib/kit-identity.sh"
 
 normalize_tool_name() {
   case "$1" in
@@ -161,8 +170,12 @@ build_base_event() {
     claude|claude-code) runtime_name="claude-code" ;;
     kiro|kiro-cli) runtime_name="kiro-cli" ;;
   esac
+  # #970: .kit is the INSTALLED Flow Agents Kit's own identity (package version +
+  # git sha/ref/dirty), resolved from this script's own on-disk location — never
+  # cwd/process ancestry/timestamps. Distinct from .agent.version above (the
+  # RUNTIME's version). See lib/kit-identity.sh for the full resolution contract.
   jq -nc \
-    --arg sv "0.3.0" \
+    --arg sv "0.4.0" \
     --arg ts "$(date +%s)000" \
     --arg sid "$session_id" \
     --arg eid "$(uuidgen 2>/dev/null || echo "e-$(date +%s)-$$")" \
@@ -170,6 +183,7 @@ build_base_event() {
     --arg an "$agent_name" \
     --arg rv "$(runtime_version "$runtime_name")" \
     --arg rn "$runtime_name" \
+    --argjson kit "$(kit_identity_json)" \
     '{
       schema_version: $sv,
       timestamp: $ts,
@@ -180,7 +194,8 @@ build_base_event() {
         name: $an,
         runtime: $rn,
         version: $rv
-      }
+      },
+      kit: $kit
     }'
 }
 

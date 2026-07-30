@@ -188,10 +188,20 @@ else
 fi
 
 # ── golden parity: the emitted record equals the committed golden (sorted) ─────────────────────────
-if diff <(jq -S . "$LOG1") <(jq -S . "$FIX/expected-record.json") >/dev/null 2>&1; then
-  pass "emitted record byte-equals the committed golden fixture (expected-record.json)"
+# #970: `.kit` (package version + git sha/ref/dirty of the checkout actually running this suite) is
+# legitimately ENVIRONMENT-derived, not fixture-derived -- it changes on every commit/dirty-tree state
+# and can never be a static byte-golden. Excluded from the golden diff below (which stays a pure proof
+# that every FIXTURE-driven field -- cost/defects/verdict/phase -- is exactly right); `.kit` itself is
+# asserted structurally (present, well-typed) immediately after.
+if diff <(jq -S 'del(.kit)' "$LOG1") <(jq -S 'del(.kit)' "$FIX/expected-record.json") >/dev/null 2>&1; then
+  pass "emitted record byte-equals the committed golden fixture (expected-record.json), excluding the environment-derived .kit field"
 else
-  fail "emitted record drifted from golden: $(diff <(jq -S . "$LOG1") <(jq -S . "$FIX/expected-record.json") | head -20)"
+  fail "emitted record drifted from golden: $(diff <(jq -S 'del(.kit)' "$LOG1") <(jq -S 'del(.kit)' "$FIX/expected-record.json") | head -20)"
+fi
+if printf '%s' "$REC" | jq -e '.kit.resolution == "resolved" or .kit.resolution == "incomplete"' >/dev/null 2>&1; then
+  pass "record carries a well-typed .kit identity block (#970, see test_telemetry_kit_attribution.sh for full coverage)"
+else
+  fail "record .kit is missing or malformed: $(printf '%s' "$REC" | jq -c '.kit' 2>/dev/null)"
 fi
 
 # ── AC3: phase-sum invariant — phase-known AND phase-unknown → unattributed ────────────────────────

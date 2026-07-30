@@ -469,6 +469,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
 
+      - name: Telemetry kit attribution integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-kit-attribution-integration
+
       - name: Console board sync integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-board-sync-integration

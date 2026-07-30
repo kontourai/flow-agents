@@ -45,6 +45,14 @@ value view (console #117).
   "task_slug": "string|null",
   "model": "string",
   "pricing_version": "string|null",
+  "kit": {
+    "resolution": "resolved|incomplete",
+    "reason": "string|null",
+    "version": "string|null",
+    "git_sha": "string|null",
+    "git_ref": "string|null",
+    "dirty": "boolean|null"
+  },
 
   "cost": {
     "input_tokens": 0,
@@ -102,6 +110,7 @@ the `session.usage` event.
 | `task_slug` | string\|null | authenticated `session.usage .task_slug`; display metadata only, never a join key |
 | `model` | string | `session.usage .usage.model` |
 | `pricing_version` | string\|null | `session.usage .usage.pricing_version` (from `pricing.json` `current_version`) |
+| `kit` | object | Kit identity (#970): the INSTALLED Flow Agents Kit's own package `version` + git `git_sha`/`git_ref`/`dirty`, resolved from the emitting script's own on-disk location via `scripts/telemetry/lib/kit-identity.sh` — never cwd, process ancestry, or a timestamp. `resolution` is `"resolved"` iff `version` resolved; any field that could not be resolved (including a partial resolution, e.g. version known but no `.git` at kit root on a packaged install) leaves that field explicitly `null` with `reason` set — never a guessed value or a silent omission. Optional for backward compatibility: absent on records emitted before #970 (consumers must not require it). Byte-identical to the same run's telemetry events' `.kit` (see `docs/specs/` telemetry schema notes and `scripts/telemetry/telemetry.sh`), so the two are joinable per run. |
 | `cost.input_tokens` | int | `session.usage .usage.input_tokens` (transcript ground truth) |
 | `cost.output_tokens` | int | `session.usage .usage.output_tokens` |
 | `cost.cache_creation_input_tokens` | int | `session.usage .usage.cache_creation_input_tokens` |
