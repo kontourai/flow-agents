@@ -120,6 +120,7 @@ CHECKS=(
   "Trust reconcile trailer diagnostic integration|bash evals/integration/test_trust_reconcile_trailer_diagnostic.sh"
   "Validate artifacts portability integration|bash evals/integration/test_validate_artifacts_portability.sh"
   "Verify CLI integration|bash evals/integration/test_verify_cli.sh"
+  "Verify gate incremental head integration|bash evals/integration/test_verify_gate_incremental_head.sh"
   "Workspace settings integration|bash evals/integration/test_workspace_settings.sh"
   "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
@@ -250,6 +251,7 @@ LANE_INTEGRATION_COVERAGE=(
   "Trust reconcile trailer diagnostic integration"
   "Validate artifacts portability integration"
   "Verify CLI integration"
+  "Verify gate incremental head integration"
   "Workspace settings integration"
 )
 

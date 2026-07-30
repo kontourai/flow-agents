@@ -1241,9 +1241,18 @@ async function bundleGateEvidence(
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     return gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
   });
-  if (headBoundGateClaims.length > 0 && (recordedRunHeads.some((head) => head === null)
-    || new Set(recordedRunHeads).size !== 1
-    || recordedRunHeads[0] !== flowRunHead(state))) {
+  // Each head-bound claim must still declare the canonical Flow state it was
+  // authorized against, but claims recorded incrementally across a
+  // multi-expectation gate legitimately carry DIFFERENT heads: flowRunHead()
+  // hashes the entire run state, so recording claim 1 moves the head that
+  // claim 2 is stamped with. Requiring every claim to share one identical
+  // head (or to match flowRunHead(state) at validation time) orphans earlier
+  // claims the moment a later one lands, and the gate can never complete.
+  // Visit-scoping — the actual property this check reaches for — is already
+  // enforced independently by claimIsCurrent() above (prior-visit claim/
+  // evidence ids are rejected, and timestamps must fall within the current
+  // gate visit window per currentGateVisit()). So only require presence here.
+  if (headBoundGateClaims.length > 0 && recordedRunHeads.some((head) => head === null)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state authorized when the gate claim was recorded");
   }
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
