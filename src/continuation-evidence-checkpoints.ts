@@ -252,6 +252,7 @@ function validateCheckpointAcceptedTurn(value: ContinuationAcceptedTurn): void {
   validateAcceptedTurn(value);
   const resultKeys = ["status"];
   if (value.result.summary !== undefined) resultKeys.push("summary");
+  if (value.result.status === "completed" && value.result.completion_reason !== undefined) resultKeys.push("completion_reason");
   if (value.result.status === "completed" && value.result.evidence !== undefined) resultKeys.push("evidence");
   if (value.result.status === "wait") resultKeys.push("barrier");
   exactKeys(value.result as unknown as Record<string, unknown>, resultKeys);

@@ -89,6 +89,18 @@ test("signed continuation checkpoints verify an exact ordered prefix", () => {
   assert.equal(fs.statSync(path.join(directory, "checkpoint-000001.json")).mode & 0o777, 0o600);
 });
 
+test("a receipt-verified gate boundary survives the signed checkpoint round trip", () => {
+  const { writer, verify } = fixture();
+  const turn = acceptedTurn(1);
+  turn.result.completion_reason = "gate_boundary";
+  writer.publish(turn, projection());
+
+  assert.equal(
+    verify().checkpoints[0].accepted_turn.result.completion_reason,
+    "gate_boundary",
+  );
+});
+
 test("interrupted temporary output does not invalidate published checkpoints", () => {
   const { directory, writer, verify } = fixture();
   writer.publish(acceptedTurn(1), projection());
