@@ -12,6 +12,37 @@ function fail(message) {
 const args = process.argv.slice(2);
 const checkOnly = args[0] === "--check";
 if (checkOnly) args.shift();
+const trustedSymlinkRootIndex = args.indexOf("--trusted-symlink-root");
+let trustedSymlinkRoot;
+let trustedSymlinkRootInput;
+let trustedSymlinkRootIdentity;
+const trustedSymlinkChildren = new Set();
+if (trustedSymlinkRootIndex !== -1) {
+  trustedSymlinkRootInput = args[trustedSymlinkRootIndex + 1];
+  if (!trustedSymlinkRootInput || trustedSymlinkRootInput.startsWith("--")) fail("--trusted-symlink-root requires an existing directory");
+  try {
+    trustedSymlinkRoot = fs.realpathSync(trustedSymlinkRootInput);
+    if (!fs.statSync(trustedSymlinkRoot).isDirectory()) fail(`trusted symlink root is not a directory: ${trustedSymlinkRootInput}`);
+    trustedSymlinkRootIdentity = fs.statSync(trustedSymlinkRoot);
+    if (typeof process.getuid === "function" && trustedSymlinkRootIdentity.uid !== process.getuid()) {
+      fail(`trusted symlink root is not owned by the current user: ${trustedSymlinkRootInput}`);
+    }
+    if ((trustedSymlinkRootIdentity.mode & 0o022) !== 0) fail(`trusted symlink root is group- or world-writable: ${trustedSymlinkRootInput}`);
+  } catch (error) {
+    fail(`invalid trusted symlink root: ${trustedSymlinkRootInput}: ${error.message}`);
+  }
+  args.splice(trustedSymlinkRootIndex, 2);
+}
+while (args.includes("--trusted-symlink-child")) {
+  const childIndex = args.indexOf("--trusted-symlink-child");
+  const child = args[childIndex + 1];
+  if (!trustedSymlinkRoot) fail("--trusted-symlink-child requires --trusted-symlink-root");
+  if (!child || child.includes("/") || child.includes("\\") || child === "." || child === ".." || child.startsWith("--")) {
+    fail("--trusted-symlink-child requires one direct destination child name");
+  }
+  trustedSymlinkChildren.add(child);
+  args.splice(childIndex, 2);
+}
 const metadataIndex = args.indexOf("--metadata-json");
 let manifestMetadata = {};
 if (metadataIndex !== -1) {
@@ -44,6 +75,15 @@ function hashFile(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+function lstatIfPresent(file) {
+  try {
+    return fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === "ENOENT") return undefined;
+    fail(`unable to inspect destination entry: ${file}: ${error.message}`);
+  }
+}
+
 function relativeFiles(root, current = root) {
   const out = [];
   for (const name of fs.readdirSync(current).sort()) {
@@ -65,14 +105,58 @@ function targetFor(rel) {
   return target;
 }
 
+function containedBy(root, target) {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function currentTrustedSymlinkRoot() {
+  if (!trustedSymlinkRoot || !trustedSymlinkRootInput) return undefined;
+  let current;
+  try {
+    current = fs.realpathSync(trustedSymlinkRootInput);
+  } catch (error) {
+    fail(`trusted symlink root is no longer resolvable: ${trustedSymlinkRootInput}: ${error.message}`);
+  }
+  if (current !== trustedSymlinkRoot) fail(`trusted symlink root changed during install: ${trustedSymlinkRootInput}`);
+  const identity = fs.statSync(current);
+  if (identity.dev !== trustedSymlinkRootIdentity.dev || identity.ino !== trustedSymlinkRootIdentity.ino) {
+    fail(`trusted symlink root identity changed during install: ${trustedSymlinkRootInput}`);
+  }
+  return current;
+}
+
 function ensureSafeParent(target, create) {
   const relative = path.relative(dest, path.dirname(target));
   let current = dest;
-  for (const part of relative.split(path.sep).filter(Boolean)) {
+  for (const [index, part] of relative.split(path.sep).filter(Boolean).entries()) {
     current = path.join(current, part);
-    if (fs.existsSync(current)) {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink()) fail(`refusing to write through symlink: ${current}`);
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (error && error.code !== "ENOENT") fail(`unable to inspect destination component: ${current}: ${error.message}`);
+    }
+    if (stat) {
+      if (stat.isSymbolicLink()) {
+        const root = currentTrustedSymlinkRoot();
+        if (!root || index !== 0 || !trustedSymlinkChildren.has(part)) fail(`refusing to write through symlink: ${current}`);
+        let canonicalTarget;
+        try {
+          canonicalTarget = fs.realpathSync(current);
+        } catch (error) {
+          fail(`trusted destination symlink is not resolvable: ${current}: ${error.message}`);
+        }
+        let canonicalStat;
+        try {
+          canonicalStat = fs.lstatSync(canonicalTarget);
+        } catch (error) {
+          fail(`unable to inspect trusted destination symlink target: ${current}: ${error.message}`);
+        }
+        if (!canonicalStat.isDirectory()) fail(`trusted destination symlink must target a directory: ${current}`);
+        if (!containedBy(root, canonicalTarget)) fail(`trusted destination symlink escapes its bound root: ${current}`);
+        continue;
+      }
       if (!stat.isDirectory()) fail(`destination component is not a directory: ${current}`);
     } else if (create) {
       fs.mkdirSync(current);
@@ -81,9 +165,9 @@ function ensureSafeParent(target, create) {
 }
 
 function readManifest() {
-  if (!fs.existsSync(manifestPath)) return new Map();
+  const stat = lstatIfPresent(manifestPath);
+  if (!stat) return new Map();
   ensureSafeParent(manifestPath, false);
-  const stat = fs.lstatSync(manifestPath);
   if (stat.isSymbolicLink() || !stat.isFile()) fail(`ownership manifest is not a regular file: ${manifestPath}`);
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")); } catch (error) { fail(`invalid ownership manifest: ${error.message}`); }
@@ -133,8 +217,8 @@ const incoming = relativeFiles(source).map((rel) => ({ rel, source: path.join(so
 for (const entry of incoming) {
   const target = targetFor(entry.rel);
   ensureSafeParent(target, false);
-  if (!fs.existsSync(target)) continue;
-  const stat = fs.lstatSync(target);
+  const stat = lstatIfPresent(target);
+  if (!stat) continue;
   if (stat.isSymbolicLink()) fail(`refusing to replace symlink: ${target}`);
   if (!stat.isFile()) fail(`destination collision is not a regular file: ${target}`);
   const oldHash = previous.get(entry.rel);
@@ -154,7 +238,8 @@ for (const entry of incoming) {
 for (const [rel] of previous) {
   const target = targetFor(rel);
   ensureSafeParent(target, false);
-  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) fail(`refusing to remove symlink replacing owned file: ${target}`);
+  const stat = lstatIfPresent(target);
+  if (stat?.isSymbolicLink()) fail(`refusing to remove symlink replacing owned file: ${target}`);
 }
 
 if (checkOnly) process.exit(0);
@@ -177,8 +262,12 @@ const staleParents = new Set();
 for (const [rel, oldHash] of previous) {
   if (incomingPaths.has(rel)) continue;
   const target = targetFor(rel);
-  if (!fs.existsSync(target)) continue;
-  const stat = fs.lstatSync(target);
+  // Revalidate the logical parent immediately before removal. A trusted
+  // top-level Stow link remains allowed only while it resolves inside its
+  // explicitly bound backing root.
+  ensureSafeParent(target, false);
+  const stat = lstatIfPresent(target);
+  if (!stat) continue;
   if (!stat.isFile() || hashFile(target) !== oldHash) {
     process.stderr.write(`install-owned-files: preserving modified former Flow Agents file: ${target}\n`);
     continue;
@@ -195,7 +284,7 @@ for (const start of [...staleParents].sort((a, b) => b.length - a.length)) {
 }
 
 ensureSafeParent(manifestPath, true);
-if (fs.existsSync(manifestPath) && fs.lstatSync(manifestPath).isSymbolicLink()) fail(`refusing to replace symlink: ${manifestPath}`);
+if (lstatIfPresent(manifestPath)?.isSymbolicLink()) fail(`refusing to replace symlink: ${manifestPath}`);
 const manifestTemp = `${manifestPath}.tmp.${process.pid}.${crypto.randomBytes(6).toString("hex")}`;
 try {
   fs.writeFileSync(manifestTemp, `${JSON.stringify({ schema_version: "1.0", ...manifestMetadata, files: incoming.map((entry) => ({ path: entry.rel, sha256: entry.hash })) }, null, 2)}\n`, { flag: "wx" });
