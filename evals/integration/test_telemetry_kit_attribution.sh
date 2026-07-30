@@ -133,6 +133,45 @@ NESTED_JSON="$(bash -c "source '$PARENTGIT/kit/scripts/telemetry/lib/kit-identit
 NESTED_SHA="$(printf '%s' "$NESTED_JSON" | jq -r '.git_sha')"
 [[ "$NESTED_SHA" == "null" ]] && pass "no .git directly at the kit root -> git_sha stays null, never the parent's sha" || fail "git_sha leaked the ambient parent repo's sha: $NESTED_SHA"
 
+# ── AC4: unborn HEAD (a real .git, zero commits) never yields a fabricated git_sha ─────────────
+# Regression fixture for a real defect: `git rev-parse HEAD` on an unborn HEAD exits 128 but still
+# PRINTS the literal string "HEAD" to stdout (standard git behavior for an unresolvable ref). A
+# resolver that gates on stdout emptiness alone (rather than the command's real exit status)
+# accepts that literal as a plausible-looking, fabricated 8-char "sha" -- not 40-hex, with no
+# disclosing reason. Also proves the three git probes are resolved INDEPENDENTLY: git_ref and
+# dirty are still correctly resolved here even though git_sha is not (a symbolic ref name needs no
+# commits to exist) -- one probe's failure must never silently blank out a sibling that succeeded.
+echo "--- AC4: unborn HEAD (real .git, zero commits) -> git_sha explicitly null, never the literal 'HEAD' ---"
+UNBORNROOT="$TMP/unborn-head"
+mkdir -p "$UNBORNROOT/packaging" "$UNBORNROOT/scripts/telemetry/lib"
+echo '{"version":"3.0.0-nocommit"}' > "$UNBORNROOT/package.json"
+cp "$KIT_IDENTITY_LIB" "$UNBORNROOT/scripts/telemetry/lib/kit-identity.sh"
+( cd "$UNBORNROOT" && git init -q && git config user.email t@example.com && git config user.name t )
+UNBORN_JSON="$(bash -c "source '$UNBORNROOT/scripts/telemetry/lib/kit-identity.sh'; kit_identity_json")"
+UNBORN_SHA="$(printf '%s' "$UNBORN_JSON" | jq -r '.git_sha')"
+[[ "$UNBORN_SHA" == "null" ]] && pass "unborn HEAD: git_sha is explicitly null, never the literal 'HEAD' or any other fabricated value" || fail "unborn HEAD: git_sha fabricated a value: $UNBORN_SHA"
+UNBORN_REASON="$(printf '%s' "$UNBORN_JSON" | jq -r '.reason')"
+[[ "$UNBORN_REASON" == *"exit 128"* || "$UNBORN_REASON" == *"unborn"* ]] && pass "unborn HEAD: reason names the specific failure ($UNBORN_REASON)" || fail "unborn HEAD: reason did not disclose the failure: $UNBORN_REASON"
+UNBORN_RESOLUTION="$(printf '%s' "$UNBORN_JSON" | jq -r '.resolution')"
+[[ "$UNBORN_RESOLUTION" == "resolved" ]] && pass "unborn HEAD: resolution stays resolved on version alone (a real, partial identity)" || fail "unborn HEAD: resolution: expected resolved got $UNBORN_RESOLUTION"
+UNBORN_REF="$(printf '%s' "$UNBORN_JSON" | jq -r '.git_ref')"
+[[ "$UNBORN_REF" == "main" || "$UNBORN_REF" == "master" ]] && pass "unborn HEAD: git_ref still independently resolves (a symbolic ref name needs no commits) ($UNBORN_REF)" || fail "unborn HEAD: git_ref did not independently resolve: $UNBORN_REF"
+UNBORN_DIRTY_TYPE="$(printf '%s' "$UNBORN_JSON" | jq -r '.dirty | type')"
+[[ "$UNBORN_DIRTY_TYPE" == "boolean" ]] && pass "unborn HEAD: dirty still independently resolves to a real boolean (untracked package.json/packaging present)" || fail "unborn HEAD: dirty did not independently resolve: type=$UNBORN_DIRTY_TYPE"
+
+# ── AC4: detached HEAD -- git_ref probe fails independently without blanking git_sha/dirty ─────
+echo "--- AC4: detached HEAD -> git_ref explicitly null (never fabricated), git_sha still resolves ---"
+DETACHEDROOT="$TMP/detached-head"
+mkdir -p "$DETACHEDROOT/packaging" "$DETACHEDROOT/scripts/telemetry/lib"
+echo '{"version":"1.0.0-detached"}' > "$DETACHEDROOT/package.json"
+cp "$KIT_IDENTITY_LIB" "$DETACHEDROOT/scripts/telemetry/lib/kit-identity.sh"
+( cd "$DETACHEDROOT" && git init -q && git config user.email t@example.com && git config user.name t &&   git add package.json packaging scripts && git commit -qm init && git checkout -q --detach HEAD )
+DETACHED_JSON="$(bash -c "source '$DETACHEDROOT/scripts/telemetry/lib/kit-identity.sh'; kit_identity_json")"
+DETACHED_REF="$(printf '%s' "$DETACHED_JSON" | jq -r '.git_ref')"
+[[ "$DETACHED_REF" == "null" ]] && pass "detached HEAD: git_ref is explicitly null, never fabricated" || fail "detached HEAD: git_ref fabricated a value: $DETACHED_REF"
+DETACHED_SHA="$(printf '%s' "$DETACHED_JSON" | jq -r '.git_sha')"
+[[ "$DETACHED_SHA" =~ ^[0-9a-f]{40}$ ]] && pass "detached HEAD: git_sha still independently resolves to a real 40-hex sha ($DETACHED_SHA)" || fail "detached HEAD: git_sha did not independently resolve: $DETACHED_SHA"
+
 # ── AC3: dirty-flag alternative to a content digest -- same sha, different identity ────────────
 echo "--- AC3: two resolutions at the SAME git sha with different local content -> different identity ---"
 DIRTYROOT="$TMP/dirty-check"
