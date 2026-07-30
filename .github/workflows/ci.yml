@@ -345,6 +345,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check plain-stop-messaging-integration
 
+      - name: Stop gate actor-scoped completion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check stop-gate-actor-scoped-completion-integration
+
       - name: Goal Fit narrative exclusion integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-narrative-exclusion-integration
