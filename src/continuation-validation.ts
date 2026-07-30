@@ -14,6 +14,7 @@ import {
 } from "./cli/public-contracts.js";
 import { flowAgentsPackageVersion } from "./lib/package-version.js";
 import type { ContinuationAcceptedTurn, ContinuationBarrier, ContinuationDriverState, ContinuationSnapshot, ContinuationTurnResult } from "./continuation-driver.js";
+import { isVerifiedContinuationBoundary, markVerifiedContinuationBoundary } from "./continuation-boundary-result.js";
 
 export const MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES = 65_536;
 export const MAX_CONTINUATION_TURN_RESULT_BYTES = 74_000;
@@ -414,13 +415,28 @@ function sameArtifactTargets(left: GateActionEnvelope["action"]["declared_artifa
   return rightByRef.size === right.length && left.every((target) => isDeepStrictEqual(target, rightByRef.get(target.ref)));
 }
 
-export function validateTurnResult(value: ContinuationTurnResult): ContinuationTurnResult {
+export function validateTurnResult(
+  value: ContinuationTurnResult,
+  options: { persistedAcceptedTurn?: boolean } = {},
+): ContinuationTurnResult {
   if (!value || typeof value !== "object" || (value.status !== "completed" && value.status !== "wait")) throw new Error("continuation adapter must return status completed or wait");
   if (value.status === "wait") validateBarrier(value.barrier);
   if (value.summary !== undefined && typeof value.summary !== "string") throw new Error("continuation adapter summary must be a string");
+  if (value.status === "completed" && value.completion_reason !== undefined
+    && value.completion_reason !== "gate_boundary") {
+    throw new Error("continuation adapter completion_reason must be gate_boundary");
+  }
+  if (value.status === "completed" && value.completion_reason === "gate_boundary"
+    && !isVerifiedContinuationBoundary(value) && !options.persistedAcceptedTurn) {
+    throw new Error("continuation gate_boundary completion requires a verified boundary receipt");
+  }
+  if (value.status === "wait" && Object.hasOwn(value, "completion_reason")) throw new Error("continuation wait results must not include completion_reason");
   if (value.status === "completed" && value.evidence !== undefined) validateAdapterEvidence(value.evidence);
   if (value.status === "wait" && Object.hasOwn(value, "evidence")) throw new Error("continuation wait results must not include evidence");
   const copy = structuredClone(value);
+  if (value.status === "completed" && value.completion_reason === "gate_boundary") {
+    markVerifiedContinuationBoundary(copy as Extract<ContinuationTurnResult, { status: "completed" }> & { completion_reason: "gate_boundary" });
+  }
   if (copy.summary) {
     const characters = Array.from(copy.summary);
     if (characters.length > 2_000) copy.summary = `${characters.slice(0, 1_997).join("")}...`;
@@ -482,7 +498,7 @@ export function validateAcceptedTurn(value: ContinuationAcceptedTurn): void {
     throw new Error("continuation accepted-turn capture has unsupported fields");
   }
   validateTurnRequest(value.request, value.iteration);
-  validateTurnResult(value.result);
+  validateTurnResult(value.result, { persistedAcceptedTurn: true });
   if (value.request.context_strategy !== undefined) validateContextStrategy(value.request.context_strategy);
   if (value.progress !== null) validatePriorProgress(value.progress);
 }

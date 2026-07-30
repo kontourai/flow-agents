@@ -2,8 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { ContinuationAdapterTimeoutError } from "../continuation-driver.js";
 import type { ContinuationBarrier, ContinuationTurnRequest, ContinuationTurnResult } from "../continuation-driver.js";
+import { markVerifiedContinuationBoundary } from "../continuation-boundary-result.js";
 
 export type ContinuationAdapterCommand = {
   argv: string[];
@@ -98,14 +100,55 @@ function spawnAdapter(
     let stderrBytes = 0;
     let settled = false;
     let forcedKill: NodeJS.Timeout | undefined;
+    let boundaryPoll: NodeJS.Timeout | undefined;
+    let boundaryResult: ContinuationTurnResult | undefined;
     let terminationError: Error | undefined;
     const maxBytes = 4 * 1024 * 1024;
+    const boundaryCompletion = (): ContinuationTurnResult | null => {
+      if (!options.continuationSessionDir || !options.continuationRunId || !options.continuationTurnSecret) return null;
+      try {
+        const require = createRequire(import.meta.url);
+        const authority = require(path.resolve(import.meta.dirname, "../../../scripts/hooks/lib/continuation-turn-authority.js")) as {
+          readActiveTurnBoundary(input: { sessionDir: string; runId: string; turnSecret: string }): { valid: boolean; record?: { issued_step?: string; canonical_step?: string; canonical_status?: string } };
+        };
+        const boundary = authority.readActiveTurnBoundary({
+          sessionDir: options.continuationSessionDir,
+          runId: options.continuationRunId,
+          turnSecret: options.continuationTurnSecret,
+        });
+        if (!boundary.valid || !boundary.record) return null;
+        return markVerifiedContinuationBoundary({
+          status: "completed",
+          completion_reason: "gate_boundary",
+          summary: boundary.record.canonical_status === "active"
+            ? `Continuation boundary advanced ${boundary.record.issued_step} to ${boundary.record.canonical_step}.`
+            : `Continuation boundary left ${boundary.record.issued_step} at canonical status ${boundary.record.canonical_status}.`,
+        });
+      } catch {
+        return null;
+      }
+    };
+    const stopAtBoundary = (): boolean => {
+      boundaryResult ??= boundaryCompletion() ?? undefined;
+      if (!boundaryResult) return false;
+      clearTimeout(timeout);
+      terminateProcessGroup(child.pid, "SIGTERM");
+      forcedKill ??= setTimeout(() => terminateProcessGroup(child.pid, "SIGKILL"), 250);
+      return true;
+    };
     const timeout = setTimeout(() => {
       if (settled) return;
+      if (stopAtBoundary()) return;
       terminationError = new ContinuationAdapterTimeoutError(options.timeoutMs);
       terminateProcessGroup(child.pid, "SIGTERM");
       forcedKill = setTimeout(() => terminateProcessGroup(child.pid, "SIGKILL"), 250);
     }, options.timeoutMs);
+    if (options.continuationSessionDir && options.continuationRunId && options.continuationTurnSecret) {
+      boundaryPoll = setInterval(() => {
+        if (!settled) stopAtBoundary();
+      }, 25);
+      boundaryPoll.unref();
+    }
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
@@ -128,14 +171,21 @@ function spawnAdapter(
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (forcedKill) clearTimeout(forcedKill);
+      if (boundaryPoll) clearInterval(boundaryPoll);
+      if (forcedKill && !boundaryResult) clearTimeout(forcedKill);
       reject(error);
     });
     child.on("close", (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (forcedKill) clearTimeout(forcedKill);
+      if (boundaryPoll) clearInterval(boundaryPoll);
+      if (forcedKill && !boundaryResult) clearTimeout(forcedKill);
+      boundaryResult ??= boundaryCompletion() ?? undefined;
+      if (boundaryResult) {
+        resolve(boundaryResult);
+        return;
+      }
       if (terminationError) {
         reject(terminationError);
         return;
@@ -160,6 +210,7 @@ function spawnAdapter(
       if ((error as NodeJS.ErrnoException).code !== "EPIPE" && !settled) {
         settled = true;
         clearTimeout(timeout);
+        if (boundaryPoll) clearInterval(boundaryPoll);
         if (forcedKill) clearTimeout(forcedKill);
         scheduleProcessGroupTermination(child.pid);
         reject(error);
@@ -174,6 +225,7 @@ type ContinuationAdapterOptions = {
   timeoutMs: number;
   continuationTurnSecret?: string;
   continuationRunId?: string;
+  continuationSessionDir?: string;
 };
 
 function adapterEnvironment(options: ContinuationAdapterOptions): NodeJS.ProcessEnv {

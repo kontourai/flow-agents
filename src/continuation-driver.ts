@@ -9,6 +9,7 @@ import {
 } from "./builder-gate-action-envelope.js";
 import { createFileContinuationStore } from "./continuation-persistence.js";
 import { assertMaxTurns, assertMissionIdentity, validateSnapshot, validateState, validateTurnResult } from "./continuation-validation.js";
+import { isVerifiedContinuationBoundary } from "./continuation-boundary-result.js";
 
 export { MAX_CONTINUATION_TURNS, createFileContinuationStore, withContinuationDriverLock } from "./continuation-persistence.js";
 export { MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES, MAX_CONTINUATION_TURN_RESULT_BYTES } from "./continuation-validation.js";
@@ -57,7 +58,7 @@ export type ContinuationContextStrategy = {
 };
 
 export type ContinuationTurnResult =
-  | { status: "completed"; summary?: string; evidence?: Record<string, unknown> }
+  | { status: "completed"; summary?: string; evidence?: Record<string, unknown>; completion_reason?: "gate_boundary" }
   | { status: "wait"; barrier: ContinuationBarrier; summary?: string };
 
 
@@ -101,7 +102,7 @@ export type ContinuationDriverState = {
 
 export type ContinuationDriverEvent = {
   schema_version: "1.0";
-  type: "started" | "turn_started" | "turn_completed" | "turn_recovered" | "gate_not_advanced" | "turn_failed" | "authority_cleanup_failed" | "parked" | "resumed" | "done" | "budget_exhausted";
+  type: "started" | "turn_started" | "turn_completed" | "turn_boundary_reached" | "turn_recovered" | "gate_not_advanced" | "turn_failed" | "authority_cleanup_failed" | "parked" | "resumed" | "done" | "budget_exhausted";
   run_id: string;
   definition_id: string;
   current_step: string;
@@ -403,6 +404,10 @@ async function recordAcceptedTurn(
   now: () => Date,
 ): Promise<MissionPosition> {
   let measured = await synchronizeTurnMeasurement(input, state, previous, request, result, now);
+  if (isVerifiedContinuationBoundary(result)
+    && measured.snapshot.status === "active" && measured.snapshot.current_step === request.current_step) {
+    throw new Error("continuation adapter reported a gate boundary without canonical advancement");
+  }
   const capture = measured.state.active_turn_capture!;
   acceptedTurnJournal(input.store)?.captureAcceptedTurn(capture);
   if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result, capture, measured.snapshot);
@@ -412,6 +417,15 @@ async function recordAcceptedTurn(
     ...(measured.progress ? { progress: measured.progress } : {}),
     turn_id: capture.turn_id,
   });
+  if (isVerifiedContinuationBoundary(result)) {
+    appendEvent(input.store, measured.state, measured.snapshot, "turn_boundary_reached", now, {
+      summary: measured.snapshot.status === "active"
+        ? `bounded turn for ${request.current_step} advanced to ${measured.snapshot.current_step}`
+        : `bounded turn for ${request.current_step} reached canonical status ${measured.snapshot.status}`,
+      ...(measured.progress ? { progress: measured.progress } : {}),
+      turn_id: capture.turn_id,
+    });
+  }
   measured = { ...measured, state: clearActiveTurn(input.store, measured.state, now) };
   if (measured.snapshot.status === "active" && measured.snapshot.current_step === request.current_step) {
     appendEvent(input.store, measured.state, measured.snapshot, "gate_not_advanced", now, { summary: "adapter completed without canonical gate advancement" });
@@ -650,6 +664,15 @@ function reconcileInterruptedTurn(
       ...(capture.progress ? { progress: capture.progress } : {}),
       turn_id: capture.turn_id,
     });
+    if (capture.result.status === "completed" && capture.result.completion_reason === "gate_boundary") {
+      appendEvent(store, recovered, snapshot, "turn_boundary_reached", now, {
+        summary: snapshot.status === "active"
+          ? `bounded turn for ${capture.request.current_step} advanced to ${snapshot.current_step}`
+          : `bounded turn for ${capture.request.current_step} reached canonical status ${snapshot.status}`,
+        ...(capture.progress ? { progress: capture.progress } : {}),
+        turn_id: capture.turn_id,
+      });
+    }
     recovered = clearActiveTurn(store, recovered, now);
     appendEvent(store, recovered, snapshot, "turn_recovered", now, {
       summary: "completed durable accepted-turn capture after interruption",
@@ -692,7 +715,7 @@ function compatibleIdentityField(left: string | undefined, right: string | undef
 }
 
 function isTerminalCanonicalStatus(status: string | undefined): boolean {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "canceled" || status === "failed";
 }
 
 function sameCanonicalStatus(left: string | undefined, right: string | undefined): boolean {

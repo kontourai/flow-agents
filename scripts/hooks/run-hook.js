@@ -8,6 +8,7 @@
  * Exit codes:
  *   0 = allow (pass through)
  *   2 = block (preToolUse only)
+ *   3 = return the signed continuation turn to its driver
  *   other = error (non-blocking)
  */
 

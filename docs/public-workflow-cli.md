@@ -732,6 +732,14 @@ a Flow gate, releases assignment or liveness for a continuation-owned nontermina
 malformed-state, or configuration blocks. The record is removed when the child completes, errors,
 or times out; parent identity changes leave it to expire instead of unlinking through a replacement.
 
+Each signed turn is also fenced to its issued canonical step. Pre- and post-tool hooks compare the
+live canonical run with the signed authority. Once the run advances, an unresolved hard blocker in
+the issued gate remains repairable in that turn; after the repair is complete, the hook writes a
+secret-authenticated `turn-boundary.json` receipt and returns control before later-step work. The
+parent adapter verifies that receipt and terminates the child process group, so a host-native abort
+that prevents final adapter JSON is still recorded causally rather than as an inferred success or an
+adapter error. A fresh signed turn is then issued from the new canonical handoff.
+
 This is cooperative same-user protection, not cryptographic filesystem isolation from a hostile
 same-UID process. A same-UID process that can rewrite both mission state and authority records or
 control the driver process remains outside this boundary. Within the cooperative boundary, the
@@ -741,9 +749,11 @@ canonical assignment and continuation mission records are capped at a conservati
 provider metadata is not rejected. PID liveness is best-effort only: PID reuse and same-UID process control remain outside this
 local coordination boundary.
 
-The event stream records `turn_completed`, `gate_not_advanced`, `turn_failed`, and best-effort
+The event stream records `turn_completed`, `turn_boundary_reached`, `gate_not_advanced`, `turn_failed`, and best-effort
 `authority_cleanup_failed`. Cleanup failures are audited but do not replace the adapter or canonical
-outcome. Failed turns carry
+outcome. `turn_boundary_reached` requires a verified boundary receipt and a completed adapter result
+whose `completion_reason` is `gate_boundary`; it is not inferred from a later state comparison, and
+adapter JSON cannot mint that reason without the parent receipt verifier. Failed turns carry
 `failure_kind` of `timeout` or `adapter_error`; a completed adapter turn whose canonical run remains
 active at the same current step records `gate_not_advanced`. These events describe driver execution only and do not
 change canonical Flow state. Adapter-returned `evidence` is not interpreted as gate evidence; only

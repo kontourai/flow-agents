@@ -430,7 +430,7 @@ const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_
  * generic outcome reached the way that runtime requires — and a declared `null` is the honest
  * kind of gap. Silent absence is neither.
  */
-type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
+type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "continuation-turn-fence-pre" | "continuation-turn-fence-post" | "stop-goal-fit";
 
 const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envPrefix?: string }[] = [
   { id: "workflow-steering-session", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
@@ -438,6 +438,8 @@ const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; e
   { id: "config-protection", script: "config-protection.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "quality-gate", script: "quality-gate.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "evidence-capture", script: "evidence-capture.js", statusMessage: "Capturing Flow Agents command evidence" },
+  { id: "continuation-turn-fence-pre", script: "continuation-turn-fence.js", statusMessage: "Enforcing Flow Agents continuation boundary" },
+  { id: "continuation-turn-fence-post", script: "continuation-turn-fence.js", statusMessage: "Checking Flow Agents continuation boundary" },
   { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envPrefix: GOAL_FIT_MODE_PREFIX },
 ];
 
@@ -458,6 +460,8 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "config-protection": "PreToolUse",
     "quality-gate": "PostToolUse",
     "evidence-capture": "PostToolUse",
+    "continuation-turn-fence-pre": "PreToolUse",
+    "continuation-turn-fence-post": "PostToolUse",
     "stop-goal-fit": "Stop",
   },
   codex: {
@@ -466,6 +470,8 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "config-protection": "PreToolUse",
     "quality-gate": "PostToolUse",
     "evidence-capture": "PostToolUse",
+    "continuation-turn-fence-pre": "PreToolUse",
+    "continuation-turn-fence-post": "PostToolUse",
     "stop-goal-fit": "Stop",
   },
   // opencode and pi wire the same canonical policies through their own plugin/extension
@@ -478,6 +484,8 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "config-protection": "tool.execute.before",
     "quality-gate": "tool.execute.after",
     "evidence-capture": "tool.execute.after",
+    "continuation-turn-fence-pre": "tool.execute.before",
+    "continuation-turn-fence-post": "tool.execute.after",
     "stop-goal-fit": "session.idle",
   },
   pi: {
@@ -486,6 +494,8 @@ const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>>
     "config-protection": "tool_call",
     "quality-gate": "tool_result",
     "evidence-capture": "tool_result",
+    "continuation-turn-fence-pre": "tool_call",
+    "continuation-turn-fence-post": "tool_result",
     "stop-goal-fit": "session_shutdown",
   },
 };
@@ -956,12 +966,23 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
       if (policyResult && policyResult.allow === false) {
         throw new Error(policyResult.reason || 'Blocked by Flow Agents hook policy.');
       }
+      const fence = runAdapter('opencode-hook-adapter.js', 'tool.execute.before', detail, 'continuation-turn-fence-pre', 'continuation-turn-fence.js', 'default');
+      if (fence && fence.returnControl === true) {
+        if (input && input.sessionID) {
+          await client.session.abort({ path: { id: input.sessionID }, query: { directory: root }, throwOnError: true });
+        }
+        throw new Error(fence.reason || 'Signed continuation turn reached its canonical boundary.');
+      }
     },
     'tool.execute.after': async (input, output) => {
       const detail = { tool: input && input.tool };
       runTelemetry('tool.execute.after', detail);
       runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'quality-gate', 'quality-gate.js', 'default');
       runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'evidence-capture', 'evidence-capture.js', 'default');
+      const fence = runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'continuation-turn-fence-post', 'continuation-turn-fence.js', 'default');
+      if (fence && fence.returnControl === true && input && input.sessionID) {
+        await client.session.abort({ path: { id: input.sessionID }, query: { directory: root }, throwOnError: true });
+      }
     },
     'session.idle': async (_input, _output) => {
       runTelemetry('session.idle');
@@ -1042,7 +1063,7 @@ const NODE_BIN = basename(process.execPath).startsWith("node") ? process.execPat
 export default function (pi: ExtensionAPI) {
   const root = process.cwd();
 
-  function runAdapter(adapterScript: string, eventName: string, hookId: string, relScript: string): { allow: boolean; context?: string; reason?: string } {
+  function runAdapter(adapterScript: string, eventName: string, hookId: string, relScript: string): { allow: boolean; context?: string; reason?: string; returnControl?: boolean } {
     const adapterPath = join(root, "scripts", "hooks", adapterScript);
     const payload = JSON.stringify({ hook_event_name: eventName, cwd: root });
     const result = spawnSync(NODE_BIN, [adapterPath, eventName, hookId, relScript, "default"], {
@@ -1053,7 +1074,7 @@ export default function (pi: ExtensionAPI) {
       timeout: 30000,
     });
     try {
-      return JSON.parse(result.stdout || "{}") as { allow: boolean; context?: string; reason?: string };
+      return JSON.parse(result.stdout || "{}") as { allow: boolean; context?: string; reason?: string; returnControl?: boolean };
     } catch {
       return { allow: true };
     }
@@ -1087,18 +1108,25 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("tool_call", async (event, _ctx) => {
+  pi.on("tool_call", async (event, ctx) => {
     runTelemetry("tool_call");
     const result = runAdapter("pi-hook-adapter.js", "tool_call", "config-protection", "config-protection.js");
     if (result && result.allow === false) {
       return { block: true, reason: result.reason || "Blocked by Flow Agents hook policy." };
     }
+    const fence = runAdapter("pi-hook-adapter.js", "tool_call", "continuation-turn-fence-pre", "continuation-turn-fence.js");
+    if (fence && fence.returnControl === true) {
+      ctx.abort();
+      return { block: true, reason: fence.reason || "Signed continuation turn reached its canonical boundary." };
+    }
   });
 
-  pi.on("tool_result", async (_event, _ctx) => {
+  pi.on("tool_result", async (_event, ctx) => {
     runTelemetry("tool_result");
     runAdapter("pi-hook-adapter.js", "tool_result", "quality-gate", "quality-gate.js");
     runAdapter("pi-hook-adapter.js", "tool_result", "evidence-capture", "evidence-capture.js");
+    const fence = runAdapter("pi-hook-adapter.js", "tool_result", "continuation-turn-fence-post", "continuation-turn-fence.js");
+    if (fence && fence.returnControl === true) ctx.abort();
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
