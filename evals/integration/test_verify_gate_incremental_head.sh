@@ -17,6 +17,17 @@
 #         driving a run that leaves (route-back) and re-enters verify-gate,
 #         then relying on the stale visit-1 critique claim (never
 #         re-recorded) to satisfy visit 2 does NOT complete the gate.
+#
+#         SCOPE CAVEAT (do not overstate this assertion): independent
+#         verification showed this scenario stays blocked even with
+#         claimIsCurrent fully disabled, because @kontourai/flow's own
+#         attachEvidence/evaluateRun keeps the run at `verify` independently.
+#         So AC2 proves the END-TO-END property (prior-visit reuse cannot
+#         complete the gate) but does NOT isolate claimIsCurrent's
+#         prior-visit-id rejection as the cause. AC3 is the unconfounded
+#         proof that claimIsCurrent is load-bearing: disabling it lets a
+#         decades-stale claim reach merge-ready. Treat AC2 as defence-in-depth
+#         coverage, and keep AC3 as the regression that guards this narrowing.
 #   AC3 — a claim whose timestamps fall outside the current visit window is
 #         still rejected: a tests-evidence claim stamped decades before the
 #         visit's enteredAt does not complete the gate, while an identical
