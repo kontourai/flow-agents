@@ -111,10 +111,10 @@ vgf_pause_resume() {
 }
 
 # `workflow start` always derives the session slug from --work-item (owner/repo#N
-# -> lowercased "owner-repo-N"; see src/lib/work-item-identity.ts workItemSlug),
-# never from a caller-chosen slug. Mirror that derivation so callers can predict
-# the session dir without depending on our fixture accepting an independent slug
-# the CLI would silently ignore.
+# -> lowercased "owner-repo-N"; see workItemSlug() in the work item identity
+# helper module), never from a caller-chosen slug. Mirror that derivation so
+# callers can predict the session dir without depending on our fixture
+# accepting an independent slug the CLI would silently ignore.
 vgf_work_item_slug() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
 }
