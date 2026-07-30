@@ -60,7 +60,7 @@ ACCEPT_PROMPT="You MUST call the read tool before replying — answering from me
 run_output=""
 provider_error=0
 for _attempt in 1 2; do
-  run_output="$(opencode run "${MODEL_ARGS[@]}" "$ACCEPT_PROMPT" 2>&1 || true)"
+  run_output="$(opencode run --format json "${MODEL_ARGS[@]}" "$ACCEPT_PROMPT" 2>&1 || true)"
   if echo "$run_output" | grep -qi "error"; then
     provider_error=1
     break
