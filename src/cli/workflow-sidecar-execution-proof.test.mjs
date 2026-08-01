@@ -295,6 +295,102 @@ test("package-script output cannot manufacture a positive test count", () => {
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 999\n"), 0);
 });
 
+test("direct contained shell suites defer their count to canonical writer output", () => {
+  const root = fixture({
+    "evals/run.sh": [
+      "#!/usr/bin/env bash",
+      'touch "$PWD/classification-executed"',
+      'echo "Results: 2/2 passed, 0 failed"',
+    ].join("\n"),
+  });
+
+  assert.deepEqual(testExecutionProof("bash evals/run.sh static", root), {
+    kind: "local-process-exit",
+    runner: "contained-shell-suite",
+    count_source: "observed-output",
+    suite_file: "evals/run.sh",
+  });
+  assert.equal(fs.existsSync(path.join(root, "classification-executed")), false, "classification must not execute the suite");
+  assert.equal(inferExecutedTestCount("bash evals/run.sh static", root, "Results: 2/2 passed, 0 failed\n"), 2);
+  assert.equal(inferExecutedTestCount("bash evals/run.sh static", root, "PASS: first\n  [PASS] second\n"), 2);
+  assert.equal(inferExecutedTestCount("bash evals/run.sh static", root, "PASS:\n[PASS]\n"), 0, "empty status labels are not positive activity");
+  assert.equal(inferExecutedTestCount("bash evals/run.sh static", root, "suite completed\n"), 0, "exit success without a supported summary is not passing test evidence");
+  assert.equal(fs.existsSync(path.join(root, "classification-executed")), false, "count inference must remain side-effect free");
+});
+
+test("shell-suite admission remains direct, contained, and test-intent scoped", () => {
+  const root = fixture({
+    "evals/run.sh": "#!/usr/bin/env bash\nexit 0\n",
+    "evals/run": "#!/usr/bin/env bash\nexit 0\n",
+    "-test": "#!/usr/bin/env bash\n[[ 1 -eq 1 ]]\n",
+    "scripts/deploy.sh": "#!/usr/bin/env bash\nexit 0\n",
+    "package.json": JSON.stringify({
+      scripts: {
+        "eval:static": "bash evals/run.sh static",
+        "test:multiline": "node --test\n test/contract.test.mjs",
+      },
+    }),
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+  const outsideRoot = fixture({ "outside-test.sh": "#!/usr/bin/env bash\nexit 0\n" });
+  fs.symlinkSync(path.join(root, "evals/run.sh"), path.join(root, "evals/symlink-test.sh"));
+
+  assert.equal(isMeaningfulTestCommand("bash evals/run.sh static", root), true);
+  assert.equal(isMeaningfulTestCommand("bash evals/run static", root), true);
+  assert.equal(isMeaningfulTestCommand("bash scripts/deploy.sh", root), false);
+  assert.equal(isMeaningfulTestCommand("bash evals/symlink-test.sh", root), false);
+  assert.equal(isMeaningfulTestCommand(`bash ${path.join(root, "evals/run.sh")} static`, root), false);
+  assert.equal(isMeaningfulTestCommand(`bash ${path.join(outsideRoot, "outside-test.sh")}`, root), false);
+  assert.equal(isMeaningfulTestCommand('bash -c "echo 1 passed"', root), false);
+  assert.equal(isMeaningfulTestCommand("bash -test outside.sh", root), false);
+  assert.equal(isMeaningfulTestCommand("sh -test outside.sh", root), false);
+  assert.equal(isMeaningfulTestCommand("zsh -test outside.sh", root), false);
+  assert.equal(isMeaningfulTestCommand("bash evals/run.sh static && true", root), false);
+  assert.equal(isMeaningfulTestCommand("MODE=static bash evals/run.sh static", root), false);
+  assert.equal(isMeaningfulTestCommand("bash evals/run.sh static > result.log", root), false);
+  assert.equal(isMeaningfulTestCommand("npm run eval:static", root), false, "package indirection cannot carry observed-output proof");
+  assert.equal(isMeaningfulTestCommand("MODE=static npm run eval:static", root), false, "an environment prefix cannot launder package indirection");
+  assert.equal(isMeaningfulTestCommand("npm run test:multiline", root), true, "existing multiline static package scripts retain whitespace normalization");
+
+  fs.mkdirSync(path.join(root, "linked"));
+  fs.symlinkSync(path.join(root, "evals"), path.join(root, "linked/evals"));
+  assert.equal(isMeaningfulTestCommand("bash linked/evals/run.sh static", root), false);
+});
+
+test("reconcile manifests do not authorize local shell-suite evidence", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: { "trust-reconcile-manifest": "node emit-manifest.cjs" },
+      "trust-reconcile-manifest": [{ command: "bash scripts/deploy.sh" }],
+    }),
+    "emit-manifest.cjs": 'require("node:fs").writeFileSync("manifest-executed", "yes");\n',
+    "scripts/deploy.sh": "#!/usr/bin/env bash\nexit 0\n",
+  });
+  const previous = process.env.TRUST_RECONCILE_MANIFEST;
+  process.env.TRUST_RECONCILE_MANIFEST = JSON.stringify([{ command: "bash scripts/deploy.sh" }]);
+  try {
+    assert.equal(testExecutionProof("bash scripts/deploy.sh", root), null);
+    assert.equal(fs.existsSync(path.join(root, "manifest-executed")), false, "classification must not execute a manifest emitter");
+  } finally {
+    if (previous === undefined) delete process.env.TRUST_RECONCILE_MANIFEST;
+    else process.env.TRUST_RECONCILE_MANIFEST = previous;
+  }
+});
+
+test("statically bounded shell scripts retain source-bounded counts", () => {
+  const root = fixture({
+    "checks/test-contract.sh": "#!/usr/bin/env bash\nset -e\n[[ 1 -eq 1 ]]\n",
+  });
+
+  assert.deepEqual(testExecutionProof("bash checks/test-contract.sh", root), {
+    kind: "local-process-exit",
+    runner: "bash",
+    static_test_units: 1,
+  });
+  assert.equal(inferExecutedTestCount("bash checks/test-contract.sh", root, "9 passed\n"), 1);
+  assert.equal(inferExecutedTestCount("bash checks/test-contract.sh", root, "PASS: contract\n"), 0, "contained-suite status syntax does not change static-bound counts");
+});
+
 test("supported node test workflows produce source-derived local proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),

@@ -42,6 +42,19 @@ tamper-evident (chain-hashed), serialized against the hook (shared lock), and su
 on conflict (an observed fail from either source wins). The waiver path is untouched:
 accepted gaps remain disclosure that derives `assumed`, never gate satisfaction.
 
+For local `tests-evidence`, a direct `bash`/`sh`/`zsh` invocation of a regular,
+non-symlink test or eval suite inside the repository may use positive test activity from
+that writer-observed output instead of a statically inferred assertion count. Classification
+is side-effect free and does not consult the Trust Reconcile manifest or ambient manifest
+variables. The exact preflight proof is retained across the single writer execution.
+Option-shaped shell operands are not admitted: the classified repository file must be the
+interpreter's actual script operand. Before binding a successful observation, the writer
+also re-reads trust state, repeats critique/workspace and evidence validation, and requires
+referenced artifact bytes to match their pre-execution digests. A suite that mutates the
+authority it is meant to verify therefore cannot mint a passing claim.
+Publication remains a separate decision: Trust Reconcile still requires an exact manifest
+command and independently reruns it in CI.
+
 **Residual risk, accepted.** A compromised writer process could self-attest a pass the hook
 never saw. Mitigations: the attribution is permanent and auditable; the chain makes
 retroactive editing detectable; a hook-observed failure always prevails; and PR CI Trust
@@ -49,3 +62,10 @@ Reconcile re-executes manifest commands independently of any local observation. 
 (#634 option c): when runtime harnesses surface exit codes in hook payloads, hook capture
 naturally resumes confirming passes first-hand; writer observations then serve as
 corroboration rather than the sole deterministic signal.
+
+A contained suite can also be edited to print test-looking output and exit zero, and a
+same-privilege process can race a mutable path between local classification and execution.
+The local classifier does not claim semantic honesty or a race-resistant execution identity;
+it is a reviewable speed bump. Required CI, manifest-exact reconciliation, CODEOWNERS, and
+owner review remain the authority boundary. Race-resistant file-identity execution that
+preserves shell source-path semantics is tracked separately in #1059.

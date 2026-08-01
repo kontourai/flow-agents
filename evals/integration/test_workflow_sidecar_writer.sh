@@ -8,13 +8,14 @@ source "$ROOT/evals/lib/node.sh"
 
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
+passes=0
 
 cleanup() {
   rm -rf "$TMPDIR_EVAL"
 }
 trap cleanup EXIT
 
-_pass() { echo "  ✓ $1"; }
+_pass() { echo "  ✓ $1"; passes=$((passes + 1)); }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 run_bounded() {
   local seconds="$1"
@@ -3934,9 +3935,10 @@ MULTI_ROOT="$MULTI_PROJECT/.kontourai/flow-agents"
 MULTI_SLUG="multi-observed"
 MULTI_DIR="$MULTI_ROOT/$MULTI_SLUG"
 mkdir -p "$MULTI_ROOT" "$MULTI_PROJECT/checks" "$MULTI_PROJECT/test"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-one.sh"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-two.sh"
-chmod +x "$MULTI_PROJECT/checks/test-one.sh" "$MULTI_PROJECT/checks/test-two.sh"
+printf '#!/usr/bin/env bash\ncount_file="$0.count"\norder_file="$(dirname "$0")/order.log"\nprintf "START one\\n" >> "$order_file"\ncount=0\nif test -f "$count_file"; then count="$(cat "$count_file")"; fi\ncount=$((count + 1))\nprintf "%%s\\n" "$count" > "$count_file"\nsleep 0.2\nif test -f "$1"; then printf "PASS: fixture exists\\n"; else printf "FAIL: fixture missing\\n"; exit 1; fi\nprintf "END one\\n" >> "$order_file"\n' > "$MULTI_PROJECT/checks/test-one.sh"
+printf '#!/usr/bin/env bash\nset -eu\norder_file="$(dirname "$0")/order.log"\nprintf "START two\\n" >> "$order_file"\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\nprintf "END two\\n" >> "$order_file"\n' > "$MULTI_PROJECT/checks/test-two.sh"
+printf '#!/usr/bin/env bash\nset -eu\nprintf "# mutated during verification\\n" > "$1"\nprintf "{\"scripts\":{\"test\":\"true\"}}\\n" > "$2"\nprintf "PASS: mutation probe ran\\n"\n' > "$MULTI_PROJECT/checks/test-mutate.sh"
+chmod +x "$MULTI_PROJECT/checks/test-one.sh" "$MULTI_PROJECT/checks/test-two.sh" "$MULTI_PROJECT/checks/test-mutate.sh"
 printf 'import test from "node:test";\nimport assert from "node:assert/strict";\ntest("fixture", () => assert.equal(1, 1));\n' > "$MULTI_PROJECT/test/sample.test.mjs"
 cat > "$MULTI_PROJECT/package.json" <<'JSON'
 {"scripts":{"test":"true","check":"echo check"}}
@@ -3953,7 +3955,7 @@ flow_agents_node "$WRITER" advance-state "$MULTI_DIR" \
 printf '# Plan evidence\n' > "$MULTI_DIR/$MULTI_SLUG--plan-work.md"
 if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
   --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review completed." \
-  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --lane-json "$CRITIQUE_LANE" \
+  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --artifact-ref "package.json" --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-11T11:00:20Z" >"$TMPDIR_EVAL/multi-critique.out" 2>"$TMPDIR_EVAL/multi-critique.err"; then
   _pass "tests-evidence fixture records a clean critique with a record-time snapshot"
 else
@@ -3962,9 +3964,11 @@ fi
 
 MULTI_ONE="bash checks/test-one.sh test/sample.test.mjs"
 MULTI_TWO="bash checks/test-two.sh test/sample.test.mjs"
+MULTI_MUTATE="bash checks/test-mutate.sh .kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md package.json"
 MULTI_DIGEST="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 MULTI_REF_ONE="{\"kind\":\"command\",\"excerpt\":\"$MULTI_ONE\",\"summary\":\"First exact command.\"}"
 MULTI_REF_TWO="{\"kind\":\"command\",\"excerpt\":\"$MULTI_TWO\",\"summary\":\"Second exact command.\"}"
+MULTI_REF_MUTATE="{\"kind\":\"command\",\"excerpt\":\"$MULTI_MUTATE\",\"summary\":\"Mutation probe command.\"}"
 MULTI_OBS_ONE="{\"command\":\"$MULTI_ONE\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
 MULTI_OBS_TWO="{\"command\":\"$MULTI_TWO\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
 
@@ -4001,7 +4005,7 @@ else
 fi
 if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
   --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review refreshed after the package-script fixture changed." \
-  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --lane-json "$CRITIQUE_LANE" \
+  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --artifact-ref "package.json" --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-11T11:00:25Z" >"$TMPDIR_EVAL/multi-critique-refresh.out" 2>"$TMPDIR_EVAL/multi-critique-refresh.err"; then
   _pass "tests-evidence fixture refreshes review after an intentional source change"
 else
@@ -4030,6 +4034,32 @@ else
   _pass "tests-evidence rejects unknown criterion fields"
 fi
 
+if test ! -e "$MULTI_PROJECT/checks/test-one.sh.count" && test ! -e "$MULTI_PROJECT/checks/order.log"; then
+  _pass "tests-evidence validation failures do not execute supplied commands"
+else
+  _fail "tests-evidence validation failure executed supplied commands before canonical observation"
+fi
+
+MULTI_BUNDLE_BEFORE_MUTATION="$(shasum -a 256 "$MULTI_DIR/trust.bundle" | awk '{print $1}')"
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Mutation probe." \
+  --command "$MULTI_MUTATE" --evidence-ref-json "$MULTI_REF_MUTATE" \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_MUTATE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_MUTATE]}" \
+  >"$TMPDIR_EVAL/multi-mutate.out" 2>"$TMPDIR_EVAL/multi-mutate.err"; then
+  _fail "tests-evidence accepted a command that mutated reviewed evidence during execution"
+elif grep -q "after command execution\\|changed during command execution" "$TMPDIR_EVAL/multi-mutate.err" \
+  && [[ "$(shasum -a 256 "$MULTI_DIR/trust.bundle" | awk '{print $1}')" == "$MULTI_BUNDLE_BEFORE_MUTATION" ]]; then
+  _pass "tests-evidence rejects post-preflight workspace mutation without changing trust.bundle"
+else
+  _fail "tests-evidence mutation rejection was not fail-closed: $(cat "$TMPDIR_EVAL/multi-mutate.out" "$TMPDIR_EVAL/multi-mutate.err")"
+fi
+printf '# Plan evidence\n' > "$MULTI_DIR/$MULTI_SLUG--plan-work.md"
+cat > "$MULTI_PROJECT/package.json" <<'JSON'
+{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs"}}
+JSON
+
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Two exact observed commands." \
   --command "$MULTI_ONE" --command "$MULTI_TWO" \
@@ -4048,6 +4078,7 @@ const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
 const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critique');
 if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
+if (gate.metadata.observed_commands[0]?.execution_proof?.count_source !== 'observed-output') process.exit(7);
 const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
 if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(4);
 for (const claim of criteria) {
@@ -4060,7 +4091,14 @@ const snapshot = review?.metadata?.review_target?.workspace_snapshot;
 if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
 NODE
   then
-    _pass "tests-evidence preserves immutable acceptance semantics and maps each criterion to its successful observed command"
+    if [[ "$(cat "$MULTI_PROJECT/checks/test-one.sh.count" 2>/dev/null)" == "1" ]] \
+      && [[ "$(tr '\n' ' ' < "$MULTI_PROJECT/checks/order.log" | sed 's/ *$//')" == "START one END one START two END two" ]]; then
+      _pass "tests-evidence executes the contained shell suite exactly once and maps its writer-observed output"
+      _pass "tests-evidence executes multiple supplied commands sequentially"
+      _pass "tests-evidence preserves immutable acceptance semantics and maps each criterion to its successful observed command"
+    else
+      _fail "tests-evidence command execution count or ordering was incorrect"
+    fi
   else
     _fail "tests-evidence multi-command or review snapshot assertion failed"
   fi
@@ -5277,6 +5315,8 @@ else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate (ran 'npm run build' first?)"
 fi
 
+total=$((passes + errors))
+echo "Results: ${passes}/${total} passed, ${errors} failed"
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."
   exit 0
