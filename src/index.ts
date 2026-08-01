@@ -125,6 +125,43 @@ export type {
 } from "./telemetry-semantics.js";
 
 export {
+  KIT_OBSERVABILITY_API_VERSION,
+  KIT_OBSERVABILITY_AUTHORITIES,
+  KIT_OBSERVABILITY_CONTRACT_VERSION,
+  KIT_OBSERVABILITY_DESCRIPTOR_KIND,
+  KIT_OBSERVABILITY_HOST_CAPABILITIES,
+  KIT_OBSERVABILITY_OPERATOR_INTENTS,
+  KIT_OBSERVABILITY_PROJECTION_KINDS,
+  KIT_OBSERVABILITY_RECORD_KIND,
+  loadKitObservabilityContribution,
+  kitObservabilityDescriptorDigest,
+  kitObservabilityProvenance,
+  negotiateKitObservabilityContribution,
+  validateKitObservabilityContribution,
+  validateKitObservabilityRecord,
+} from "./kit-observability-contract.js";
+export type {
+  KitObservabilityAuthority,
+  KitObservabilityAuthorityRefs,
+  KitObservabilityContribution,
+  KitObservabilityContributionLoadResult,
+  KitObservabilityDiagnostic,
+  KitObservabilityDiagnosticCode,
+  KitObservabilityHostCapability,
+  KitObservabilityHostState,
+  KitObservabilityMcpAppsBridgeDeclaration,
+  KitObservabilityMcpAppsBridgeResult,
+  KitObservabilityMcpAppsResource,
+  KitObservabilityNegotiation,
+  KitObservabilityOperatorAction,
+  KitObservabilityOperatorIntent,
+  KitObservabilityProjection,
+  KitObservabilityPresentation,
+  KitObservabilityProjectionKind,
+  KitObservabilityRecord,
+} from "./kit-observability-contract.js";
+
+export {
   NARRATIVE_SOURCE_ID_VERSION,
   SourceIdParseError,
   compareSourceIds,

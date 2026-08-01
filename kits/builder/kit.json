@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "observability_contribution": { "path": "kit-observability.contribution.json" },
   "id": "builder",
   "name": "Builder Kit",
   "product_name": "Builder Kit",

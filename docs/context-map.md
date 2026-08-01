@@ -61,6 +61,8 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
 | flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |
 | grounded-execution-narrative.schema.json | Flow Agents Grounded Execution Narrative | https://flow-agents.dev/schemas/grounded-execution-narrative.schema.json |
+| kit-observability-contribution.schema.json | Kit observability contribution | https://kontourai.dev/schemas/flow-agents/kit-observability-contribution/1.0.json |
+| kit-observability-record.schema.json | Kit observability record | https://kontourai.dev/schemas/flow-agents/kit-observability-record/1.0.json |
 | lifecycle-authority-keys.schema.json | Lifecycle Authority Key Registry | https://kontourai.dev/schemas/lifecycle-authority-keys.schema.json |
 | narrative-eval-result.schema.json | Flow Agents Narrative Eval Result | https://flow-agents.dev/schemas/narrative-eval-result.schema.json |
 | narrative-runtime-projection.schema.json | Flow Agents Grounded Runtime Projection | https://flow-agents.dev/schemas/narrative-runtime-projection.schema.json |

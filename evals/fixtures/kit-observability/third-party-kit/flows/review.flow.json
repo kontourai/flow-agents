@@ -1,0 +1,8 @@
+{
+  "id": "partner-review.review",
+  "version": "1.0",
+  "steps": [
+    { "id": "review", "next": null }
+  ],
+  "gates": {}
+}

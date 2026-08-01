@@ -33,6 +33,14 @@
       "types": "./build/src/console-contract.d.ts",
       "import": "./build/src/console-contract.js"
     },
+    "./kit-observability-contract": {
+      "types": "./build/src/kit-observability-contract.d.ts",
+      "import": "./build/src/kit-observability-contract.js"
+    },
+    "./kit-observability-conformance": {
+      "types": "./build/src/kit-observability-conformance.d.ts",
+      "import": "./build/src/kit-observability-conformance.js"
+    },
     "./package.json": "./package.json",
     "./schemas/*.json": "./schemas/*.json"
   },

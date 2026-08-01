@@ -29,6 +29,8 @@ if (!p.exports || !p.exports["."]) fail("exports must define the root entry");
 const root = p.exports["."];
 if (root.import !== "./build/src/index.js") fail("exports[.].import must be ./build/src/index.js");
 if (root.types !== "./build/src/index.d.ts") fail("exports[.].types must be ./build/src/index.d.ts");
+const conformance = p.exports["./kit-observability-conformance"];
+if (!conformance || conformance.import !== "./build/src/kit-observability-conformance.js" || conformance.types !== "./build/src/kit-observability-conformance.d.ts") fail("kit observability conformance subpath must be exported");
 ' 2>/tmp/lib-exports-pkg.err; then
   pass "package.json declares library entry points (main/types/exports)"
 else
@@ -77,6 +79,35 @@ console.log("LIBRARY_IMPORT_OK");
   pass "importing the library exposes the public API without running the CLI"
 else
   fail "library import failed, ran the CLI, or is missing public exports"
+fi
+
+# 5. The host conformance subpath is available to a package consumer and packed.
+if node --input-type=module -e '
+import { KIT_OBSERVABILITY_CONFORMANCE_VECTORS, runKitObservabilityConformance } from "@kontourai/flow-agents/kit-observability-conformance";
+if (KIT_OBSERVABILITY_CONFORMANCE_VECTORS.length !== 4 || !runKitObservabilityConformance().passed) process.exit(1);
+' 2>/dev/null; then
+  pass "Kit observability conformance is a consumer-importable public subpath"
+else
+  fail "Kit observability conformance subpath is not consumer-importable"
+fi
+
+npm run build:bundles --silent
+if npm pack --dry-run --json --ignore-scripts | node -e '
+import("node:readline").then(({ createInterface }) => {
+  const names = new Set();
+  const lines = createInterface({ input: process.stdin });
+  lines.on("line", (line) => {
+    const match = line.match(/"path": "(build\/src\/kit-observability-conformance(?:\.d)?\.ts|build\/src\/kit-observability-conformance\.js)"/);
+    if (match) names.add(match[1]);
+  });
+  lines.on("close", () => {
+    for (const required of ["build/src/kit-observability-conformance.js", "build/src/kit-observability-conformance.d.ts"]) if (!names.has(required)) process.exitCode = 1;
+  });
+});
+'; then
+  pass "package dry run includes Kit observability conformance artifacts"
+else
+  fail "package dry run omitted Kit observability conformance artifacts"
 fi
 
 # 4. the CLI still runs when invoked directly (entry guard regression guard).

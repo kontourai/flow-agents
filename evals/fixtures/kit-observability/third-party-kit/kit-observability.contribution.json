@@ -1,0 +1,24 @@
+{
+  "apiVersion": "flowagents.kontourai.io/v1alpha1",
+  "kind": "KitObservabilityContribution",
+  "metadata": { "name": "partner-review" },
+  "spec": {
+    "contract_version": "1.0",
+    "package_ref": "npm:@partner/review-kit@1.0.0",
+    "projections": {
+      "run_summary": { "schema_ref": "https://partner.example/schemas/review-run-summary/1.0.json" },
+      "queue": { "schema_ref": "https://partner.example/schemas/review-queue/1.0.json" }
+    },
+    "authority_refs": {
+      "flow": "flowagents.kontourai.io/v1alpha1/WorkflowRun",
+      "surface": "surface.kontourai.io/v1alpha1/TrustBundle",
+      "runtime": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope"
+    },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": { "kind": "mcp_apps_resource_bridge", "resource": { "uri": "ui://partner.example/kits/partner-review/observability", "mime_type": "text/html;profile=mcp-app" }, "bridge": { "tool_name": "partner-review-observability", "visibility": ["model", "app"] } }, "fallback": { "kind": "standard_views", "source": "declared_projections" } } },
+    "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "unavailable" },
+    "operator_intents": [
+      { "intent": "open_resource", "label": "Open review queue", "required_capability": "resource.open", "target": { "authority": "flow", "kind": "queue_item" } }
+    ],
+    "compatibility": { "unsupported_version": "diagnostic" }
+  }
+}
