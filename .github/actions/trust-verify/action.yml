@@ -101,6 +101,11 @@ inputs:
     required: false
     default: "24"
 
+outputs:
+  failure-summary:
+    description: "Bounded structured reasons when Trust Verify fails. Empty on success."
+    value: ${{ steps.trust-verify.outputs.failure-summary }}
+
 runs:
   using: "composite"
   steps:
