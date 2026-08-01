@@ -251,6 +251,7 @@ LANE_INTEGRATION_COVERAGE=(
   "Session resume roundtrip integration"
   "Skill drift check integration"
   "Trust reconcile trailer diagnostic integration"
+  "Trust PR advisory comment integration"
   "Validate artifacts portability integration"
   "Verify CLI integration"
   "Workspace settings integration"

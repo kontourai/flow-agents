@@ -645,6 +645,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check verify-cli-integration
 
+      - name: Trust PR advisory comment integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check trust-pr-advisory-comment-integration
+
       - name: Workspace settings integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workspace-settings-integration
