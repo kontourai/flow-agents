@@ -91,6 +91,7 @@ else
   fail "Kit observability conformance subpath is not consumer-importable"
 fi
 
+npm run build:bundles --silent
 if npm pack --dry-run --json --ignore-scripts | node -e '
 import("node:readline").then(({ createInterface }) => {
   const names = new Set();

@@ -169,6 +169,16 @@ test("a contribution record binds a descriptor/package and carries canonical aut
   delete record.spec.authority_refs.runtime;
   assert.throws(() => validateKitObservabilityRecord(record, loaded.contribution), /authority identities/);
   assert.equal(validateRecordSchema(record), true, "declared-authority completeness is cross-record semantic validation");
+  for (const authority of ["flow", "surface", "runtime"]) {
+    const candidate = recordFor(loaded.contribution);
+    candidate.spec.authority_refs[authority] = loaded.contribution.spec.authority_refs[authority];
+    assert.throws(() => validateKitObservabilityRecord(candidate, loaded.contribution), /not the descriptor authority type/);
+    assert.equal(validateRecordSchema(candidate), false, `${authority} descriptor type must not validate as a record identity`);
+  }
+  const wrongAuthorityShape = recordFor(loaded.contribution);
+  wrongAuthorityShape.spec.authority_refs.flow = "surface://trust-bundles/not-a-flow-run";
+  assert.throws(() => validateKitObservabilityRecord(wrongAuthorityShape, loaded.contribution), /flow:\/\/ record identity/);
+  assert.equal(validateRecordSchema(wrongAuthorityShape), false, "the schema must enforce authority-specific record identity shapes");
 });
 
 test("record schema and validator reject the same local binding and authority faults", () => {
@@ -202,6 +212,13 @@ test("descriptor digest is canonical across key order and changes with descripto
   const drifted = structuredClone(loaded.contribution);
   drifted.spec.data_policy.raw_source = "unavailable";
   assert.notEqual(kitObservabilityDescriptorDigest(drifted), original);
+  const localeCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => { throw new Error("locale collation must not affect descriptor digest"); };
+  try {
+    assert.equal(kitObservabilityDescriptorDigest(loaded.contribution), original);
+  } finally {
+    String.prototype.localeCompare = localeCompare;
+  }
 });
 
 test("a symlinked descriptor cannot escape the Kit root", () => {

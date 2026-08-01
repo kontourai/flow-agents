@@ -39,6 +39,7 @@ export type KitObservabilityConformanceVector = {
     navigation_intents: KitObservabilityOperatorAction["intent"][];
     diagnostic_codes: string[];
     provenance?: boolean;
+    descriptor_digest?: string;
   };
 };
 
@@ -98,6 +99,8 @@ const record: KitObservabilityConformanceRecord = {
   data: { state: "observed" },
 };
 
+export const KIT_OBSERVABILITY_CONFORMANCE_DESCRIPTOR_DIGEST = "sha256:45a0e4172592a5138462a74a832b22a170a49386f4c234da94ff33c8733c5f6b" as const;
+
 export const KIT_OBSERVABILITY_CONFORMANCE_VECTORS: readonly KitObservabilityConformanceVector[] = Object.freeze([
   {
     id: "mcp-apps-navigation-provenance",
@@ -105,14 +108,14 @@ export const KIT_OBSERVABILITY_CONFORMANCE_VECTORS: readonly KitObservabilityCon
     contribution,
     host: { installed: true, enabled: true, supported_contract_versions: ["1.0"], capabilities: ["standard_views", "mcp_apps_resource_bridge", "resource.open", "proposal.review"] },
     record,
-    expected: { status: "enabled", presentation_kind: "mcp_apps_resource_bridge", navigation_intents: ["open_resource", "review_proposal"], diagnostic_codes: [], provenance: true },
+    expected: { status: "enabled", presentation_kind: "mcp_apps_resource_bridge", navigation_intents: ["open_resource", "review_proposal"], diagnostic_codes: [], provenance: true, descriptor_digest: KIT_OBSERVABILITY_CONFORMANCE_DESCRIPTOR_DIGEST },
   },
   {
     id: "standard-view-degradation",
     description: "A host without optional MCP Apps or navigation capabilities falls back to declared standard views without blocking the Kit.",
     contribution,
     host: { installed: true, enabled: true, supported_contract_versions: ["1.0"], capabilities: ["standard_views"] },
-    expected: { status: "enabled", presentation_kind: "standard_views", navigation_intents: [], diagnostic_codes: ["optional_host_capability_unavailable", "operator_intent_capability_unavailable", "operator_intent_capability_unavailable"], provenance: true },
+    expected: { status: "enabled", presentation_kind: "standard_views", navigation_intents: [], diagnostic_codes: ["optional_host_capability_unavailable", "operator_intent_capability_unavailable", "operator_intent_capability_unavailable"], provenance: true, descriptor_digest: KIT_OBSERVABILITY_CONFORMANCE_DESCRIPTOR_DIGEST },
   },
   {
     id: "disabled-contribution",
@@ -140,6 +143,10 @@ const defaultAdapter: KitObservabilityHostAdapter = {
 export function runKitObservabilityConformance(adapter: KitObservabilityHostAdapter = defaultAdapter): KitObservabilityConformanceReport {
   const results = KIT_OBSERVABILITY_CONFORMANCE_VECTORS.map((vector) => {
     const failures: string[] = [];
+    const canonicalDescriptorDigest = kitObservabilityDescriptorDigest(vector.contribution);
+    if (vector.expected.descriptor_digest && canonicalDescriptorDigest !== vector.expected.descriptor_digest) failures.push(`package canonical descriptor digest: expected ${vector.expected.descriptor_digest}, got ${canonicalDescriptorDigest}`);
+    const adapterDescriptorDigest = adapter.descriptorDigest(vector.contribution);
+    if (adapterDescriptorDigest !== canonicalDescriptorDigest) failures.push(`adapter descriptor digest: expected package canonical ${canonicalDescriptorDigest}, got ${adapterDescriptorDigest}`);
     const negotiation = adapter.negotiate(vector.contribution, vector.host);
     if (negotiation.status !== vector.expected.status) failures.push(`status: expected ${vector.expected.status}, got ${negotiation.status}`);
     if (vector.expected.presentation_kind && negotiation.presentation?.kind !== vector.expected.presentation_kind) failures.push(`presentation: expected ${vector.expected.presentation_kind}, got ${negotiation.presentation?.kind ?? "none"}`);
@@ -148,7 +155,7 @@ export function runKitObservabilityConformance(adapter: KitObservabilityHostAdap
     const diagnostics = negotiation.diagnostics.map((diagnostic) => diagnostic.code);
     if (JSON.stringify(diagnostics) !== JSON.stringify(vector.expected.diagnostic_codes)) failures.push(`diagnostics: expected ${vector.expected.diagnostic_codes.join(",")}, got ${diagnostics.join(",")}`);
     if (vector.expected.provenance) {
-      if (!negotiation.provenance || negotiation.provenance.descriptor_digest !== adapter.descriptorDigest(vector.contribution)) failures.push("missing or mismatched descriptor provenance");
+      if (!negotiation.provenance || negotiation.provenance.descriptor_digest !== canonicalDescriptorDigest) failures.push("missing or mismatched descriptor provenance");
     }
     if (vector.record) {
       const boundRecord = {
@@ -156,7 +163,7 @@ export function runKitObservabilityConformance(adapter: KitObservabilityHostAdap
         kind: "KitObservabilityRecord",
         metadata: { name: vector.record.name },
         spec: {
-          binding: { contribution_ref: vector.contribution.metadata.name, descriptor_digest: adapter.descriptorDigest(vector.contribution), package_ref: vector.contribution.spec.package_ref },
+          binding: { contribution_ref: vector.contribution.metadata.name, descriptor_digest: canonicalDescriptorDigest, package_ref: vector.contribution.spec.package_ref },
           projection: { kind: vector.record.projection_kind },
           authority_refs: vector.record.authority_refs,
           data: vector.record.data,

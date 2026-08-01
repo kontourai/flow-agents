@@ -22,6 +22,7 @@ import { KIT_OBSERVABILITY_CONFORMANCE_VECTORS, runKitObservabilityConformance }
 if (KIT_OBSERVABILITY_CONFORMANCE_VECTORS.length < 4 || !runKitObservabilityConformance().passed) process.exit(1);
 '
 
+npm run build:bundles --silent
 npm pack --dry-run --json --ignore-scripts | node -e '
 import("node:readline").then(({ createInterface }) => {
   const names = new Set();

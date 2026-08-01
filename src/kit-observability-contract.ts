@@ -115,6 +115,11 @@ const idPattern = /^[a-z][a-z0-9-]{0,62}$/;
 const refPattern = /^[^\u0000-\u001f\u007f\s]{1,512}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const uiResourcePattern = /^ui:\/\/[^\s]+$/;
+const authorityIdentityPatterns: Record<KitObservabilityAuthority, RegExp> = {
+  flow: /^flow:\/\/[^\s]+$/,
+  surface: /^surface:\/\/[^\s]+$/,
+  runtime: /^runtime:\/\/[^\s]+$/,
+};
 
 export function validateKitObservabilityContribution(value: unknown): KitObservabilityContribution {
   const root = object(value, "contribution");
@@ -317,6 +322,11 @@ function recordAuthorityRefs(value: unknown, contribution: KitObservabilityContr
   const declared = Object.keys(contribution.spec.authority_refs).sort();
   const actual = Object.keys(refs).sort();
   if (JSON.stringify(actual) !== JSON.stringify(declared)) throw new Error(`${label} must carry exactly the descriptor-declared authority identities`);
+  for (const authority of actual as KitObservabilityAuthority[]) {
+    const identity = refs[authority];
+    if (identity === contribution.spec.authority_refs[authority]) throw new Error(`${label}.${authority} must be a record identity, not the descriptor authority type`);
+    if (typeof identity !== "string" || !authorityIdentityPatterns[authority].test(identity)) throw new Error(`${label}.${authority} must be a ${authority}:// record identity`);
+  }
 }
 
 function hostContract(value: unknown, label: string): void {
@@ -386,7 +396,7 @@ function isContainedOrEqual(root: string, candidate: string): boolean {
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right));
+    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
   }
   return JSON.stringify(value);
