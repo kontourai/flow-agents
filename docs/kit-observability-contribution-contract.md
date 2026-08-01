@@ -25,6 +25,8 @@ Hosts import `@kontourai/flow-agents/kit-observability-contract` and call `loadK
 - `invalid` with `invalid_contribution` — the underlying Kit still runs headlessly;
 - `unsupported` with `unsupported_contract_version` — the host must show the compatibility gap honestly and must not guess a fallback interpretation.
 
+Kit-repository validation surfaces an unsupported contribution as a non-blocking warning: the optional host view is unavailable, but the underlying Kit remains valid and headless. A malformed declared descriptor remains an error because an author opted in with an invalid local contract.
+
 ## Descriptor contents
 
 `spec` declares the Kit id and contribution version, projection kinds plus their Kit-owned schema references, supported view kinds, and canonical `flow`, `surface`, and `runtime` references. v1 supports `run_summary`, `metric_series`, `queue`, `grounded_narrative`, and `learning` projections.
@@ -37,7 +39,7 @@ Published structural schemas are [kit-observability-contribution.schema.json](..
 
 Builder and Knowledge provide real fixtures at `kits/<kit>/kit-observability.contribution.json`. The synthetic third-party fixture at `evals/fixtures/kit-observability/third-party-kit/` uses the identical `kit.json` declaration and has no host-specific source branch.
 
-An authored record is a `KitObservabilityRecord` with a matching contribution id/version, declared projection kind/schema reference, authority refs, and Kit-defined data. It cannot include `gate` or `claim` authority in its data. Store non-durable generated projection output under `.kontourai/flow-agents/`; durable decisions continue to live in their owning ledger or provider.
+An authored record is a `KitObservabilityRecord` with a matching contribution id/version, declared projection kind/schema reference, authority refs, and Kit-defined data. It cannot include top-level `gate` or `claim` authority in its data. The `data` value is opaque, Kit-schema-owned payload: generic hosts do not recursively interpret it as Flow or Surface state, and the Flow gate resolver and Surface claim derivation do not consume this record type. Nested domain fields such as `domain.gate` therefore remain valid Kit data but cannot confer lifecycle or trust authority. Store non-durable generated projection output under `.kontourai/flow-agents/`; durable decisions continue to live in their owning ledger or provider.
 
 Run the conformance test headlessly from this repository:
 

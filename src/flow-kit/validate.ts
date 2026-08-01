@@ -799,8 +799,11 @@ function validateAgentMetadata(kitDir: string, manifestPath: string, manifest: R
     errors.push(...validateActionRepositoryMetadata({ kitDir, manifestPath, manifest, actions: flowStepActionResult.entries, skillRoles: skillRoleResult.entries }));
   }
   const observability = loadKitObservabilityContribution(kitDir, manifest);
-  if (observability.status === "invalid" || observability.status === "unsupported") {
+  if (observability.status === "invalid") {
     for (const diagnostic of observability.diagnostics) errors.push(`${manifestPath}: observability_contribution ${diagnostic.code}: ${diagnostic.message}`);
+  }
+  if (observability.status === "unsupported") {
+    for (const diagnostic of observability.diagnostics) warnings.push(`${manifestPath}: observability_contribution ${diagnostic.code}: ${diagnostic.message}`);
   }
   return { errors, warnings };
 }

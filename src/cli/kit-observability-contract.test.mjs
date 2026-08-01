@@ -7,7 +7,7 @@ import {
   loadKitObservabilityContribution,
   validateKitObservabilityRecord,
 } from "../../build/src/index.js";
-import { validateKitRepository } from "../../build/src/flow-kit/validate.js";
+import { validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
 
 const root = path.resolve(import.meta.dirname, "..", "..");
 const fixtureRoot = path.join(root, "evals/fixtures/kit-observability");
@@ -71,7 +71,11 @@ test("absent, invalid, and future contributions report typed diagnostics without
   assert.equal(future.status, "unsupported");
   assert.equal(future.diagnostics[0].code, "unsupported_contract_version");
   assert.match(future.diagnostics[0].message, /contract_version/);
-  assert.match((await validateKitRepository(futureDir))[0], /unsupported_contract_version/);
+  const diagnostics = await validateKitRepositoryDiagnostics(futureDir);
+  assert.deepEqual(diagnostics.errors, []);
+  assert.equal(diagnostics.warnings.length, 1);
+  assert.match(diagnostics.warnings[0], /unsupported_contract_version/);
+  assert.deepEqual(await validateKitRepository(futureDir), []);
 });
 
 test("a contribution record preserves authorities but cannot carry Flow gate or Surface claim authority", () => {
@@ -91,4 +95,7 @@ test("a contribution record preserves authorities but cannot carry Flow gate or 
     /cannot contain Flow gate or Surface claim authority/,
   );
   assert.equal(validateRecordSchema(record), false, "the published schema must reject claim authority too");
+  record.spec.data = { domain: { gate: "boarding", claim: "claim-number" } };
+  assert.doesNotThrow(() => validateKitObservabilityRecord(record, loaded.contribution));
+  assert.equal(validateRecordSchema(record), true, "opaque nested domain data must remain Kit-owned");
 });
