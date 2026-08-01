@@ -143,6 +143,7 @@ jobs:
       pr-number: ${{ github.event.pull_request.number }}
       result: ${{ needs['trust-verify'].result }}
       run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      check-name: Trust Verify
 ```
 
 Pin `<SHA>` to an immutable reviewed commit. The caller runs as a separate job, grants only

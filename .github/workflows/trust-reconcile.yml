@@ -27,11 +27,10 @@
 # The agent cannot self-declare success here: it cannot modify the CI environment,
 # pre-disable this job, or post-forge results after the check runs.
 #
-# THIS JOB IS ALREADY A REQUIRED, ADMIN-ENFORCED STATUS CHECK on main (verified via
-# `gh api repos/kontourai/flow-agents/branches/main/protection`: "Trust Reconcile" is in
-# required_status_checks.contexts, enforce_admins.enabled: true). No PR — including from
-# admins — can merge past a failing run. Disabling/relaxing this requires a server-side
-# branch-protection change (GitHub UI/API), not a code change in this repo.
+# ADVISORY PHASE: this workflow runs and reports but is not currently a required
+# status check on main. A failure remains visible without blocking merge while the
+# trust workflow is being productionized. Arming it later requires a server-side
+# branch-protection change; editing this file alone cannot make it required.
 #
 # Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
 # or continue-work. Mirrors the structure of .github/workflows/ci.yml.
@@ -169,3 +168,17 @@ jobs:
             trust.attestation.status.json
           if-no-files-found: ignore
           retention-days: 30
+
+  trust-advisory-comment:
+    if: >-
+      ${{ always() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: trust-reconcile
+    permissions:
+      pull-requests: write
+    uses: kontourai/.github/.github/workflows/trust-advisory-comment.yml@66f62973ae2f01adf9abbcc2baff62f0a57d96a0
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      result: ${{ needs['trust-reconcile'].result }}
+      run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      check-name: Trust Reconcile
