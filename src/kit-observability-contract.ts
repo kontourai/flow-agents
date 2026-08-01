@@ -1,9 +1,9 @@
 /**
  * Host-neutral, read-only Kit observability contribution contract (#911).
  *
- * A Kit declares projections and references; a host decides whether and how to
- * render, store, authenticate, or route them. Nothing in this module invokes a
- * provider, changes a Flow lifecycle, or derives Surface trust.
+ * Kits declare inspectability semantics. Hosts own installation, enablement,
+ * rendering, storage, tenancy, authentication, and every provider operation.
+ * Portable v1 carries no executable command or direct lifecycle mutation.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -16,23 +16,33 @@ export const KIT_OBSERVABILITY_PROJECTION_KINDS = [
   "run_summary", "metric_series", "queue", "grounded_narrative", "learning",
 ] as const;
 export const KIT_OBSERVABILITY_AUTHORITIES = ["flow", "surface", "runtime"] as const;
+export const KIT_OBSERVABILITY_HOST_CAPABILITIES = [
+  "standard_views", "mcp_apps_resource_bridge", "resource.open", "export.local", "proposal.review",
+] as const;
+export const KIT_OBSERVABILITY_OPERATOR_INTENTS = ["open_resource", "export_local", "review_proposal"] as const;
 
 export type KitObservabilityProjectionKind = (typeof KIT_OBSERVABILITY_PROJECTION_KINDS)[number];
 export type KitObservabilityAuthority = (typeof KIT_OBSERVABILITY_AUTHORITIES)[number];
+export type KitObservabilityHostCapability = (typeof KIT_OBSERVABILITY_HOST_CAPABILITIES)[number];
+export type KitObservabilityOperatorIntent = (typeof KIT_OBSERVABILITY_OPERATOR_INTENTS)[number];
 export type KitObservabilityDiagnosticCode =
   | "contribution_absent"
+  | "contribution_not_installed"
+  | "contribution_disabled"
   | "invalid_contribution"
-  | "unsupported_contract_version";
+  | "unsupported_contract_version"
+  | "host_contract_version_unsupported"
+  | "required_host_capability_missing"
+  | "optional_host_capability_unavailable"
+  | "operator_intent_capability_unavailable";
 
-export type KitObservabilityDiagnostic = {
-  code: KitObservabilityDiagnosticCode;
-  message: string;
-};
-
-export type KitObservabilityAuthorityRef = {
-  authority: KitObservabilityAuthority;
-  ref: string;
-};
+export type KitObservabilityDiagnostic = { code: KitObservabilityDiagnosticCode; message: string };
+export type KitObservabilityAuthorityRefs = Partial<Record<KitObservabilityAuthority, string>>;
+export type KitObservabilityProjection = { schema_ref: string };
+export type KitObservabilityOperatorAction =
+  | { intent: "open_resource"; label: string; required_capability: "resource.open"; target: { authority: KitObservabilityAuthority; kind: "workflow_run" | "work_item" | "narrative" | "queue_item" } }
+  | { intent: "export_local"; label: string; required_capability: "export.local" }
+  | { intent: "review_proposal"; label: string; required_capability: "proposal.review"; target: { authority: "surface"; kind: "proposal" } };
 
 export type KitObservabilityContribution = {
   apiVersion: typeof KIT_OBSERVABILITY_API_VERSION;
@@ -40,13 +50,15 @@ export type KitObservabilityContribution = {
   metadata: { name: string };
   spec: {
     contract_version: typeof KIT_OBSERVABILITY_CONTRACT_VERSION;
-    kit: { id: string };
-    projections: { kind: KitObservabilityProjectionKind; schema_ref: string }[];
-    views: KitObservabilityProjectionKind[];
-    authority_refs: KitObservabilityAuthorityRef[];
-    capabilities: { local_export: "read"; sink: "unsupported" | "optional" };
+    projections: Partial<Record<KitObservabilityProjectionKind, KitObservabilityProjection>>;
+    authority_refs: KitObservabilityAuthorityRefs;
+    host: {
+      required_capabilities: ["standard_views"];
+      optional_capabilities: ["mcp_apps_resource_bridge"];
+      presentation: { preferred: "mcp_apps_resource_bridge"; fallback: "standard_views" };
+    };
     data_policy: { redaction: "declared"; retention: "kit_owned"; raw_source: "available" | "unavailable" };
-    operator_actions: { id: string; kind: "provider_command" | "proposal_ref"; ref: string }[];
+    operator_intents: KitObservabilityOperatorAction[];
     compatibility: { unsupported_version: "diagnostic" };
   };
 };
@@ -55,17 +67,26 @@ export type KitObservabilityRecord = {
   apiVersion: typeof KIT_OBSERVABILITY_API_VERSION;
   kind: typeof KIT_OBSERVABILITY_RECORD_KIND;
   metadata: { name: string };
-  spec: {
-    contribution: { kit_id: string; contract_version: typeof KIT_OBSERVABILITY_CONTRACT_VERSION };
-    projection: { kind: KitObservabilityProjectionKind; schema_ref: string };
-    authority_refs: KitObservabilityAuthorityRef[];
-    data: Record<string, unknown>;
-  };
+  spec: { contribution_ref: string; projection: { kind: KitObservabilityProjectionKind }; data: Record<string, unknown> };
 };
 
 export type KitObservabilityContributionLoadResult =
   | { status: "supported"; contribution: KitObservabilityContribution; diagnostics: [] }
   | { status: "absent" | "invalid" | "unsupported"; diagnostics: KitObservabilityDiagnostic[] };
+
+export type KitObservabilityHostState = {
+  installed: boolean;
+  enabled: boolean;
+  supported_contract_versions: readonly string[];
+  capabilities: readonly KitObservabilityHostCapability[];
+};
+
+export type KitObservabilityNegotiation = {
+  status: "enabled" | "disabled" | "incompatible";
+  presentation?: "mcp_apps_resource_bridge" | "standard_views";
+  available_operator_intents: KitObservabilityOperatorAction[];
+  diagnostics: KitObservabilityDiagnostic[];
+};
 
 const idPattern = /^[a-z][a-z0-9-]{0,62}$/;
 const refPattern = /^[^\u0000-\u001f\u007f\s]{1,512}$/;
@@ -79,29 +100,20 @@ export function validateKitObservabilityContribution(value: unknown): KitObserva
   exactKeys(metadata, ["name"], "contribution.metadata");
   identifier(metadata.name, "contribution.metadata.name");
   const spec = object(root.spec, "contribution.spec");
-  exactKeys(spec, ["contract_version", "kit", "projections", "views", "authority_refs", "capabilities", "data_policy", "operator_actions", "compatibility"], "contribution.spec");
+  exactKeys(spec, ["contract_version", "projections", "authority_refs", "host", "data_policy", "operator_intents", "compatibility"], "contribution.spec");
   if (spec.contract_version !== KIT_OBSERVABILITY_CONTRACT_VERSION) throw new Error("contribution contract_version is unsupported");
-  const kit = object(spec.kit, "contribution.spec.kit");
-  exactKeys(kit, ["id"], "contribution.spec.kit");
-  identifier(kit.id, "contribution.spec.kit.id");
-  if (metadata.name !== kit.id) throw new Error("contribution metadata.name must equal spec.kit.id");
-  const projections = projectionList(spec.projections, "contribution.spec.projections");
-  const views = projectionKinds(spec.views, "contribution.spec.views");
-  for (const view of views) if (!projections.some((projection) => projection.kind === view)) throw new Error(`contribution view ${view} has no declared projection`);
+  projections(spec.projections, "contribution.spec.projections");
   authorityRefs(spec.authority_refs, "contribution.spec.authority_refs");
-  const capabilities = object(spec.capabilities, "contribution.spec.capabilities");
-  exactKeys(capabilities, ["local_export", "sink"], "contribution.spec.capabilities");
-  if (capabilities.local_export !== "read" || !["unsupported", "optional"].includes(String(capabilities.sink))) throw new Error("contribution capabilities are invalid");
-  const dataPolicy = object(spec.data_policy, "contribution.spec.data_policy");
-  exactKeys(dataPolicy, ["redaction", "retention", "raw_source"], "contribution.spec.data_policy");
-  if (dataPolicy.redaction !== "declared" || dataPolicy.retention !== "kit_owned" || !["available", "unavailable"].includes(String(dataPolicy.raw_source))) throw new Error("contribution data_policy is invalid");
-  operatorActions(spec.operator_actions, "contribution.spec.operator_actions");
+  hostContract(spec.host, "contribution.spec.host");
+  dataPolicy(spec.data_policy, "contribution.spec.data_policy");
+  operatorIntents(spec.operator_intents, "contribution.spec.operator_intents");
   const compatibility = object(spec.compatibility, "contribution.spec.compatibility");
   exactKeys(compatibility, ["unsupported_version"], "contribution.spec.compatibility");
   if (compatibility.unsupported_version !== "diagnostic") throw new Error("contribution compatibility must diagnose unsupported versions");
   return structuredClone(value) as KitObservabilityContribution;
 }
 
+/** Descriptor-to-record linkage is semantic validation; each individual shape has a shipped JSON Schema. */
 export function validateKitObservabilityRecord(value: unknown, contribution: KitObservabilityContribution): KitObservabilityRecord {
   const root = object(value, "record");
   exactKeys(root, ["apiVersion", "kind", "metadata", "spec"], "record");
@@ -110,36 +122,68 @@ export function validateKitObservabilityRecord(value: unknown, contribution: Kit
   exactKeys(metadata, ["name"], "record.metadata");
   identifier(metadata.name, "record.metadata.name");
   const spec = object(root.spec, "record.spec");
-  exactKeys(spec, ["contribution", "projection", "authority_refs", "data"], "record.spec");
-  const contributionRef = object(spec.contribution, "record.spec.contribution");
-  exactKeys(contributionRef, ["kit_id", "contract_version"], "record.spec.contribution");
-  if (contributionRef.kit_id !== contribution.spec.kit.id || contributionRef.contract_version !== contribution.spec.contract_version) throw new Error("record contribution reference does not match the descriptor");
+  exactKeys(spec, ["contribution_ref", "projection", "data"], "record.spec");
+  if (spec.contribution_ref !== contribution.metadata.name) throw new Error("record contribution_ref does not match the descriptor");
   const projection = object(spec.projection, "record.spec.projection");
-  exactKeys(projection, ["kind", "schema_ref"], "record.spec.projection");
+  exactKeys(projection, ["kind"], "record.spec.projection");
   projectionKind(projection.kind, "record.spec.projection.kind");
-  reference(projection.schema_ref, "record.spec.projection.schema_ref");
-  if (!contribution.spec.projections.some((entry) => entry.kind === projection.kind && entry.schema_ref === projection.schema_ref)) throw new Error("record projection is not declared by the contribution");
-  authorityRefs(spec.authority_refs, "record.spec.authority_refs");
+  if (!(projection.kind in contribution.spec.projections)) throw new Error("record projection is not declared by the contribution");
   const data = object(spec.data, "record.spec.data");
   if (Object.prototype.hasOwnProperty.call(data, "gate") || Object.prototype.hasOwnProperty.call(data, "claim")) throw new Error("record data cannot contain Flow gate or Surface claim authority");
   return structuredClone(value) as KitObservabilityRecord;
 }
 
-/** Read-only discovery for a host or Kit validator. Absence is optional and never an error. */
+/** Host-owned lifecycle and capability negotiation. No result blocks the underlying Kit. */
+export function negotiateKitObservabilityContribution(
+  contributionResult: KitObservabilityContributionLoadResult,
+  host: KitObservabilityHostState,
+): KitObservabilityNegotiation {
+  if (contributionResult.status !== "supported") {
+    return { status: contributionResult.status === "unsupported" ? "incompatible" : "disabled", available_operator_intents: [], diagnostics: contributionResult.diagnostics };
+  }
+  if (!host.installed) return disabled("contribution_not_installed", "The host has not installed this Kit contribution.");
+  if (!host.enabled) return disabled("contribution_disabled", "The host has disabled this optional Kit contribution.");
+  const contribution = contributionResult.contribution;
+  if (!host.supported_contract_versions.includes(contribution.spec.contract_version)) {
+    return { status: "incompatible", available_operator_intents: [], diagnostics: [{ code: "host_contract_version_unsupported", message: `Host does not support contribution contract version ${contribution.spec.contract_version}.` }] };
+  }
+  if (!host.capabilities.includes("standard_views")) {
+    return { status: "incompatible", available_operator_intents: [], diagnostics: [{ code: "required_host_capability_missing", message: "Host lacks required standard_views capability." }] };
+  }
+  const diagnostics: KitObservabilityDiagnostic[] = [];
+  const hasMcpApps = host.capabilities.includes("mcp_apps_resource_bridge");
+  if (!hasMcpApps) diagnostics.push({ code: "optional_host_capability_unavailable", message: "MCP Apps resource bridge is unavailable; using declarative standard views." });
+  const availableOperatorIntents = contribution.spec.operator_intents.filter((action) => {
+    if (host.capabilities.includes(action.required_capability)) return true;
+    diagnostics.push({ code: "operator_intent_capability_unavailable", message: `Host lacks ${action.required_capability}; ${action.intent} is unavailable.` });
+    return false;
+  });
+  return {
+    status: "enabled",
+    presentation: hasMcpApps ? "mcp_apps_resource_bridge" : "standard_views",
+    available_operator_intents: structuredClone(availableOperatorIntents),
+    diagnostics,
+  };
+}
+
+/** Read-only discovery. A symlinked descriptor must resolve inside the Kit root. */
 export function loadKitObservabilityContribution(kitDir: string, manifest?: unknown): KitObservabilityContributionLoadResult {
   let manifestValue = manifest;
   const manifestPath = path.join(kitDir, "kit.json");
   try {
-    if (manifestValue === undefined) manifestValue = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const kitRoot = fs.realpathSync(path.resolve(kitDir));
+    if (manifestValue === undefined) manifestValue = JSON.parse(fs.readFileSync(path.join(kitRoot, "kit.json"), "utf8"));
     const root = object(manifestValue, "kit manifest");
     const declaration = root.observability_contribution;
     if (declaration === undefined) return { status: "absent", diagnostics: [{ code: "contribution_absent", message: "Kit does not declare an observability contribution." }] };
     const entry = object(declaration, "kit manifest observability_contribution");
     exactKeys(entry, ["path"], "kit manifest observability_contribution");
     if (typeof entry.path !== "string" || !entry.path || path.isAbsolute(entry.path) || entry.path.replace(/\\/g, "/").split("/").includes("..")) throw new Error("kit manifest observability_contribution.path must be a relative in-kit path");
-    const descriptorPath = path.resolve(kitDir, entry.path);
-    const rootPath = path.resolve(kitDir);
-    if (descriptorPath !== rootPath && !descriptorPath.startsWith(`${rootPath}${path.sep}`)) throw new Error("kit manifest observability_contribution.path escapes the Kit");
+    const candidate = path.resolve(kitRoot, entry.path);
+    if (!isContainedOrEqual(kitRoot, candidate)) throw new Error("kit manifest observability_contribution.path escapes the Kit");
+    const descriptorPath = fs.realpathSync(candidate);
+    if (!isContainedOrEqual(kitRoot, descriptorPath)) throw new Error("kit manifest observability_contribution.path escapes the Kit through a symlink");
+    if (!fs.statSync(descriptorPath).isFile()) throw new Error("kit manifest observability_contribution.path must resolve to a regular file");
     const descriptor = JSON.parse(fs.readFileSync(descriptorPath, "utf8"));
     try {
       return { status: "supported", contribution: validateKitObservabilityContribution(descriptor), diagnostics: [] };
@@ -149,8 +193,12 @@ export function loadKitObservabilityContribution(kitDir: string, manifest?: unkn
       return { status: code === "unsupported_contract_version" ? "unsupported" : "invalid", diagnostics: [{ code, message }] };
     }
   } catch (error) {
-    return { status: "invalid", diagnostics: [{ code: "invalid_contribution", message: error instanceof Error ? error.message : "contribution could not be loaded" }] };
+    return { status: "invalid", diagnostics: [{ code: "invalid_contribution", message: error instanceof Error ? error.message : `contribution could not be loaded from ${manifestPath}` }] };
   }
+}
+
+function disabled(code: "contribution_not_installed" | "contribution_disabled", message: string): KitObservabilityNegotiation {
+  return { status: "disabled", available_operator_intents: [], diagnostics: [{ code, message }] };
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -177,49 +225,76 @@ function projectionKind(value: unknown, label: string): asserts value is KitObse
   if (!(KIT_OBSERVABILITY_PROJECTION_KINDS as readonly unknown[]).includes(value)) throw new Error(`${label} is not a supported projection kind`);
 }
 
-function projectionKinds(value: unknown, label: string): KitObservabilityProjectionKind[] {
-  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty list`);
-  value.forEach((entry, index) => projectionKind(entry, `${label}[${index}]`));
-  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicate projection kinds`);
-  return value as KitObservabilityProjectionKind[];
+function projections(value: unknown, label: string): void {
+  const entries = object(value, label);
+  exactKnownKeys(entries, KIT_OBSERVABILITY_PROJECTION_KINDS, label);
+  if (Object.keys(entries).length === 0) throw new Error(`${label} must declare at least one projection`);
+  for (const [kind, entry] of Object.entries(entries)) {
+    projectionKind(kind, `${label}.${kind}`);
+    const projection = object(entry, `${label}.${kind}`);
+    exactKeys(projection, ["schema_ref"], `${label}.${kind}`);
+    reference(projection.schema_ref, `${label}.${kind}.schema_ref`);
+  }
 }
 
-function projectionList(value: unknown, label: string): { kind: KitObservabilityProjectionKind; schema_ref: string }[] {
-  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty list`);
-  const result = value.map((entry, index) => {
-    const projection = object(entry, `${label}[${index}]`);
-    exactKeys(projection, ["kind", "schema_ref"], `${label}[${index}]`);
-    projectionKind(projection.kind, `${label}[${index}].kind`);
-    reference(projection.schema_ref, `${label}[${index}].schema_ref`);
-    return { kind: projection.kind, schema_ref: projection.schema_ref } as { kind: KitObservabilityProjectionKind; schema_ref: string };
-  });
-  if (new Set(result.map((entry) => entry.kind)).size !== result.length) throw new Error(`${label} must not declare a projection kind twice`);
-  return result;
+function authorityRefs(value: unknown, label: string): void {
+  const entries = object(value, label);
+  exactKnownKeys(entries, KIT_OBSERVABILITY_AUTHORITIES, label);
+  if (Object.keys(entries).length === 0) throw new Error(`${label} must declare at least one authority reference`);
+  for (const [authority, ref] of Object.entries(entries)) {
+    if (!(KIT_OBSERVABILITY_AUTHORITIES as readonly string[]).includes(authority)) throw new Error(`${label}.${authority} is invalid`);
+    reference(ref, `${label}.${authority}`);
+  }
 }
 
-function authorityRefs(value: unknown, label: string): KitObservabilityAuthorityRef[] {
-  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty list`);
-  const result = value.map((entry, index) => {
-    const referenceEntry = object(entry, `${label}[${index}]`);
-    exactKeys(referenceEntry, ["authority", "ref"], `${label}[${index}]`);
-    if (!(KIT_OBSERVABILITY_AUTHORITIES as readonly unknown[]).includes(referenceEntry.authority)) throw new Error(`${label}[${index}].authority is invalid`);
-    reference(referenceEntry.ref, `${label}[${index}].ref`);
-    return { authority: referenceEntry.authority as KitObservabilityAuthority, ref: referenceEntry.ref };
-  });
-  if (new Set(result.map((entry) => entry.authority)).size !== result.length) throw new Error(`${label} must not duplicate an authority`);
-  return result;
+function hostContract(value: unknown, label: string): void {
+  const host = object(value, label);
+  exactKeys(host, ["required_capabilities", "optional_capabilities", "presentation"], label);
+  if (JSON.stringify(host.required_capabilities) !== JSON.stringify(["standard_views"])) throw new Error(`${label}.required_capabilities must be [standard_views]`);
+  if (JSON.stringify(host.optional_capabilities) !== JSON.stringify(["mcp_apps_resource_bridge"])) throw new Error(`${label}.optional_capabilities must be [mcp_apps_resource_bridge]`);
+  const presentation = object(host.presentation, `${label}.presentation`);
+  exactKeys(presentation, ["preferred", "fallback"], `${label}.presentation`);
+  if (presentation.preferred !== "mcp_apps_resource_bridge" || presentation.fallback !== "standard_views") throw new Error(`${label}.presentation must prefer MCP Apps with standard-view fallback`);
 }
 
-function operatorActions(value: unknown, label: string): void {
+function dataPolicy(value: unknown, label: string): void {
+  const policy = object(value, label);
+  exactKeys(policy, ["redaction", "retention", "raw_source"], label);
+  if (policy.redaction !== "declared" || policy.retention !== "kit_owned" || !["available", "unavailable"].includes(String(policy.raw_source))) throw new Error(`${label} is invalid`);
+}
+
+function operatorIntents(value: unknown, label: string): void {
   if (!Array.isArray(value)) throw new Error(`${label} must be a list`);
-  const ids = new Set<string>();
   value.forEach((entry, index) => {
     const action = object(entry, `${label}[${index}]`);
-    exactKeys(action, ["id", "kind", "ref"], `${label}[${index}]`);
-    identifier(action.id, `${label}[${index}].id`);
-    if (ids.has(action.id)) throw new Error(`${label} has duplicate action id ${action.id}`);
-    ids.add(action.id);
-    if (action.kind !== "provider_command" && action.kind !== "proposal_ref") throw new Error(`${label}[${index}].kind must be provider_command or proposal_ref`);
-    reference(action.ref, `${label}[${index}].ref`);
+    if (action.intent === "open_resource") {
+      exactKeys(action, ["intent", "label", "required_capability", "target"], `${label}[${index}]`);
+      if (action.required_capability !== "resource.open") throw new Error(`${label}[${index}] open_resource requires resource.open`);
+      actionTarget(action.target, `${label}[${index}].target`, ["workflow_run", "work_item", "narrative", "queue_item"]);
+    } else if (action.intent === "export_local") {
+      exactKeys(action, ["intent", "label", "required_capability"], `${label}[${index}]`);
+      if (action.required_capability !== "export.local") throw new Error(`${label}[${index}] export_local requires export.local`);
+    } else if (action.intent === "review_proposal") {
+      exactKeys(action, ["intent", "label", "required_capability", "target"], `${label}[${index}]`);
+      if (action.required_capability !== "proposal.review") throw new Error(`${label}[${index}] review_proposal requires proposal.review`);
+      actionTarget(action.target, `${label}[${index}].target`, ["proposal"], "surface");
+    } else throw new Error(`${label}[${index}].intent is invalid`);
+    if (typeof action.label !== "string" || action.label.trim().length === 0 || action.label.length > 120) throw new Error(`${label}[${index}].label must be a bounded non-empty label`);
   });
+}
+
+function actionTarget(value: unknown, label: string, kinds: readonly string[], requiredAuthority?: KitObservabilityAuthority): void {
+  const target = object(value, label);
+  exactKeys(target, ["authority", "kind"], label);
+  if (!(KIT_OBSERVABILITY_AUTHORITIES as readonly unknown[]).includes(target.authority) || (requiredAuthority && target.authority !== requiredAuthority)) throw new Error(`${label}.authority is invalid`);
+  if (!kinds.includes(String(target.kind))) throw new Error(`${label}.kind is invalid`);
+}
+
+function exactKnownKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const extras = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (extras.length) throw new Error(`${label} has unknown properties: ${extras.join(", ")}`);
+}
+
+function isContainedOrEqual(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }

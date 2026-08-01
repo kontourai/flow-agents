@@ -4,25 +4,24 @@
   "metadata": { "name": "builder" },
   "spec": {
     "contract_version": "1.0",
-    "kit": { "id": "builder" },
-    "projections": [
-      { "kind": "run_summary", "schema_ref": "https://kontourai.dev/schemas/builder/run-summary/1.0.json" },
-      { "kind": "metric_series", "schema_ref": "https://kontourai.dev/schemas/builder/metric-series/1.0.json" },
-      { "kind": "queue", "schema_ref": "https://kontourai.dev/schemas/builder/queue/1.0.json" },
-      { "kind": "grounded_narrative", "schema_ref": "https://kontourai.dev/schemas/builder/grounded-narrative/1.0.json" },
-      { "kind": "learning", "schema_ref": "https://kontourai.dev/schemas/builder/learning/1.0.json" }
-    ],
-    "views": ["run_summary", "metric_series", "queue", "grounded_narrative", "learning"],
-    "authority_refs": [
-      { "authority": "flow", "ref": "flowagents.kontourai.io/v1alpha1/WorkflowRun" },
-      { "authority": "surface", "ref": "surface.kontourai.io/v1alpha1/TrustBundle" },
-      { "authority": "runtime", "ref": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope" }
-    ],
-    "capabilities": { "local_export": "read", "sink": "optional" },
+    "projections": {
+      "run_summary": { "schema_ref": "https://kontourai.dev/schemas/builder/run-summary/1.0.json" },
+      "metric_series": { "schema_ref": "https://kontourai.dev/schemas/builder/metric-series/1.0.json" },
+      "queue": { "schema_ref": "https://kontourai.dev/schemas/builder/queue/1.0.json" },
+      "grounded_narrative": { "schema_ref": "https://kontourai.dev/schemas/builder/grounded-narrative/1.0.json" },
+      "learning": { "schema_ref": "https://kontourai.dev/schemas/builder/learning/1.0.json" }
+    },
+    "authority_refs": {
+      "flow": "flowagents.kontourai.io/v1alpha1/WorkflowRun",
+      "surface": "surface.kontourai.io/v1alpha1/TrustBundle",
+      "runtime": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope"
+    },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": "mcp_apps_resource_bridge", "fallback": "standard_views" } },
     "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "available" },
-    "operator_actions": [
-      { "id": "open-work-item", "kind": "provider_command", "ref": "provider://work-item/open" },
-      { "id": "review-learning-proposal", "kind": "proposal_ref", "ref": "proposal://learning/review" }
+    "operator_intents": [
+      { "intent": "open_resource", "label": "Open work item", "required_capability": "resource.open", "target": { "authority": "flow", "kind": "work_item" } },
+      { "intent": "export_local", "label": "Export local view", "required_capability": "export.local" },
+      { "intent": "review_proposal", "label": "Review learning proposal", "required_capability": "proposal.review", "target": { "authority": "surface", "kind": "proposal" } }
     ],
     "compatibility": { "unsupported_version": "diagnostic" }
   }

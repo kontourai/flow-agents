@@ -4,11 +4,11 @@ title: Kit observability contribution contract
 
 # Kit observability contribution contract
 
-Issue #911 defines an optional, host-neutral declaration for a Flow Agents Kit that wants its operational projections consumed by Console, Station, or another host. It is a **read contract**: a Kit owns projection semantics and references; a host owns rendering, storage policy, authentication, tenancy, and operator interaction. Headless Kit execution remains complete when no host is installed.
+Issue #911 defines an optional, host-neutral declaration for a Flow Agents Kit that wants operational projections consumed by Console, Station, or another host. It is a **read contract**: a Kit owns projection semantics and references; a host owns installation, enablement, rendering, storage policy, authentication, tenancy, and every provider operation. Headless Kit execution remains complete when no host is installed.
 
-The contract does not create a Flow transition, satisfy a Flow gate, derive a Surface claim, or authorize a host to mutate a Kit lifecycle. `flow`, `surface`, and `runtime` references identify the authority a host must consult; they are not copies of that authority.
+The contract never creates a Flow transition, satisfies a Flow gate, derives a Surface claim, or authorizes a host to mutate a Kit lifecycle. `flow`, `surface`, and `runtime` references identify authority a host must consult; they are not copies of that authority.
 
-## Discovery and compatibility
+## Discovery, lifecycle, and compatibility
 
 An opting-in `kit.json` adds one portable declaration:
 
@@ -16,33 +16,42 @@ An opting-in `kit.json` adds one portable declaration:
 "observability_contribution": { "path": "kit-observability.contribution.json" }
 ```
 
-The path stays inside the Kit. The descriptor is a Kontour Resource Contract-shaped record with `apiVersion`, `kind`, `metadata`, and `spec`; its v1 values are `flowagents.kontourai.io/v1alpha1`, `KitObservabilityContribution`, and contract version `1.0`.
+The path is a relative in-Kit path and is resolved with `realpath`; a descriptor symlink that resolves outside the Kit is rejected. The descriptor is a Kontour Resource Contract-shaped record with `apiVersion`, `kind`, `metadata`, and `spec`; its v1 values are `flowagents.kontourai.io/v1alpha1`, `KitObservabilityContribution`, and contract version `1.0`.
 
-Hosts import `@kontourai/flow-agents/kit-observability-contract` and call `loadKitObservabilityContribution(kitDir)`. It returns one of:
+Hosts call `loadKitObservabilityContribution(kitDir)` for discovery and then `negotiateKitObservabilityContribution(result, hostState)` for their own lifecycle state. Negotiation is deliberately a host input, never a field a Kit can mutate:
 
-- `supported` with a validated descriptor;
-- `absent` with `contribution_absent` — optional, so the host simply has no Kit view;
-- `invalid` with `invalid_contribution` — the underlying Kit still runs headlessly;
-- `unsupported` with `unsupported_contract_version` — the host must show the compatibility gap honestly and must not guess a fallback interpretation.
+| Result | Meaning | Underlying Kit |
+| --- | --- | --- |
+| `enabled` | Installed and enabled; required host capability exists. | Continues normally. |
+| `disabled` | Absent, not installed, or host-disabled optional contribution. | Continues headlessly. |
+| `incompatible` | Descriptor/host contract version or required capability cannot be negotiated. | Continues headlessly. |
 
-Kit-repository validation surfaces an unsupported contribution as a non-blocking warning: the optional host view is unavailable, but the underlying Kit remains valid and headless. A malformed declared descriptor remains an error because an author opted in with an invalid local contract.
+Diagnostics are typed (`contribution_absent`, `contribution_disabled`, `contribution_not_installed`, `unsupported_contract_version`, `host_contract_version_unsupported`, and capability diagnostics), so a host can report the exact disabled or incompatible reason without inventing behavior. Kit-repository validation surfaces an unsupported descriptor as a non-blocking warning; a malformed opted-in local descriptor remains an error.
 
-## Descriptor contents
+## Descriptor contents and host capability negotiation
 
-`spec` declares the Kit id and contribution version, projection kinds plus their Kit-owned schema references, supported view kinds, and canonical `flow`, `surface`, and `runtime` references. v1 supports `run_summary`, `metric_series`, `queue`, `grounded_narrative`, and `learning` projections.
+`spec.projections` is a map from supported projection kind to its Kit-owned schema reference. `spec.authority_refs` is likewise a map, avoiding duplicated Kit ids, projection kinds, view subsets, and authority lists. v1 supports `run_summary`, `metric_series`, `queue`, `grounded_narrative`, and `learning` projections.
 
-It also requires explicit local-export/sink capability, redaction/retention/raw-source policy, and operator actions. Actions are only a `provider_command` or a `proposal_ref`; they are provider-routed read/navigation/proposal references, never a direct lifecycle mutation.
+Every v1 descriptor requires `standard_views`, optionally requests `mcp_apps_resource_bridge`, and declares `mcp_apps_resource_bridge` as its preferred presentation with `standard_views` as its fallback. A host that supports the official MCP Apps resource/bridge presents that negotiated view; otherwise it renders the same declaration with standard views. A host plugin/server is optional negotiated infrastructure, not a second contract or source of lifecycle authority.
 
-Published structural schemas are [kit-observability-contribution.schema.json](../schemas/kit-observability-contribution.schema.json) and [kit-observability-record.schema.json](../schemas/kit-observability-record.schema.json). The exported typed validators enforce the additional cross-record invariants: a record must name a descriptor-declared projection and preserve its authority references.
+`operator_intents` is closed to three host-governed, capability-gated intents:
+
+- `open_resource` requires `resource.open` and names only an authority and resource kind.
+- `export_local` requires `export.local`.
+- `review_proposal` requires `proposal.review` and names the Surface proposal kind.
+
+Portable v1 has no provider command, executable ref, lifecycle endpoint, or direct mutation intent. Consequently privileged/direct lifecycle mutation is unrepresentable in the descriptor. A host may make an available intent actionable only through its own authenticated, authorized provider integration; otherwise it reports `operator_intent_capability_unavailable` and keeps the Kit operational.
+
+Published structural schemas are [kit-observability-contribution.schema.json](../schemas/kit-observability-contribution.schema.json) and [kit-observability-record.schema.json](../schemas/kit-observability-record.schema.json). The shipped typed validator and JSON Schema reject the same local descriptor faults; conformance includes parity cases for unknown fields, missing projection schemas, presentation changes, unsupported capabilities, and forbidden executable-style refs. Descriptor-to-record linkage (matching `contribution_ref` and declared projection) is intentionally semantic validation because it needs the loaded descriptor, while every individual record shape is schema-validated.
 
 ## Author and host conformance
 
-Builder and Knowledge provide real fixtures at `kits/<kit>/kit-observability.contribution.json`. The synthetic third-party fixture at `evals/fixtures/kit-observability/third-party-kit/` uses the identical `kit.json` declaration and has no host-specific source branch.
+Builder and Knowledge provide real descriptors at `kits/<kit>/kit-observability.contribution.json`. The synthetic third-party fixture at `evals/fixtures/kit-observability/third-party-kit/` uses the identical `kit.json` declaration and has no host-specific branch. Host-state fixtures exercise disabled, uninstalled, capability-limited, MCP-enabled, and incompatible negotiation without a Console release.
 
-An authored record is a `KitObservabilityRecord` with a matching contribution id/version, declared projection kind/schema reference, authority refs, and Kit-defined data. It cannot include top-level `gate` or `claim` authority in its data. The `data` value is opaque, Kit-schema-owned payload: generic hosts do not recursively interpret it as Flow or Surface state, and the Flow gate resolver and Surface claim derivation do not consume this record type. Nested domain fields such as `domain.gate` therefore remain valid Kit data but cannot confer lifecycle or trust authority. Store non-durable generated projection output under `.kontourai/flow-agents/`; durable decisions continue to live in their owning ledger or provider.
+An authored record is a `KitObservabilityRecord` with a descriptor `contribution_ref`, a declared projection kind, and Kit-defined data. It cannot include top-level `gate` or `claim` authority in its data. The `data` value is opaque, Kit-schema-owned payload: generic hosts do not recursively interpret it as Flow or Surface state, and the Flow gate resolver and Surface claim derivation do not consume this record type. Nested domain fields such as `domain.gate` therefore remain valid Kit data but cannot confer lifecycle or trust authority. Store non-durable generated projection output under `.kontourai/flow-agents/`; durable decisions continue to live in their owning ledger or provider.
 
 Run the conformance test headlessly from this repository:
 
 ```sh
-npm run test:unit -- --test-name-pattern='Kit observability'
+bash evals/static/test_kit_observability_contract.sh
 ```

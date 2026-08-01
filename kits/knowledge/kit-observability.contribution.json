@@ -4,23 +4,22 @@
   "metadata": { "name": "knowledge" },
   "spec": {
     "contract_version": "1.0",
-    "kit": { "id": "knowledge" },
-    "projections": [
-      { "kind": "run_summary", "schema_ref": "https://kontourai.dev/schemas/knowledge/run-summary/1.0.json" },
-      { "kind": "metric_series", "schema_ref": "https://kontourai.dev/schemas/knowledge/metric-series/1.0.json" },
-      { "kind": "grounded_narrative", "schema_ref": "https://kontourai.dev/schemas/knowledge/grounded-narrative/1.0.json" },
-      { "kind": "learning", "schema_ref": "https://kontourai.dev/schemas/knowledge/learning/1.0.json" }
-    ],
-    "views": ["run_summary", "metric_series", "grounded_narrative", "learning"],
-    "authority_refs": [
-      { "authority": "flow", "ref": "flowagents.kontourai.io/v1alpha1/WorkflowRun" },
-      { "authority": "surface", "ref": "surface.kontourai.io/v1alpha1/TrustBundle" },
-      { "authority": "runtime", "ref": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope" }
-    ],
-    "capabilities": { "local_export": "read", "sink": "unsupported" },
+    "projections": {
+      "run_summary": { "schema_ref": "https://kontourai.dev/schemas/knowledge/run-summary/1.0.json" },
+      "metric_series": { "schema_ref": "https://kontourai.dev/schemas/knowledge/metric-series/1.0.json" },
+      "grounded_narrative": { "schema_ref": "https://kontourai.dev/schemas/knowledge/grounded-narrative/1.0.json" },
+      "learning": { "schema_ref": "https://kontourai.dev/schemas/knowledge/learning/1.0.json" }
+    },
+    "authority_refs": {
+      "flow": "flowagents.kontourai.io/v1alpha1/WorkflowRun",
+      "surface": "surface.kontourai.io/v1alpha1/TrustBundle",
+      "runtime": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope"
+    },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": "mcp_apps_resource_bridge", "fallback": "standard_views" } },
     "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "available" },
-    "operator_actions": [
-      { "id": "review-knowledge-proposal", "kind": "proposal_ref", "ref": "proposal://knowledge/review" }
+    "operator_intents": [
+      { "intent": "open_resource", "label": "Open knowledge narrative", "required_capability": "resource.open", "target": { "authority": "runtime", "kind": "narrative" } },
+      { "intent": "review_proposal", "label": "Review knowledge proposal", "required_capability": "proposal.review", "target": { "authority": "surface", "kind": "proposal" } }
     ],
     "compatibility": { "unsupported_version": "diagnostic" }
   }

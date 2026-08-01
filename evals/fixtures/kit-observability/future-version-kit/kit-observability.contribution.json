@@ -4,17 +4,11 @@
   "metadata": { "name": "future-observe" },
   "spec": {
     "contract_version": "2.0",
-    "kit": { "id": "future-observe" },
-    "projections": [
-      { "kind": "run_summary", "schema_ref": "https://partner.example/schemas/future-run-summary/2.0.json" }
-    ],
-    "views": ["run_summary"],
-    "authority_refs": [
-      { "authority": "flow", "ref": "flowagents.kontourai.io/v1alpha1/WorkflowRun" }
-    ],
-    "capabilities": { "local_export": "read", "sink": "unsupported" },
+    "projections": { "run_summary": { "schema_ref": "https://partner.example/schemas/future-run-summary/2.0.json" } },
+    "authority_refs": { "flow": "flowagents.kontourai.io/v1alpha1/WorkflowRun" },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": "mcp_apps_resource_bridge", "fallback": "standard_views" } },
     "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "unavailable" },
-    "operator_actions": [],
+    "operator_intents": [],
     "compatibility": { "unsupported_version": "diagnostic" }
   }
 }
