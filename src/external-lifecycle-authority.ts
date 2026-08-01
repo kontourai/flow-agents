@@ -4,11 +4,24 @@ import { createHash, createPrivateKey, createPublicKey, verify } from "node:cryp
 import { execFileSync } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
+export const LIFECYCLE_AUTHORITY_COMPLETION_SCHEMA_VERSION = "2.0";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
 export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
 const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery", "authorize-workflow-evidence"]);
+
+export class LifecycleAuthorityCompletionUpgradeRequiredError extends Error {
+  readonly code = "LIFECYCLE_AUTHORITY_COMPLETION_UPGRADE_REQUIRED" as const;
+  constructor(observedVersion: unknown) {
+    super(
+      `lifecycle authority completion schema ${JSON.stringify(observedVersion)} is not supported; `
+      + "complete or archive this run with its previous lifecycle helper before upgrading, "
+      + "or start a new Builder run after the helper upgrade",
+    );
+    this.name = "LifecycleAuthorityCompletionUpgradeRequiredError";
+  }
+}
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
 export interface ExternalLifecycleMutationResult {
@@ -119,11 +132,16 @@ function validateSignedCompletion(value: unknown, action: string, requestSha256:
 
 function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operationStatuses: readonly string[], label: string): JsonRecord {
   if (!record(value)) throw new Error(`${label} is missing`);
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  if (value.schema_version !== LIFECYCLE_AUTHORITY_COMPLETION_SCHEMA_VERSION) {
+    throw new LifecycleAuthorityCompletionUpgradeRequiredError(value.schema_version);
+  }
+  const generationBound = ["reseal-verification-evidence", "recover-exact-current-completion"].includes(String(value.action));
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   const observed = Object.keys(value).sort();
   if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error(`${label} contains unexpected or missing fields`);
-  if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
+  if (value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`${label} ${key} is invalid`);
+  if (generationBound && (typeof value.recovery_generation !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.recovery_generation))) throw new Error(`${label} recovery_generation is invalid`);
   if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error(`${label} signature is invalid`);
   const signatureValue = value.signature.value;

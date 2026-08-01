@@ -3,36 +3,90 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const modules = path.resolve(process.argv[2] ?? "");
-const pin = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-const roots = [];
-const seen = new Set();
+const args = process.argv.slice(2);
+const normalizeIndex = args.indexOf("--normalize-modes");
+const normalizeModes = normalizeIndex !== -1;
+if (normalizeModes) args.splice(normalizeIndex, 1);
+if (args.length !== 2) throw new Error("usage: verify-flow-reducer-closure.mjs [--normalize-modes] <node_modules> <pin.json>");
+const modules = path.resolve(args[0] ?? "");
+const pin = JSON.parse(fs.readFileSync(args[1], "utf8"));
+const rootStat = fs.lstatSync(modules);
+if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+  throw new Error("staged node_modules must be a real directory");
+}
+if (normalizeModes) fs.chmodSync(modules, 0o755);
 
-function inspectPackage(packageRoot) {
-  packageRoot = path.resolve(packageRoot);
-  if (seen.has(packageRoot)) return;
-  if (!packageRoot.startsWith(`${modules}${path.sep}`)) throw new Error("Flow dependency escapes staged node_modules");
-  const stat = fs.lstatSync(packageRoot);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Flow dependency root must be a real directory");
-  seen.add(packageRoot); roots.push(packageRoot);
-  const metadata = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
-  for (const name of Object.keys(metadata.dependencies ?? {}).sort()) inspectPackage(path.join(modules, name));
+function packageMetadata(name) {
+  const packageRoot = path.join(modules, ...name.split("/"));
+  const root = fs.lstatSync(packageRoot);
+  if (!root.isDirectory() || root.isSymbolicLink()) {
+    throw new Error(`staged package must be a real directory: ${name}`);
+  }
+  const metadataFile = path.join(packageRoot, "package.json");
+  const metadataStat = fs.lstatSync(metadataFile);
+  if (!metadataStat.isFile() || metadataStat.isSymbolicLink()) {
+    throw new Error(`staged package metadata must be a regular file: ${name}`);
+  }
+  return JSON.parse(fs.readFileSync(metadataFile, "utf8"));
 }
 
-inspectPackage(path.join(modules, "@kontourai", "flow"));
-const digest = crypto.createHash("sha256");
-for (const packageRoot of roots.sort()) {
-  const prefix = path.relative(modules, packageRoot).split(path.sep).join("/");
-  const files = [];
-  const walk = (dir) => fs.readdirSync(dir).sort().forEach((name) => {
-    const file = path.join(dir, name); const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink()) throw new Error(`staged Flow dependency must not contain symlinks: ${file}`);
-    if (stat.isDirectory()) walk(file); else if (stat.isFile()) files.push(file);
-  });
-  walk(packageRoot);
-  for (const file of files) {
-    digest.update(`${prefix}/${path.relative(packageRoot, file).split(path.sep).join("/")}`);
-    digest.update("\0"); digest.update(fs.readFileSync(file)); digest.update("\0");
+const flow = packageMetadata("@kontourai/flow");
+if (flow.name !== pin.package || flow.version !== pin.package_version) {
+  throw new Error("staged Flow package does not match the independently pinned identity");
+}
+
+const identityPackages = {
+  hachure: "hachure",
+  surface: "@kontourai/surface",
+};
+const dependencyVersions = pin.reducer?.dependency_versions;
+if (!dependencyVersions || Object.keys(dependencyVersions).sort().join(",") !== Object.keys(identityPackages).sort().join(",")) {
+  throw new Error("Flow reducer dependency identity is incomplete or unsupported");
+}
+for (const [identity, packageName] of Object.entries(identityPackages)) {
+  const metadata = packageMetadata(packageName);
+  if (metadata.version !== dependencyVersions[identity]) {
+    throw new Error(`staged ${packageName} does not match the independently pinned reducer identity`);
   }
 }
-if (digest.digest("hex") !== pin.closure_sha256) throw new Error("staged Flow dependency closure does not match the independently pinned digest");
+
+const digest = crypto.createHash("sha256");
+function canonicalMode(stat) {
+  // npm preserves executable classification but applies the caller's umask to
+  // permission bits. Bind the security-relevant classification, not ambient
+  // install policy; the privileged installer applies these canonical modes.
+  if (stat.isDirectory()) return 0o755;
+  return (stat.mode & 0o100) === 0o100 ? 0o755 : 0o644;
+}
+function walk(dir) {
+  for (const name of fs.readdirSync(dir).sort()) {
+    const entry = path.join(dir, name);
+    const stat = fs.lstatSync(entry);
+    const relative = path.relative(modules, entry).split(path.sep).join("/");
+    if (stat.isSymbolicLink()) {
+      const target = fs.readlinkSync(entry);
+      const resolvedTarget = path.resolve(path.dirname(entry), target);
+      if (path.isAbsolute(target) || !resolvedTarget.startsWith(`${modules}${path.sep}`) || !fs.statSync(resolvedTarget).isFile()) {
+        throw new Error(`staged Flow closure symlink must resolve to an in-tree regular file: ${entry}`);
+      }
+      digest.update(`symlink\0${relative}\0${target}\0`);
+    } else if (stat.isDirectory()) {
+      if (normalizeModes) fs.chmodSync(entry, canonicalMode(stat));
+      digest.update(`directory\0${relative}\0${canonicalMode(stat)}\0`);
+      walk(entry);
+    } else if (stat.isFile()) {
+      if (normalizeModes) fs.chmodSync(entry, canonicalMode(stat));
+      digest.update(`file\0${relative}\0${canonicalMode(stat)}\0`);
+      digest.update(fs.readFileSync(entry));
+      digest.update("\0");
+    } else {
+      throw new Error(`staged Flow closure contains an unsupported entry: ${entry}`);
+    }
+  }
+}
+walk(modules);
+
+const actualDigest = digest.digest("hex");
+if (actualDigest !== pin.closure_sha256) {
+  throw new Error(`staged Flow dependency closure does not match the independently pinned digest: expected ${pin.closure_sha256}, received ${actualDigest}`);
+}

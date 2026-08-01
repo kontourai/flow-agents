@@ -149,6 +149,74 @@ function gateExpectation(claim) {
     : null;
 }
 
+function acceptanceCriterionId(claim) {
+  return claim?.claimType === "workflow.acceptance.criterion"
+    && claim?.subjectType === "flow-step"
+    && claim?.metadata?.origin === "acceptance"
+    && record(claim.metadata.criterion)
+    && typeof claim.metadata.criterion.id === "string"
+    && claim.metadata.criterion.id
+    ? claim.metadata.criterion.id
+    : null;
+}
+
+function acceptanceClaimContractProjection(claim, label) {
+  const criterionId = acceptanceCriterionId(claim);
+  if (!criterionId) throw new Error(`verification evidence reseal ${label} is not a canonical acceptance criterion claim`);
+  const projection = structuredClone(claim);
+  delete projection.id;
+  delete projection.value;
+  delete projection.status;
+  delete projection.createdAt;
+  delete projection.updatedAt;
+  delete projection.verificationPolicyId;
+  for (const field of ["status", "evidence_refs", "observed_commands", "identity_version", "verified_at"]) {
+    delete projection.metadata.criterion[field];
+  }
+  return projection;
+}
+
+export function verificationAcceptanceClaimDeltaSummary(currentClaims, candidateClaims, targetIndex) {
+  if (!Array.isArray(currentClaims) || !Array.isArray(candidateClaims) || currentClaims.length !== candidateClaims.length) {
+    throw new Error("verification evidence reseal acceptance-claim delta requires equal ordered claim sets");
+  }
+  const deltas = [];
+  for (let index = 0; index < currentClaims.length; index += 1) {
+    if (index === targetIndex || JSON.stringify(currentClaims[index]) === JSON.stringify(candidateClaims[index])) continue;
+    const predecessorCriterionId = acceptanceCriterionId(currentClaims[index]);
+    const currentCriterionId = acceptanceCriterionId(candidateClaims[index]);
+    const currentCriterion = candidateClaims[index]?.metadata?.criterion;
+    if (!predecessorCriterionId || predecessorCriterionId !== currentCriterionId
+        || candidateClaims[index]?.value !== "pass"
+        || candidateClaims[index]?.status !== "verified"
+        || currentCriterion?.status !== "pass"
+        || currentCriterion?.identity_version !== 2
+        || typeof currentCriterion?.verified_at !== "string"
+        || !Number.isFinite(Date.parse(currentCriterion.verified_at))) {
+      throw new Error("verification evidence reseal changed a claim outside the target expectation and its matching acceptance criteria");
+    }
+    if (canonical(acceptanceClaimContractProjection(currentClaims[index], `criterion ${predecessorCriterionId} predecessor`))
+        !== canonical(acceptanceClaimContractProjection(candidateClaims[index], `criterion ${predecessorCriterionId} replacement`))) {
+      throw new Error(`verification evidence reseal changed immutable acceptance criterion contract ${predecessorCriterionId}`);
+    }
+    deltas.push({
+      index,
+      criterion_id: predecessorCriterionId,
+      predecessor_claim_sha256: jsonDigest(currentClaims[index]),
+      current_claim_sha256: jsonDigest(candidateClaims[index]),
+    });
+  }
+  if (new Set(deltas.map((delta) => delta.criterion_id)).size !== deltas.length) {
+    throw new Error("verification evidence reseal acceptance-claim delta contains duplicate criterion identities");
+  }
+  const projection = { schema_version: "1.0", kind: "kontourai.verification-acceptance-claim-delta", deltas };
+  return {
+    count: deltas.length,
+    digest: crypto.createHash("sha256").update(canonical(projection)).digest("hex"),
+    projection,
+  };
+}
+
 function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {
   if (!record(currentBundle) || !record(candidateBundle) || !Array.isArray(currentBundle.claims) || !Array.isArray(candidateBundle.claims)) {
     throw new Error("verification evidence reseal requires Trust Bundles with claims");
@@ -198,18 +266,20 @@ function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, 
       || claimDigest(current) !== authorization.current_claim_sha256) {
     throw new Error("verification evidence reseal claim identity, status, or digest does not match the authorized delta");
   }
-  currentBundle.claims.forEach((claim, claimIndex) => {
-    if (claimIndex !== index && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
-      throw new Error("verification evidence reseal changed the complete ordered claim set outside the authorized expectation");
-    }
-  });
+  const related = verificationAcceptanceClaimDeltaSummary(currentBundle.claims, candidateBundle.claims, index);
+  if ((related.count > 0 && authorization.target_expectation_id !== "tests-evidence")
+      || related.count !== authorization.acceptance_claim_delta_count
+      || related.digest !== authorization.acceptance_claim_delta_sha256) {
+    throw new Error("verification evidence reseal acceptance-claim delta does not match the authorized tests-evidence scope");
+  }
 }
 
 /**
  * Pure package-side policy for the privileged evidence reseal. Filesystem,
  * signature, replay, Flow attachment, and completion concerns remain in the
- * coordinator; this transition accepts only the exact authorized bytes and a
- * gate-claim-only Trust Bundle change.
+ * coordinator; this transition accepts only the exact authorized bytes, the
+ * target gate-claim replacement, and its digest-bound acceptance-criterion
+ * replacements for tests-evidence.
  */
 export function resealVerificationEvidenceTransition(input) {
   const {
@@ -222,7 +292,9 @@ export function resealVerificationEvidenceTransition(input) {
     ledger_bytes: ledgerBytes,
     flow,
   } = input ?? {};
-  if (!record(authorization) || authorization.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
+  if (!record(authorization) || authorization.schema_version !== "2.0" || authorization.operation !== "reseal-verification-evidence") {
+    throw new Error("verification evidence reseal authorization schema is obsolete or unsupported; regenerate it with workflow reseal-verification-evidence-request");
+  }
   if (!Buffer.isBuffer(currentBundleBytes) || !Buffer.isBuffer(candidateBundleBytes) || !Buffer.isBuffer(ledgerBytes)) throw new Error("verification evidence reseal requires exact byte preimages");
   if (!record(flow) || flow.definition_id !== "builder.build" || flow.step_id !== "verify"
       || typeof flow.gate_id !== "string" || !Array.isArray(flow.requirements)

@@ -244,14 +244,17 @@ authenticated stale same-run root completion, the raw current bundle and ledger 
 cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
 and canonical ordered gate-policy digests, Flow head/manifest,
 fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
-the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
-plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
-generation active through root completion/nonce persistence and receipt installation. Prepared
+the coordinator first durably stages and root-signs an exact four-artifact Flow-only publication
+plan. Before delegation, root persists a unique expected generation in the durable nonce record
+and signs it into the publication capability. The worker activates Flow's native recovery fence
+before the first postimage and keeps that generation active through root completion, nonce
+persistence, and receipt installation. The root-signed completion binds the root-protected
+generation. Prepared
 retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
 old/new state forward from the staged postimages, and rejects unknown or mismatched state without
 restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
 opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
-ledger, and stale receipt; it never snapshots or restores them.
+ledger, stale receipt, and canonical Flow state; it never snapshots or restores them.
 
 The canonical attachment ID and stored filename include the signed authorization digest in addition
 to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
@@ -286,7 +289,9 @@ does not attach or publish that candidate. Its unsigned authorization binds the 
 candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
 raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
 expiry. It also binds the exact target verify expectation and the predecessor/current claim
-id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+id, status, raw-JSON digest, ordered index, and `replace` delta. For `tests-evidence`, it also binds
+the count and canonical digest of same-identity, in-place acceptance-criterion replacements
+produced by the normal evidence writer. The signed action invokes only the
 fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
 requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
 that does not match the current expectation's step, claim type, and subject type. It acquires
@@ -295,16 +300,18 @@ artifact identities: session bundle, Flow manifest, Flow state, request-keyed st
 JSON report, and Markdown report. The root-signed plan contains no artifact paths; it binds the
 request, authorization key and nonce, pinned reducer identity, result core, and exact pre/post
 presence, mode, size, and digest for each fixed identity. Old and new images are durably staged
-in fixed siblings and reread before publication. It permits
-replacement of only that one ordered target claim; every other claim, including other verify-gate
-claims, must remain byte-identical and in the same order. It requires a byte-identical critique
+in fixed siblings and reread before publication. It permits replacement of only that ordered
+target claim plus the explicitly digest-bound matching acceptance-criterion claims required by
+passing `tests-evidence`; every other claim, including other verify-gate and acceptance claims,
+must remain byte-identical and in the same order. It requires a byte-identical critique
 projection, attaches the candidate to the `builder.build` verify gate, commits the exact candidate
 bytes without appending a sixth ledger event, and installs a new root-signed exact-current
 completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
 remains active through durable root completion and exact receipt installation; all canonical
 readers and ordinary Flow mutations fail closed while active. Flow's native writer assigns a
-unique generation and durably publishes it; the dedicated finalizer requires that exact
-generation before reopening. Consumers bind the generation, file bytes, and run-directory
+unique generation and durably publishes it; the root-signed completion binds that generation,
+and the dedicated finalizer requires the exact match and rechecks the protected postimages under Flow's finalization ticket before
+reopening. Consumers bind the generation, file bytes, and run-directory
 identity across their complete supported reads and reject symlinked fixed Flow ancestry.
 Before root records a nonce or any plan/stage exists, the helper preflights the installed
 mutation lock, recovery lock, active writer, and generation-bound finalizer APIs. Recovery
@@ -322,9 +329,16 @@ The reference coordinator ships no pathname or descriptor-only fallback and refu
 platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
 capability is absent or invalid. Portable request creation and external signing remain available.
 After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
-removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
+removed. Replay validates that the exact root-signed receipt generation equals the finalized
+Flow fence generation, then removes
+only the private plan and stages. It does not require live postimages to remain unchanged or rewrite
+them, because an ordinary Flow writer may legitimately supersede those bytes after the fence opens.
 Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
 nonce/completion and transaction recovery make an exact completed retry a replay.
+
+Verification reseal authorizations use operation schema `2.0`. Earlier authorization files do
+not bind the acceptance-criterion replacement set and are not accepted. Regenerate an in-flight
+request with `workflow reseal-verification-evidence-request`; there is no legacy fallback.
 
 The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, `archive`,
 `resolve-critique`, `repair-critique-resolution-history`, and

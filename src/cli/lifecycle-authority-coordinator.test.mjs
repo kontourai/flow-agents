@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inCanonicalFlowProjectTransaction, inProjectTransaction, recoverMatchingTransaction, recoverMatchingTransactionWithCanonicalFlowLock, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
@@ -34,9 +34,9 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, cleanupFinalizedVerificationResealReplay, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, cleanupFinalizedVerificationResealReplay: module.cleanupFinalizedVerificationResealReplay, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -156,7 +156,7 @@ test("signed provisional authority event installs an exact durable coordinator c
   const eventUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: "session-a", subject: authorization.subject, authorization_sha256: loaded.sha256(loaded.canonicalJson(authorization)), predecessor_hash: "0".repeat(64), signed_authorization: authorization };
   const event = { ...eventUnsigned, event_hash: loaded.sha256(eventUnsigned) };
   fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json"), JSON.stringify({ schema_version: "1.0", events: [event] }), { mode: 0o600 });
-  const completionUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "publish-provisional-delivery", request_sha256: "c".repeat(64), run_id: "session-a", operation_status: "applied", result_core_sha256: loaded.sha256(event), coordinator_runtime_sha256: "d".repeat(64), completed_at: new Date().toISOString() };
+  const completionUnsigned = { schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "publish-provisional-delivery", request_sha256: "c".repeat(64), run_id: "session-a", operation_status: "applied", result_core_sha256: loaded.sha256(event), coordinator_runtime_sha256: "d".repeat(64), completed_at: new Date().toISOString() };
   const completion = { ...completionUnsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(completionUnsigned)), completionKeys.privateKey).toString("base64") } };
   assert.deepEqual(loaded.installCompletionReceipt({ projectRoot: root, sessionDir, runId: "session-a" }, completion), { run_id: "session-a", receipt: "written" });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "provisional-delivery.authority-completion.json"), "utf8")), completion);
@@ -192,7 +192,7 @@ test("provisional completion receipt rotates only to the validated ledger tail a
   };
   const completionFor = (event, requestSha256) => {
     const unsigned = {
-      schema_version: "1.0",
+      schema_version: "2.0",
       kind: "kontourai.lifecycle-authority.completion",
       action: "publish-provisional-delivery",
       request_sha256: requestSha256,
@@ -432,7 +432,7 @@ function copyPinnedFlowClosure(installRoot) {
   fs.copyFileSync("packaging/lifecycle-authority/flow-reducer-v1.json", path.join(installRoot, "flow-reducer-v1.json"));
 }
 
-async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
+async function createHermeticRecoveryFixture(runId = "exact-current-recovery", { retainPlan = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-exact-current-e2e-"));
   let projectRoot = path.join(root, "project");
   const installRoot = path.join(root, "installed");
@@ -456,7 +456,11 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   coordinatorSource = coordinatorSource
     .replace(/export const CONFIG_ROOT = .*?;/, `export const CONFIG_ROOT = ${JSON.stringify(configRoot)};`)
     .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  coordinatorSource += "\nexport { prepareExactCurrentRecoveryPublication, publishExactCurrentRecoveryPublication, recoverExactCurrentRecoveryPublication, finalizeExactCurrentRecoveryPublication, finalizeVerificationResealFence, signedCapability };\n";
+  if (retainPlan) coordinatorSource = coordinatorSource.replace(
+      "if (fs.existsSync(exactCurrentRecoveryPlanFile(paths))) fs.unlinkSync(exactCurrentRecoveryPlanFile(paths));",
+      "if (false && fs.existsSync(exactCurrentRecoveryPlanFile(paths))) fs.unlinkSync(exactCurrentRecoveryPlanFile(paths));",
+  );
+  coordinatorSource += "\nexport { exactCurrentRecoveryPlanFile, prepareExactCurrentRecoveryPublication, publishExactCurrentRecoveryPublication, recoverExactCurrentRecoveryPublication, finalizeExactCurrentRecoveryPublication, finalizeVerificationResealFence, signedCapability, verifiedCapability };\n";
   fs.writeFileSync(path.join(installRoot, "runtime-v1.mjs"), fs.readFileSync(RUNTIME), { mode: 0o644 });
   fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), coordinatorSource, { mode: 0o755 });
   const coordinator = await import(`${pathToFileURL(path.join(installRoot, "coordinator.mjs")).href}?fixture=${Date.now()}-${Math.random()}`);
@@ -509,7 +513,7 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
 
   const signCompletion = (unsigned) => ({ ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(coordinator.canonicalJson(unsigned)), completionPrivate).toString("base64") } });
   const staleCore = coordinator.sha256({ ...historical.bundle, critique_resolution_events: [signedEvent] });
-  const stale = signCompletion({ schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "6".repeat(64), run_id: runId, operation_status: "applied", result_core_sha256: staleCore, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: "2026-07-24T00:03:00.000Z" });
+  const stale = signCompletion({ schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "6".repeat(64), run_id: runId, operation_status: "applied", result_core_sha256: staleCore, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: "2026-07-24T00:03:00.000Z" });
   const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
   fs.writeFileSync(completionFile, `${JSON.stringify(stale)}\n`, { mode: 0o644 });
   const bundleBytes = fs.readFileSync(bundleFile), ledgerBytes = fs.readFileSync(ledgerFile), completionBytes = fs.readFileSync(completionFile);
@@ -533,7 +537,8 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   fs.writeFileSync(authorizationFile, `${JSON.stringify(authorization)}\n`, { mode: 0o600 });
   const request = { action: "recover-exact-current-completion", project_root: projectRoot, session_dir: sessionDir, authorization_file: authorizationFile };
   const envelope = { schema_version: "1.0", action: request.action, request_sha256: coordinator.sha256(request), request };
-  return { root, coordinator, projectRoot, sessionDir, flowRoot, stateRoot, bundleFile, ledgerFile, completionFile, bundleBytes, ledgerBytes, completionBytes, authorization, authorizationFile, envelope, operatorPrivate, signCompletion, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  const recoveryGeneration = randomUUID();
+  return { root, coordinator, projectRoot, sessionDir, flowRoot, stateRoot, runId, bundleFile, ledgerFile, completionFile, bundleBytes, ledgerBytes, completionBytes, authorization, authorizationFile, envelope, operatorPrivate, recoveryGeneration, signCompletion, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
 async function invokeHermeticCoordinator(fixture) {
@@ -548,22 +553,47 @@ async function invokeHermeticCoordinator(fixture) {
 }
 
 test("hermetic privileged coordinator recovers a stale completion without rewriting evidence and replays exactly", async () => {
-  const fixture = await createHermeticRecoveryFixture();
+  const fixture = await createHermeticRecoveryFixture("exact-current-recovery", { retainPlan: true });
   try {
+    const flowStateFile = path.join(fixture.flowRoot, "state.json");
+    const flowStateBefore = fs.readFileSync(flowStateFile);
+    const routeBacksBefore = JSON.parse(flowStateBefore).transitions.filter((entry) => entry.type === "route_back").length;
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: fixture.runId };
+    const planFile = fixture.coordinator.exactCurrentRecoveryPlanFile(paths);
     const applied = await invokeHermeticCoordinator(fixture);
     assert.equal(applied.result.operation_status, "applied");
     assert.equal(applied.result.completion.action, "recover-exact-current-completion");
+    const planCapability = JSON.parse(fs.readFileSync(planFile, "utf8"));
+    const signedPlan = fixture.coordinator.verifiedCapability(planCapability, "exact-current-recovery-plan-capability");
+    const nonceFile = path.join(
+      fixture.stateRoot,
+      "nonces",
+      `${fixture.coordinator.sha256(`${fixture.authorization.signature.key_id}\u0000${fixture.authorization.nonce}`)}.json`,
+    );
+    const nonceRecord = JSON.parse(fs.readFileSync(nonceFile, "utf8"));
+    const generation = applied.result.completion.recovery_generation;
+    assert.equal(nonceRecord.status, "applied");
+    assert.equal(nonceRecord.recovery_generation, generation, "root persists the completion generation in its durable nonce");
+    assert.equal(signedPlan.recovery_generation, generation, "root signs the durable generation into the delegated plan");
     assert.equal(fs.readFileSync(fixture.bundleFile).compare(fixture.bundleBytes), 0, "recovery must retain exact trust.bundle bytes");
     assert.equal(fs.readFileSync(fixture.ledgerFile).compare(fixture.ledgerBytes), 0, "recovery must retain exact ledger bytes");
+    const flowStateAfter = fs.readFileSync(flowStateFile);
+    assert.deepEqual(flowStateAfter, flowStateBefore, "authority-only recovery must not rewrite canonical Flow state");
+    assert.equal(JSON.parse(flowStateAfter).transitions.filter((entry) => entry.type === "route_back").length, routeBacksBefore, "authority-only recovery must not consume route-back budget");
     const manifest = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "evidence", "manifest.json"), "utf8"));
     const attachmentId = `lifecycle-authority:${fixture.envelope.request_sha256}:${fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization))}`;
     assert.equal(manifest.evidence.filter((entry) => entry.id === attachmentId).length, 1, "one request-keyed canonical attachment is published");
     const receipt = JSON.parse(fs.readFileSync(fixture.completionFile, "utf8"));
+    assert.equal(receipt.recovery_generation, generation, "the installed receipt retains the root generation");
     assert.equal(receipt.result_core_sha256, fixture.coordinator.sha256({ ...JSON.parse(fixture.bundleBytes), critique_resolution_events: JSON.parse(fixture.ledgerBytes).events }));
+    const fence = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "recovery-fence.json"), "utf8"));
+    assert.equal(fence.status, "open");
+    assert.equal(fence.previous_generation, generation, "finalization opens only the root generation");
     const durableBefore = fs.readdirSync(path.join(fixture.stateRoot, "completions")).sort();
     const replay = await invokeHermeticCoordinator(fixture);
     assert.equal(replay.result.operation_status, "replayed");
     assert.deepEqual(replay.result.completion, applied.result.completion, "exact request reuses immutable completion");
+    assert.equal(replay.result.completion.recovery_generation, generation, "replay preserves the root generation");
     assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "evidence", "manifest.json"), "utf8")).evidence.filter((entry) => entry.id === attachmentId).length, 1, "replay adds no duplicate attachment");
     assert.deepEqual(fs.readdirSync(path.join(fixture.stateRoot, "completions")).sort(), durableBefore, "replay adds no durable completion");
   } finally { fixture.cleanup(); }
@@ -578,6 +608,7 @@ for (const [label, crashAfter] of [["first Flow postimage", 1], ["all Flow posti
       const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
         request: fixture.envelope.request,
         plan: prepared.plan,
+        recovery_generation: fixture.recoveryGeneration,
       });
       const binding = {
         request_sha256: fixture.envelope.request_sha256,
@@ -595,13 +626,113 @@ for (const [label, crashAfter] of [["first Flow postimage", 1], ["all Flow posti
       assert.deepEqual(fs.readFileSync(fixture.bundleFile), fixture.bundleBytes, "crash never rewrites trust.bundle");
       assert.deepEqual(fs.readFileSync(fixture.ledgerFile), fixture.ledgerBytes, "crash never rewrites the resolution ledger");
       assert.deepEqual(fs.readFileSync(fixture.completionFile), fixture.completionBytes, "crash never rewrites the stale receipt");
-      const recovered = await fixture.coordinator.recoverExactCurrentRecoveryPublication(paths, binding);
+      const recovered = await fixture.coordinator.recoverExactCurrentRecoveryPublication(paths, binding, fixture.recoveryGeneration);
       assert.equal(recovered.state, "new");
       assert.equal(recovered.result_core_sha256, prepared.plan.result_core_sha256);
       assert.equal(fixture.coordinator.classifyExactCurrentRecoveryArtifacts(paths, prepared.plan), "new");
     } finally { fixture.cleanup(); }
   });
 }
+
+test("exact-current recovery rejects a Flow state change in the plan-before-fence window", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-state-preimage");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-state-preimage" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
+    });
+    const binding = {
+      request_sha256: fixture.envelope.request_sha256,
+      authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+    };
+    await pauseRun(paths.runId, {
+      cwd: paths.projectRoot,
+      reason: "legitimate writer wins before recovery fence",
+      authority: {
+        kind: "operator_request",
+        actor: "state-preimage-test",
+        request_ref: "test:state-preimage",
+        requested_at: "2026-07-24T00:08:00.000Z",
+      },
+      at: "2026-07-24T00:08:01.000Z",
+    });
+    const stateAfterWriter = fs.readFileSync(path.join(fixture.flowRoot, "state.json"));
+    await assert.rejects(
+      fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding),
+      /protected input flow-state changed/,
+    );
+    assert.deepEqual(fs.readFileSync(path.join(fixture.flowRoot, "state.json")), stateAfterWriter, "stale recovery must not overwrite the winning Flow state");
+    assert.equal((await loadRun(paths.runId, paths.projectRoot)).state.status, "paused");
+  } finally { fixture.cleanup(); }
+});
+
+test("exact-current recovery rejects same-user fence generation replacement after activation", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-generation-replacement");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-generation-replacement" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
+    });
+    const fenceFile = path.join(fixture.flowRoot, "recovery-fence.json");
+    await assert.rejects(
+      fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, {
+        request_sha256: fixture.envelope.request_sha256,
+        authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+      }, {
+        async after_write({ writes }) {
+          if (writes !== 1) return;
+          const fence = JSON.parse(fs.readFileSync(fenceFile, "utf8"));
+          fs.writeFileSync(fenceFile, `${JSON.stringify({ ...fence, generation: randomUUID() }, null, 2)}\n`, { mode: 0o600 });
+        },
+      }),
+      /root-bound active Flow recovery fence|coordinator_fence_mismatch/,
+    );
+    assert.equal(fs.existsSync(path.join(fixture.sessionDir, ".exact-current-recovery.transaction.json")), true);
+    assert.equal(fs.existsSync(path.join(fixture.stateRoot, "completions")), false);
+  } finally { fixture.cleanup(); }
+});
+
+test("exact-current recovery plan preserves the authorized reducer state preimage across an intra-preparation mutation", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-intra-preparation-state");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-intra-preparation-state" };
+    const stateFile = path.join(fixture.flowRoot, "state.json");
+    const authorizedStateBytes = fs.readFileSync(stateFile);
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(
+      fixture.envelope,
+      paths,
+      fixture.authorization,
+      {
+        async afterSynchronization() {
+          const changed = JSON.parse(authorizedStateBytes);
+          changed.updated_at = "2026-07-24T00:09:00.000Z";
+          fs.writeFileSync(stateFile, `${JSON.stringify(changed, null, 2)}\n`, { mode: 0o644 });
+        },
+      },
+    );
+    const protectedState = prepared.plan.protected_preimages.find((entry) => entry.id === "flow-state");
+    assert.equal(protectedState.pre.sha256, createHash("sha256").update(authorizedStateBytes).digest("hex"));
+    assert.notEqual(protectedState.pre.sha256, createHash("sha256").update(fs.readFileSync(stateFile)).digest("hex"));
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
+    });
+    await assert.rejects(
+      fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, {
+        request_sha256: fixture.envelope.request_sha256,
+        authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+      }),
+      /protected input flow-state changed/,
+    );
+  } finally { fixture.cleanup(); }
+});
 
 test("exact-current recovery fence rejects a normal Flow writer until exact finalization opens it", async () => {
   const fixture = await createHermeticRecoveryFixture("recovery-fence");
@@ -611,12 +742,13 @@ test("exact-current recovery fence rejects a normal Flow writer until exact fina
     const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
       request: fixture.envelope.request,
       plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
     });
     const binding = {
       request_sha256: fixture.envelope.request_sha256,
       authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
     };
-    await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
+    const published = await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
     await assert.rejects(
       pauseRun(paths.runId, {
         cwd: paths.projectRoot,
@@ -627,7 +759,7 @@ test("exact-current recovery fence rejects a normal Flow writer until exact fina
       /recovery fence|recovery.*active/i,
     );
     const completion = fixture.signCompletion({
-      schema_version: "1.0",
+      schema_version: "2.0",
       kind: "kontourai.lifecycle-authority.completion",
       action: "recover-exact-current-completion",
       request_sha256: prepared.plan.request_sha256,
@@ -636,6 +768,7 @@ test("exact-current recovery fence rejects a normal Flow writer until exact fina
       result_core_sha256: prepared.plan.result_core_sha256,
       coordinator_runtime_sha256: coordinatorRuntimeSha256(),
       completed_at: "2026-07-24T00:10:02.000Z",
+      recovery_generation: published.recovery_generation,
     });
     fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
     const finalized = await fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion);
@@ -650,6 +783,47 @@ test("exact-current recovery fence rejects a normal Flow writer until exact fina
   } finally { fixture.cleanup(); }
 });
 
+test("exact-current recovery keeps its fence active when a protected input changes before finalization opens it", async () => {
+  const fixture = await createHermeticRecoveryFixture("recovery-final-protected-input");
+  try {
+    const paths = { projectRoot: fixture.projectRoot, sessionDir: fixture.sessionDir, runId: "recovery-final-protected-input" };
+    const prepared = await fixture.coordinator.prepareExactCurrentRecoveryPublication(fixture.envelope, paths, fixture.authorization);
+    const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
+      request: fixture.envelope.request,
+      plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
+    });
+    const published = await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, {
+      request_sha256: fixture.envelope.request_sha256,
+      authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
+    });
+    const completion = fixture.signCompletion({
+      schema_version: "2.0",
+      kind: "kontourai.lifecycle-authority.completion",
+      action: "recover-exact-current-completion",
+      request_sha256: prepared.plan.request_sha256,
+      run_id: paths.runId,
+      operation_status: "applied",
+      result_core_sha256: prepared.plan.result_core_sha256,
+      coordinator_runtime_sha256: coordinatorRuntimeSha256(),
+      completed_at: "2026-07-24T00:11:00.000Z",
+      recovery_generation: published.recovery_generation,
+    });
+    fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const changedBundle = JSON.parse(fixture.bundleBytes);
+    changedBundle.claims.push({ id: "foreign-direct-mutation" });
+    fs.writeFileSync(fixture.bundleFile, `${JSON.stringify(changedBundle)}\n`, { mode: 0o644 });
+
+    await assert.rejects(
+      fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion),
+      /final protected input trust-bundle changed/,
+    );
+    const fence = JSON.parse(fs.readFileSync(path.join(fixture.flowRoot, "recovery-fence.json"), "utf8"));
+    assert.equal(fence.status, "active");
+    assert.equal(fence.recovery_id, prepared.plan.recovery_id);
+  } finally { fixture.cleanup(); }
+});
+
 test("exact-current cleanup replay preserves a legitimate Flow write after its matching fence was finalized", async () => {
   const fixture = await createHermeticRecoveryFixture("recovery-cleanup-replay");
   try {
@@ -658,14 +832,15 @@ test("exact-current cleanup replay preserves a legitimate Flow write after its m
     const capability = fixture.coordinator.signedCapability("exact-current-recovery-plan-capability", {
       request: fixture.envelope.request,
       plan: prepared.plan,
+      recovery_generation: fixture.recoveryGeneration,
     });
     const binding = {
       request_sha256: fixture.envelope.request_sha256,
       authorization_sha256: fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization)),
     };
-    await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
+    const published = await fixture.coordinator.publishExactCurrentRecoveryPublication(paths, capability, binding);
     const completion = fixture.signCompletion({
-      schema_version: "1.0",
+      schema_version: "2.0",
       kind: "kontourai.lifecycle-authority.completion",
       action: "recover-exact-current-completion",
       request_sha256: prepared.plan.request_sha256,
@@ -674,6 +849,7 @@ test("exact-current cleanup replay preserves a legitimate Flow write after its m
       result_core_sha256: prepared.plan.result_core_sha256,
       coordinator_runtime_sha256: coordinatorRuntimeSha256(),
       completed_at: "2026-07-24T00:15:00.000Z",
+      recovery_generation: published.recovery_generation,
     });
     fs.writeFileSync(fixture.completionFile, `${JSON.stringify(completion)}\n`, { mode: 0o644 });
     const fenceFile = path.join(fixture.flowRoot, "recovery-fence.json");
@@ -707,6 +883,15 @@ test("exact-current cleanup replay preserves a legitimate Flow write after its m
     assert.ok(fs.existsSync(planFile));
     assert.ok(stages.some((file) => fs.existsSync(file)));
 
+    await assert.rejects(
+      fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, {
+        ...completion,
+        recovery_generation: "33333333-3333-4333-8333-333333333333",
+      }),
+      /does not bind the finalized Flow recovery generation/,
+    );
+    assert.ok(fs.existsSync(planFile), "generation mismatch must preserve the exact-current recovery plan");
+
     const replay = await fixture.coordinator.finalizeExactCurrentRecoveryPublication(paths, completion);
     assert.deepEqual(replay, { run_id: paths.runId, finalized: true, cleanup_replayed: true });
     assert.equal(fs.existsSync(planFile), false);
@@ -722,7 +907,11 @@ test("exact-current cleanup replay preserves a legitimate Flow write after its m
 test("same recovery request path accepts a second signed authorization generation with a distinct attachment", async () => {
   const fixture = await createHermeticRecoveryFixture("repeat-recovery");
   try {
+    const flowStateFile = path.join(fixture.flowRoot, "state.json");
+    const flowStateBefore = fs.readFileSync(flowStateFile);
+    const routeBacksBefore = JSON.parse(flowStateBefore).transitions.filter((entry) => entry.type === "route_back").length;
     const first = await invokeHermeticCoordinator(fixture);
+    assert.deepEqual(fs.readFileSync(flowStateFile), flowStateBefore, "first authority-only generation must not rewrite Flow state");
     const firstAuthorizationSha256 = fixture.coordinator.sha256(fixture.coordinator.canonicalJson(fixture.authorization));
     const bundle = JSON.parse(fs.readFileSync(fixture.bundleFile, "utf8"));
     bundle.claims.push({
@@ -796,6 +985,9 @@ test("same recovery request path accepts a second signed authorization generatio
     assert.ok(ids.includes(`lifecycle-authority:${fixture.envelope.request_sha256}:${firstAuthorizationSha256}`));
     assert.ok(ids.includes(`lifecycle-authority:${fixture.envelope.request_sha256}:${secondAuthorizationSha256}`));
     assert.equal(new Set(ids).size, 2, "each signed authorization generation has one distinct stored attachment");
+    const flowStateAfter = fs.readFileSync(flowStateFile);
+    assert.deepEqual(flowStateAfter, flowStateBefore, "repeated authority-only generations must not rewrite Flow state");
+    assert.equal(JSON.parse(flowStateAfter).transitions.filter((entry) => entry.type === "route_back").length, routeBacksBefore);
   } finally { fixture.cleanup(); }
 });
 
@@ -829,7 +1021,7 @@ test("hermetic privileged coordinator resumes a prepared recovery and preserves 
     const operationId = fixture.coordinator.sha256({ project: fixture.projectRoot, run_id: "prepared-recovery", action: fixture.envelope.action, key_id: "fixture-operator", nonce: fixture.authorization.nonce });
     const nonceFile = path.join(fixture.stateRoot, "nonces", `${fixture.coordinator.sha256(`fixture-operator\u0000${fixture.authorization.nonce}`)}.json`);
     fs.mkdirSync(path.dirname(nonceFile), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(nonceFile, `${JSON.stringify({ schema_version: "1.0", operation_id: operationId, authorization_sha256: authorizationSha256, key_id: "fixture-operator", nonce: fixture.authorization.nonce, request_sha256: fixture.envelope.request_sha256, status: "prepared" })}\n`, { mode: 0o600 });
+    fs.writeFileSync(nonceFile, `${JSON.stringify({ schema_version: "1.0", operation_id: operationId, authorization_sha256: authorizationSha256, key_id: "fixture-operator", nonce: fixture.authorization.nonce, request_sha256: fixture.envelope.request_sha256, status: "prepared", recovery_generation: fixture.recoveryGeneration })}\n`, { mode: 0o600 });
     const applied = await invokeHermeticCoordinator(fixture);
     assert.equal(applied.result.operation_status, "applied", "prepared all-old state resumes to one all-new completion");
     const currentCore = fixture.coordinator.sha256({ ...JSON.parse(fixture.bundleBytes), critique_resolution_events: JSON.parse(fixture.ledgerBytes).events });
@@ -915,7 +1107,7 @@ test("exact-current recovery classifies all-old, mixed, all-new, and unknown Flo
       run_id: paths.runId, request_sha256: requestSha256, authorization_sha256: authorizationSha256,
       authorization_key_id: "operator", authorization_nonce: "nonce", reducer: { id: "fixture" },
       result_core_sha256: "d".repeat(64),
-      protected_preimages: ["trust-bundle", "resolution-ledger", "stale-receipt"].map((id) => ({ id, pre: { presence: "absent", mode: null, size: 0, sha256: null } })),
+      protected_preimages: ["trust-bundle", "resolution-ledger", "stale-receipt", "flow-state"].map((id) => ({ id, pre: { presence: "absent", mode: null, size: 0, sha256: null } })),
       artifacts: artifacts.map(({ id, pre, post }) => ({ id, pre, post })),
     };
     assert.deepEqual(validateExactCurrentRecoveryPlan(plan), plan);
@@ -929,7 +1121,7 @@ test("exact-current recovery classifies all-old, mixed, all-new, and unknown Flo
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("reseal uses Flow's native mutation lock to serialize a legitimate concurrent lifecycle write", async () => {
+test("authority project transactions use Flow's native mutation lock and preserve a queued public writer", async () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-reseal-native-flow-lock-"));
   const runId = "run-1";
   const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
@@ -946,17 +1138,14 @@ test("reseal uses Flow's native mutation lock to serialize a legitimate concurre
     let transactionEntered;
     const entered = new Promise((resolve) => { transactionEntered = resolve; });
     const release = new Promise((resolve) => { releaseTransaction = resolve; });
-    const transaction = withCanonicalFlowRunMutationLock(
+    const transaction = inCanonicalFlowProjectTransaction(
       { projectRoot, sessionDir, runId },
-      () => inProjectTransaction(
-        { projectRoot, sessionDir, runId },
-        { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) },
-        async () => {
-          transactionEntered();
-          await release;
-          fs.writeFileSync(bundleFile, '{"claims":[{"id":"resealed"}]}\n');
-        },
-      ),
+      { request_sha256: "a".repeat(64), authorization_sha256: "b".repeat(64) },
+      async () => {
+        transactionEntered();
+        await release;
+        fs.writeFileSync(bundleFile, '{"claims":[{"id":"resolved"}]}\n');
+      },
       withRunMutationLock,
     );
     await entered;
@@ -990,7 +1179,7 @@ test("reseal uses Flow's native mutation lock to serialize a legitimate concurre
     await transaction;
     const childResult = await childResultPromise;
     assert.deepEqual(childResult, { code: 0, stderr: "" });
-    assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"resealed"}]}\n');
+    assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"resolved"}]}\n');
     const run = await loadRun(runId, projectRoot);
     assert.equal(run.state.status, "paused");
     assert.equal(run.state.lifecycle.at(-1)?.authority?.request_ref, "test:native-lock", "the legitimate foreign Flow write must be preserved");
@@ -1159,9 +1348,12 @@ for (const journalStatus of ["prepared", "committed"]) {
       fs.writeFileSync(journalFile, `${JSON.stringify(journal)}\n`);
 
       let childResultPromise;
-      await withCanonicalFlowRunMutationLock(
+      await recoverMatchingTransactionWithCanonicalFlowLock(
         { projectRoot, sessionDir, runId },
-        async () => {
+        binding,
+        async (lockedRunId, lockedProjectRoot, operation) => withRunMutationLock(lockedRunId, lockedProjectRoot, async () => {
+          assert.equal(lockedRunId, runId);
+          assert.equal(lockedProjectRoot, projectRoot);
           const lockRoot = path.join(flowRoot, ".mutation.lock");
           const currentTickets = fs.readdirSync(lockRoot, { withFileTypes: true })
             .filter((entry) => entry.isDirectory() && entry.name.startsWith("ticket-"))
@@ -1203,13 +1395,12 @@ for (const journalStatus of ["prepared", "committed"]) {
           assert.equal(childExited, false, "public pause must wait for recovery to release the native ticket");
 
           fs.writeFileSync(bundleFile, '{"claims":[{"id":"interrupted"}]}\n');
-          assert.equal(recoverMatchingTransaction({ projectRoot, sessionDir, runId }, binding), true);
+          assert.equal(await operation(), true);
           assert.equal(fs.existsSync(currentTicket), true, "current recovery ticket must remain intact");
           assert.equal(fs.existsSync(path.join(flowRoot, legacyObsoleteTicket)), false, "obsolete journal ticket must never be restored");
           assert.equal(fs.readFileSync(bundleFile, "utf8"), '{"claims":[{"id":"baseline"}]}\n');
           assert.equal(JSON.parse(fs.readFileSync(journalFile, "utf8")).status, "rolled_back");
-        },
-        withRunMutationLock,
+        }),
       );
 
       assert.deepEqual(await childResultPromise, { code: 0, stderr: "" });
@@ -1260,15 +1451,37 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   const resealBranch = source.slice(source.indexOf("async function prepareVerificationResealTransaction"), source.indexOf("function assertVerificationResealStages"));
   assert.doesNotMatch(resealBranch, /\binProjectTransaction\s*\(/, "reseal must never use the recursive tree transaction");
   const fenceWriter = source.slice(source.indexOf("async function writeVerificationResealFence"), source.indexOf("function stageVerificationResealImage"));
-  assert.match(fenceWriter, /\bwriteRunRecoveryFence\s*\(/, "reseal must use Flow's native generated-fence writer");
+  assert.match(fenceWriter, /\bwriteRunRecoveryFenceWithExpectedGeneration\s*\(/, "reseal must use Flow's native coordinator-bound fence writer");
   assert.match(fenceWriter, /\bfinalizeRunRecoveryFence\s*\(/, "reseal must use Flow's generation-bound native fence finalizer");
   assert.doesNotMatch(fenceWriter, /\batomicWrite\s*\(/, "reseal must not locally synthesize a Flow recovery fence");
+  for (const [entrypoint, lockedEntrypoint] of [
+    ["finalizeVerificationResealTransaction", "finalizeVerificationResealTransactionLocked"],
+    ["finalizeExactCurrentRecoveryPublication", "finalizeExactCurrentRecoveryPublicationLocked"],
+  ]) {
+    const wrapper = source.slice(
+      source.indexOf(`async function ${entrypoint}`),
+      source.indexOf(`async function ${lockedEntrypoint}`),
+    );
+    assert.match(wrapper, /\bwithCoordinatorAssignmentLock\s*\(/, `${entrypoint} must retain the coordinator guard through Flow finalization`);
+  }
+  for (const [entrypoint, nextEntrypoint] of [
+    ["interactiveResealWorker", "interactiveExactCurrentRecoveryWorker"],
+    ["interactiveExactCurrentRecoveryWorker", "main"],
+  ]) {
+    const worker = source.slice(
+      source.indexOf(`async function ${entrypoint}`),
+      source.indexOf(`async function ${nextEntrypoint}`),
+    );
+    const assignmentLock = worker.indexOf("withCoordinatorAssignmentLock");
+    const flowLock = worker.indexOf("withCanonicalFlowRunMutationLock");
+    assert.ok(assignmentLock >= 0 && flowLock > assignmentLock, `${entrypoint} must acquire assignment before Flow mutation`);
+  }
   assert.throws(
     () => assertVerificationResealFlowCapabilities({ withRunMutationLock() {} }),
     /withRunRecoveryLock is unavailable/,
   );
   assert.equal(assertVerificationResealFlowCapabilities({
-    withRunMutationLock() {}, withRunRecoveryLock() {}, writeRunRecoveryFence() {}, finalizeRunRecoveryFence() {},
+    withRunMutationLock() {}, withRunRecoveryLock() {}, writeRunRecoveryFenceWithExpectedGeneration() {}, finalizeRunRecoveryFence() {},
   }), true);
   const rootOperation = source.slice(source.indexOf("async function processRootOperation"), source.indexOf("function response"));
   assert.ok(
@@ -1281,6 +1494,98 @@ test("reseal plan is closed over exactly six fixed artifact identities and no jo
   );
   assert.match(replacement, /atomicReplaceExpectedPreimage\s*\(/);
   assert.doesNotMatch(replacement, /fs\.(?:renameSync|unlinkSync|writeFileSync)\s*\(/, "the reference coordinator must not implement leaf replacement");
+});
+
+test("finalized reseal cleanup preserves a legitimate writer that superseded live postimages", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reseal-finalized-cleanup-"));
+  const runId = "run-1";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", runId);
+  const paths = { projectRoot: root, sessionDir, runId };
+  const requestSha256 = "2".repeat(64);
+  const recoveryGeneration = "22222222-2222-4222-8222-222222222222";
+  const authorization = {
+    signature: { key_id: "operator" }, nonce: "nonce",
+    assignment_generation_sha256: "5".repeat(64), assignment_actor_key: "actor",
+    assignment_actor: { runtime: "test", session_id: "session", host: "host", human: null },
+  };
+  const present = { presence: "present", mode: 0o644, size: 7, sha256: "a".repeat(64) };
+  const plan = {
+    schema_version: "1.0",
+    kind: "flow-agents.verification-reseal-transaction.v1",
+    recovery_id: "1".repeat(64),
+    run_id: runId,
+    request_sha256: requestSha256,
+    authorization_sha256: sha256(canonicalJson(authorization)),
+    authorization_key_id: "operator",
+    authorization_nonce: "nonce",
+    authorization,
+    assignment: { generation_sha256: "5".repeat(64), actor_key: "actor", actor: authorization.assignment_actor },
+    reducer: { package: "@kontourai/flow", version: "test" },
+    result_core_sha256: "4".repeat(64),
+    artifacts: VERIFICATION_RESEAL_ARTIFACT_IDS.map((id) => ({ id, parent: { dev: 1, ino: 1 }, pre: present, post: present })),
+  };
+  const completion = {
+    schema_version: "2.0",
+    kind: "kontourai.lifecycle-authority.completion",
+    action: "reseal-verification-evidence",
+    request_sha256: requestSha256,
+    run_id: runId,
+    operation_status: "applied",
+    result_core_sha256: plan.result_core_sha256,
+    coordinator_runtime_sha256: "6".repeat(64),
+    completed_at: "2026-07-29T04:00:00.000Z",
+    recovery_generation: recoveryGeneration,
+    signature: { algorithm: "ed25519", value: "test-signature" },
+  };
+  try {
+    const files = verificationResealArtifactFiles(paths, requestSha256);
+    for (const [id, file] of files) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `writer-${id}\n`, { mode: 0o644 });
+      fs.writeFileSync(`${file}.verification-reseal-old`, "old\n", { mode: 0o644 });
+      fs.writeFileSync(`${file}.verification-reseal-new`, "new\n", { mode: 0o644 });
+    }
+    const planFile = path.join(sessionDir, ".verification-reseal.transaction.json");
+    fs.writeFileSync(planFile, '{"signed":"plan"}\n', { mode: 0o644 });
+    fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completion)}\n`, { mode: 0o644 });
+    const livePostWriterBytes = new Map([...files].map(([id, file]) => [id, fs.readFileSync(file)]));
+    const loaded = await loadProtectedReadFromCoordinator();
+
+    assert.throws(
+      () => loaded.cleanupFinalizedVerificationResealReplay(paths, plan, completion, {
+        protocol: "flow.run-recovery-fence.v1",
+        run_id: runId,
+        recovery_id: plan.recovery_id,
+        status: "open",
+        updated_at: "2026-07-29T04:00:01.000Z",
+        generation: "11111111-1111-4111-8111-111111111111",
+        previous_generation: "33333333-3333-4333-8333-333333333333",
+      }),
+      /does not bind the finalized Flow recovery generation/,
+    );
+    assert.equal(fs.existsSync(planFile), true, "generation mismatch must preserve the recovery plan");
+
+    assert.deepEqual(
+      loaded.cleanupFinalizedVerificationResealReplay(paths, plan, completion, {
+        protocol: "flow.run-recovery-fence.v1",
+        run_id: runId,
+        recovery_id: plan.recovery_id,
+        status: "open",
+        updated_at: "2026-07-29T04:00:01.000Z",
+        generation: "11111111-1111-4111-8111-111111111111",
+        previous_generation: recoveryGeneration,
+      }),
+      { run_id: runId, finalized: true, cleanup_replayed: true },
+    );
+    for (const [id, file] of files) {
+      assert.deepEqual(fs.readFileSync(file), livePostWriterBytes.get(id), `${id} writer bytes must survive cleanup`);
+      assert.equal(fs.existsSync(`${file}.verification-reseal-old`), false);
+      assert.equal(fs.existsSync(`${file}.verification-reseal-new`), false);
+    }
+    assert.equal(fs.existsSync(planFile), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("reseal delegates literal expected-preimage replacement and pins the opened parent", () => {
@@ -1645,13 +1950,19 @@ test("coordinator rejects forged or stale current completions before history rep
     const fixture = twoEdgeLedgerFixture();
     const sessionDir = path.join(directory, "session"); fs.mkdirSync(sessionDir);
     const unsigned = {
-      schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "a".repeat(64), run_id: fixture.authorization.run_id,
+      schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "a".repeat(64), run_id: fixture.authorization.run_id,
       operation_status: "applied", result_core_sha256: loaded.lifecycleAuthorityResultDigest(fixture.bundle, fixture.ledger.events), coordinator_runtime_sha256: "b".repeat(64), completed_at: "2030-01-01T00:00:00.000Z",
     };
     const complete = (value) => ({ ...value, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(value)), privateKey).toString("base64") } });
     const writeCompletion = (completion) => fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completion)}\n`, { mode: 0o600 });
     writeCompletion(complete(unsigned));
     assert.equal(loaded.verifyCurrentLifecycleCompletion({ sessionDir, runId: fixture.authorization.run_id }, fixture.bundle, fixture.ledger.events).result_core_sha256, unsigned.result_core_sha256);
+    writeCompletion(complete({ ...unsigned, schema_version: "1.0" }));
+    assert.throws(
+      () => loaded.verifyCurrentLifecycleCompletion({ sessionDir, runId: fixture.authorization.run_id }, fixture.bundle, fixture.ledger.events),
+      /complete or archive this run with its previous lifecycle helper.*start a new Builder run/s,
+      "legacy completion schemas fail closed with explicit upgrade guidance",
+    );
     writeCompletion({ ...complete(unsigned), result_core_sha256: "f".repeat(64) });
     assert.throws(() => loaded.verifyCurrentLifecycleCompletion({ sessionDir, runId: fixture.authorization.run_id }, fixture.bundle, fixture.ledger.events), /completion signature is invalid/i, "a forged completion is rejected cryptographically");
     writeCompletion(complete({ ...unsigned, result_core_sha256: "f".repeat(64) }));
@@ -1685,7 +1996,7 @@ test("committed recovery replaces only an authenticated stale receipt with an ex
     fs.writeFileSync(path.join(sessionDir, "trust.bundle"), `${JSON.stringify(bundle)}\n`, { mode: 0o600 });
     const exactCore = loaded.lifecycleAuthorityResultDigest(bundle, []);
     const signedCompletion = (requestSha256, resultCoreSha256, action = "repair-critique-resolution-history", operationStatus = "applied", overrides = {}) => {
-      const unsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z", ...overrides };
+      const unsigned = { schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: requestSha256, run_id: "run-replay", operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: "a".repeat(64), completed_at: "2030-01-01T00:00:00.000Z", ...(["reseal-verification-evidence", "recover-exact-current-completion"].includes(action) ? { recovery_generation: "11111111-1111-4111-8111-111111111111" } : {}), ...overrides };
       return { ...unsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(unsigned)), privateKey).toString("base64") } };
     };
     const exactCandidate = signedCompletion("b".repeat(64), exactCore, "reseal-verification-evidence");
@@ -1765,6 +2076,15 @@ test("committed recovery replaces only an authenticated stale receipt with an ex
         `${action} replay reuses its exact signed durable completion`,
       );
     }
+    const legacyDurableCompletion = signedCompletion("9".repeat(64), exactCore, "cancel", "applied", { schema_version: "1.0" });
+    assert.throws(
+      () => loaded.durableCompletionRecord(
+        { authorization_sha256: "8".repeat(64), request_sha256: "9".repeat(64), result_core_sha256: exactCore, completion: legacyDurableCompletion },
+        { action: "cancel", request_sha256: "9".repeat(64) }, { runId: "run-replay" }, "8".repeat(64),
+      ),
+      /complete or archive this run with its previous lifecycle helper.*start a new Builder run/s,
+      "legacy durable completions cannot be replayed after helper upgrade",
+    );
   } finally {
     if (moduleDirectory) fs.rmSync(moduleDirectory, { recursive: true, force: true });
     fs.rmSync(directory, { recursive: true, force: true });
@@ -1791,7 +2111,7 @@ test("historical repair bridge is request-keyed, append-only, and rejects an alt
     const event = { event_id: "historical-event", event_hash: "e".repeat(64), operation: "resolve-critique", run_id: runId, signed_authorization: historicalAuthorization };
     const historicalBundle = { schema_version: "1.0", claims: [] };
     const resultCore = loaded.lifecycleAuthorityResultDigest(historicalBundle, [event]);
-    const completionUnsigned = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "a".repeat(64), run_id: runId, operation_status: "applied", result_core_sha256: resultCore, coordinator_runtime_sha256: "b".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
+    const completionUnsigned = { schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique", request_sha256: "a".repeat(64), run_id: runId, operation_status: "applied", result_core_sha256: resultCore, coordinator_runtime_sha256: "b".repeat(64), completed_at: "2030-01-01T00:00:00.000Z" };
     const completion = { ...completionUnsigned, signature: { algorithm: "ed25519", value: sign(null, Buffer.from(loaded.canonicalJson(completionUnsigned)), privateKey).toString("base64") } };
     fs.writeFileSync(path.join(sessionDir, "lifecycle-authority.completion.json"), `${JSON.stringify(completion)}\n`, { mode: 0o600 });
     const attachmentId = `lifecycle-authority:${completion.request_sha256}`;
@@ -1964,7 +2284,7 @@ test("coordinator verifies the raw-byte preimage before parsing and at the mutat
   );
   assert.match(
     source,
-    /await inProjectTransaction[\s\S]*?const currentBytes = protectedRegularFile\(bundleFile, "trust bundle", 4 \* 1024 \* 1024\);\s*assertAuthorizedBundlePreimage\(currentBytes, envelope\.action, authorization\);\s*if \(!currentBytes\.equals\(beforeBytes\)\)[\s\S]*?await synchronizeCanonicalFlow/s,
+    /await inCanonicalFlowProjectTransaction[\s\S]*?const currentBytes = protectedRegularFile\(bundleFile, "trust bundle", 4 \* 1024 \* 1024\);\s*assertAuthorizedBundlePreimage\(currentBytes, envelope\.action, authorization\);\s*if \(!currentBytes\.equals\(beforeBytes\)\)[\s\S]*?await synchronizeCanonicalFlow/s,
     "the coordinator must revalidate the same exact bytes before its first canonical mutation",
   );
 });

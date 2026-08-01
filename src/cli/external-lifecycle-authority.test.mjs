@@ -7,8 +7,10 @@ import * as lifecycleAuthority from "../../build/src/external-lifecycle-authorit
 
 const {
   LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH,
+  LIFECYCLE_AUTHORITY_COMPLETION_SCHEMA_VERSION,
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+  LifecycleAuthorityCompletionUpgradeRequiredError,
   invokeExternalLifecycleAuthority,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
@@ -21,7 +23,7 @@ const {
 
 const action = "cancel";
 const digest = "a".repeat(64);
-const completion = { schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action, request_sha256: digest, run_id: "run-1", operation_status: "applied", result_core_sha256: "b".repeat(64), coordinator_runtime_sha256: "c".repeat(64), completed_at: "2026-07-20T00:00:00.000Z", signature: { algorithm: "ed25519", value: "signed-by-external-authority" } };
+const completion = { schema_version: LIFECYCLE_AUTHORITY_COMPLETION_SCHEMA_VERSION, kind: "kontourai.lifecycle-authority.completion", action, request_sha256: digest, run_id: "run-1", operation_status: "applied", result_core_sha256: "b".repeat(64), coordinator_runtime_sha256: "c".repeat(64), completed_at: "2026-07-20T00:00:00.000Z", signature: { algorithm: "ed25519", value: "signed-by-external-authority" } };
 const valid = { schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION, action, request_sha256: digest, status: "accepted", result: { run_id: "run-1", operation_status: "applied", completion } };
 const output = (overrides = {}) => `${JSON.stringify({ ...valid, ...overrides })}\n`;
 
@@ -155,8 +157,8 @@ function canonical(value) {
 }
 
 function signedCompletion(overrides = {}) {
-  const unsigned = {
-    schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+  const unsignedBase = {
+    schema_version: LIFECYCLE_AUTHORITY_COMPLETION_SCHEMA_VERSION,
     kind: "kontourai.lifecycle-authority.completion",
     action,
     request_sha256: digest,
@@ -167,6 +169,9 @@ function signedCompletion(overrides = {}) {
     completed_at: "2026-07-20T00:00:00.000Z",
     ...overrides,
   };
+  const unsigned = ["reseal-verification-evidence", "recover-exact-current-completion"].includes(unsignedBase.action)
+    ? { ...unsignedBase, recovery_generation: unsignedBase.recovery_generation ?? "11111111-1111-4111-8111-111111111111" }
+    : unsignedBase;
   return {
     ...unsigned,
     signature: {
@@ -399,6 +404,18 @@ test("strict current consumers reject a correctly signed replayed completion whi
     false,
     "a replayed completion cannot become exact-current authority even when its core digest matches",
   );
+}));
+
+test("completion schema upgrades fail closed with actionable typed guidance", () => withCompletionVerificationKey(() => {
+  const legacy = signedCompletion({ schema_version: "1.0", action: "resolve-critique" });
+  for (const verifyCompletion of [verifyLifecycleAuthorityCompletion, verifyHistoricalLifecycleAuthorityCompletion]) {
+    assert.throws(
+      () => verifyCompletion(legacy),
+      (error) => error instanceof LifecycleAuthorityCompletionUpgradeRequiredError
+        && error.code === "LIFECYCLE_AUTHORITY_COMPLETION_UPGRADE_REQUIRED"
+        && /complete or archive this run with its previous lifecycle helper.*start a new Builder run/s.test(error.message),
+    );
+  }
 }));
 
 test("purpose-specific provisional completion binds exact action run request and authority event", () => withCompletionVerificationKey(() => {

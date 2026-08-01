@@ -22,6 +22,7 @@ import {
 } from "./runtime-v1.mjs";
 
 export const PROTOCOL_VERSION = "1.0";
+export const COMPLETION_SCHEMA_VERSION = "2.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
 export const STATE_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-authority-v1";
 export const REGISTRY_FILE = `${CONFIG_ROOT}/keys.json`;
@@ -91,8 +92,10 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
   "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
   "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
+  "acceptance_claim_delta_count", "acceptance_claim_delta_sha256",
   "nonce", "expires_at", "requested_at", "signature",
 ];
+const VERIFICATION_RESEAL_AUTHORIZATION_VERSION = "2.0";
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 export function canonicalJson(value) {
@@ -224,6 +227,10 @@ function assertPrivilegedAuthorizationShape(authorization) {
         ? HOST_WORKFLOW_AUTHORIZATION_FIELDS
       : null;
   if (!fields) return authorization;
+  if (authorization.operation === "reseal-verification-evidence"
+      && authorization.schema_version !== VERIFICATION_RESEAL_AUTHORIZATION_VERSION) {
+    throw new Error("verification evidence reseal authorization schema is obsolete or unsupported; regenerate it with workflow reseal-verification-evidence-request");
+  }
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
   exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   if (authorization.operation !== "recover-exact-current-completion") {
@@ -327,10 +334,14 @@ export const VERIFICATION_RESEAL_ARTIFACT_IDS = Object.freeze([
   "flow-report-markdown",
 ]);
 const VERIFICATION_RESEAL_PLAN_FILE = ".verification-reseal.transaction.json";
+const FLOW_RECOVERY_GENERATION = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+function validFlowRecoveryGeneration(value) {
+  return typeof value === "string" && FLOW_RECOVERY_GENERATION.test(value);
+}
+const GENERATION_BOUND_ACTIONS = new Set(["reseal-verification-evidence", "recover-exact-current-completion"]);
 export const EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL = "flow-agents.exact-current-recovery-publication.v1";
 export const EXACT_CURRENT_RECOVERY_ARTIFACT_IDS = Object.freeze([
   "flow-manifest",
-  "flow-state",
   "flow-attachment",
   "flow-report-json",
   "flow-report-markdown",
@@ -460,6 +471,13 @@ export function recoverMatchingTransaction(paths, expectedBinding) {
   if (!recovered) throw new Error("prepared lifecycle transaction changed during recovery");
   return true;
 }
+export async function recoverMatchingTransactionWithCanonicalFlowLock(paths, expectedBinding, injectedLock = null) {
+  return withCanonicalFlowRunMutationLock(
+    paths,
+    () => recoverMatchingTransaction(paths, expectedBinding),
+    injectedLock,
+  );
+}
 function recoverPreparedTransactionForEntry(paths, expectedBinding) {
   const file = transactionJournal(paths);
   if (!fs.existsSync(file)) return false;
@@ -488,6 +506,13 @@ export async function inProjectTransaction(paths, binding, action) {
     atomicWrite(transactionJournal(paths), `${JSON.stringify({ ...journal, status: "rolled_back", rolled_back_at: new Date().toISOString() })}\n`);
     throw error;
   }
+}
+export async function inCanonicalFlowProjectTransaction(paths, binding, action, injectedLock = null) {
+  return withCanonicalFlowRunMutationLock(
+    paths,
+    () => inProjectTransaction(paths, binding, action),
+    injectedLock,
+  );
 }
 function protectedJson(file, label, maxBytes = 4 * 1024 * 1024) {
   return JSON.parse(protectedRegularFile(file, label, maxBytes).toString("utf8"));
@@ -543,10 +568,19 @@ function lifecycleAuthorityResultDigest(bundle, resolutionEvents) {
   return sha256({ ...bundle, critique_resolution_events: resolutionEvents });
 }
 function assertLifecycleCompletionIdentity(paths, completion, operationStatuses, label) {
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  if (completion?.schema_version !== COMPLETION_SCHEMA_VERSION) {
+    throw new Error(
+      `${label} schema ${JSON.stringify(completion?.schema_version)} is not supported; `
+      + "complete or archive this run with its previous lifecycle helper before upgrading, "
+      + "or start a new Builder run after the helper upgrade",
+    );
+  }
+  const generationBound = GENERATION_BOUND_ACTIONS.has(completion?.action);
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   exact(completion, fields, label);
-  if (completion.schema_version !== PROTOCOL_VERSION || completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
+  if (completion.kind !== "kontourai.lifecycle-authority.completion" || !["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(completion.action) || completion.run_id !== paths.runId || !operationStatuses.includes(completion.operation_status) || typeof completion.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(completion.request_sha256)) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"]) if (typeof completion[key] !== "string" || !/^[a-f0-9]{64}$/.test(completion[key])) throw new Error(`${label} ${key} is invalid`);
+  if (generationBound && !validFlowRecoveryGeneration(completion.recovery_generation)) throw new Error(`${label} recovery_generation is invalid`);
   if (typeof completion.completed_at !== "string" || !Number.isFinite(Date.parse(completion.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(completion.signature) || completion.signature.algorithm !== "ed25519" || typeof completion.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(completion.signature.value)) throw new Error(`${label} signature is invalid`);
   const { signature, ...unsigned } = completion;
@@ -628,14 +662,17 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.9.0" || pin.release_commit !== "a7c101f" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.12.0" || pin.release_commit !== "b1483cf" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFenceWithExpectedGeneration", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
+  }
+  if (flow.FLOW_RUN_RECOVERY_FINALIZE_BEFORE_OPEN !== "flow.run-recovery.finalize-before-open.v1") {
+    throw new Error("pinned Flow reducer artifact does not support atomic recovery pre-open assertions");
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
   exactObject(identity, pin.reducer, "installed Flow reducer");
@@ -643,14 +680,14 @@ async function loadPinnedFlowReducer() {
     flow,
     withRunMutationLock: flow.withRunMutationLock,
     withRunRecoveryLock: flow.withRunRecoveryLock,
-    writeRunRecoveryFence: flow.writeRunRecoveryFence,
+    writeRunRecoveryFenceWithExpectedGeneration: flow.writeRunRecoveryFenceWithExpectedGeneration,
     finalizeRunRecoveryFence: flow.finalizeRunRecoveryFence,
     pin,
     artifact_sha256: sha256File(entry, "pinned Flow reducer artifact"),
   };
 }
 export function assertVerificationResealFlowCapabilities(runStore) {
-  for (const name of ["withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFenceWithExpectedGeneration", "finalizeRunRecoveryFence"]) {
     if (typeof runStore?.[name] !== "function") throw new Error(`canonical Flow verification reseal capability ${name} is unavailable`);
   }
   return true;
@@ -697,7 +734,6 @@ export function exactCurrentRecoveryArtifactFiles(paths, requestSha256, authoriz
   const files = canonicalFlowPaths(paths);
   return new Map([
     ["flow-manifest", files.manifest],
-    ["flow-state", files.state],
     ["flow-attachment", path.join(files.root, "evidence", `lifecycle-authority:${requestSha256}:${authorizationSha256}.json`)],
     ["flow-report-json", files.reportJson],
     ["flow-report-markdown", files.reportMarkdown],
@@ -908,32 +944,34 @@ function inspectVerificationResealFence(paths) {
   ], "Flow recovery fence");
   if (fence.protocol !== FLOW_RECOVERY_FENCE_PROTOCOL || fence.run_id !== paths.runId
       || !/^[a-f0-9]{64}$/.test(String(fence.recovery_id))
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.generation))
+      || !validFlowRecoveryGeneration(fence.generation)
       || (fence.previous_generation !== undefined
-        && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(fence.previous_generation)))
+        && !validFlowRecoveryGeneration(fence.previous_generation))
       || !["active", "open"].includes(fence.status)
       || typeof fence.updated_at !== "string" || !Number.isFinite(Date.parse(fence.updated_at))) {
     throw new Error("Flow recovery fence is malformed or unsupported");
   }
   return fence;
 }
-async function writeVerificationResealFence(paths, recoveryId, status) {
-  if (!/^[a-f0-9]{64}$/.test(String(recoveryId)) || status !== "active") {
+async function writeVerificationResealFence(paths, recoveryId, status, expectedGeneration) {
+  if (!/^[a-f0-9]{64}$/.test(String(recoveryId)) || status !== "active"
+      || !validFlowRecoveryGeneration(expectedGeneration)) {
     throw new Error("Flow recovery fence update is invalid");
   }
-  const { writeRunRecoveryFence } = await loadPinnedFlowReducer();
-  if (typeof writeRunRecoveryFence !== "function") throw new Error("canonical Flow recovery fence writer is unavailable");
-  await writeRunRecoveryFence(paths.runId, {
+  const { writeRunRecoveryFenceWithExpectedGeneration } = await loadPinnedFlowReducer();
+  if (typeof writeRunRecoveryFenceWithExpectedGeneration !== "function") throw new Error("canonical Flow coordinator-bound recovery fence writer is unavailable");
+  await writeRunRecoveryFenceWithExpectedGeneration(paths.runId, {
     protocol: FLOW_RECOVERY_FENCE_PROTOCOL,
     run_id: paths.runId,
     recovery_id: recoveryId,
     status,
     updated_at: new Date().toISOString(),
+    expected_generation: expectedGeneration,
   }, paths.projectRoot);
 }
-async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration) {
+async function finalizeVerificationResealFence(paths, recoveryId, expectedGeneration, beforeOpen = undefined) {
   if (!/^[a-f0-9]{64}$/.test(String(recoveryId))
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(expectedGeneration))) {
+      || !validFlowRecoveryGeneration(expectedGeneration)) {
     throw new Error("Flow recovery fence finalization is invalid");
   }
   const { finalizeRunRecoveryFence } = await loadPinnedFlowReducer();
@@ -942,7 +980,7 @@ async function finalizeVerificationResealFence(paths, recoveryId, expectedGenera
     recovery_id: recoveryId,
     expected_generation: expectedGeneration,
     updated_at: new Date().toISOString(),
-  }, paths.projectRoot);
+  }, paths.projectRoot, { beforeOpen });
 }
 function stageVerificationResealImage(file, bytes, mode, image) {
   const stage = verificationResealStageFile(file, image);
@@ -967,8 +1005,8 @@ function stageExactCurrentRecoveryImage(file, bytes, mode, image) {
 function readSignedVerificationResealPlan(paths) {
   const capability = protectedJson(verificationResealPlanFile(paths), "verification reseal signed plan", 1024 * 1024);
   const value = verifiedCapability(capability, "reseal-plan-capability");
-  if (!record(value.plan)) throw new Error("verification reseal signed plan payload is invalid");
-  return { capability, plan: validateVerificationResealPlan(value.plan) };
+  if (!record(value.plan) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("verification reseal signed plan payload is invalid");
+  return { capability, plan: validateVerificationResealPlan(value.plan), recovery_generation: value.recovery_generation };
 }
 export function classifyVerificationResealArtifacts(paths, plan) {
   const files = verificationResealArtifactFiles(paths, plan.request_sha256);
@@ -1092,11 +1130,14 @@ function currentGatePolicy(definition, state) {
 function flowGatePolicyDigest(policy) {
   return sha256(canonicalJson({ gate_id: policy.gate_id, requirements: policy.requirements }));
 }
-async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null, attachmentGeneration = null) {
+async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage = null, attachmentGeneration = null, evaluationMode = "evaluate") {
+  if (!["evaluate", "attach-only"].includes(evaluationMode)) throw new Error("canonical Flow synchronization evaluation mode is invalid");
   const { flow, pin, artifact_sha256 } = await loadPinnedFlowReducer();
   const files = canonicalFlowPaths(paths);
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
-  const stateBytes = protectedRegularFile(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const statePreimage = readVerificationResealArtifact(files.state, "canonical Flow state");
+  if (statePreimage.bytes === null) throw new Error("canonical Flow state is missing");
+  const stateBytes = statePreimage.bytes;
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const definition = JSON.parse(definitionBytes.toString("utf8"));
   const state = JSON.parse(stateBytes.toString("utf8"));
@@ -1127,9 +1168,18 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   const reduced = flow.reduceTrustAttachment({
     run: { definition, state, manifest }, bundle,
     attachment: { id: attachmentId, gate_id: gateId, attached_at: attachedAt, original_path: path.relative(paths.projectRoot, path.join(paths.sessionDir, "trust.bundle")), stored_path: storedPath, sha256: sha256(bundleBytes), ...(supersede.length ? { supersede } : {}) },
+    evaluation_mode: evaluationMode,
     now: attachedAt, dependencies: flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES
   });
   exactObject(reduced.identity, pin.reducer, "Flow reducer result");
+  if (reduced.evaluation_mode !== evaluationMode) throw new Error("Flow reducer result evaluation mode does not match the requested synchronization mode");
+  const writesState = reduced.write?.artifacts?.some((artifact) => artifact?.path === "state.json") === true;
+  if (evaluationMode === "attach-only") {
+    exactObject(reduced.next_state, state, "attach-only Flow state");
+    if (reduced.evaluation !== null || writesState) throw new Error("attach-only Flow synchronization attempted to evaluate or write canonical state");
+  } else if (!record(reduced.evaluation) || !writesState) {
+    throw new Error("evaluating Flow synchronization omitted evaluation or canonical state");
+  }
   const evidenceFile = path.join(files.root, storedPath);
   if (!fs.readFileSync(files.definition).equals(definitionBytes) || !fs.readFileSync(files.state).equals(stateBytes) || !fs.readFileSync(files.manifest).equals(manifestBytes)) throw new Error("canonical Flow preimage changed during lifecycle trust synchronization");
   const postimages = [{ file: evidenceFile, bytes: bundleBytes, label: "canonical Flow stored trust bundle", max_bytes: 4 * 1024 * 1024 }];
@@ -1138,10 +1188,16 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
     const bytes = Buffer.from(typeof artifact.value === "string" ? artifact.value : `${JSON.stringify(artifact.value, null, 2)}\n`);
     postimages.push({ file: destination, bytes, label: artifact.path === "evidence/manifest.json" ? "canonical Flow evidence manifest" : "canonical Flow reducer artifact", max_bytes: artifact.path === "evidence/manifest.json" ? MAX_CANONICAL_FLOW_MANIFEST_BYTES : 16 * 1024 * 1024 });
   }
-  return { reducer: { ...reduced.identity, artifact_sha256 }, attachment_id: attachmentId, flow_preimage: flowPreimage, postimages };
+  return {
+    reducer: { ...reduced.identity, artifact_sha256 },
+    attachment_id: attachmentId,
+    flow_preimage: flowPreimage,
+    flow_state_preimage: statePreimage.descriptor,
+    postimages,
+  };
 }
 async function synchronizeCanonicalFlow(paths, bundle, envelope, expectedPreimage = null) {
-  const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage);
+  const prepared = await prepareCanonicalFlowSynchronization(paths, bundle, envelope, expectedPreimage, null, "attach-only");
   for (const postimage of prepared.postimages) atomicWrite(postimage.file, postimage.bytes, 0o644);
   return prepared;
 }
@@ -1176,6 +1232,7 @@ function assignmentLockOwner(file) {
 }
 async function acquireCoordinatorAssignmentLock(paths) {
   const lockDir = assignmentLockDir(paths);
+  fs.mkdirSync(path.dirname(lockDir), { recursive: true, mode: 0o700 });
   const ownerFile = path.join(lockDir, "owner.json");
   const token = crypto.randomBytes(16).toString("hex");
   const deadline = Date.now() + 30_000;
@@ -1299,8 +1356,12 @@ async function archiveCanonicalSession(paths, authorization) {
   fs.renameSync(paths.sessionDir, destination);
   return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(paths.projectRoot, destination) }) };
 }
-function completion(envelope, paths, operationStatus, resultCoreSha256) {
-  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
+function completion(envelope, paths, operationStatus, resultCoreSha256, recoveryGeneration = null) {
+  const generationBound = GENERATION_BOUND_ACTIONS.has(envelope.action);
+  if (generationBound !== (recoveryGeneration !== null) || (generationBound && !validFlowRecoveryGeneration(recoveryGeneration))) {
+    throw new Error("lifecycle completion recovery generation is invalid");
+  }
+  const unsigned = { schema_version: COMPLETION_SCHEMA_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString(), ...(generationBound ? { recovery_generation: recoveryGeneration } : {}) };
   const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
@@ -1498,8 +1559,9 @@ function assertVerificationResealStages(paths, plan) {
 }
 async function publishVerificationResealTransaction(paths, capability, binding, { lockHeld = false } = {}) {
   const value = verifiedCapability(capability, "reseal-plan-capability");
-  if (!record(value.plan)) throw new Error("verification reseal plan capability payload is invalid");
+  if (!record(value.plan) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("verification reseal plan capability payload is invalid");
   const plan = assertVerificationResealPlanBinding(value.plan, paths, binding);
+  const expectedGeneration = value.recovery_generation;
   const atomicReplaceCapability = loadVerificationResealAtomicReplaceCapability();
   const observedFence = inspectVerificationResealFence(paths);
   const withLock = observedFence.status === "active"
@@ -1516,16 +1578,16 @@ async function publishVerificationResealTransaction(paths, capability, binding, 
     const classification = classifyVerificationResealArtifacts(paths, plan);
     if (classification === "unknown") {
       const fence = inspectVerificationResealFence(paths);
-      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active", expectedGeneration);
+      else if (fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("verification reseal recovery fence belongs to another generation");
       quarantineVerificationResealTransaction(paths, plan);
       throw new Error("verification reseal artifacts are mixed or unknown and were quarantined");
     }
     if (classification === "old") {
       await assertVerificationResealFinalPublicationBoundary(paths, plan);
       const fence = inspectVerificationResealFence(paths);
-      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active", expectedGeneration);
+      else if (fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("verification reseal recovery fence belongs to another generation");
       const files = verificationResealArtifactFiles(paths, plan.request_sha256);
       for (const artifact of plan.artifacts) {
         const file = files.get(artifact.id);
@@ -1540,12 +1602,13 @@ async function publishVerificationResealTransaction(paths, capability, binding, 
     }
     if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal publication did not install the exact postimages");
     const fence = inspectVerificationResealFence(paths);
-    if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal publication lost its active Flow recovery fence");
-    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id };
+    if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("verification reseal publication lost its root-bound active Flow recovery fence");
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, recovery_generation: expectedGeneration };
   };
   return lockHeld ? publish() : withCoordinatorAssignmentLock(paths, () => withLock(publish));
 }
-async function recoverVerificationResealTransaction(paths, binding) {
+async function recoverVerificationResealTransaction(paths, binding, expectedGeneration) {
+  if (!validFlowRecoveryGeneration(expectedGeneration)) throw new Error("verification reseal recovery generation is invalid");
   const observedFence = inspectVerificationResealFence(paths);
   const withLock = observedFence.status === "active"
     ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
@@ -1557,37 +1620,54 @@ async function recoverVerificationResealTransaction(paths, binding) {
       if (fence.status === "active") throw new Error("active Flow recovery fence has no signed verification reseal plan");
       return { run_id: paths.runId, recovered: false, state: "none" };
     }
-    const { capability, plan } = readSignedVerificationResealPlan(paths);
+    const { capability, plan, recovery_generation: signedGeneration } = readSignedVerificationResealPlan(paths);
+    if (signedGeneration !== expectedGeneration) throw new Error("verification reseal signed plan does not bind the root recovery generation");
     assertVerificationResealPlanBinding(plan, paths, binding);
     const classification = classifyVerificationResealArtifacts(paths, plan);
     if (classification === "unknown") {
       const fence = inspectVerificationResealFence(paths);
-      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-      else if (fence.recovery_id !== plan.recovery_id) throw new Error("verification reseal recovery fence belongs to another generation");
+      if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active", expectedGeneration);
+      else if (fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("verification reseal recovery fence belongs to another generation");
       quarantineVerificationResealTransaction(paths, plan);
       throw new Error("verification reseal recovery found mixed or unknown artifacts and quarantined them");
     }
     if (classification === "new") {
       const fence = inspectVerificationResealFence(paths);
-      if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id) throw new Error("published verification reseal generation is missing its active recovery fence");
-      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+      if (fence.status !== "active" || fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("published verification reseal generation is missing its root-bound active recovery fence");
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256, recovery_generation: expectedGeneration };
     }
     return { run_id: paths.runId, recovered: true, state: "old", capability };
   }));
 }
 async function finalizeVerificationResealTransaction(paths, completion) {
+  return withCoordinatorAssignmentLock(
+    paths,
+    () => finalizeVerificationResealTransactionLocked(paths, completion),
+  );
+}
+function cleanupFinalizedVerificationResealReplay(paths, plan, completion, observedFence) {
+  validateVerificationResealPlan(plan);
+  if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
+      || observedFence.previous_generation !== completion.recovery_generation) {
+    throw new Error("verification reseal cleanup replay does not bind the finalized Flow recovery generation");
+  }
+  if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
+    throw new Error("verification reseal cleanup replay does not bind the signed plan result");
+  }
+  const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
+  if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal cleanup replay receipt is not exact");
+  // Once Flow has durably finalized this exact generation, ordinary writers may
+  // supersede its postimages. Cleanup removes only the signed plan and private
+  // stage files, so live Flow and session evidence must remain untouched.
+  cleanupVerificationResealTransaction(paths, plan);
+  return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+}
+async function finalizeVerificationResealTransactionLocked(paths, completion) {
   const observedFence = inspectVerificationResealFence(paths);
   if (observedFence.status !== "active") {
     if (fs.existsSync(verificationResealPlanFile(paths))) {
       const { plan } = readSignedVerificationResealPlan(paths);
-      if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
-        throw new Error("verification reseal cleanup replay does not bind the signed plan result");
-      }
-      const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
-      if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal cleanup replay receipt is not exact");
-      if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cleanup replay does not retain exact postimages");
-      cleanupVerificationResealTransaction(paths, plan);
-      return { run_id: paths.runId, finalized: true, cleanup_replayed: true };
+      return cleanupFinalizedVerificationResealReplay(paths, plan, completion, observedFence);
     }
     return { run_id: paths.runId, finalized: false };
   }
@@ -1596,6 +1676,7 @@ async function finalizeVerificationResealTransaction(paths, completion) {
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
       throw new Error("verification reseal durable completion does not bind the signed plan result");
     }
+    if (completion.recovery_generation !== observedFence.generation) throw new Error("verification reseal completion does not bind the active Flow recovery generation");
     const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal completion receipt", 256 * 1024);
     if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal exact completion receipt is not installed");
     if (classifyVerificationResealArtifacts(paths, plan) !== "new") throw new Error("verification reseal cannot finalize without exact postimages");
@@ -1606,7 +1687,11 @@ async function finalizeVerificationResealTransaction(paths, completion) {
     }
     return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
   });
-  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation, async () => {
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "verification reseal pre-open completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("verification reseal pre-open completion receipt changed");
+    if (classifyVerificationResealArtifacts(paths, finalized.plan) !== "new") throw new Error("verification reseal pre-open postimages changed");
+  });
   cleanupVerificationResealTransaction(paths, finalized.plan);
   return finalized.result;
 }
@@ -1783,6 +1868,7 @@ function exactCurrentRecoveryProtectedFiles(paths) {
     ["trust-bundle", path.join(paths.sessionDir, "trust.bundle")],
     ["resolution-ledger", resolutionEventLedgerFile(paths)],
     ["stale-receipt", path.join(paths.sessionDir, "lifecycle-authority.completion.json")],
+    ["flow-state", canonicalFlowPaths(paths).state],
   ]);
 }
 export function validateExactCurrentRecoveryPlan(plan) {
@@ -1797,12 +1883,12 @@ export function validateExactCurrentRecoveryPlan(plan) {
       || typeof plan.authorization_key_id !== "string" || !plan.authorization_key_id
       || typeof plan.authorization_nonce !== "string" || !plan.authorization_nonce
       || !record(plan.reducer) || !/^[a-f0-9]{64}$/.test(String(plan.result_core_sha256))
-      || !Array.isArray(plan.protected_preimages) || plan.protected_preimages.length !== 3
+      || !Array.isArray(plan.protected_preimages) || plan.protected_preimages.length !== 4
       || !Array.isArray(plan.artifacts) || plan.artifacts.length !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length) {
     throw new Error("exact-current recovery publication plan identity is invalid");
   }
   const protectedIds = plan.protected_preimages.map((artifact) => artifact?.id);
-  if (canonicalJson(protectedIds) !== canonicalJson(["trust-bundle", "resolution-ledger", "stale-receipt"])) {
+  if (canonicalJson(protectedIds) !== canonicalJson(["trust-bundle", "resolution-ledger", "stale-receipt", "flow-state"])) {
     throw new Error("exact-current recovery plan must bind exactly the protected evidence inputs");
   }
   for (const artifact of plan.protected_preimages) {
@@ -1811,7 +1897,7 @@ export function validateExactCurrentRecoveryPlan(plan) {
   }
   const ids = plan.artifacts.map((artifact) => artifact?.id);
   if (canonicalJson(ids) !== canonicalJson(EXACT_CURRENT_RECOVERY_ARTIFACT_IDS)) {
-    throw new Error("exact-current recovery plan must enumerate exactly the fixed five Flow artifact ids");
+    throw new Error("exact-current recovery plan must enumerate exactly the fixed four Flow artifact ids");
   }
   for (const artifact of plan.artifacts) {
     exact(artifact, ["id", "pre", "post"], `exact-current recovery artifact ${artifact?.id}`);
@@ -1834,6 +1920,15 @@ function assertExactCurrentRecoveryProtectedPreimages(paths, plan) {
     const actual = readVerificationResealArtifact(files.get(artifact.id), `exact-current recovery protected input ${artifact.id}`).descriptor;
     if (canonicalJson(actual) !== canonicalJson(artifact.pre)) {
       throw new Error(`exact-current recovery protected input ${artifact.id} changed`);
+    }
+  }
+}
+function assertExactCurrentRecoveryFinalProtectedInputs(paths, plan) {
+  const files = exactCurrentRecoveryProtectedFiles(paths);
+  for (const artifact of plan.protected_preimages.filter((candidate) => candidate.id !== "stale-receipt")) {
+    const actual = readVerificationResealArtifact(files.get(artifact.id), `exact-current recovery final protected input ${artifact.id}`).descriptor;
+    if (canonicalJson(actual) !== canonicalJson(artifact.pre)) {
+      throw new Error(`exact-current recovery final protected input ${artifact.id} changed`);
     }
   }
 }
@@ -1863,10 +1958,10 @@ export function classifyExactCurrentRecoveryArtifacts(paths, plan) {
 function readSignedExactCurrentRecoveryPlan(paths) {
   const capability = protectedJson(exactCurrentRecoveryPlanFile(paths), "exact-current recovery signed plan", 1024 * 1024);
   const value = verifiedCapability(capability, "exact-current-recovery-plan-capability");
-  if (!record(value.plan)) throw new Error("exact-current recovery signed plan payload is invalid");
-  return { capability, plan: validateExactCurrentRecoveryPlan(value.plan) };
+  if (!record(value.plan) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("exact-current recovery signed plan payload is invalid");
+  return { capability, plan: validateExactCurrentRecoveryPlan(value.plan), recovery_generation: value.recovery_generation };
 }
-async function prepareExactCurrentRecoveryPublication(envelope, paths, authorization, { lockHeld = false } = {}) {
+async function prepareExactCurrentRecoveryPublication(envelope, paths, authorization, { lockHeld = false, afterSynchronization = null } = {}) {
   const binding = { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) };
   const prepare = async () => {
     const fence = inspectVerificationResealFence(paths);
@@ -1876,12 +1971,13 @@ async function prepareExactCurrentRecoveryPublication(envelope, paths, authoriza
     const synchronized = await prepareCanonicalFlowSynchronization(paths, initial.reduced.bundle, envelope, {
       definition_id: authorization.flow_definition_id, step_id: authorization.flow_step_id, gate_id: authorization.flow_gate_id,
       subject: authorization.subject, run_head: authorization.flow_run_head, manifest_sha256: authorization.flow_manifest_sha256,
-    }, binding.authorization_sha256);
+    }, binding.authorization_sha256, "attach-only");
+    if (typeof afterSynchronization === "function") await afterSynchronization();
     const artifactFiles = exactCurrentRecoveryArtifactFiles(paths, envelope.request_sha256, binding.authorization_sha256);
     const postimageByFile = new Map(synchronized.postimages.map((postimage) => [postimage.file, postimage.bytes]));
     if (postimageByFile.size !== EXACT_CURRENT_RECOVERY_ARTIFACT_IDS.length
         || [...artifactFiles.values()].some((file) => !postimageByFile.has(file))) {
-      throw new Error("exact-current recovery reducer did not produce exactly the fixed five Flow artifacts");
+      throw new Error("exact-current recovery reducer did not produce exactly the fixed four Flow artifacts");
     }
     const artifacts = [];
     for (const id of EXACT_CURRENT_RECOVERY_ARTIFACT_IDS) {
@@ -1896,7 +1992,9 @@ async function prepareExactCurrentRecoveryPublication(envelope, paths, authoriza
     const protectedFiles = exactCurrentRecoveryProtectedFiles(paths);
     const protectedPreimages = [...protectedFiles].map(([id, file]) => ({
       id,
-      pre: readVerificationResealArtifact(file, `exact-current recovery protected input ${id}`).descriptor,
+      pre: id === "flow-state"
+        ? synchronized.flow_state_preimage
+        : readVerificationResealArtifact(file, `exact-current recovery protected input ${id}`).descriptor,
     }));
     const planCore = {
       schema_version: PROTOCOL_VERSION,
@@ -1925,8 +2023,9 @@ function installExactCurrentRecoveryImage(file, descriptor, stage, label) {
 }
 async function publishExactCurrentRecoveryPublication(paths, capability, binding, { lockHeld = false, after_write = null } = {}) {
   const value = verifiedCapability(capability, "exact-current-recovery-plan-capability");
-  if (!record(value.plan)) throw new Error("exact-current recovery plan capability payload is invalid");
+  if (!record(value.plan) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("exact-current recovery plan capability payload is invalid");
   const plan = assertExactCurrentRecoveryPlanBinding(value.plan, paths, binding);
+  const expectedGeneration = value.recovery_generation;
   const observedFence = inspectVerificationResealFence(paths);
   const withLock = observedFence.status === "active"
     ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
@@ -1942,11 +2041,11 @@ async function publishExactCurrentRecoveryPublication(paths, capability, binding
     const classification = classifyExactCurrentRecoveryArtifacts(paths, plan);
     if (classification === "unknown") throw new Error("exact-current recovery found foreign or unknown Flow artifact state");
     const fence = inspectVerificationResealFence(paths);
-    if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-    else if (fence.recovery_id !== plan.recovery_id) throw new Error("exact-current recovery fence belongs to another generation");
+    if (fence.status === "open") await writeVerificationResealFence(paths, plan.recovery_id, "active", expectedGeneration);
+    else if (fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration) throw new Error("exact-current recovery fence belongs to another generation");
     const activeFence = inspectVerificationResealFence(paths);
-    if (activeFence.status !== "active" || activeFence.recovery_id !== plan.recovery_id) {
-      throw new Error("exact-current recovery publication lost its active Flow recovery fence");
+    if (activeFence.status !== "active" || activeFence.recovery_id !== plan.recovery_id || activeFence.generation !== expectedGeneration) {
+      throw new Error("exact-current recovery publication lost its root-bound active Flow recovery fence");
     }
     if (classification !== "new") {
       const files = exactCurrentRecoveryArtifactFiles(paths, plan.request_sha256, plan.authorization_sha256);
@@ -1964,24 +2063,26 @@ async function publishExactCurrentRecoveryPublication(paths, capability, binding
     assertExactCurrentRecoveryProtectedPreimages(paths, plan);
     if (classifyExactCurrentRecoveryArtifacts(paths, plan) !== "new") throw new Error("exact-current recovery publication did not install the exact postimages");
     const finalFence = inspectVerificationResealFence(paths);
-    if (finalFence.status !== "active" || finalFence.recovery_id !== plan.recovery_id) {
-      throw new Error("exact-current recovery publication lost its active Flow recovery fence");
+    if (finalFence.status !== "active" || finalFence.recovery_id !== plan.recovery_id || finalFence.generation !== expectedGeneration) {
+      throw new Error("exact-current recovery publication lost its root-bound active Flow recovery fence");
     }
-    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, state: "new" };
+    return { result_core_sha256: plan.result_core_sha256, run_id: paths.runId, recovery_id: plan.recovery_id, recovery_generation: expectedGeneration, state: "new" };
   };
   return lockHeld ? publish() : withLock(publish);
 }
-async function recoverExactCurrentRecoveryPublication(paths, binding) {
+async function recoverExactCurrentRecoveryPublication(paths, binding, expectedGeneration) {
+  if (!validFlowRecoveryGeneration(expectedGeneration)) throw new Error("exact-current recovery publication generation is invalid");
   const observedFence = inspectVerificationResealFence(paths);
   const withLock = observedFence.status === "active"
     ? (operation) => withCanonicalFlowRunRecoveryLock(paths, observedFence.recovery_id, operation)
     : (operation) => withCanonicalFlowRunMutationLock(paths, operation);
   return withLock(async () => {
     if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, recovered: false, state: "none" };
-    const { capability, plan } = readSignedExactCurrentRecoveryPlan(paths);
+    const { capability, plan, recovery_generation: signedGeneration } = readSignedExactCurrentRecoveryPlan(paths);
+    if (signedGeneration !== expectedGeneration) throw new Error("exact-current recovery signed plan does not bind the root recovery generation");
     assertExactCurrentRecoveryPlanBinding(plan, paths, binding);
     const fence = inspectVerificationResealFence(paths);
-    if (fence.status === "active" && fence.recovery_id !== plan.recovery_id) {
+    if (fence.status === "active" && (fence.recovery_id !== plan.recovery_id || fence.generation !== expectedGeneration)) {
       throw new Error("exact-current recovery fence belongs to another generation");
     }
     assertExactCurrentRecoveryStages(paths, plan);
@@ -1989,8 +2090,12 @@ async function recoverExactCurrentRecoveryPublication(paths, binding) {
     const classification = classifyExactCurrentRecoveryArtifacts(paths, plan);
     if (classification === "unknown") throw new Error("exact-current recovery found foreign or unknown Flow artifact state");
     if (classification === "new") {
-      if (fence.status !== "active") await writeVerificationResealFence(paths, plan.recovery_id, "active");
-      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256 };
+      if (fence.status !== "active") await writeVerificationResealFence(paths, plan.recovery_id, "active", expectedGeneration);
+      const activeFence = inspectVerificationResealFence(paths);
+      if (activeFence.status !== "active" || activeFence.recovery_id !== plan.recovery_id || activeFence.generation !== expectedGeneration) {
+        throw new Error("exact-current recovery publication recovery lost its root-bound active Flow recovery fence");
+      }
+      return { run_id: paths.runId, recovered: true, state: "new", result_core_sha256: plan.result_core_sha256, recovery_generation: expectedGeneration };
     }
     return publishExactCurrentRecoveryPublication(paths, capability, binding, { lockHeld: true });
   });
@@ -2004,12 +2109,18 @@ function cleanupExactCurrentRecoveryPublication(paths, plan) {
   if (fs.existsSync(exactCurrentRecoveryPlanFile(paths))) fs.unlinkSync(exactCurrentRecoveryPlanFile(paths));
 }
 async function finalizeExactCurrentRecoveryPublication(paths, completion) {
+  return withCoordinatorAssignmentLock(
+    paths,
+    () => finalizeExactCurrentRecoveryPublicationLocked(paths, completion),
+  );
+}
+async function finalizeExactCurrentRecoveryPublicationLocked(paths, completion) {
   const observedFence = inspectVerificationResealFence(paths);
   if (observedFence.status !== "active") {
     if (!fs.existsSync(exactCurrentRecoveryPlanFile(paths))) return { run_id: paths.runId, finalized: false };
     const { plan } = readSignedExactCurrentRecoveryPlan(paths);
     if (observedFence.status !== "open" || observedFence.recovery_id !== plan.recovery_id
-        || typeof observedFence.previous_generation !== "string") {
+        || observedFence.previous_generation !== completion.recovery_generation) {
       throw new Error("exact-current recovery cleanup replay does not bind the finalized Flow recovery generation");
     }
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
@@ -2029,6 +2140,7 @@ async function finalizeExactCurrentRecoveryPublication(paths, completion) {
     if (completion.request_sha256 !== plan.request_sha256 || completion.result_core_sha256 !== plan.result_core_sha256) {
       throw new Error("exact-current recovery durable completion does not bind the signed plan result");
     }
+    if (completion.recovery_generation !== observedFence.generation) throw new Error("exact-current recovery completion does not bind the active Flow recovery generation");
     const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery completion receipt", 256 * 1024);
     if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery exact completion receipt is not installed");
     if (classifyExactCurrentRecoveryArtifacts(paths, plan) !== "new") throw new Error("exact-current recovery cannot finalize without exact postimages");
@@ -2039,7 +2151,12 @@ async function finalizeExactCurrentRecoveryPublication(paths, completion) {
     }
     return { plan, generation: fence.generation, result: { run_id: paths.runId, finalized: true } };
   });
-  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation);
+  await finalizeVerificationResealFence(paths, finalized.plan.recovery_id, finalized.generation, async () => {
+    const receipt = protectedJson(path.join(paths.sessionDir, "lifecycle-authority.completion.json"), "exact-current recovery pre-open completion receipt", 256 * 1024);
+    if (canonicalJson(receipt) !== canonicalJson(completion)) throw new Error("exact-current recovery pre-open completion receipt changed");
+    assertExactCurrentRecoveryFinalProtectedInputs(paths, finalized.plan);
+    if (classifyExactCurrentRecoveryArtifacts(paths, finalized.plan) !== "new") throw new Error("exact-current recovery pre-open postimages changed");
+  });
   cleanupExactCurrentRecoveryPublication(paths, finalized.plan);
   return finalized.result;
 }
@@ -2064,7 +2181,7 @@ async function executeCritiqueMutation(envelope, paths, authorization, completio
       const sessionBundle = reduced.bundle;
       const nextResolutionEvents = reduced.resolution_events;
       const resultCoreSha256 = lifecycleAuthorityResultDigest(sessionBundle, nextResolutionEvents);
-      await inProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
+      await inCanonicalFlowProjectTransaction(paths, { request_sha256: envelope.request_sha256, authorization_sha256: sha256(canonicalJson(authorization)) }, async () => {
         const currentBytes = protectedRegularFile(bundleFile, "trust bundle", 4 * 1024 * 1024);
         assertAuthorizedBundlePreimage(currentBytes, envelope.action, authorization);
         if (!currentBytes.equals(beforeBytes)) throw new Error("critique resolution preimage changed during preparation");
@@ -2144,9 +2261,17 @@ function durableCompletionRecord(prior, envelope, identity, authorizationSha256)
   exact(prior, ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
   if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
   const completionRecord = prior.completion;
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  if (completionRecord?.schema_version !== COMPLETION_SCHEMA_VERSION) {
+    throw new Error(
+      `durable lifecycle completion schema ${JSON.stringify(completionRecord?.schema_version)} is not supported; `
+      + "complete or archive this run with its previous lifecycle helper before upgrading, "
+      + "or start a new Builder run after the helper upgrade",
+    );
+  }
+  const generationBound = GENERATION_BOUND_ACTIONS.has(completionRecord?.action);
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", ...(generationBound ? ["recovery_generation"] : []), "signature"];
   exact(completionRecord, fields, "durable lifecycle completion");
-  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
+  if (completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || (generationBound && !validFlowRecoveryGeneration(completionRecord.recovery_generation)) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
   const { signature, ...unsigned } = completionRecord;
   const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
   if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("durable lifecycle completion signature is invalid");
@@ -2309,14 +2434,21 @@ async function processRootOperation(envelope) {
   const authorizationSha256 = sha256(canonicalJson(authorization));
   const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);
   const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
-  const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+  const generationBound = GENERATION_BOUND_ACTIONS.has(envelope.action);
+  const preparedBase = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+  let prepared = generationBound
+    ? { ...preparedBase, recovery_generation: crypto.randomUUID() }
+    : preparedBase;
   const runLockId = sha256({ project: identity.project, run_id: identity.runId });
   return withDurableLock(runLockId, async () => {
     const caller = callerIdentity();
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
-      reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
+      const replayPrepared = generationBound
+        ? { ...preparedBase, recovery_generation: completionRecord.recovery_generation }
+        : preparedBase;
+      reconcileCompletedNonce(nonceFile, replayPrepared, prior.result_core_sha256);
       if (["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery"].includes(envelope.action)) childInvocation({ kind: "receipt", capability: signedCapability("receipt-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
       if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
@@ -2327,6 +2459,12 @@ async function processRootOperation(envelope) {
     let verifiedBridge = null;
     if (fs.existsSync(nonceFile)) {
       const prior = durableJson(nonceFile, "nonce record");
+      if (generationBound) {
+        if (!validFlowRecoveryGeneration(prior.recovery_generation)) {
+          throw new Error("prepared lifecycle authorization nonce has no valid root-bound recovery generation");
+        }
+        prepared = { ...preparedBase, recovery_generation: prior.recovery_generation };
+      }
       assertPreparedNonceRecord(prior, prepared);
       resumePrepared = true;
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
@@ -2371,7 +2509,7 @@ async function processRootOperation(envelope) {
     if (envelope.action === "reseal-verification-evidence") {
       let recovery = null;
       if (resumePrepared) {
-        recovery = childInvocation({ kind: "recover-reseal", capability: signedCapability("recover-reseal-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
+        recovery = childInvocation({ kind: "recover-reseal", capability: signedCapability("recover-reseal-capability", { request: envelope.request, binding: transactionBinding, recovery_generation: prepared.recovery_generation }) }, caller);
         if (!record(recovery) || recovery.run_id !== identity.runId || !["none", "old", "new"].includes(recovery.state)) {
           throw new Error("unprivileged verification reseal recovery returned an invalid response");
         }
@@ -2390,7 +2528,7 @@ async function processRootOperation(envelope) {
                 || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
               throw new Error("verification reseal plan does not bind the root-authenticated operation");
             }
-            return signedCapability("reseal-plan-capability", { request: envelope.request, plan });
+            return signedCapability("reseal-plan-capability", { request: envelope.request, plan, recovery_generation: prepared.recovery_generation });
           });
         } else {
           mutation = childInvocation({ kind: "publish-reseal", capability: planCapability }, caller);
@@ -2401,7 +2539,7 @@ async function processRootOperation(envelope) {
       if (resumePrepared) {
         recovery = childInvocation({
           kind: "recover-exact-current-recovery",
-          capability: signedCapability("recover-exact-current-recovery-capability", { request: envelope.request, binding: transactionBinding }),
+          capability: signedCapability("recover-exact-current-recovery-capability", { request: envelope.request, binding: transactionBinding, recovery_generation: prepared.recovery_generation }),
         }, caller);
         if (!record(recovery) || recovery.run_id !== identity.runId || !["none", "new"].includes(recovery.state)) {
           throw new Error("unprivileged exact-current recovery publication recovery returned an invalid response");
@@ -2421,14 +2559,16 @@ async function processRootOperation(envelope) {
               || plan.authorization_key_id !== identity.keyId || plan.authorization_nonce !== identity.nonce || plan.run_id !== identity.runId) {
             throw new Error("exact-current recovery plan does not bind the root-authenticated operation");
           }
-          return signedCapability("exact-current-recovery-plan-capability", { request: envelope.request, plan });
+          return signedCapability("exact-current-recovery-plan-capability", { request: envelope.request, plan, recovery_generation: prepared.recovery_generation });
         });
       }
     } else {
       mutation = childInvocation({ kind: "mutate", capability: signedCapability("mutation-capability", { envelope, authorization, resume_prepared: resumePrepared, ...(verifiedBridge ? { verified_bridge: verifiedBridge } : {}) }) }, caller);
     }
-    if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
-    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256);
+    assertPreparedNonceRecord(durableJson(nonceFile, "nonce record"), prepared);
+    if (!record(mutation) || mutation.run_id !== identity.runId || typeof mutation.result_core_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(mutation.result_core_sha256)
+        || (generationBound && mutation.recovery_generation !== prepared.recovery_generation)) throw new Error("unprivileged lifecycle mutation worker result is invalid");
+    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", mutation.result_core_sha256, generationBound ? prepared.recovery_generation : null);
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: mutation.result_core_sha256, completion: completionRecord })}\n`);
     atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, mutation.result_core_sha256))}\n`);
     // The root process has already returned to a root-owned boundary. A second
@@ -2563,7 +2703,7 @@ async function interactiveExactCurrentRecoveryWorker() {
     throw new Error("exact-current recovery preparation operation is invalid");
   }
   const paths = canonicalMutationPaths(envelope.request);
-  return withCanonicalFlowRunMutationLock(paths, async () => {
+  return withCoordinatorAssignmentLock(paths, () => withCanonicalFlowRunMutationLock(paths, async () => {
     const prepared = await prepareExactCurrentRecoveryPublication(envelope, paths, value.authorization, { lockHeld: true });
     process.stdout.write(`${JSON.stringify(prepared)}\n`);
     const second = await lines.next();
@@ -2579,7 +2719,7 @@ async function interactiveExactCurrentRecoveryWorker() {
       authorization_sha256: prepared.plan.authorization_sha256,
     }, { lockHeld: true });
     process.stdout.write(`${JSON.stringify(mutation)}\n`);
-  });
+  }));
 }
 export async function main(input = fs.readFileSync(0, "utf8")) {
   if (CHILD_MODE) {
@@ -2613,11 +2753,11 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     }
     if (payload.kind === "recover-reseal") {
       const value = verifiedCapability(payload.capability, "recover-reseal-capability");
-      if (!record(value.request) || !record(value.binding)) throw new Error("verification reseal recovery request is invalid");
+      if (!record(value.request) || !record(value.binding) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("verification reseal recovery request is invalid");
       exact(value.binding, ["request_sha256", "authorization_sha256"], "verification reseal recovery binding");
       const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
       if (envelope.action !== "reseal-verification-evidence") throw new Error("verification reseal recovery operation is invalid");
-      return recoverVerificationResealTransaction(canonicalMutationPaths(value.request), value.binding);
+      return recoverVerificationResealTransaction(canonicalMutationPaths(value.request), value.binding, value.recovery_generation);
     }
     if (payload.kind === "finalize-reseal") {
       const value = verifiedCapability(payload.capability, "finalize-reseal-capability");
@@ -2637,11 +2777,11 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
     }
     if (payload.kind === "recover-exact-current-recovery") {
       const value = verifiedCapability(payload.capability, "recover-exact-current-recovery-capability");
-      if (!record(value.request) || !record(value.binding)) throw new Error("exact-current recovery publication recovery request is invalid");
+      if (!record(value.request) || !record(value.binding) || !validFlowRecoveryGeneration(value.recovery_generation)) throw new Error("exact-current recovery publication recovery request is invalid");
       exact(value.binding, ["request_sha256", "authorization_sha256"], "exact-current recovery publication recovery binding");
       const envelope = validateEnvelope({ schema_version: PROTOCOL_VERSION, action: value.request.action, request_sha256: value.binding.request_sha256, request: value.request });
       if (envelope.action !== "recover-exact-current-completion") throw new Error("exact-current recovery publication recovery operation is invalid");
-      return recoverExactCurrentRecoveryPublication(canonicalMutationPaths(value.request), value.binding);
+      return recoverExactCurrentRecoveryPublication(canonicalMutationPaths(value.request), value.binding, value.recovery_generation);
     }
     if (payload.kind === "finalize-exact-current-recovery") {
       const value = verifiedCapability(payload.capability, "finalize-exact-current-recovery-capability");
@@ -2657,7 +2797,7 @@ export async function main(input = fs.readFileSync(0, "utf8")) {
       if (value.binding.request_sha256 !== sha256(envelope.request) || !/^[a-f0-9]{64}$/.test(String(value.binding.authorization_sha256))) throw new Error("mutation worker rollback binding is invalid");
       const paths = canonicalMutationPaths(value.request);
       if (value.request.action === "reseal-verification-evidence") throw new Error("verification reseal rejects legacy recursive rollback");
-      const rolledBack = recoverMatchingTransaction(paths, value.binding);
+      const rolledBack = await recoverMatchingTransactionWithCanonicalFlowLock(paths, value.binding);
       return { run_id: paths.runId, rolled_back: rolledBack };
     }
     if (payload.kind === "receipt") {

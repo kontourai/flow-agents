@@ -165,6 +165,14 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const source = fs.readFileSync(process.argv[2], "utf8");
+if (/\$\{3:-node_modules\}/.test(source)) {
+  throw new Error("lifecycle authority installer must not default to root workspace node_modules");
+}
+if (!/flow-reducer-closure/.test(source)
+    || !/npm ci --ignore-scripts --silent/.test(source)
+    || !/if \[ -z "\$flow_node_modules" \]; then prepare_default_closure; fi/.test(source)) {
+  throw new Error("lifecycle authority installer must prepare the committed lock-bearing closure by default");
+}
 const match = source.match(/^ensure_operator_group\(\) \{[\s\S]*?^\}$/m);
 if (!match) throw new Error("could not extract ensure_operator_group");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-darwin-group-"));

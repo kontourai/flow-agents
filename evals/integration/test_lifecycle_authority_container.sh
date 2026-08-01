@@ -51,7 +51,7 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure, and that pin is
+# The privileged coordinator is pinned to the audited Flow reducer closure, and that pin is
 # a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
 # clock, not a control.
 #
@@ -62,15 +62,20 @@ sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current 
 # earlier (#1054). Regenerating the digest would only have restarted the countdown.
 #
 # Install from a committed lockfile instead. `flow-reducer-closure/` pins the entire transitive
-# tree, so the staged closure is byte-identical on every machine and the digest means what it says.
+# tree, while the verifier canonicalizes install-time permission masking and
+# still binds each file's executable classification.
 pinned_reducer_root="$(mktemp -d)"
 cp "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package.json" \
    "$ROOT_DIR/packaging/lifecycle-authority/flow-reducer-closure/package-lock.json" \
    "$pinned_reducer_root/"
 # `npm ci` resolves its manifest from the working directory, not from --prefix (which errors), so
 # this must be a subshell cd rather than the --prefix form the floating install used.
-(cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
+(umask 077 && cd "$pinned_reducer_root" && npm ci --ignore-scripts --silent)
 pinned_reducer_modules="$pinned_reducer_root/node_modules"
+# The documented invocation must prepare this same committed closure itself,
+# rather than accidentally copying the root workspace dependency tree.
+scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs
+node scripts/verify-flow-reducer-closure.mjs /usr/local/libexec/kontourai/flow-reducer/node_modules packaging/lifecycle-authority/flow-reducer-v1.json
 bad_modules="$(mktemp -d)"
 mkdir -p "$bad_modules/@kontourai"
 ln -s "$pinned_reducer_modules/@kontourai/flow" "$bad_modules/@kontourai/flow"
@@ -82,6 +87,26 @@ cp -a "$pinned_reducer_modules/." "$tampered_modules/"
 printf '\n// tampered fixture\n' >> "$tampered_modules/@kontourai/flow/dist/index.js"
 if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-tampered-reducer.log 2>&1; then
   echo "tampered staged reducer unexpectedly installed" >&2; exit 1
+fi
+optional_tampered_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$optional_tampered_modules/"
+optional_package="$(node - "$optional_tampered_modules/.package-lock.json" <<'NODE'
+const fs = require('node:fs');
+const lock = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).packages;
+const entry = Object.keys(lock).sort().find((name) => name.startsWith('node_modules/') && lock[name]?.optional);
+if (!entry) process.exit(1);
+process.stdout.write(entry.slice('node_modules/'.length));
+NODE
+)"
+printf '\n{"tampered":true}\n' > "$optional_tampered_modules/$optional_package/kontourai-tamper.json"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$optional_tampered_modules" kontourai-lifecycle-operator >/tmp/rejected-optional-tamper.log 2>&1; then
+  echo "tampered optional package unexpectedly installed" >&2; exit 1
+fi
+extra_symlink_modules="$(mktemp -d)"
+cp -a "$pinned_reducer_modules/." "$extra_symlink_modules/"
+ln -s "$extra_symlink_modules/@kontourai/flow" "$extra_symlink_modules/unexpected-flow-link"
+if scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$extra_symlink_modules" kontourai-lifecycle-operator >/tmp/rejected-extra-symlink.log 2>&1; then
+  echo "extra staged symlink unexpectedly installed" >&2; exit 1
 fi
 scripts/lifecycle-authority-admin.sh install packaging/lifecycle-authority/coordinator.mjs "$pinned_reducer_modules" kontourai-lifecycle-operator
 usermod -a -G kontourai-lifecycle-operator node
@@ -256,10 +281,8 @@ const flowFile = path.join(project, '.kontourai', 'flow', 'runs', 'reseal-e2e', 
 const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8')); flow.current_step = 'verify'; fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
 const sidecarFile = path.join(session, 'state.json'); const sidecar = JSON.parse(fs.readFileSync(sidecarFile, 'utf8'));
 if (sidecar.flow_run) sidecar.flow_run.current_step = 'verify'; fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
-const acceptanceFile = path.join(session, 'acceptance.json'), acceptance = JSON.parse(fs.readFileSync(acceptanceFile, 'utf8'));
-acceptance.criteria = []; fs.writeFileSync(acceptanceFile, `${JSON.stringify(acceptance, null, 2)}\n`);
 NODE
-node build/src/cli/workflow-sidecar.js record-gate-claim "$RESEAL_SESSION" --expectation policy-compliance --status not_verified --summary "Pre-resolution policy evidence was incomplete." --timestamp "2026-07-20T00:10:00Z" >/dev/null
+node build/src/cli/workflow-sidecar.js record-gate-claim "$RESEAL_SESSION" --expectation tests-evidence --status not_verified --summary "Pre-resolution test evidence was incomplete." --timestamp "2026-07-20T00:10:00Z" >/dev/null
 printf 'reseal delivery failed\n' > "$DELIVERY"
 node build/src/cli/workflow-sidecar.js record-critique "$RESEAL_SESSION" --id reseal-failed-review --reviewer reseal-reviewer-one --verdict fail --summary "Reseal fixture defect." --artifact-ref "$DELIVERY" --lane-json '{"id":"reseal-code","status":"fail","summary":"Reseal defect remains.","evidence_refs":[{"kind":"artifact","file":"review-target/delivery.md","summary":"Reseal delivery review."}]}' --finding-json '{"id":"reseal-defect","severity":"high","status":"open","description":"Reseal repair required."}' --timestamp "2026-07-20T00:11:00Z" >/dev/null
 printf 'reseal delivery repaired\n' > "$DELIVERY"
@@ -398,8 +421,10 @@ const [action, project_root, session_dir, authorization_file, prior_record_id, r
 console.log(JSON.stringify(invokeExternalLifecycleAuthority({ action, project_root, session_dir, authorization_file, prior_record_id, resolving_record_id })));
 NODE
 
-# Resolve the reseal fixture first, then stage and sign the exact final
-# tests-evidence replacement while the canonical run is still at verify.
+# Resolve the reseal fixture first. Two ordinary public evidence publications
+# then make the completion stale, and two distinct signed exact-current
+# generations refresh it without consuming another route-back. Finally, the
+# public reseal request executes and stages the exact tests-evidence replacement.
 su -s /bin/bash node -c "cd /work && node /work/history-repair-invoke.mjs resolve-critique '$PROJECT' '$RESEAL_SESSION' /root/lifecycle-authorizations/reseal-resolve.json '${RESEAL_CRITIQUE_IDS[0]}' '${RESEAL_CRITIQUE_IDS[1]}'" >/tmp/reseal-resolve-result.json
 node -e "const r=require('/tmp/reseal-resolve-result.json'); if(r.operation_status!=='applied') throw new Error('reseal fixture critique resolution was not applied')"
 node --input-type=module - "$PROJECT" "$RESEAL_SESSION" /root/lifecycle-authorizations/reseal-resolve.json "${RESEAL_CRITIQUE_IDS[0]}" "${RESEAL_CRITIQUE_IDS[1]}" <<'NODE'
@@ -495,78 +520,34 @@ const caller = resolveCurrentAssignmentActor(), assignment = JSON.parse(fs.readF
 assignment.actor_key = caller.actorKey; assignment.actor = caller.actor; fs.writeFileSync(file, `${JSON.stringify(assignment, null, 2)}\n`);
 NODE
 export PINNED_FLOW_ROOT="$(dirname "$LIFECYCLE_HELPER_PATH")/flow-reducer/node_modules/@kontourai/flow"
-cat > /work/stage-reseal-request.mjs <<'NODE'
-import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { pathToFileURL } from 'node:url';
-import { stageWorkflowEvidenceCandidate } from './build/src/cli/workflow.js';
-import { resolveCurrentAssignmentActor } from './build/src/cli/assignment-provider.js';
-import { buildUnsignedVerificationEvidenceResealAuthorization } from './build/src/builder-lifecycle-authority.js';
-import { critiqueHistoryProjectionSummary } from './build/src/cli/critique-resolution.js';
-const [project, session, pinnedFlowRoot] = process.argv.slice(2), runId = path.basename(session), expectation = 'policy-compliance';
-const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const flow = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
-const flowRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
-const state = JSON.parse(fs.readFileSync(path.join(flowRoot, 'state.json'), 'utf8'));
-const definition = JSON.parse(fs.readFileSync(path.join(flowRoot, 'definition.json'), 'utf8'));
-const caller = resolveCurrentAssignmentActor(), currentBytes = fs.readFileSync(path.join(session, 'trust.bundle'));
-const current = JSON.parse(currentBytes), targetIndex = current.claims.findIndex((claim) => claim.metadata?.gate_claim?.expectation_id === expectation);
-if (targetIndex < 0 || current.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === expectation).length !== 1) throw new Error('reseal fixture requires one current policy claim');
-const staged = await stageWorkflowEvidenceCandidate(session, [
-  'record-gate-claim', session,
-  '--expectation', expectation,
-  '--status', 'pass',
-  '--summary', 'Final installed-closure policy verification passed.',
-  '--evidence-ref-json', JSON.stringify({ kind: 'artifact', file: 'review-target/delivery.md', summary: 'Reviewed delivery covered by the installed-closure policy verification.' }),
-  '--actor', caller.actorKey,
-]);
-let candidate = JSON.parse(staged.bytes);
-if (candidate.claims.length !== current.claims.length
-    || candidate.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === expectation).length !== 1
-    || candidate.claims.findIndex((claim) => claim.metadata?.gate_claim?.expectation_id === expectation) !== targetIndex) {
-  throw new Error('staged candidate did not retain one ordered in-place target replacement');
-}
-current.claims.forEach((claim, index) => {
-  if (index === targetIndex || JSON.stringify(claim) === JSON.stringify(candidate.claims[index])) return;
-  const replacementClaim = candidate.claims[index];
-  const keys = [...new Set([...Object.keys(claim), ...Object.keys(replacementClaim || {})])]
-    .filter((key) => JSON.stringify(claim[key]) !== JSON.stringify(replacementClaim?.[key]));
-  const metadataKeys = keys.includes('metadata')
-    ? [...new Set([...Object.keys(claim.metadata || {}), ...Object.keys(replacementClaim?.metadata || {})])]
-      .filter((key) => JSON.stringify(claim.metadata?.[key]) !== JSON.stringify(replacementClaim?.metadata?.[key]))
-    : [];
-  throw new Error(`public reseal candidate changed non-target claim ${index} fields ${keys.join(',')} metadata ${metadataKeys.join(',')}`);
-});
-const candidateBytes = Buffer.from(`${JSON.stringify(candidate, null, 2)}\n`);
-const candidateFile = path.join(session, `.workflow-evidence-transaction-${staged.transaction_id}`, 'trust.bundle.candidate');
-fs.writeFileSync(candidateFile, candidateBytes, { mode: 0o600 });
-const ledgerFile = path.join(session, 'lifecycle-authority.resolution-events.json'), ledgerBytes = fs.existsSync(ledgerFile) ? fs.readFileSync(ledgerFile) : Buffer.alloc(0);
-const events = ledgerBytes.length ? JSON.parse(ledgerBytes).events : [];
-const completionBytes = fs.readFileSync(path.join(session, 'lifecycle-authority.completion.json')), completion = JSON.parse(completionBytes);
-const manifestBytes = fs.readFileSync(path.join(flowRoot, 'evidence', 'manifest.json'));
-const workState = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8')), subject = workState.work_item_refs[0];
-const assignmentBytes = fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${runId}.json`));
-const assignment = JSON.parse(assignmentBytes);
-if (assignment.status !== 'claimed' || assignment.actor_key !== caller.actorKey
-    || JSON.stringify(assignment.actor) !== JSON.stringify(caller.actor)) {
-  throw new Error('reseal fixture does not have the exact active caller assignment');
-}
-const predecessor = current.claims[targetIndex], replacement = candidate.claims[targetIndex], now = new Date();
-const { unsigned, signingPayload } = buildUnsignedVerificationEvidenceResealAuthorization({
-  project_root: project, run_id: runId, subject,
-  assignment_generation_sha256: sha(assignmentBytes), assignment_actor_key: assignment.actor_key, assignment_actor: assignment.actor,
-  preimage_bundle_sha256: sha(currentBytes), candidate_bundle_sha256: sha(candidateBytes), candidate_transaction_id: staged.transaction_id,
-  preimage_ledger_sha256: sha(ledgerBytes), preimage_ledger_length: events.length, preimage_ledger_tail_hash: events.at(-1)?.event_hash ?? '0'.repeat(64),
-  current_completion_sha256: sha(completionBytes), current_completion_request_sha256: completion.request_sha256, current_completion_result_core_sha256: completion.result_core_sha256,
-  flow_definition_id: 'builder.build', flow_step_id: 'verify', flow_gate_id: 'verify-gate', flow_run_head: flow.flowRunHead(state), flow_manifest_sha256: sha(manifestBytes),
-  critique_projection_sha256: critiqueHistoryProjectionSummary(current.claims).digest, target_expectation_id: expectation,
-  predecessor_claim_id: predecessor.id, predecessor_claim_status: predecessor.status, predecessor_claim_sha256: sha(Buffer.from(JSON.stringify(predecessor))), predecessor_claim_index: targetIndex,
-  current_claim_id: replacement.id, current_claim_status: replacement.status, current_claim_sha256: sha(Buffer.from(JSON.stringify(replacement))), current_claim_index: targetIndex,
-  claim_delta: 'replace', nonce: `container-reseal-${crypto.randomBytes(12).toString('hex')}`,
-  requested_at: now.toISOString(), expires_at: new Date(now.getTime() + 3_600_000).toISOString(),
-});
-if (definition.id !== 'builder.build' || state.current_step !== 'verify') throw new Error('reseal fixture left the protected verify gate');
-process.stdout.write(`${JSON.stringify({ authorization: unsigned, signing_payload: signingPayload })}\n`);
-NODE
-su -s /bin/bash node -c "cd /work && FLOW_AGENTS_ACTOR=reseal-container node /work/stage-reseal-request.mjs '$PROJECT' '$RESEAL_SESSION' '$PINNED_FLOW_ROOT' > /tmp/reseal-request.json"
+for generation in 1 2; do
+  su -s /bin/bash node -c "cd '$PROJECT' && FLOW_AGENTS_ACTOR=reseal-container node /work/build/src/cli.js workflow evidence \
+    --session-dir '$RESEAL_SESSION' \
+    --expectation tests-evidence \
+    --status not_verified \
+    --summary 'Lifecycle authority test evidence generation $generation remains incomplete.' \
+    --evidence-ref-json '{\"kind\":\"artifact\",\"file\":\"review-target/delivery.md\",\"summary\":\"Reviewed lifecycle authority delivery.\"}'" >/tmp/reseal-policy-"$generation".json
+  su -s /bin/bash node -c "cd /work && FLOW_AGENTS_ACTOR=reseal-container node build/src/cli.js workflow recover-exact-current-completion-request \
+    --session-dir '$RESEAL_SESSION'" >/tmp/reseal-recovery-request-"$generation".json
+  node /work/sign-authorization.mjs /tmp/reseal-recovery-request-"$generation".json /root/lifecycle-authorizations/reseal-recovery-"$generation".json
+  su -s /bin/bash node -c "cd /work && FLOW_AGENTS_ACTOR=reseal-container node build/src/cli.js workflow recover-exact-current-completion \
+    --session-dir '$RESEAL_SESSION' \
+    --json \
+    --authorization-file /root/lifecycle-authorizations/reseal-recovery-$generation.json" >/tmp/reseal-recovery-result-"$generation".json
+  node -e "const r=require('/tmp/reseal-recovery-result-$generation.json'); if(r.operation_status!=='applied') throw new Error('reseal recovery generation $generation was not applied')"
+done
+
+TEST_COMMAND="node --test review-target/fixture.test.mjs"
+TEST_REF='{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"Runs the project-local lifecycle fixture test."}'
+CRITERION='{"id":"AC-1","status":"pass","evidence_refs":[{"kind":"command","excerpt":"node --test review-target/fixture.test.mjs","summary":"The lifecycle fixture test proves AC-1."}]}'
+su -s /bin/bash node -c "cd '$PROJECT' && FLOW_AGENTS_ACTOR=reseal-container node /work/build/src/cli.js workflow reseal-verification-evidence-request \
+  --session-dir '$RESEAL_SESSION' \
+  --expectation tests-evidence \
+  --status pass \
+  --command '$TEST_COMMAND' \
+  --summary 'Final observed lifecycle verification passed after two recovery generations.' \
+  --evidence-ref-json '$TEST_REF' \
+  --criterion-json '$CRITERION'" >/tmp/reseal-request.json
 node /work/sign-authorization.mjs /tmp/reseal-request.json /root/lifecycle-authorizations/reseal.json
 
 cat > /work/pinned-flow-lock-holder.mjs <<'NODE'
@@ -584,10 +565,10 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 3.9.0 mutation after reseal',
+  reason: 'installed pinned Flow mutation after reseal',
   authority: {
     kind: 'operator_request',
-    actor: 'installed-flow-3.9.0-container',
+    actor: 'installed-pinned-flow-container',
     request_ref: 'container:reseal-native-lock',
     requested_at: '2026-07-20T00:20:00Z'
   },
@@ -623,7 +604,8 @@ const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
 const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
 if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
 const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
-if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.9.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.9.0');
+const reducerPin = JSON.parse(fs.readFileSync('/work/packaging/lifecycle-authority/flow-reducer-v1.json', 'utf8'));
+if (packageJson.name !== reducerPin.package || packageJson.version !== reducerPin.package_version) throw new Error(`reseal interoperability must use installed exact ${reducerPin.package}@${reducerPin.package_version}`);
 if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
 const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
 for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -640,7 +622,7 @@ const spawnAsNode = (script, args) => {
 };
 const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
 if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
-  throw new Error('installed exact @kontourai/flow@3.9.0 does not expose the public recovery contract');
+  throw new Error(`installed exact ${reducerPin.package}@${reducerPin.package_version} does not expose the public recovery contract`);
 }
 const waitFor = async (label, predicate) => {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -653,48 +635,80 @@ const ticketCount = () => fs.existsSync(lockRoot)
   ? fs.readdirSync(lockRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith('ticket-')).length
   : 0;
 const ledgerBefore = fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json'));
+const stateBefore = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
+const routeBacksBefore = stateBefore.transitions.filter((entry) => entry.type === 'route_back').length;
+const manifestBefore = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
+const recoveryAttachments = manifestBefore.evidence.filter((entry) => /^lifecycle-authority:[a-f0-9]{64}:[a-f0-9]{64}$/.test(entry.id));
+if (recoveryAttachments.length !== 2 || new Set(recoveryAttachments.map((entry) => entry.id)).size !== 2) {
+  throw new Error('two distinct exact-current recovery generations were not attached before reseal');
+}
 const holder = spawnAsNode('/work/pinned-flow-lock-holder.mjs', [pinnedFlowRoot, project, runId, readyFile, releaseFile]);
 await Promise.race([
-  waitFor('installed 3.9.0 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
-  holder.result.then((result) => { throw new Error(`installed 3.9.0 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed pinned Flow holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
+  holder.result.then((result) => { throw new Error(`installed pinned Flow holder exited before readiness: ${result.stdout}${result.stderr}`); }),
 ]);
 const reseal = spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']);
 await Promise.race([
-  waitFor('root reseal ticket behind installed 3.9.0 holder', () => ticketCount() === 2),
-  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.9.0: ${result.stdout}${result.stderr}`); }),
+  waitFor('root reseal ticket behind installed pinned Flow holder', () => ticketCount() === 2),
+  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed pinned Flow: ${result.stdout}${result.stderr}`); }),
 ]);
 const pause = spawnAsNode('/work/pinned-flow-pause.mjs', [pinnedFlowRoot, project, runId]);
 await Promise.race([
-  waitFor('installed 3.9.0 public pause behind reseal', () => ticketCount() === 3),
-  pause.result.then((result) => { throw new Error(`installed 3.9.0 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed pinned Flow public pause behind reseal', () => ticketCount() === 3),
+  pause.result.then((result) => { throw new Error(`installed pinned Flow pause exited before queuing: ${result.stdout}${result.stderr}`); }),
 ]);
 fs.writeFileSync(releaseFile, 'release\n');
 const [holderResult, resealResult, pauseResult] = await Promise.all([holder.result, reseal.result, pause.result]);
-if (holderResult.status !== 0) throw new Error(`installed 3.9.0 holder failed: ${holderResult.stderr}`);
-if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.9.0 lock: ${resealResult.stdout}${resealResult.stderr}`);
-if (pauseResult.status !== 0) throw new Error(`installed 3.9.0 pause failed behind reseal: ${pauseResult.stderr}`);
+if (holderResult.status !== 0) throw new Error(`installed pinned Flow holder failed: ${holderResult.stderr}`);
+if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed pinned Flow lock: ${resealResult.stdout}${resealResult.stderr}`);
+if (pauseResult.status !== 0) throw new Error(`installed pinned Flow pause failed behind reseal: ${pauseResult.stderr}`);
 const resealReceipt = JSON.parse(resealResult.stdout);
 if (resealReceipt.operation_status !== 'applied') throw new Error('installed-closure reseal was not applied');
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
-const target = bundle.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === 'policy-compliance');
-if (target.length !== 1 || target[0].status !== 'verified' || target[0].metadata.gate_claim.step_id !== 'verify') throw new Error('reseal did not publish the exact current verify claim');
+const target = bundle.claims.filter((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
+if (target.length !== 1 || target[0].status !== 'verified' || target[0].metadata.gate_claim.step_id !== 'verify') throw new Error('reseal did not publish the exact current tests-evidence claim');
+const observed = target[0].metadata.observed_commands;
+if (!Array.isArray(observed) || observed.length !== 1 || observed[0].command !== 'node --test review-target/fixture.test.mjs' || observed[0].exit_code !== 0 || observed[0].test_count !== 1) {
+  throw new Error('reseal tests-evidence does not contain the writer-observed project test result');
+}
+const acceptance = bundle.claims.filter((claim) => claim.claimType === 'workflow.acceptance.criterion' && claim.metadata?.criterion?.id === 'AC-1');
+if (acceptance.length !== 1 || acceptance[0].status !== 'verified' || acceptance[0].value !== 'pass') throw new Error('reseal did not publish verified AC-1 evidence');
 if (!fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json')).equals(ledgerBefore)) throw new Error('reseal changed the resolution ledger');
 const completionResult = await spawnAsNode('/work/verify-reseal-completion.mjs', [path.join(session, 'lifecycle-authority.completion.json')]).result;
 if (completionResult.status !== 0) throw new Error(`unprivileged completion verification failed: ${completionResult.stdout}${completionResult.stderr}`);
 const completion = JSON.parse(completionResult.stdout);
 if (completion.action !== 'reseal-verification-evidence') throw new Error('reseal did not install its exact completion');
+const resealAuthorization = JSON.parse(fs.readFileSync('/root/lifecycle-authorizations/reseal.json', 'utf8'));
+const nonceId = crypto.createHash('sha256')
+  .update(`${resealAuthorization.signature.key_id}\u0000${resealAuthorization.nonce}`)
+  .digest('hex');
+const nonceRecord = JSON.parse(fs.readFileSync(path.join(process.env.LIFECYCLE_STATE_ROOT, 'nonces', `${nonceId}.json`), 'utf8'));
+if (nonceRecord.status !== 'applied' || nonceRecord.recovery_generation !== completion.recovery_generation) {
+  throw new Error('reseal durable nonce and completion do not retain one root generation');
+}
+const finalizedFence = JSON.parse(fs.readFileSync(path.join(runRoot, 'recovery-fence.json'), 'utf8'));
+if (finalizedFence.status !== 'open' || finalizedFence.previous_generation !== completion.recovery_generation) {
+  throw new Error('reseal finalization does not bind the root completion generation');
+}
 const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
-if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.9.0 public mutation was not preserved');
+if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed pinned Flow public mutation was not preserved');
+if (state.transitions.filter((entry) => entry.type === 'route_back').length !== routeBacksBefore) throw new Error('recovery or reseal consumed a verify route-back');
 const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
-if (manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`).length !== 1) throw new Error('reseal attachment is absent or duplicated');
+const resealEntries = manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`);
+if (resealEntries.length !== 1) throw new Error('reseal attachment is absent or duplicated');
+if (recoveryAttachments.some((expected) => !manifest.evidence.some((entry) => entry.id === expected.id))) throw new Error('reseal lost a prior recovery-generation attachment');
+const bundleBytes = fs.readFileSync(path.join(session, 'trust.bundle'));
+const resealEntry = resealEntries[0], storedBytes = fs.readFileSync(path.join(runRoot, resealEntry.stored_path));
+const bundleDigest = crypto.createHash('sha256').update(bundleBytes).digest('hex');
+if (resealEntry.sha256 !== bundleDigest || !storedBytes.equals(bundleBytes)) throw new Error('reseal did not atomically publish one byte-identical bundle and Flow attachment');
 if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
-console.log('PASS: installed exact @kontourai/flow@3.9.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
+console.log('PASS: two public exact-current recovery generations preserve route-back budget, then observed tests-evidence publishes atomically under the installed pinned Flow FIFO lock');
 NODE
 node /work/reseal-native-lock-e2e.mjs
 
 cat > /work/history-repair-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawnSync } from 'node:child_process';
-import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
+import { COMPLETION_SCHEMA_VERSION, canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
 import { coordinatorRuntimeSha256, validateResolutionEventLedger } from './packaging/lifecycle-authority/runtime-v1.mjs';
 const project = '/tmp/lifecycle-authority-e2e', slug = 'repair-e2e', session = path.join(project, '.kontourai', 'flow-agents', slug);
 const critiques = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8')).claims
@@ -739,7 +753,7 @@ const survivor = structuredClone(legacyLedger.events[2]); survivor.sequence = 1;
 const overwrittenLedger = { schema_version: '1.0', events: [survivor] }; fs.writeFileSync(ledgerFile, `${JSON.stringify(overwrittenLedger, null, 2)}\n`, { mode: 0o644 });
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
 const priorCompletion = verifyCompletion(path.join(session, 'lifecycle-authority.completion.json'));
-const unsignedCompletion = { schema_version: '1.0', kind: 'kontourai.lifecycle-authority.completion', action: 'resolve-critique', request_sha256: priorCompletion.request_sha256, run_id: slug, operation_status: 'applied', result_core_sha256: sha256({ ...bundle, critique_resolution_events: overwrittenLedger.events }), coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
+const unsignedCompletion = { schema_version: COMPLETION_SCHEMA_VERSION, kind: 'kontourai.lifecycle-authority.completion', action: 'resolve-critique', request_sha256: priorCompletion.request_sha256, run_id: slug, operation_status: 'applied', result_core_sha256: sha256({ ...bundle, critique_resolution_events: overwrittenLedger.events }), coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
 const completion = { ...unsignedCompletion, signature: { algorithm: 'ed25519', value: crypto.sign(null, Buffer.from(canonicalJson(unsignedCompletion)), crypto.createPrivateKey(fs.readFileSync('/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-signing-key.pem'))).toString('base64') } };
 fs.writeFileSync(path.join(session, 'lifecycle-authority.completion.json'), `${JSON.stringify(completion, null, 2)}\n`, { mode: 0o644 });
 const historicalAuthorization = survivor.signed_authorization, historicalAuthorizationSha256 = sha256(canonicalJson(historicalAuthorization));
@@ -972,7 +986,7 @@ if (replay.operation_status !== 'replayed') throw new Error('resolve did not rep
 expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/resolve-copied-path.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /consumed lifecycle authorization record does not match the exact request/);
 expectReject(() => invoke('resolve-critique', 'resolve-e2e', '/root/lifecycle-authorizations/copied-project.json', { prior_record_id: ids[0], resolving_record_id: ids[1] }), /canonical project root/);
 const wrongStepProject = '/tmp/lifecycle-authority-wrong-step', wrongStepSession = path.join(wrongStepProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongStepState = path.join(wrongStepProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'state.json'); const wrongState = JSON.parse(fs.readFileSync(wrongStepState, 'utf8')); wrongState.current_step = 'execute'; fs.writeFileSync(wrongStepState, JSON.stringify(wrongState)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongStepProject, session_dir: wrongStepSession, authorization_file: '/root/lifecycle-authorizations/wrong-step.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
-const wrongFlowProject = '/tmp/lifecycle-authority-wrong-flow', wrongFlowSession = path.join(wrongFlowProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongDefinition = path.join(wrongFlowProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'definition.json'); const foreign = JSON.parse(fs.readFileSync(wrongDefinition, 'utf8')); foreign.id = 'builder.shape'; fs.writeFileSync(wrongDefinition, JSON.stringify(foreign)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongFlowProject, session_dir: wrongFlowSession, authorization_file: '/root/lifecycle-authorizations/wrong-flow.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder.build verify step/);
+const wrongFlowProject = '/tmp/lifecycle-authority-wrong-flow', wrongFlowSession = path.join(wrongFlowProject, '.kontourai', 'flow-agents', 'resolve-e2e'), wrongDefinition = path.join(wrongFlowProject, '.kontourai', 'flow', 'runs', 'resolve-e2e', 'definition.json'); const foreign = JSON.parse(fs.readFileSync(wrongDefinition, 'utf8')); foreign.id = 'builder.shape'; fs.writeFileSync(wrongDefinition, JSON.stringify(foreign)); expectReject(() => invokeExternalLifecycleAuthority({ action: 'resolve-critique', project_root: wrongFlowProject, session_dir: wrongFlowSession, authorization_file: '/root/lifecycle-authorizations/wrong-flow.json', prior_record_id: ids[0], resolving_record_id: ids[1] }), /builder\.build verify step|flow\.run_location\.no_complete_candidate/);
 const bundle = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'trust.bundle'), 'utf8'));
 const resolutionEvents = JSON.parse(fs.readFileSync(path.join(session('resolve-e2e'), 'lifecycle-authority.resolution-events.json'), 'utf8')).events;
 if (resolutionEvents.length !== 1 || !bundle.claims.some((claim) => claim.status === 'superseded' && claim.value === 'fail')) throw new Error('historical critique was not preserved exactly once');

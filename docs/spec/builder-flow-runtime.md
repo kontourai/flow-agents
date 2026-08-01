@@ -442,8 +442,13 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
-dependencies declared by that package
+For install and upgrade, omitting `[node_modules]` makes the script create a temporary
+`npm ci --ignore-scripts` stage from the committed
+`packaging/lifecycle-authority/flow-reducer-closure/package-lock.json`; it never falls back to the
+root workspace dependency tree. An explicit pre-staged closure remains supported for offline
+installation. The script stages the exact published `@kontourai/flow` package declared by the
+independently reviewed reducer pin and the
+transitive runtime dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
 pin, and staged reducer for rollback and enforces root ownership and protected mode; it does not
@@ -520,18 +525,23 @@ manifest, nonce, request time, and expiry.
 The coordinator repeats those checks while holding its durable per-run and
 Flow mutation locks. Its pure transition returns the current bundle and ledger
 unchanged. Before any Flow postimage write, the unprivileged worker stages the
-fixed five Flow-only old/new images and root signs a request-, authorization-,
+fixed four writable Flow-only old/new images and root signs a request-, authorization-,
 nonce-, reducer-, and result-bound publication plan. The plan binds, but never
-stages or restores, `trust.bundle`, the resolution ledger, and the stale
-receipt. Before the first postimage, the worker activates Flow's native
-generation-bound recovery fence for the signed plan `recovery_id`. The fence
+stages or restores, `trust.bundle`, the resolution ledger, the stale receipt,
+or canonical Flow state. State remains a protected read-only preimage so a
+writer in the plan-before-fence window invalidates the plan. Before delegation,
+root persists a unique expected generation in the durable nonce record and
+signs it into the publication capability. Before the first postimage, the
+worker activates Flow's native coordinator-bound recovery fence for the signed
+plan `recovery_id` and that exact generation. The fence
 remains active while root persists completion and nonce state and installs the
 exact receipt, so ordinary Flow writers cannot observe or mutate the
 intermediate generation. Prepared recovery uses the matching native recovery
 lock. It classifies each live artifact as exact old, exact new, or unknown;
 all-old and exact mixed states roll forward from staged new bytes, all-new
 succeeds idempotently, and unknown state fails closed without restoration.
-Finalization verifies the exact active fence generation, receipt, and all-new
+The root-signed completion binds the root-protected active fence generation.
+Finalization verifies that exact active generation, receipt, and all-new
 postimages, opens the fence through Flow's finalizer, and only then removes the
 stages and plan. Completion replay safely resumes receipt installation or
 cleanup.
@@ -569,13 +579,20 @@ identity, raw ledger digest/length/tail, raw and core current-completion identit
 `verify` step and `verify-gate` identity, Flow run head and raw manifest digest, critique projection digest, project/run/subject,
 nonce, request time, and expiry. It also binds the exact target verify expectation and the
 predecessor/current claim id, status, raw-JSON digest, ordered index, and `replace` delta. The
-coordinator derives the candidate path from the signed transaction id; the protocol has no
+authorization binds the count and canonical digest of any coupled acceptance-criterion claim
+replacements. Those coupled replacements are allowed only for `tests-evidence`, must retain the
+same ordered indices and immutable claim contracts, including subject, workflow subject,
+criterion ID and description, and are independently re-derived by the privileged runtime.
+Only derived identity, status, evidence, and verification timestamps may change. This
+authorization shape is operation schema `2.0`; older files must be regenerated and have no
+legacy fallback. The coordinator derives the candidate path from the signed transaction id; the protocol has no
 caller-selected candidate path.
 
 The unprivileged mutation worker reopens and validates every exact preimage. Its pure runtime
 transition requires a byte-semantically identical critique projection and complete ordered claim
-set except for the one authorized in-place target replacement. Unrelated verify claims cannot be
-modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
+set except for the one authorized in-place target replacement and, for `tests-evidence`, its
+digest-bound matching acceptance-criterion replacements. Unrelated verify or acceptance claims
+cannot be modified, inserted, deleted, or reordered. It also requires an unchanged external ledger and the
 `builder.build` verify gate. The protected policy derives the exact current gate requirements from
 the canonical Flow Definition, requires the target expectation exactly once there, and validates
 both predecessor and replacement `gate_claim` stamps against that requirement's expectation,
@@ -592,7 +609,8 @@ records nonce and completion, issues the immutable full-bundle-plus-ledger evide
 completion, and installs that exact receipt while the fence remains active. Finalization uses
 Flow's recovery-only native lock, verifies the exact postimages and receipt, then opens the fence.
 Flow's native writer assigns the active fence a unique generation and durably publishes it;
-the dedicated finalizer requires that exact generation before reopening. Readers bind the
+the root-signed completion binds that generation and the dedicated finalizer requires the exact
+match before reopening. Readers bind the
 generation, exact fence fingerprint, and run-directory identity across the full supported read,
 and reject symlinked fixed Flow ancestry. The installed closure must expose the mutation lock,
 recovery lock, active writer, and generation-bound finalizer before root creates a nonce or the
@@ -626,7 +644,13 @@ reports recovery required rather than presenting the reseal as a complete local
 operation. Authenticated correlation producers hold Flow's canonical per-run
 mutation lock across their complete capture or commit, reject an active recovery
 fence, and reject a projected run head, status, or step that differs from
-canonical Flow.
+canonical Flow. Lifecycle recovery finalization also retains the coordinator
+assignment lock across its protected-input assertion and Flow's durable
+active-to-open publication, so every supported lifecycle writer participates
+in the same external-input guard. Interactive reseal and exact-current recovery
+workers acquire that assignment lock before Flow's mutation lock, matching
+ordinary evidence writers and finalization so a fence cannot invert the lock
+order and block the operation that must reopen it.
 
 The public package executes this helper only as `sudo -n -- <pinned-helper>`. Installation creates
 the dedicated `kontourai-lifecycle-operator` group (or the explicit fourth installer argument) and

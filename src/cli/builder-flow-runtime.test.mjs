@@ -1892,7 +1892,7 @@ async function captureWorkflowPublicResult(args) {
 function installSignedCurrentCompletion(session) {
   const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
   const unsigned = {
-    schema_version: "1.0",
+    schema_version: "2.0",
     kind: "kontourai.lifecycle-authority.completion",
     action: "resolve-critique",
     request_sha256: "a".repeat(64),
@@ -4430,10 +4430,11 @@ test("verification evidence reseal authorization binds every atomic preimage", (
     critique_projection_sha256: "b".repeat(64), target_expectation_id: "tests-evidence",
     predecessor_claim_id: "gate-tests", predecessor_claim_status: "disputed", predecessor_claim_sha256: "c".repeat(64), predecessor_claim_index: 4,
     current_claim_id: "gate-tests", current_claim_status: "verified", current_claim_sha256: "d".repeat(64), current_claim_index: 4,
-    claim_delta: "replace", nonce: "reseal-once",
+    claim_delta: "replace", acceptance_claim_delta_count: 0, acceptance_claim_delta_sha256: "e".repeat(64), nonce: "reseal-once",
     requested_at: "2030-01-02T00:00:00.000Z", expires_at: "2030-01-02T00:10:00.000Z",
   };
   const built = builderLifecycleAuthority.buildUnsignedVerificationEvidenceResealAuthorization(fields);
+  assert.equal(built.unsigned.schema_version, "2.0");
   assert.equal(built.unsigned.operation, "reseal-verification-evidence");
   assert.equal(built.signingPayload, JSON.stringify(built.unsigned));
   assert.equal(built.unsigned.candidate_transaction_id, fields.candidate_transaction_id);
@@ -4445,6 +4446,15 @@ test("verification evidence reseal authorization binds every atomic preimage", (
       projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
     }),
     /unexpected or missing fields/i,
+  );
+  assert.throws(
+    () => builderLifecycleAuthority.validateVerificationEvidenceResealAuthorization({
+      ...malformed,
+      schema_version: "1.0",
+    }, {
+      projectRoot: fields.project_root, runId: fields.run_id, subject: fields.subject, now: "2030-01-02T00:01:00.000Z",
+    }),
+    /regenerate it with workflow reseal-verification-evidence-request/i,
   );
 });
 
@@ -4663,7 +4673,7 @@ test("public history-repair request deterministically derives every historical/c
     };
     const requestSha256 = "b".repeat(64);
     const completion = {
-      schema_version: "1.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
+      schema_version: "2.0", kind: "kontourai.lifecycle-authority.completion", action: "resolve-critique",
       request_sha256: requestSha256, run_id: slug, operation_status: "applied",
       result_core_sha256: lifecycleAuthorityResultDigest({ ...historicalBundle, critique_resolution_events: [event] }),
       coordinator_runtime_sha256: "c".repeat(64), completed_at: "2030-01-01T00:01:30.000Z",
