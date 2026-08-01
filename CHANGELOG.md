@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.6.0](https://github.com/kontourai/flow-agents/compare/v5.5.0...v5.6.0) (2026-08-01)
+
+
+### Features
+
+* add Kit observability contribution contract ([#1122](https://github.com/kontourai/flow-agents/issues/1122)) ([32c0939](https://github.com/kontourai/flow-agents/commit/32c0939ab2a4e81ac7514cd51c91d682907fab58))
+* expose continuation adapter checkpoint identity ([#1076](https://github.com/kontourai/flow-agents/issues/1076)) ([7dd2a4f](https://github.com/kontourai/flow-agents/commit/7dd2a4f66bfd1240eb87cdcbb020c21a878f39dd))
+* publish Trust advisory PR comments ([ce92236](https://github.com/kontourai/flow-agents/commit/ce9223697f16002bf345be93ccbe2e2183e028d9))
+* surface Trust failure reasons ([90b2609](https://github.com/kontourai/flow-agents/commit/90b260996e1c4477c56317935f0362d48a8cf8d5))
+
+
+### Fixes
+
+* **ci:** reject a canonical verify command that pipes into another command ([#1089](https://github.com/kontourai/flow-agents/issues/1089)) ([95c77a8](https://github.com/kontourai/flow-agents/commit/95c77a833e7e76f6792b8de394feef6837d65af1))
+* **hooks:** stop-gate must not double-gate an actor whose own next_action is done ([#962](https://github.com/kontourai/flow-agents/issues/962) P1) ([#1103](https://github.com/kontourai/flow-agents/issues/1103)) ([8bc1f4e](https://github.com/kontourai/flow-agents/commit/8bc1f4eab1f3ec0fb5e6460acc00dfabffd563bc))
+* **opencode:** support Stow-managed global init ([#1117](https://github.com/kontourai/flow-agents/issues/1117)) ([ad75632](https://github.com/kontourai/flow-agents/commit/ad756327cbfae882fa4298513fc1027590e8895f))
+* **telemetry-doctor:** resolve config the way the runtime does, not just the shipped default ([#1083](https://github.com/kontourai/flow-agents/issues/1083)) ([fe4add8](https://github.com/kontourai/flow-agents/commit/fe4add84f5a14d82531b56158aa5080c7d33f367))
+
+
+### Documentation
+
+* **decisions:** Console record delivery — delivery classes, and fold vs replay ([#1086](https://github.com/kontourai/flow-agents/issues/1086)) ([8d3fe3b](https://github.com/kontourai/flow-agents/commit/8d3fe3bf380184b248ae05c27f6c0b4ce392a74d))
+* simplify trust advisory comments ([bb6cb97](https://github.com/kontourai/flow-agents/commit/bb6cb97cc46f7a64cefad7e1230e572bc37b9dd0))
+
 ## [5.5.0](https://github.com/kontourai/flow-agents/compare/v5.4.0...v5.5.0) (2026-07-28)
 
 
