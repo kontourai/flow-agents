@@ -191,6 +191,16 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
+`--criterion-json` supplies the complete, verified evidence for the accepted criteria during this
+public verification transaction. It is intentionally distinct from `acceptance.json`: that file
+remains the planning contract and can retain an incomplete planner reference such as
+`{"kind":"source","summary":"Locate the implementation source before verification."}`.
+The successful `workflow evidence --expectation tests-evidence` command validates the complete
+criterion objects and records them in authoritative `trust.bundle`; it does not rewrite the
+planning artifact. Do not edit `acceptance.json` to repair a planned placeholder or invoke the
+package-private `workflow:sidecar record-evidence` writer for that purpose. Generic/private
+evidence writes continue to validate their final refs and fail closed on incomplete source refs.
+
 An embedding host whose current runtime identity cannot reproduce the active
 assignment actor must establish an expiring recovery-capable session binding,
 then authorize each ordinary evidence mutation separately. Run
