@@ -1,0 +1,25 @@
+name: "Flow Agents Trust Advisory Comment"
+description: >
+  Publishes an informational pull-request comment from a completed Trust Verify
+  workflow_run. Designed only for a trusted default-branch workflow_run publisher.
+
+inputs:
+  github-token:
+    description: "Token with actions: read and pull-requests: write."
+    required: true
+  workflow-run-id:
+    description: "Completed workflow_run id to inspect through the GitHub API."
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # This action deliberately performs no checkout, artifact download, or PR-output
+    # parsing. It obtains the completed run and current PR state only through GitHub's
+    # REST API while executing from trusted default-branch workflow_run code.
+    - name: Publish Trust advisory pull request comment
+      shell: bash
+      env:
+        TRUST_ADVISORY_TOKEN: ${{ inputs.github-token }}
+        TRUST_ADVISORY_RUN_ID: ${{ inputs.workflow-run-id }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/trust-advisory-comment.js"

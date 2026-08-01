@@ -120,16 +120,77 @@ arming the status check. Change it to `required` when the check becomes required
 setting controls bundle absence only: a failed fresh verification still fails in either
 mode.
 
+### Advisory PR comments (trusted publisher)
+
+Do **not** give the Trust Verify workflow a write-capable token. To make advisory Trust
+warnings visible in pull-request conversation, add this separate workflow on the
+repository's default branch. It runs only after a completed workflow named `Trust Verify`;
+it does not check out pull-request code, download artifacts, or parse PR-controlled logs.
+
+```yaml
+name: Publish Trust Verify advisory comment
+
+on:
+  workflow_run:
+    workflows: ["Trust Verify"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  publish:
+    # Defense in depth: the action re-checks this through the API.
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    # Serializes normal publisher delivery for one workflow identity + revision.
+    # The action's recorded generation comparison remains authoritative if events
+    # arrive out of order or an older run is released from the queue later.
+    concurrency:
+      group: trust-advisory-${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    steps:
+      # No actions/checkout step belongs in this publisher.
+      - uses: kontourai/flow-agents/.github/actions/trust-advisory-comment@<SHA>
+        with:
+          github-token: ${{ github.token }}
+          workflow-run-id: ${{ github.event.workflow_run.id }}
+```
+
+Pin `<SHA>` to an immutable reviewed Flow Agents commit. The publisher retrieves the
+completed run and its associated pull request(s) through GitHub's REST API, then re-fetches
+each PR and writes only when its **current** head SHA still equals the run's head SHA. A stale
+run cannot create, resolve, or overwrite a comment. The marker is namespaced by the immutable
+workflow id and its path, and records `run_number`, `run_attempt`, and immutable run id. Only
+`github-actions[bot]` comments with that state are updated; an older generation cannot overwrite
+a newer result even when both runs used the same head SHA. The workflow concurrency group reduces
+normal same-revision races, while the state comparison remains the authoritative guard. Before
+each POST or PATCH, the publisher also lists bounded pages of completed `pull_request` runs for
+the immutable workflow id queried by exact head SHA, then filters the returned records to that
+same SHA again, validates their generation fields,
+and refuses to mutate when any newer generation exists. That API guard covers a newer clean
+success that intentionally left no comment to compare against.
+
+A non-successful Trust Verify run creates the informational warning; a later successful run
+updates that warning to resolved. A clean first run creates no comment. Failures of this
+separate publisher remain visibly red so permissions/API problems are actionable, but it must
+remain non-required in branch protection: it cannot alter the already-completed Trust Verify
+verdict. Fork pull requests work because the publisher executes trusted default-branch
+`workflow_run` code with its own scoped token.
+
 ## Step 4 — Protect the Verify Config
 
 CODEOWNERS prevents the agent from quietly weakening the verify command. Add entries
 for the files that declare what CI runs:
 
 ```
-# Trust anchor config — requires owner review.
+# Trust anchor and trusted advisory-publisher config — requires owner review.
 # An agent cannot weaken verify-command or the reconcile manifest without a human
-# approving the change.
+# approving the change, or add a checkout/write path to the publisher.
 .github/workflows/trust-verify.yml  @your-org/owners
+.github/workflows/trust-advisory-comment.yml  @your-org/owners
 package.json                         @your-org/owners
 evals/ci/run-baseline.sh             @your-org/owners
 ```
