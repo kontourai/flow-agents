@@ -1,0 +1,25 @@
+{
+  "apiVersion": "flowagents.kontourai.io/v1alpha1",
+  "kind": "KitObservabilityContribution",
+  "metadata": { "name": "partner-review" },
+  "spec": {
+    "contract_version": "1.0",
+    "kit": { "id": "partner-review" },
+    "projections": [
+      { "kind": "run_summary", "schema_ref": "https://partner.example/schemas/review-run-summary/1.0.json" },
+      { "kind": "queue", "schema_ref": "https://partner.example/schemas/review-queue/1.0.json" }
+    ],
+    "views": ["run_summary", "queue"],
+    "authority_refs": [
+      { "authority": "flow", "ref": "flowagents.kontourai.io/v1alpha1/WorkflowRun" },
+      { "authority": "surface", "ref": "surface.kontourai.io/v1alpha1/TrustBundle" },
+      { "authority": "runtime", "ref": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope" }
+    ],
+    "capabilities": { "local_export": "read", "sink": "optional" },
+    "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "unavailable" },
+    "operator_actions": [
+      { "id": "open-review", "kind": "provider_command", "ref": "provider://review/open" }
+    ],
+    "compatibility": { "unsupported_version": "diagnostic" }
+  }
+}

@@ -125,6 +125,28 @@ export type {
 } from "./telemetry-semantics.js";
 
 export {
+  KIT_OBSERVABILITY_API_VERSION,
+  KIT_OBSERVABILITY_AUTHORITIES,
+  KIT_OBSERVABILITY_CONTRACT_VERSION,
+  KIT_OBSERVABILITY_DESCRIPTOR_KIND,
+  KIT_OBSERVABILITY_PROJECTION_KINDS,
+  KIT_OBSERVABILITY_RECORD_KIND,
+  loadKitObservabilityContribution,
+  validateKitObservabilityContribution,
+  validateKitObservabilityRecord,
+} from "./kit-observability-contract.js";
+export type {
+  KitObservabilityAuthority,
+  KitObservabilityAuthorityRef,
+  KitObservabilityContribution,
+  KitObservabilityContributionLoadResult,
+  KitObservabilityDiagnostic,
+  KitObservabilityDiagnosticCode,
+  KitObservabilityProjectionKind,
+  KitObservabilityRecord,
+} from "./kit-observability-contract.js";
+
+export {
   NARRATIVE_SOURCE_ID_VERSION,
   SourceIdParseError,
   compareSourceIds,

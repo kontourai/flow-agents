@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "observability_contribution": { "path": "kit-observability.contribution.json" },
   "id": "knowledge",
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",

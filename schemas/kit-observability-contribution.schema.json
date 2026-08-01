@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/kit-observability-contribution/1.0.json",
+  "title": "Kit observability contribution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "flowagents.kontourai.io/v1alpha1" },
+    "kind": { "const": "KitObservabilityContribution" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "kit", "projections", "views", "authority_refs", "capabilities", "data_policy", "operator_actions", "compatibility"],
+      "properties": {
+        "contract_version": { "const": "1.0" },
+        "kit": { "$ref": "#/$defs/kit" },
+        "projections": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/projection" } },
+        "views": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/projectionKind" } },
+        "authority_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/authorityRef" } },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "data_policy": { "$ref": "#/$defs/dataPolicy" },
+        "operator_actions": { "type": "array", "items": { "$ref": "#/$defs/operatorAction" } },
+        "compatibility": { "$ref": "#/$defs/compatibility" }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+    "reference": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f\\s]+$" },
+    "metadata": { "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "$ref": "#/$defs/identifier" } } },
+    "kit": { "type": "object", "additionalProperties": false, "required": ["id"], "properties": { "id": { "$ref": "#/$defs/identifier" } } },
+    "projectionKind": { "enum": ["run_summary", "metric_series", "queue", "grounded_narrative", "learning"] },
+    "projection": { "type": "object", "additionalProperties": false, "required": ["kind", "schema_ref"], "properties": { "kind": { "$ref": "#/$defs/projectionKind" }, "schema_ref": { "$ref": "#/$defs/reference" } } },
+    "authorityRef": { "type": "object", "additionalProperties": false, "required": ["authority", "ref"], "properties": { "authority": { "enum": ["flow", "surface", "runtime"] }, "ref": { "$ref": "#/$defs/reference" } } },
+    "capabilities": { "type": "object", "additionalProperties": false, "required": ["local_export", "sink"], "properties": { "local_export": { "const": "read" }, "sink": { "enum": ["unsupported", "optional"] } } },
+    "dataPolicy": { "type": "object", "additionalProperties": false, "required": ["redaction", "retention", "raw_source"], "properties": { "redaction": { "const": "declared" }, "retention": { "const": "kit_owned" }, "raw_source": { "enum": ["available", "unavailable"] } } },
+    "operatorAction": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "ref"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "kind": { "enum": ["provider_command", "proposal_ref"] }, "ref": { "$ref": "#/$defs/reference" } } },
+    "compatibility": { "type": "object", "additionalProperties": false, "required": ["unsupported_version"], "properties": { "unsupported_version": { "const": "diagnostic" } } }
+  }
+}

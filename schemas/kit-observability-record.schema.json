@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/kit-observability-record/1.0.json",
+  "title": "Kit observability record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "flowagents.kontourai.io/v1alpha1" },
+    "kind": { "const": "KitObservabilityRecord" },
+    "metadata": { "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" } } },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contribution", "projection", "authority_refs", "data"],
+      "properties": {
+        "contribution": { "type": "object", "additionalProperties": false, "required": ["kit_id", "contract_version"], "properties": { "kit_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" }, "contract_version": { "const": "1.0" } } },
+        "projection": { "type": "object", "additionalProperties": false, "required": ["kind", "schema_ref"], "properties": { "kind": { "enum": ["run_summary", "metric_series", "queue", "grounded_narrative", "learning"] }, "schema_ref": { "type": "string", "minLength": 1, "maxLength": 512 } } },
+        "authority_refs": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["authority", "ref"], "properties": { "authority": { "enum": ["flow", "surface", "runtime"] }, "ref": { "type": "string", "minLength": 1, "maxLength": 512 } } } },
+        "data": {
+          "type": "object",
+          "not": {
+            "anyOf": [
+              { "required": ["gate"] },
+              { "required": ["claim"] }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

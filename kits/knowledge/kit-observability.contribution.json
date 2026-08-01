@@ -1,0 +1,27 @@
+{
+  "apiVersion": "flowagents.kontourai.io/v1alpha1",
+  "kind": "KitObservabilityContribution",
+  "metadata": { "name": "knowledge" },
+  "spec": {
+    "contract_version": "1.0",
+    "kit": { "id": "knowledge" },
+    "projections": [
+      { "kind": "run_summary", "schema_ref": "https://kontourai.dev/schemas/knowledge/run-summary/1.0.json" },
+      { "kind": "metric_series", "schema_ref": "https://kontourai.dev/schemas/knowledge/metric-series/1.0.json" },
+      { "kind": "grounded_narrative", "schema_ref": "https://kontourai.dev/schemas/knowledge/grounded-narrative/1.0.json" },
+      { "kind": "learning", "schema_ref": "https://kontourai.dev/schemas/knowledge/learning/1.0.json" }
+    ],
+    "views": ["run_summary", "metric_series", "grounded_narrative", "learning"],
+    "authority_refs": [
+      { "authority": "flow", "ref": "flowagents.kontourai.io/v1alpha1/WorkflowRun" },
+      { "authority": "surface", "ref": "surface.kontourai.io/v1alpha1/TrustBundle" },
+      { "authority": "runtime", "ref": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope" }
+    ],
+    "capabilities": { "local_export": "read", "sink": "unsupported" },
+    "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "available" },
+    "operator_actions": [
+      { "id": "review-knowledge-proposal", "kind": "proposal_ref", "ref": "proposal://knowledge/review" }
+    ],
+    "compatibility": { "unsupported_version": "diagnostic" }
+  }
+}
