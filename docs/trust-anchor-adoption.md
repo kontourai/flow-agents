@@ -129,7 +129,14 @@ caller job to the same pull-request workflow as `trust-verify`:
 ```yaml
 jobs:
   trust-verify:
-    # Existing Trust Verify job remains unchanged.
+    outputs:
+      failure-summary: ${{ steps.trust-verify.outputs.failure-summary }}
+    steps:
+      # Existing setup steps remain unchanged.
+      - id: trust-verify
+        uses: kontourai/flow-agents/.github/actions/trust-verify@<SHA>
+        with:
+          verify-command: "npm run verify"
 
   trust-advisory-comment:
     if: >-
@@ -144,6 +151,7 @@ jobs:
       result: ${{ needs['trust-verify'].result }}
       run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       check-name: Trust Verify
+      details: ${{ needs['trust-verify'].outputs.failure-summary }}
 ```
 
 Pin `<SHA>` to an immutable reviewed commit. The caller runs as a separate job, grants only
