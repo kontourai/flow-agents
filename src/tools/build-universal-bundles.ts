@@ -388,31 +388,95 @@ function exportCodexProfileConfig(profile: Record<string, unknown>, settings: Re
   for (const [key, value] of Object.entries(profile)) if (typeof value !== "object" || value === null) lines.push(`${key} = ${tomlValue(value)}`);
   return `${lines.join("\n").trimEnd()}\n`;
 }
-function shellHook(command: string, timeout = 10, statusMessage?: string): Record<string, unknown> {
-  const hook: Record<string, unknown> = { type: "command", command, timeout };
+/**
+ * A hook invocation is either shell form (`command` string handed to the host's
+ * shell) or exec form (`command` binary spawned directly with `args`, no shell).
+ *
+ * #1098 / ops Windows probe (2026-07-29): every hook used to be emitted as a
+ * `bash -lc` wrapper whose only real job was resolving `$root`. On stock
+ * Windows, `bash` resolves to the WSL2 shim — a different OS with no Windows
+ * `node` on PATH and no view of `C:\` paths — so every hook exited 127 and the
+ * policy layer silently never fired. The hook *scripts* run fine under Windows
+ * `node`. The fix is to take the shell out of the hook path entirely wherever
+ * the host contract allows it.
+ */
+type HookInvocation = { command: string; args?: string[] };
+function shellHook(invocation: HookInvocation, timeout = 10, statusMessage?: string): Record<string, unknown> {
+  const hook: Record<string, unknown> = { type: "command", command: invocation.command, timeout };
+  if (invocation.args) hook.args = invocation.args;
   if (statusMessage) hook.statusMessage = statusMessage;
   return hook;
 }
-function claudeTelemetry(event: string): string {
-  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-telemetry-hook.js" ${event} dev'`;
+/**
+ * Claude Code exec form: `command` is resolved on PATH and spawned directly with
+ * `args` as the argument vector — no shell on any platform — and
+ * `${CLAUDE_PROJECT_DIR}` is substituted by Claude Code itself into each args
+ * element "regardless of the working directory when the hook runs"
+ * (code.claude.com/docs/en/hooks). Requires Claude Code >= 2.1.139 (2026-05-11,
+ * the release that added the `args` field).
+ */
+const CLAUDE_HOOKS_PREFIX = "${CLAUDE_PROJECT_DIR}/scripts/hooks/";
+function claudeTelemetry(event: string): HookInvocation {
+  return { command: "node", args: [`${CLAUDE_HOOKS_PREFIX}claude-telemetry-hook.js`, event, "dev"] };
 }
-function claudePolicy(event: string, script: string, envPrefix = ""): string {
-  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; ${envPrefix}node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
+function claudePolicy(event: string, script: string, envDefault?: EnvDefault): HookInvocation {
+  return {
+    command: "node",
+    args: [`${CLAUDE_HOOKS_PREFIX}claude-hook-adapter.js`, event, script.replace(/\.js$/, ""), script, "default", ...envDefaultArgs(envDefault)],
+  };
 }
-function codexRoot(scriptPath: string): string {
-  return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi; if [ ! -f "$root/${scriptPath}" ] && [ -f "$HOME/.codex/${scriptPath}" ]; then root="$HOME/.codex"; fi; if [ ! -f "$root/${scriptPath}" ]; then echo "flow-agents: hook script not found at $root/${scriptPath} (checked \\$CODEX_HOME, git toplevel/cwd, and \\$HOME/.codex) - skipping hook" >&2; exit 0; fi`;
+/**
+ * Codex hooks carry a single command string, so exec form is not available and
+ * the multi-location root search (CODEX_HOME → git toplevel → cwd → ~/.codex)
+ * cannot be done before *something* runs. That something is now `node -e` with
+ * an inline resolver instead of `bash -lc`: the resolver ports the old shell
+ * search to JS, then requires the real hook script in-process with argv
+ * restored to the script's documented contract. The string is deliberately
+ * limited to characters that survive every host shell unescaped inside double
+ * quotes — no `$`, backticks, `%`, `\` or embedded double quotes — so it
+ * behaves identically under sh, Git Bash, PowerShell, and cmd.
+ */
+function codexTrampoline(scriptRelPath: string, args: string[]): HookInvocation {
+  const resolver =
+    "var fs=require('fs'),p=require('path'),cp=require('child_process');" +
+    "var rel=process.argv[1];var e=process.env;var c=[];" +
+    "if(e.CODEX_HOME)c.push(e.CODEX_HOME);" +
+    "var g='';try{g=cp.execSync('git rev-parse --show-toplevel',{stdio:['ignore','pipe','ignore']}).toString().trim()}catch(err){}" +
+    "if(g)c.push(g);c.push(process.cwd());" +
+    "if(e.HOME)c.push(p.join(e.HOME,'.codex'));" +
+    "if(e.USERPROFILE)c.push(p.join(e.USERPROFILE,'.codex'));" +
+    "var root=null;for(var i=0;i<c.length;i++){if(c[i]&&fs.existsSync(p.join(c[i],rel))){root=c[i];break}}" +
+    "if(!root){console.error('flow-agents: hook script not found (checked CODEX_HOME, git toplevel, cwd, and the .codex home): '+rel+' - skipping hook');process.exit(0)}" +
+    "process.argv[1]=p.join(root,rel);require(process.argv[1])";
+  return { command: `node -e "${resolver}" ${[scriptRelPath, ...args].join(" ")}` };
 }
-function codexTelemetry(event: string): string {
-  if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
-  return `bash -lc '${codexRoot("scripts/hooks/codex-telemetry-hook.js")}; node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
+function codexTelemetry(event: string): HookInvocation {
+  // PermissionRequest telemetry has no node adapter mapping and invokes the bash
+  // telemetry pipeline directly; it stays shell-form (and remains a disclosed
+  // Windows gap until scripts/telemetry/telemetry.sh has a node port).
+  if (event === "PermissionRequest") {
+    const scriptPath = "scripts/telemetry/telemetry.sh";
+    return {
+      command: `bash -lc 'root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi; if [ ! -f "$root/${scriptPath}" ] && [ -f "$HOME/.codex/${scriptPath}" ]; then root="$HOME/.codex"; fi; if [ ! -f "$root/${scriptPath}" ]; then echo "flow-agents: hook script not found at $root/${scriptPath} (checked \\$CODEX_HOME, git toplevel/cwd, and \\$HOME/.codex) - skipping hook" >&2; exit 0; fi; bash "$root/${scriptPath}" permissionRequest dev'`,
+    };
+  }
+  return codexTrampoline("scripts/hooks/codex-telemetry-hook.js", [event, "dev"]);
 }
-function codexPolicy(script: string, envPrefix = ""): string {
-  return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; ${envPrefix}node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
+function codexPolicy(script: string, envDefault?: EnvDefault): HookInvocation {
+  return codexTrampoline("scripts/hooks/codex-hook-adapter.js", [script.replace(/\.js$/, ""), script, "default", ...envDefaultArgs(envDefault)]);
 }
 // Shipped L2 runtimes enforce goal fit by default (mode=block), while remaining
 // operator-overridable via the FLOW_AGENTS_GOAL_FIT_MODE environment variable.
 // The canonical engine default stays warn so the conformance contract is honest.
-const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_MODE:-block}" ';
+// This used to be a shell prefix (`VAR="${VAR:-block}"`); with no shell in the
+// hook path it now travels as an `--env-default=KEY=VALUE` argument that the
+// hook adapters apply to the child environment only when KEY is unset —
+// identical operator-override-wins semantics, no shell required.
+type EnvDefault = { key: string; value: string };
+const GOAL_FIT_ENV_DEFAULT: EnvDefault = { key: "FLOW_AGENTS_GOAL_FIT_MODE", value: "block" };
+function envDefaultArgs(envDefault?: EnvDefault): string[] {
+  return envDefault ? [`--env-default=${envDefault.key}=${envDefault.value}`] : [];
+}
 
 /**
  * #1024: the ONE policy-hook table every runtime derives from.
@@ -432,13 +496,13 @@ const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_
  */
 type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
 
-const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envPrefix?: string }[] = [
+const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envDefault?: EnvDefault }[] = [
   { id: "workflow-steering-session", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "workflow-steering-prompt", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "config-protection", script: "config-protection.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "quality-gate", script: "quality-gate.js", statusMessage: "Running Flow Agents hook policy" },
   { id: "evidence-capture", script: "evidence-capture.js", statusMessage: "Capturing Flow Agents command evidence" },
-  { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envPrefix: GOAL_FIT_MODE_PREFIX },
+  { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envDefault: GOAL_FIT_ENV_DEFAULT },
 ];
 
 /** Telemetry events per runtime. A runtime absent from an event emits no record for it — declare why below. */
@@ -553,8 +617,8 @@ export function assertGeneratedPolicyCoverage(runtime: string, generatedSource: 
 
 function buildRuntimeHookMap(
   runtime: string,
-  telemetryCommand: (event: string) => string,
-  policyCommand: (event: string, script: string, envPrefix?: string) => string,
+  telemetryCommand: (event: string) => HookInvocation,
+  policyCommand: (event: string, script: string, envDefault?: EnvDefault) => HookInvocation,
 ): Record<string, Array<Record<string, unknown>>> {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};
   for (const event of RUNTIME_TELEMETRY_EVENTS[runtime] ?? []) {
@@ -563,7 +627,7 @@ function buildRuntimeHookMap(
   for (const hook of POLICY_HOOKS) {
     const event = RUNTIME_POLICY_EVENTS[runtime]?.[hook.id];
     if (!event) continue; // declared unsupported; assertPolicyHookCoverage proves it was declared, not forgotten
-    (hooks[event] ??= []).push({ hooks: [shellHook(policyCommand(event, hook.script, hook.envPrefix), 30, hook.statusMessage)] });
+    (hooks[event] ??= []).push({ hooks: [shellHook(policyCommand(event, hook.script, hook.envDefault), 30, hook.statusMessage)] });
   }
   return hooks;
 }
@@ -588,15 +652,20 @@ export function assertPolicyHookCoverage(): void {
 function exportClaudeSettings(): string {
   assertPolicyHookCoverage();
   return `${JSON.stringify({
-    statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
+    // statusLine has no exec form, so this stays a shell string — but a plain
+    // `node` invocation instead of a `bash -lc` wrapper. Claude Code runs it via
+    // sh on POSIX and Git Bash on Windows (PowerShell only when Git Bash is
+    // absent, where `$CLAUDE_PROJECT_DIR` does not expand and the statusline —
+    // a cosmetic surface — simply does not display).
+    statusLine: { type: "command", command: 'node "$CLAUDE_PROJECT_DIR/scripts/statusline/flow-agents-statusline.js"' },
     permissions: manifest.claude_code.permissions ?? {},
     skipDangerousModePermissionPrompt: manifest.claude_code.skipDangerousModePermissionPrompt ?? true,
-    hooks: buildRuntimeHookMap("claude-code", claudeTelemetry, (event, script, envPrefix) => claudePolicy(event, script, envPrefix ?? "")),
+    hooks: buildRuntimeHookMap("claude-code", claudeTelemetry, claudePolicy),
   }, null, 2)}\n`;
 }
 function exportCodexHooks(): string {
   assertPolicyHookCoverage();
-  return `${JSON.stringify({ hooks: buildRuntimeHookMap("codex", codexTelemetry, (_event, script, envPrefix) => codexPolicy(script, envPrefix ?? "")) }, null, 2)}\n`;
+  return `${JSON.stringify({ hooks: buildRuntimeHookMap("codex", codexTelemetry, (_event, script, envDefault) => codexPolicy(script, envDefault)) }, null, 2)}\n`;
 }
 
 function copySharedContent(targetRoot: string, targetName: string, token: string): void {

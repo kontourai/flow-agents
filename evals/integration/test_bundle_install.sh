@@ -605,10 +605,23 @@ else
   _fail "pi task dir scaffold missing"
 fi
 
-if rg -q 'claude-hook-adapter\.js.*stop-goal-fit\.js' "$CLAUDE_DEST/.claude/settings.json" \
-  && rg -q 'claude-hook-adapter\.js.*workflow-steering\.js' "$CLAUDE_DEST/.claude/settings.json" \
-  && rg -q 'claude-hook-adapter\.js.*quality-gate\.js' "$CLAUDE_DEST/.claude/settings.json" \
-  && rg -q 'claude-hook-adapter\.js.*config-protection\.js' "$CLAUDE_DEST/.claude/settings.json"; then
+# #1098: policy hooks are exec form — the adapter path and policy script are
+# separate args elements (separate pretty-printed lines), so single-line rg
+# cannot see them together; assert per hook entry over command+args.
+if node - "$CLAUDE_DEST/.claude/settings.json" <<'NODE'
+const fs = require("node:fs");
+const hooks = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).hooks || {};
+const entries = Object.values(hooks).flat().flatMap((g) => (g.hooks || []));
+const wired = (script) => entries.some((h) => {
+  const haystack = [String(h.command || ""), ...(Array.isArray(h.args) ? h.args.map(String) : [])].join(" ");
+  return haystack.includes("claude-hook-adapter.js") && haystack.includes(script);
+});
+for (const script of ["stop-goal-fit.js", "workflow-steering.js", "quality-gate.js", "config-protection.js"]) {
+  if (!wired(script)) throw new Error(`policy hook not wired: ${script}`);
+}
+console.log("ok");
+NODE
+then
   _pass "Claude Code install wires Flow Agents policy hooks"
 else
   _fail "Claude Code install is missing Flow Agents policy hook wiring"
@@ -648,10 +661,14 @@ function eventGroups(file, ...names) {
   return [];
 }
 function hasWorkflowSteering(file, ...eventNames) {
+  // #1098: Claude entries are exec form — the script path lives in `args`,
+  // command is merely "node" — so identity must scan command AND args.
   return eventGroups(file, ...eventNames).some((group) => {
     if ("command" in group) return String(group.command || "").includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher);
-    const command = (group.hooks || []).map((hook) => String(hook.command || "")).join(" ");
-    return command.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher);
+    const haystack = (group.hooks || [])
+      .map((hook) => [String(hook.command || ""), ...(Array.isArray(hook.args) ? hook.args.map(String) : [])].join(" "))
+      .join(" ");
+    return haystack.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher);
   });
 }
 for (const file of process.argv.slice(2)) {
@@ -742,25 +759,34 @@ function eventGroups(file, ...names) {
   for (const name of names) if (hooks[name]?.length) return hooks[name];
   return [];
 }
-function workflowCommand(file, ...eventNames) {
+function workflowInvocation(file, ...eventNames) {
+  // #1098: returns { command } for shell-form entries (Kiro strings, the codex
+  // trampoline) and { command, args } for Claude exec-form entries.
   for (const group of eventGroups(file, ...eventNames)) {
     if ("command" in group) {
       const command = String(group.command || "");
-      if (command.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher)) return command;
+      if (command.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher)) return { command };
       continue;
     }
-    const command = (group.hooks || []).map((hook) => String(hook.command || "")).join(" ");
-    if (command.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher) && group.hooks?.[0]) {
-      return String(group.hooks[0].command || "");
+    for (const hook of group.hooks || []) {
+      const haystack = [String(hook.command || ""), ...(Array.isArray(hook.args) ? hook.args.map(String) : [])].join(" ");
+      if (haystack.includes("workflow-steering.js") && [undefined, null, "*"].includes(group.matcher)) {
+        return Array.isArray(hook.args) ? { command: String(hook.command || ""), args: hook.args.map(String) } : { command: String(hook.command || "") };
+      }
     }
   }
   throw new Error(`missing workflow-steering command in ${file}`);
 }
-function runCommand(label, command, cwd, runtimeJson) {
+function runCommand(label, invocation, cwd, runtimeJson) {
   const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd, prompt: "continue" });
   const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd, FLOW_AGENTS_ACTOR: installedHookActor };
   if (label === "Codex") env.CODEX_HOME = cwd;
-  const result = spawnSync(command, { input: payload, cwd, env, shell: true, encoding: "utf8", timeout: 30000 });
+  // Exec form runs per the documented Claude Code contract: substitute the
+  // ${CLAUDE_PROJECT_DIR} placeholder into each args element, spawn directly,
+  // no shell. Shell-form strings keep the historical shell invocation.
+  const result = invocation.args
+    ? spawnSync(invocation.command, invocation.args.map((a) => a.split("${CLAUDE_PROJECT_DIR}").join(cwd)), { input: payload, cwd, env, encoding: "utf8", timeout: 30000 })
+    : spawnSync(invocation.command, { input: payload, cwd, env, shell: true, encoding: "utf8", timeout: 30000 });
   if (result.status !== 0) throw new Error(`${label} installed hook failed: rc=${result.status} stdout=${result.stdout} stderr=${result.stderr}`);
   const ctx = runtimeJson ? (JSON.parse(result.stdout).hookSpecificOutput?.additionalContext || "") : result.stdout;
   if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error(`${label} installed hook did not emit workflow attention: ${result.stdout} ${result.stderr}`);
@@ -770,9 +796,9 @@ function runCommand(label, command, cwd, runtimeJson) {
 writeFixture(claudeDest);
 writeFixture(codexDest);
 writeFixture(kiroWorkspace);
-runCommand("Claude Code", workflowCommand(path.join(claudeDest, ".claude/settings.json"), "UserPromptSubmit", "userPromptSubmit"), claudeDest, true);
-runCommand("Codex", workflowCommand(path.join(codexDest, ".codex/hooks.json"), "UserPromptSubmit", "userPromptSubmit"), codexDest, true);
-runCommand("Kiro", workflowCommand(path.join(kiroDest, "agents/dev.json"), "UserPromptSubmit", "userPromptSubmit"), kiroWorkspace, false);
+runCommand("Claude Code", workflowInvocation(path.join(claudeDest, ".claude/settings.json"), "UserPromptSubmit", "userPromptSubmit"), claudeDest, true);
+runCommand("Codex", workflowInvocation(path.join(codexDest, ".codex/hooks.json"), "UserPromptSubmit", "userPromptSubmit"), codexDest, true);
+runCommand("Kiro", workflowInvocation(path.join(kiroDest, "agents/dev.json"), "UserPromptSubmit", "userPromptSubmit"), kiroWorkspace, false);
 console.log("ok");
 NODE
 then
