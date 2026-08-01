@@ -177,6 +177,8 @@ export type ActiveFlowStep = {
   routeBackReasons: string[];
   /** When resolved through a parent step's uses_flow edge, names the child FlowDefinition that owns the gate. */
   sourceFlowId?: string;
+  /** Ordered child FlowDefinitions that contribute a composed multi-child gate. */
+  sourceFlowIds?: string[];
 };
 
 /** Shape of a gate entry in the FlowDefinition JSON. */
@@ -189,6 +191,13 @@ type FlowGate = {
   route_back_policy?: { max_attempts: number; on_exceeded: string };
 };
 
+type FlowStep = { id: string; next: string | null; uses_flow?: string; uses_flows?: string[] };
+
+type RouteBackMetadata = {
+  onRouteBack?: Record<string, string>;
+  routeBackPolicy?: { max_attempts: number; on_exceeded: string };
+};
+
 /** Shape of a FlowDefinition JSON file. */
 type FlowDefinition = {
   id: string;
@@ -197,13 +206,15 @@ type FlowDefinition = {
    *  (e.g. "execution") to step ids (e.g. "execute") so advance-state can write active_step_id
    *  without hardcoding any vocabulary in the core. */
   phase_map?: Record<string, string>;
-  steps?: Array<{ id: string; next: string | null; uses_flow?: string }>;
+  steps?: FlowStep[];
   gates?: Record<string, FlowGate>;
   /** Optional claim types or expectation ids this flow intentionally exposes to parent/composed flows. */
   exports?: string[];
+  /** Resolver-emitted provenance for gates imported through uses_flows. */
+  flow_agents_contributions?: Array<{ flow_id: string; gate_id: string; step_id: string; expectation_ids: string[] }>;
 };
 
-type InternalActiveFlowStep = ActiveFlowStep & { flowExports?: string[] };
+type InternalActiveFlowStep = ActiveFlowStep & { flowExports?: string[]; routeBack?: RouteBackMetadata };
 
 function flowIdParts(flowId: string): { kitId: string; flowName: string } | null {
   if (!flowId) return null;
@@ -227,6 +238,90 @@ function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = tr
   } catch {
     return null; // ENOENT, permission error, or parse error → fail-open
   }
+}
+
+function childFlowIdsForStep(step: FlowStep): string[] | null {
+  const scalar = step.uses_flow;
+  const list = step.uses_flows;
+  if (scalar !== undefined && list !== undefined) return null;
+  // A present scalar declaration must be a single non-empty id.  Treating an
+  // array (or an empty value) as "no composition" would silently erase the
+  // legacy fan-in attempt instead of failing closed.
+  if (scalar !== undefined) return typeof scalar === "string" && scalar.trim() ? [scalar] : null;
+  if (list === undefined) return [];
+  if (!Array.isArray(list) || list.length === 0 || list.some((flowId) => typeof flowId !== "string" || !flowId.trim())) return null;
+  if (new Set(list).size !== list.length) return null;
+  return list;
+}
+
+const AGGREGATE_GATE_PREFIX = "flow-agents.aggregate.";
+
+function aggregateGateId(stepId: string): string {
+  return `${AGGREGATE_GATE_PREFIX}${stepId}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Route-back metadata participates in the aggregate gate's observable runtime
+ * behavior, so malformed or partial declarations are not safe to ignore.
+ */
+function routeBackMetadataForGate(gate: FlowGate): RouteBackMetadata | null {
+  const rawRoutes = gate.on_route_back;
+  const rawPolicy = gate.route_back_policy;
+  if (rawRoutes === undefined && rawPolicy === undefined) return {};
+  if (!isRecord(rawRoutes)) return null;
+  const onRouteBack: Record<string, string> = {};
+  for (const [reason, target] of Object.entries(rawRoutes)) {
+    if (!reason || typeof target !== "string" || !target) return null;
+    onRouteBack[reason] = target;
+  }
+  if (rawPolicy === undefined) return { onRouteBack };
+  if (!isRecord(rawPolicy)
+    || !Number.isSafeInteger(rawPolicy.max_attempts)
+    || rawPolicy.max_attempts < 1
+    || typeof rawPolicy.on_exceeded !== "string"
+    || !rawPolicy.on_exceeded) return null;
+  return {
+    onRouteBack,
+    routeBackPolicy: { max_attempts: rawPolicy.max_attempts, on_exceeded: rawPolicy.on_exceeded },
+  };
+}
+
+/** Return null when children would give the aggregate contradictory retry semantics. */
+function mergeRouteBackMetadata(metadata: RouteBackMetadata[]): RouteBackMetadata | null {
+  const onRouteBack: Record<string, string> = {};
+  let routeBackPolicy: RouteBackMetadata["routeBackPolicy"] | undefined;
+  let policyPresence: boolean | undefined;
+  for (const entry of metadata) {
+    const hasPolicy = entry.routeBackPolicy !== undefined;
+    if (policyPresence === undefined) policyPresence = hasPolicy;
+    else if (policyPresence !== hasPolicy) return null;
+    if (hasPolicy) {
+      if (routeBackPolicy
+        && (routeBackPolicy.max_attempts !== entry.routeBackPolicy!.max_attempts
+          || routeBackPolicy.on_exceeded !== entry.routeBackPolicy!.on_exceeded)) return null;
+      routeBackPolicy = entry.routeBackPolicy;
+    }
+    for (const [reason, target] of Object.entries(entry.onRouteBack ?? {})) {
+      if (onRouteBack[reason] !== undefined && onRouteBack[reason] !== target) return null;
+      onRouteBack[reason] = target;
+    }
+  }
+  if (routeBackPolicy && Object.keys(onRouteBack).length === 0) return null;
+  return {
+    ...(Object.keys(onRouteBack).length > 0 ? { onRouteBack } : {}),
+    ...(routeBackPolicy ? { routeBackPolicy } : {}),
+  };
+}
+
+function routeBackGateFields(metadata: RouteBackMetadata): Pick<FlowGate, "on_route_back" | "route_back_policy"> {
+  return {
+    ...(metadata.onRouteBack ? { on_route_back: metadata.onRouteBack } : {}),
+    ...(metadata.routeBackPolicy ? { route_back_policy: metadata.routeBackPolicy } : {}),
+  };
 }
 
 /**
@@ -261,26 +356,65 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
   if (!source || !Array.isArray(source.steps)) return null;
   const effective = JSON.parse(JSON.stringify(source)) as FlowDefinition;
   effective.gates = { ...(effective.gates ?? {}) };
+  const contributions: NonNullable<FlowDefinition["flow_agents_contributions"]> = [];
 
   for (let index = 0; index < source.steps.length; index += 1) {
-    const sourceStep = source.steps[index]!;
-    if (typeof sourceStep.uses_flow !== "string" || !sourceStep.uses_flow.trim()) continue;
-    const child = resolveEffectiveFlowDefinitionInternal(sourceStep.uses_flow, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
-    if (!child || !child.gates) return null;
-    const childGateEntry = Object.entries(child.gates).find(([, gate]) => gate?.step === sourceStep.id);
-    if (!childGateEntry) return null;
+    const sourceStep: FlowStep = source.steps[index]!;
+    const childFlowIds = childFlowIdsForStep(sourceStep);
+    if (childFlowIds === null) return null;
+    if (childFlowIds.length === 0) continue;
     if (Object.values(effective.gates).some((gate) => gate?.step === sourceStep.id)) return null;
-    const [childGateId, childGate] = childGateEntry;
-    const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
-    const exported = exportedExpectations(childExpects, child.exports);
-    if (!exported) return null;
-    effective.gates[`${sourceStep.uses_flow}:${childGateId}`] = {
-      ...childGate,
-      expects: exported,
+
+    // Keep scalar composition byte-compatible: its one child gate remains
+    // namespaced exactly as before rather than becoming an aggregate.
+    if (typeof sourceStep.uses_flow === "string") {
+      const child = resolveEffectiveFlowDefinitionInternal(childFlowIds[0]!, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
+      if (!child || !child.gates) return null;
+      const childGateEntry = Object.entries(child.gates).find(([, gate]) => gate?.step === sourceStep.id);
+      if (!childGateEntry) return null;
+      const [childGateId, childGate] = childGateEntry;
+      const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
+      const exported = exportedExpectations(childExpects, child.exports);
+      if (!exported) return null;
+      effective.gates[`${sourceStep.uses_flow}:${childGateId}`] = {
+        ...childGate,
+        expects: exported,
+      };
+      const { uses_flow: _usesFlow, ...compiledStep } = effective.steps![index]!;
+      effective.steps![index] = compiledStep;
+      continue;
+    }
+
+    const imports: Array<{ flowId: string; gateId: string; expects: GateExpectation[]; routeBack: RouteBackMetadata }> = [];
+    const expectationIds = new Set<string>();
+    for (const childFlowId of childFlowIds) {
+      const child = resolveEffectiveFlowDefinitionInternal(childFlowId, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
+      if (!child || !child.gates) return null;
+      const childGateEntries: Array<[string, FlowGate]> = Object.entries(child.gates).filter(([, gate]) => gate?.step === sourceStep.id);
+      // A list contributor must resolve to one gate, matching live resolution.
+      if (childGateEntries.length !== 1) return null;
+      const [childGateId, childGate] = childGateEntries[0]!;
+      const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
+      const exported = exportedExpectations(childExpects, child.exports);
+      const routeBack = routeBackMetadataForGate(childGate);
+      if (!exported || !routeBack || exported.some((expectation) => expectationIds.has(expectation.id))) return null;
+      for (const expectation of exported) expectationIds.add(expectation.id);
+      imports.push({ flowId: childFlowId, gateId: childGateId, expects: exported, routeBack });
+    }
+    const routeBack = mergeRouteBackMetadata(imports.map((entry) => entry.routeBack));
+    const gateId = aggregateGateId(sourceStep.id);
+    if (!routeBack || effective.gates[gateId]) return null;
+    effective.gates[gateId] = {
+      step: sourceStep.id,
+      expects: imports.flatMap((entry) => entry.expects),
+      ...routeBackGateFields(routeBack),
     };
-    const { uses_flow: _usesFlow, ...compiledStep } = effective.steps![index]!;
+    for (const imported of imports) contributions.push({ flow_id: imported.flowId, gate_id: imported.gateId, step_id: sourceStep.id, expectation_ids: imported.expects.map((expectation) => expectation.id) });
+    const { uses_flows: _usesFlows, ...compiledStep } = effective.steps![index]!;
     effective.steps![index] = compiledStep;
   }
+  if (contributions.length > 0) effective.flow_agents_contributions = contributions;
+  else delete effective.flow_agents_contributions;
   const effectiveSteps = effective.steps!;
   const gatedSteps = new Set(Object.values(effective.gates).flatMap((gate) =>
     typeof gate?.step === "string" ? [gate.step] : []));
@@ -394,33 +528,71 @@ function resolveFlowStepInternal(flowId: string, stepId: string, repoRoot: strin
 
   if (!flowDef || typeof flowDef !== "object") return null;
 
-  // Find the gate whose .step matches stepId.
-  if (flowDef.gates) {
-    for (const [gateId, gate] of Object.entries(flowDef.gates)) {
-      if (!gate || gate.step !== stepId) continue;
-      const expects = Array.isArray(gate.expects) ? gate.expects : [];
-      return { flowId, stepId, gateId, gateExpects: expects, routeBackReasons: Object.keys(gate.on_route_back ?? {}), flowExports: flowDef.exports };
-    }
+  const composedStep = Array.isArray(flowDef.steps) ? flowDef.steps.find((step) => step?.id === stepId) : undefined;
+  const childFlowIds = composedStep ? childFlowIdsForStep(composedStep) : [];
+  if (childFlowIds === null) return null;
+
+  const directGateEntry = flowDef.gates
+    ? Object.entries(flowDef.gates).find(([, gate]) => gate?.step === stepId)
+    : undefined;
+  if (directGateEntry) {
+    if (childFlowIds.length > 0) return null;
+    const [gateId, gate] = directGateEntry;
+    const routeBack = routeBackMetadataForGate(gate);
+    if (!routeBack) return null;
+    return { flowId, stepId, gateId, gateExpects: Array.isArray(gate.expects) ? gate.expects : [], routeBackReasons: Object.keys(routeBack.onRouteBack ?? {}), flowExports: flowDef.exports, routeBack };
   }
 
-  const composedStep = Array.isArray(flowDef.steps)
-    ? flowDef.steps.find((step) => step && step.id === stepId && typeof step.uses_flow === "string" && step.uses_flow.trim())
-    : null;
-  if (composedStep?.uses_flow) {
-    const child = resolveFlowStepInternal(composedStep.uses_flow, stepId, repoRoot, seen);
-    if (child) {
+  if (childFlowIds.length === 1 && typeof composedStep?.uses_flow === "string") {
+    const child = resolveFlowStepInternal(childFlowIds[0]!, stepId, repoRoot, seen);
+    if (!child) return null;
+    const childGateExpects = exportedExpectations(child.gateExpects, child.flowExports);
+    if (!childGateExpects) return null;
+    return {
+      flowId,
+      stepId,
+      gateId: `${child.flowId}:${child.gateId}`,
+      gateExpects: childGateExpects,
+      routeBackReasons: child.routeBackReasons,
+      sourceFlowId: child.flowId,
+      flowExports: flowDef.exports,
+      routeBack: child.routeBack,
+    };
+  }
+
+  if (childFlowIds.length > 0) {
+    const gateExpects: GateExpectation[] = [];
+    const expectationIds = new Set<string>();
+    const routeBackEntries: RouteBackMetadata[] = [];
+    if (flowDef.gates?.[aggregateGateId(stepId)]) return null;
+    for (const childFlowId of childFlowIds) {
+      // Match effective compilation: a list contributor must compile to one
+      // gate at this step, not merely have a first gate live resolution finds.
+      const effectiveChild = resolveEffectiveFlowDefinitionInternal(childFlowId, repoRoot, new Set([flowId]), true) as FlowDefinition | null;
+      const effectiveChildGates = effectiveChild?.gates
+        ? Object.entries(effectiveChild.gates).filter(([, gate]) => gate?.step === stepId)
+        : [];
+      if (effectiveChildGates.length !== 1) return null;
+      const child = resolveFlowStepInternal(childFlowId, stepId, repoRoot, new Set(seen));
+      if (!child) return null;
       const childGateExpects = exportedExpectations(child.gateExpects, child.flowExports);
-      if (!childGateExpects) return null;
-      return {
-        flowId,
-        stepId,
-        gateId: `${child.flowId}:${child.gateId}`,
-        gateExpects: childGateExpects,
-        routeBackReasons: child.routeBackReasons,
-        sourceFlowId: child.flowId,
-        flowExports: flowDef.exports,
-      };
+      if (!childGateExpects || !child.routeBack || childGateExpects.some((expectation) => expectationIds.has(expectation.id))) return null;
+      for (const expectation of childGateExpects) expectationIds.add(expectation.id);
+      gateExpects.push(...childGateExpects);
+      routeBackEntries.push(child.routeBack);
     }
+    const routeBack = mergeRouteBackMetadata(routeBackEntries);
+    if (!routeBack) return null;
+    return {
+      flowId,
+      stepId,
+      gateId: aggregateGateId(stepId),
+      gateExpects,
+      routeBackReasons: Object.keys(routeBack.onRouteBack ?? {}),
+      sourceFlowIds: [...childFlowIds],
+      flowExports: flowDef.exports,
+      routeBack,
+    };
   }
 
   return null; // no gate matched the given stepId
@@ -591,6 +763,23 @@ export function resolveRouteBackPolicy(
   const fromStep = phaseMap[fromPhase];
   const toStep = phaseMap[toPhase];
   if (!fromStep || !toStep) return null; // phases not in this flow
+
+  // List composition emits one gate only in the effective runtime definition;
+  // consult that gate so retry accounting uses the same merged policy as live
+  // gate evaluation. Scalar composition keeps the historical raw-flow path.
+  const sourceStep = Array.isArray(flowDef.steps) ? flowDef.steps.find((step) => step?.id === fromStep) : undefined;
+  if (sourceStep?.uses_flows !== undefined) {
+    const effective = resolveEffectiveFlowDefinition(flowId, repoRoot) as FlowDefinition | null;
+    const aggregate = effective?.gates?.[aggregateGateId(fromStep)];
+    if (!aggregate) return null;
+    const metadata = routeBackMetadataForGate(aggregate);
+    if (!metadata?.routeBackPolicy || !metadata.onRouteBack || !Object.values(metadata.onRouteBack).includes(toStep)) return null;
+    return {
+      maxAttempts: metadata.routeBackPolicy.max_attempts,
+      onExceeded: metadata.routeBackPolicy.on_exceeded,
+      fromStepId: fromStep,
+    };
+  }
 
   if (!flowDef.gates) return null;
   for (const gate of Object.values(flowDef.gates)) {

@@ -91,7 +91,7 @@ A Flow Definition at minimum needs `id`, `version`, `steps`, and `gates`. Steps 
 
 The `id` in the flow file should match the `id` declared in `kit.json`'s `flows` list. Look at `kits/builder/flows/shape.flow.json` and `kits/builder/flows/build.flow.json` in this repository for fuller examples of multi-step flows with required and optional gate evidence.
 
-Flow Definitions may compose another declared Flow Definition at a step with `uses_flow`. The parent keeps lifecycle ownership (`active_flow_id` can remain the parent flow), while gate resolution for that step comes from the child flow with the same step id. Use this for reusable extensions such as publish, CI merge readiness, or learning closeout:
+Flow Definitions may compose another declared Flow Definition at a step with `uses_flow`. The parent keeps lifecycle ownership (`active_flow_id` can remain the parent flow), while gate resolution for that step comes from the child flow with the same step id. Use this scalar form for one reusable extension such as publish, CI merge readiness, or learning closeout:
 
 ```json
 {
@@ -105,7 +105,24 @@ Flow Definitions may compose another declared Flow Definition at a step with `us
 }
 ```
 
-The child flow should declare the gates for those step ids and list the claim types it intentionally exposes in `exports` (expectation ids are also accepted for non-claim expectations). Composition fails closed when a child gate expectation is not exported. Parent verification is still determined by trust-bundle claims: required child claims that are missing, disputed, or `not_verified` prevent the composed parent from being treated as verified.
+The additive `uses_flows` form accepts an ordered list of required children at one extension step. Each child must declare exactly one gate for that same step and export every expectation it contributes. The resolver preflights all children, then emits one deterministic `flow-agents.aggregate.<step-id>` gate containing every imported expectation in declared order. It records each child gate in `flow_agents_contributions` provenance. All required expectations participate in that one parent gate; a missing, failed, disputed, stale, or `not_verified` child claim prevents verification.
+
+```json
+{
+  "id": "my-kit.release",
+  "steps": [
+    {
+      "id": "verify",
+      "next": null,
+      "uses_flows": ["verification.verify", "veritas.verify", "third-party.verify"]
+    }
+  ]
+}
+```
+
+Do not declare both `uses_flow` and `uses_flows` on one step, do not repeat a child flow id, and do not place a parent-owned gate on a composed step; each shape is rejected. The aggregate gate id is reserved: a collision is rejected rather than overwritten. Child route-back declarations merge only when every declared retry policy is identical and a reason maps to one target; conflicting targets, retry limits, or malformed/partial metadata are rejected. Scalar `uses_flow` remains supported unchanged.
+
+This is a composition primitive only. It neither chooses installed child kits nor reads per-Kit configuration: #579 owns selected/optional dependency closure and #275 owns committed effective configuration and activation semantics. Until those contracts select contributions, an author must provide the explicit child list and treat optional-absence and configuration-precedence behavior as `NOT_VERIFIED` here.
 
 An optional named terminal sentinel may make the source definition easier to
 read, for example `{ "id": "shape-done", "next": null }`. When that sentinel is
