@@ -179,6 +179,12 @@ test("a contribution record binds a descriptor/package and carries canonical aut
   wrongAuthorityShape.spec.authority_refs.flow = "surface://trust-bundles/not-a-flow-run";
   assert.throws(() => validateKitObservabilityRecord(wrongAuthorityShape, loaded.contribution), /flow:\/\/ record identity/);
   assert.equal(validateRecordSchema(wrongAuthorityShape), false, "the schema must enforce authority-specific record identity shapes");
+  for (const authority of ["flow", "surface", "runtime"]) {
+    const candidate = recordFor(loaded.contribution);
+    candidate.spec.authority_refs[authority] = `${authority}://\u0000control-byte`;
+    assert.throws(() => validateKitObservabilityRecord(candidate, loaded.contribution), /non-empty non-sensitive reference/);
+    assert.equal(validateRecordSchema(candidate), false, `${authority} control bytes must match typed reference validation`);
+  }
 });
 
 test("record schema and validator reject the same local binding and authority faults", () => {

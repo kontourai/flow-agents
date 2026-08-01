@@ -13,5 +13,5 @@
       "data": { "type": "object", "not": { "anyOf": [{ "required": ["gate"] }, { "required": ["claim"] }] } }
     } }
   },
-  "$defs": { "reference": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f\\s]+$" }, "flowIdentityReference": { "type": "string", "minLength": 8, "maxLength": 512, "pattern": "^flow://[^\\s]+$" }, "surfaceIdentityReference": { "type": "string", "minLength": 11, "maxLength": 512, "pattern": "^surface://[^\\s]+$" }, "runtimeIdentityReference": { "type": "string", "minLength": 11, "maxLength": 512, "pattern": "^runtime://[^\\s]+$" } }
+  "$defs": { "reference": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f\\s]+$" }, "flowIdentityReference": { "type": "string", "minLength": 8, "maxLength": 512, "pattern": "^flow://[^\\u0000-\\u001f\\u007f\\s]+$" }, "surfaceIdentityReference": { "type": "string", "minLength": 11, "maxLength": 512, "pattern": "^surface://[^\\u0000-\\u001f\\u007f\\s]+$" }, "runtimeIdentityReference": { "type": "string", "minLength": 11, "maxLength": 512, "pattern": "^runtime://[^\\u0000-\\u001f\\u007f\\s]+$" } }
 }
