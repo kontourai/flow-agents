@@ -4,6 +4,7 @@
   "metadata": { "name": "builder" },
   "spec": {
     "contract_version": "1.0",
+    "package_ref": "npm:@kontourai/flow-agents@5.5.0#kits/builder",
     "projections": {
       "run_summary": { "schema_ref": "https://kontourai.dev/schemas/builder/run-summary/1.0.json" },
       "metric_series": { "schema_ref": "https://kontourai.dev/schemas/builder/metric-series/1.0.json" },
@@ -16,7 +17,7 @@
       "surface": "surface.kontourai.io/v1alpha1/TrustBundle",
       "runtime": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope"
     },
-    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": "mcp_apps_resource_bridge", "fallback": "standard_views" } },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": { "kind": "mcp_apps_resource_bridge", "resource": { "uri": "ui://flow-agents.kontourai.io/kits/builder/observability", "mime_type": "text/html;profile=mcp-app" }, "bridge": { "tool_name": "builder-observability", "visibility": ["model", "app"] } }, "fallback": { "kind": "standard_views", "source": "declared_projections" } } },
     "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "available" },
     "operator_intents": [
       { "intent": "open_resource", "label": "Open work item", "required_capability": "resource.open", "target": { "authority": "flow", "kind": "work_item" } },

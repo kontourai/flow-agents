@@ -6,6 +6,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import {
   loadKitObservabilityContribution,
+  kitObservabilityDescriptorDigest,
   negotiateKitObservabilityContribution,
   validateKitObservabilityContribution,
   validateKitObservabilityRecord,
@@ -28,8 +29,13 @@ function recordFor(contribution) {
     kind: "KitObservabilityRecord",
     metadata: { name: `${contribution.metadata.name}-run` },
     spec: {
-      contribution_ref: contribution.metadata.name,
+      binding: {
+        contribution_ref: contribution.metadata.name,
+        descriptor_digest: kitObservabilityDescriptorDigest(contribution),
+        package_ref: contribution.spec.package_ref,
+      },
       projection: { kind },
+      authority_refs: Object.fromEntries(Object.keys(contribution.spec.authority_refs).map((authority) => [authority, `${authority}://${contribution.metadata.name}-run`])),
       data: { state: "observed" },
     },
   };
@@ -46,7 +52,7 @@ test("Builder and Knowledge opt in through the same public contribution interfac
     assert.equal(loaded.contribution.metadata.name, kit);
     assert.equal(validateContributionSchema(loaded.contribution), true, JSON.stringify(validateContributionSchema.errors));
     const record = validateKitObservabilityRecord(recordFor(loaded.contribution), loaded.contribution);
-    assert.equal(record.spec.contribution_ref, loaded.contribution.metadata.name);
+    assert.equal(record.spec.binding.contribution_ref, loaded.contribution.metadata.name);
     assert.equal(validateRecordSchema(record), true, JSON.stringify(validateRecordSchema.errors));
     assert.deepEqual(await validateKitRepository(kitDir), []);
   }
@@ -92,13 +98,18 @@ test("host lifecycle and capabilities negotiate presentation without blocking th
   assert.equal(uninstalled.diagnostics[0].code, "contribution_not_installed");
   const standard = negotiateKitObservabilityContribution(loaded, states.standard_views_only);
   assert.equal(standard.status, "enabled");
-  assert.equal(standard.presentation, "standard_views");
+  assert.equal(standard.presentation.kind, "standard_views");
+  assert.equal(standard.presentation.source, "declared_projections");
   assert.equal(standard.available_operator_intents.length, 0);
   assert.ok(standard.diagnostics.some(({ code }) => code === "optional_host_capability_unavailable"));
   assert.ok(standard.diagnostics.some(({ code }) => code === "operator_intent_capability_unavailable"));
   const mcp = negotiateKitObservabilityContribution(loaded, states.mcp_apps_full);
   assert.equal(mcp.status, "enabled");
-  assert.equal(mcp.presentation, "mcp_apps_resource_bridge");
+  assert.equal(mcp.presentation.kind, "mcp_apps_resource_bridge");
+  assert.equal(mcp.presentation.resource.uri, "ui://flow-agents.kontourai.io/kits/builder/observability");
+  assert.equal(mcp.presentation.bridge.tool_meta.ui.resourceUri, mcp.presentation.resource.uri);
+  assert.deepEqual(mcp.presentation.bridge.tool_meta.ui.visibility, ["model", "app"]);
+  assert.equal(mcp.provenance.descriptor_digest, kitObservabilityDescriptorDigest(loaded.contribution));
   assert.equal(mcp.available_operator_intents.length, 3);
   assert.deepEqual(mcp.diagnostics, []);
   const missingRequired = negotiateKitObservabilityContribution(loaded, states.missing_standard_views);
@@ -120,6 +131,7 @@ test("published JSON schemas and typed validators reject the same local descript
     (value) => { value.spec.host.presentation.fallback = "direct_provider_command"; },
     (value) => { value.spec.operator_intents[0].required_capability = "provider.execute"; },
     (value) => { value.spec.operator_intents[0].ref = "provider://mutation"; },
+    (value) => { value.spec.operator_intents[0].label = "   "; },
   ];
   for (const fault of faults) {
     const candidate = structuredClone(loaded.contribution);
@@ -129,7 +141,7 @@ test("published JSON schemas and typed validators reject the same local descript
   }
 });
 
-test("a contribution record preserves a semantic descriptor link but cannot carry Flow gate or Surface claim authority", () => {
+test("a contribution record binds a descriptor/package and carries canonical authority identities", () => {
   const loaded = loadKitObservabilityContribution(path.join(root, "kits", "builder"));
   assert.equal(loaded.status, "supported");
   const record = recordFor(loaded.contribution);
@@ -143,9 +155,53 @@ test("a contribution record preserves a semantic descriptor link but cannot carr
   record.spec.data = { domain: { gate: "boarding", claim: "claim-number" } };
   assert.doesNotThrow(() => validateKitObservabilityRecord(record, loaded.contribution));
   assert.equal(validateRecordSchema(record), true, "opaque nested domain data must remain Kit-owned");
-  record.spec.contribution_ref = "another-kit";
+  record.spec.binding.contribution_ref = "another-kit";
   assert.throws(() => validateKitObservabilityRecord(record, loaded.contribution), /does not match the descriptor/);
   assert.equal(validateRecordSchema(record), true, "descriptor linkage is documented semantic validation, not a duplicated schema field");
+  record.spec.binding.contribution_ref = loaded.contribution.metadata.name;
+  record.spec.binding.descriptor_digest = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => validateKitObservabilityRecord(record, loaded.contribution), /descriptor_digest does not match/);
+  assert.equal(validateRecordSchema(record), true, "descriptor digest matching is cross-record semantic validation");
+  record.spec.binding.descriptor_digest = kitObservabilityDescriptorDigest(loaded.contribution);
+  record.spec.binding.package_ref = "npm:@other/kit@1.0.0";
+  assert.throws(() => validateKitObservabilityRecord(record, loaded.contribution), /package_ref does not match/);
+  record.spec.binding.package_ref = loaded.contribution.spec.package_ref;
+  delete record.spec.authority_refs.runtime;
+  assert.throws(() => validateKitObservabilityRecord(record, loaded.contribution), /authority identities/);
+  assert.equal(validateRecordSchema(record), true, "declared-authority completeness is cross-record semantic validation");
+});
+
+test("record schema and validator reject the same local binding and authority faults", () => {
+  const loaded = loadKitObservabilityContribution(path.join(root, "kits", "builder"));
+  assert.equal(loaded.status, "supported");
+  const validateRecordSchema = new Ajv2020({ strict: false, allErrors: true }).compile(recordSchema);
+  const faults = [
+    (value) => { value.spec.binding.descriptor_digest = "bad-digest"; },
+    (value) => { value.spec.authority_refs.unknown = "unknown://record"; },
+    (value) => { value.spec.authority_refs = {}; },
+  ];
+  for (const fault of faults) {
+    const candidate = recordFor(loaded.contribution);
+    fault(candidate);
+    assert.throws(() => validateKitObservabilityRecord(candidate, loaded.contribution));
+    assert.equal(validateRecordSchema(candidate), false, JSON.stringify(validateRecordSchema.errors));
+  }
+});
+
+test("descriptor digest is canonical across key order and changes with descriptor content", () => {
+  const loaded = loadKitObservabilityContribution(path.join(root, "kits", "builder"));
+  assert.equal(loaded.status, "supported");
+  const original = kitObservabilityDescriptorDigest(loaded.contribution);
+  const reordered = {
+    kind: loaded.contribution.kind,
+    spec: Object.fromEntries(Object.entries(loaded.contribution.spec).reverse()),
+    metadata: loaded.contribution.metadata,
+    apiVersion: loaded.contribution.apiVersion,
+  };
+  assert.equal(kitObservabilityDescriptorDigest(reordered), original);
+  const drifted = structuredClone(loaded.contribution);
+  drifted.spec.data_policy.raw_source = "unavailable";
+  assert.notEqual(kitObservabilityDescriptorDigest(drifted), original);
 });
 
 test("a symlinked descriptor cannot escape the Kit root", () => {

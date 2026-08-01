@@ -34,23 +34,26 @@
       "properties": {
         "required_capabilities": { "const": ["standard_views"] },
         "optional_capabilities": { "const": ["mcp_apps_resource_bridge"] },
-        "presentation": { "type": "object", "additionalProperties": false, "required": ["preferred", "fallback"], "properties": { "preferred": { "const": "mcp_apps_resource_bridge" }, "fallback": { "const": "standard_views" } } }
+        "presentation": { "$ref": "#/$defs/presentation" }
       }
     },
+    "mcpAppsResource": { "type": "object", "additionalProperties": false, "required": ["uri", "mime_type"], "properties": { "uri": { "type": "string", "pattern": "^ui://[^\\s]+$" }, "mime_type": { "const": "text/html;profile=mcp-app" } } },
+    "mcpAppsBridge": { "type": "object", "additionalProperties": false, "required": ["tool_name", "visibility"], "properties": { "tool_name": { "$ref": "#/$defs/identifier" }, "visibility": { "const": ["model", "app"] } } },
+    "presentation": { "type": "object", "additionalProperties": false, "required": ["preferred", "fallback"], "properties": { "preferred": { "type": "object", "additionalProperties": false, "required": ["kind", "resource", "bridge"], "properties": { "kind": { "const": "mcp_apps_resource_bridge" }, "resource": { "$ref": "#/$defs/mcpAppsResource" }, "bridge": { "$ref": "#/$defs/mcpAppsBridge" } } }, "fallback": { "type": "object", "additionalProperties": false, "required": ["kind", "source"], "properties": { "kind": { "const": "standard_views" }, "source": { "const": "declared_projections" } } } } },
     "dataPolicy": { "type": "object", "additionalProperties": false, "required": ["redaction", "retention", "raw_source"], "properties": { "redaction": { "const": "declared" }, "retention": { "const": "kit_owned" }, "raw_source": { "enum": ["available", "unavailable"] } } },
     "target": { "type": "object", "additionalProperties": false, "required": ["authority", "kind"], "properties": { "authority": { "enum": ["flow", "surface", "runtime"] }, "kind": { "enum": ["workflow_run", "work_item", "narrative", "queue_item"] } } },
     "operatorIntent": {
       "oneOf": [
-        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability", "target"], "properties": { "intent": { "const": "open_resource" }, "label": { "type": "string", "minLength": 1, "maxLength": 120 }, "required_capability": { "const": "resource.open" }, "target": { "$ref": "#/$defs/target" } } },
-        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability"], "properties": { "intent": { "const": "export_local" }, "label": { "type": "string", "minLength": 1, "maxLength": 120 }, "required_capability": { "const": "export.local" } } },
-        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability", "target"], "properties": { "intent": { "const": "review_proposal" }, "label": { "type": "string", "minLength": 1, "maxLength": 120 }, "required_capability": { "const": "proposal.review" }, "target": { "type": "object", "additionalProperties": false, "required": ["authority", "kind"], "properties": { "authority": { "const": "surface" }, "kind": { "const": "proposal" } } } } }
+        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability", "target"], "properties": { "intent": { "const": "open_resource" }, "label": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*" }, "required_capability": { "const": "resource.open" }, "target": { "$ref": "#/$defs/target" } } },
+        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability"], "properties": { "intent": { "const": "export_local" }, "label": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*" }, "required_capability": { "const": "export.local" } } },
+        { "type": "object", "additionalProperties": false, "required": ["intent", "label", "required_capability", "target"], "properties": { "intent": { "const": "review_proposal" }, "label": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*" }, "required_capability": { "const": "proposal.review" }, "target": { "type": "object", "additionalProperties": false, "required": ["authority", "kind"], "properties": { "authority": { "const": "surface" }, "kind": { "const": "proposal" } } } } }
       ]
     },
     "compatibility": { "type": "object", "additionalProperties": false, "required": ["unsupported_version"], "properties": { "unsupported_version": { "const": "diagnostic" } } },
     "spec": {
       "type": "object", "additionalProperties": false,
-      "required": ["contract_version", "projections", "authority_refs", "host", "data_policy", "operator_intents", "compatibility"],
-      "properties": { "contract_version": { "const": "1.0" }, "projections": { "$ref": "#/$defs/projections" }, "authority_refs": { "$ref": "#/$defs/authorityRefs" }, "host": { "$ref": "#/$defs/host" }, "data_policy": { "$ref": "#/$defs/dataPolicy" }, "operator_intents": { "type": "array", "items": { "$ref": "#/$defs/operatorIntent" } }, "compatibility": { "$ref": "#/$defs/compatibility" } }
+      "required": ["contract_version", "package_ref", "projections", "authority_refs", "host", "data_policy", "operator_intents", "compatibility"],
+      "properties": { "contract_version": { "const": "1.0" }, "package_ref": { "$ref": "#/$defs/reference" }, "projections": { "$ref": "#/$defs/projections" }, "authority_refs": { "$ref": "#/$defs/authorityRefs" }, "host": { "$ref": "#/$defs/host" }, "data_policy": { "$ref": "#/$defs/dataPolicy" }, "operator_intents": { "type": "array", "items": { "$ref": "#/$defs/operatorIntent" } }, "compatibility": { "$ref": "#/$defs/compatibility" } }
     }
   }
 }

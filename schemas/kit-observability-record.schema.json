@@ -6,10 +6,12 @@
   "properties": {
     "apiVersion": { "const": "flowagents.kontourai.io/v1alpha1" }, "kind": { "const": "KitObservabilityRecord" },
     "metadata": { "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" } } },
-    "spec": { "type": "object", "additionalProperties": false, "required": ["contribution_ref", "projection", "data"], "properties": {
-      "contribution_ref": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+    "spec": { "type": "object", "additionalProperties": false, "required": ["binding", "projection", "authority_refs", "data"], "properties": {
+      "binding": { "type": "object", "additionalProperties": false, "required": ["contribution_ref", "descriptor_digest", "package_ref"], "properties": { "contribution_ref": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" }, "descriptor_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "package_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f\\s]+$" } } },
       "projection": { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "enum": ["run_summary", "metric_series", "queue", "grounded_narrative", "learning"] } } },
+      "authority_refs": { "type": "object", "additionalProperties": false, "properties": { "flow": { "$ref": "#/$defs/reference" }, "surface": { "$ref": "#/$defs/reference" }, "runtime": { "$ref": "#/$defs/reference" } }, "anyOf": [{ "required": ["flow"] }, { "required": ["surface"] }, { "required": ["runtime"] }] },
       "data": { "type": "object", "not": { "anyOf": [{ "required": ["gate"] }, { "required": ["claim"] }] } }
     } }
-  }
+  },
+  "$defs": { "reference": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f\\s]+$" } }
 }

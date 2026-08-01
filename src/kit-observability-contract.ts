@@ -7,6 +7,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 
 export const KIT_OBSERVABILITY_API_VERSION = "flowagents.kontourai.io/v1alpha1" as const;
 export const KIT_OBSERVABILITY_CONTRACT_VERSION = "1.0" as const;
@@ -39,6 +40,18 @@ export type KitObservabilityDiagnosticCode =
 export type KitObservabilityDiagnostic = { code: KitObservabilityDiagnosticCode; message: string };
 export type KitObservabilityAuthorityRefs = Partial<Record<KitObservabilityAuthority, string>>;
 export type KitObservabilityProjection = { schema_ref: string };
+export type KitObservabilityMcpAppsResource = { uri: string; mime_type: "text/html;profile=mcp-app" };
+export type KitObservabilityMcpAppsBridgeDeclaration = {
+  tool_name: string;
+  visibility: ["model", "app"];
+};
+export type KitObservabilityMcpAppsBridgeResult = KitObservabilityMcpAppsBridgeDeclaration & {
+  tool_meta: { ui: { resourceUri: string; visibility: ["model", "app"] } };
+};
+export type KitObservabilityPresentation = {
+  preferred: { kind: "mcp_apps_resource_bridge"; resource: KitObservabilityMcpAppsResource; bridge: KitObservabilityMcpAppsBridgeDeclaration };
+  fallback: { kind: "standard_views"; source: "declared_projections" };
+};
 export type KitObservabilityOperatorAction =
   | { intent: "open_resource"; label: string; required_capability: "resource.open"; target: { authority: KitObservabilityAuthority; kind: "workflow_run" | "work_item" | "narrative" | "queue_item" } }
   | { intent: "export_local"; label: string; required_capability: "export.local" }
@@ -50,12 +63,13 @@ export type KitObservabilityContribution = {
   metadata: { name: string };
   spec: {
     contract_version: typeof KIT_OBSERVABILITY_CONTRACT_VERSION;
+    package_ref: string;
     projections: Partial<Record<KitObservabilityProjectionKind, KitObservabilityProjection>>;
     authority_refs: KitObservabilityAuthorityRefs;
     host: {
       required_capabilities: ["standard_views"];
       optional_capabilities: ["mcp_apps_resource_bridge"];
-      presentation: { preferred: "mcp_apps_resource_bridge"; fallback: "standard_views" };
+      presentation: KitObservabilityPresentation;
     };
     data_policy: { redaction: "declared"; retention: "kit_owned"; raw_source: "available" | "unavailable" };
     operator_intents: KitObservabilityOperatorAction[];
@@ -67,7 +81,12 @@ export type KitObservabilityRecord = {
   apiVersion: typeof KIT_OBSERVABILITY_API_VERSION;
   kind: typeof KIT_OBSERVABILITY_RECORD_KIND;
   metadata: { name: string };
-  spec: { contribution_ref: string; projection: { kind: KitObservabilityProjectionKind }; data: Record<string, unknown> };
+  spec: {
+    binding: { contribution_ref: string; descriptor_digest: string; package_ref: string };
+    projection: { kind: KitObservabilityProjectionKind };
+    authority_refs: KitObservabilityAuthorityRefs;
+    data: Record<string, unknown>;
+  };
 };
 
 export type KitObservabilityContributionLoadResult =
@@ -83,13 +102,19 @@ export type KitObservabilityHostState = {
 
 export type KitObservabilityNegotiation = {
   status: "enabled" | "disabled" | "incompatible";
-  presentation?: "mcp_apps_resource_bridge" | "standard_views";
+  presentation?:
+    | { kind: "mcp_apps_resource_bridge"; resource: KitObservabilityMcpAppsResource; bridge: KitObservabilityMcpAppsBridgeResult }
+    | { kind: "standard_views"; source: "declared_projections" };
+  provenance?: { contribution_ref: string; descriptor_digest: string; package_ref: string; authority_refs: KitObservabilityAuthorityRefs };
+  navigation: { available_operator_intents: KitObservabilityOperatorAction[] };
   available_operator_intents: KitObservabilityOperatorAction[];
   diagnostics: KitObservabilityDiagnostic[];
 };
 
 const idPattern = /^[a-z][a-z0-9-]{0,62}$/;
 const refPattern = /^[^\u0000-\u001f\u007f\s]{1,512}$/;
+const digestPattern = /^sha256:[a-f0-9]{64}$/;
+const uiResourcePattern = /^ui:\/\/[^\s]+$/;
 
 export function validateKitObservabilityContribution(value: unknown): KitObservabilityContribution {
   const root = object(value, "contribution");
@@ -100,8 +125,9 @@ export function validateKitObservabilityContribution(value: unknown): KitObserva
   exactKeys(metadata, ["name"], "contribution.metadata");
   identifier(metadata.name, "contribution.metadata.name");
   const spec = object(root.spec, "contribution.spec");
-  exactKeys(spec, ["contract_version", "projections", "authority_refs", "host", "data_policy", "operator_intents", "compatibility"], "contribution.spec");
+  exactKeys(spec, ["contract_version", "package_ref", "projections", "authority_refs", "host", "data_policy", "operator_intents", "compatibility"], "contribution.spec");
   if (spec.contract_version !== KIT_OBSERVABILITY_CONTRACT_VERSION) throw new Error("contribution contract_version is unsupported");
+  reference(spec.package_ref, "contribution.spec.package_ref");
   projections(spec.projections, "contribution.spec.projections");
   authorityRefs(spec.authority_refs, "contribution.spec.authority_refs");
   hostContract(spec.host, "contribution.spec.host");
@@ -113,6 +139,22 @@ export function validateKitObservabilityContribution(value: unknown): KitObserva
   return structuredClone(value) as KitObservabilityContribution;
 }
 
+/** Stable SHA-256 binding over canonical, key-sorted descriptor JSON. */
+export function kitObservabilityDescriptorDigest(value: KitObservabilityContribution): string {
+  const contribution = validateKitObservabilityContribution(value);
+  return `sha256:${createHash("sha256").update(canonicalJson(contribution)).digest("hex")}`;
+}
+
+export function kitObservabilityProvenance(value: KitObservabilityContribution): NonNullable<KitObservabilityNegotiation["provenance"]> {
+  const contribution = validateKitObservabilityContribution(value);
+  return {
+    contribution_ref: contribution.metadata.name,
+    descriptor_digest: kitObservabilityDescriptorDigest(contribution),
+    package_ref: contribution.spec.package_ref,
+    authority_refs: structuredClone(contribution.spec.authority_refs),
+  };
+}
+
 /** Descriptor-to-record linkage is semantic validation; each individual shape has a shipped JSON Schema. */
 export function validateKitObservabilityRecord(value: unknown, contribution: KitObservabilityContribution): KitObservabilityRecord {
   const root = object(value, "record");
@@ -122,12 +164,18 @@ export function validateKitObservabilityRecord(value: unknown, contribution: Kit
   exactKeys(metadata, ["name"], "record.metadata");
   identifier(metadata.name, "record.metadata.name");
   const spec = object(root.spec, "record.spec");
-  exactKeys(spec, ["contribution_ref", "projection", "data"], "record.spec");
-  if (spec.contribution_ref !== contribution.metadata.name) throw new Error("record contribution_ref does not match the descriptor");
+  exactKeys(spec, ["binding", "projection", "authority_refs", "data"], "record.spec");
+  const binding = object(spec.binding, "record.spec.binding");
+  exactKeys(binding, ["contribution_ref", "descriptor_digest", "package_ref"], "record.spec.binding");
+  if (binding.contribution_ref !== contribution.metadata.name) throw new Error("record contribution_ref does not match the descriptor");
+  if (binding.package_ref !== contribution.spec.package_ref) throw new Error("record package_ref does not match the descriptor");
+  if (typeof binding.descriptor_digest !== "string" || !digestPattern.test(binding.descriptor_digest)) throw new Error("record descriptor_digest must be a sha256 digest");
+  if (binding.descriptor_digest !== kitObservabilityDescriptorDigest(contribution)) throw new Error("record descriptor_digest does not match the descriptor");
   const projection = object(spec.projection, "record.spec.projection");
   exactKeys(projection, ["kind"], "record.spec.projection");
   projectionKind(projection.kind, "record.spec.projection.kind");
   if (!(projection.kind in contribution.spec.projections)) throw new Error("record projection is not declared by the contribution");
+  recordAuthorityRefs(spec.authority_refs, contribution, "record.spec.authority_refs");
   const data = object(spec.data, "record.spec.data");
   if (Object.prototype.hasOwnProperty.call(data, "gate") || Object.prototype.hasOwnProperty.call(data, "claim")) throw new Error("record data cannot contain Flow gate or Surface claim authority");
   return structuredClone(value) as KitObservabilityRecord;
@@ -139,16 +187,16 @@ export function negotiateKitObservabilityContribution(
   host: KitObservabilityHostState,
 ): KitObservabilityNegotiation {
   if (contributionResult.status !== "supported") {
-    return { status: contributionResult.status === "unsupported" ? "incompatible" : "disabled", available_operator_intents: [], diagnostics: contributionResult.diagnostics };
+    return unavailable(contributionResult.status === "unsupported" ? "incompatible" : "disabled", contributionResult.diagnostics);
   }
   if (!host.installed) return disabled("contribution_not_installed", "The host has not installed this Kit contribution.");
   if (!host.enabled) return disabled("contribution_disabled", "The host has disabled this optional Kit contribution.");
   const contribution = contributionResult.contribution;
   if (!host.supported_contract_versions.includes(contribution.spec.contract_version)) {
-    return { status: "incompatible", available_operator_intents: [], diagnostics: [{ code: "host_contract_version_unsupported", message: `Host does not support contribution contract version ${contribution.spec.contract_version}.` }] };
+    return unavailable("incompatible", [{ code: "host_contract_version_unsupported", message: `Host does not support contribution contract version ${contribution.spec.contract_version}.` }]);
   }
   if (!host.capabilities.includes("standard_views")) {
-    return { status: "incompatible", available_operator_intents: [], diagnostics: [{ code: "required_host_capability_missing", message: "Host lacks required standard_views capability." }] };
+    return unavailable("incompatible", [{ code: "required_host_capability_missing", message: "Host lacks required standard_views capability." }]);
   }
   const diagnostics: KitObservabilityDiagnostic[] = [];
   const hasMcpApps = host.capabilities.includes("mcp_apps_resource_bridge");
@@ -158,9 +206,21 @@ export function negotiateKitObservabilityContribution(
     diagnostics.push({ code: "operator_intent_capability_unavailable", message: `Host lacks ${action.required_capability}; ${action.intent} is unavailable.` });
     return false;
   });
+  const presentation = hasMcpApps
+    ? {
+      kind: "mcp_apps_resource_bridge" as const,
+      resource: structuredClone(contribution.spec.host.presentation.preferred.resource),
+      bridge: {
+        ...structuredClone(contribution.spec.host.presentation.preferred.bridge),
+        tool_meta: { ui: { resourceUri: contribution.spec.host.presentation.preferred.resource.uri, visibility: ["model", "app"] as ["model", "app"] } },
+      },
+    }
+    : { kind: "standard_views" as const, source: "declared_projections" as const };
   return {
     status: "enabled",
-    presentation: hasMcpApps ? "mcp_apps_resource_bridge" : "standard_views",
+    presentation,
+    provenance: kitObservabilityProvenance(contribution),
+    navigation: { available_operator_intents: structuredClone(availableOperatorIntents) },
     available_operator_intents: structuredClone(availableOperatorIntents),
     diagnostics,
   };
@@ -198,7 +258,11 @@ export function loadKitObservabilityContribution(kitDir: string, manifest?: unkn
 }
 
 function disabled(code: "contribution_not_installed" | "contribution_disabled", message: string): KitObservabilityNegotiation {
-  return { status: "disabled", available_operator_intents: [], diagnostics: [{ code, message }] };
+  return unavailable("disabled", [{ code, message }]);
+}
+
+function unavailable(status: "disabled" | "incompatible", diagnostics: KitObservabilityDiagnostic[]): KitObservabilityNegotiation {
+  return { status, navigation: { available_operator_intents: [] }, available_operator_intents: [], diagnostics };
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -247,6 +311,14 @@ function authorityRefs(value: unknown, label: string): void {
   }
 }
 
+function recordAuthorityRefs(value: unknown, contribution: KitObservabilityContribution, label: string): void {
+  const refs = object(value, label);
+  authorityRefs(refs, label);
+  const declared = Object.keys(contribution.spec.authority_refs).sort();
+  const actual = Object.keys(refs).sort();
+  if (JSON.stringify(actual) !== JSON.stringify(declared)) throw new Error(`${label} must carry exactly the descriptor-declared authority identities`);
+}
+
 function hostContract(value: unknown, label: string): void {
   const host = object(value, label);
   exactKeys(host, ["required_capabilities", "optional_capabilities", "presentation"], label);
@@ -254,7 +326,19 @@ function hostContract(value: unknown, label: string): void {
   if (JSON.stringify(host.optional_capabilities) !== JSON.stringify(["mcp_apps_resource_bridge"])) throw new Error(`${label}.optional_capabilities must be [mcp_apps_resource_bridge]`);
   const presentation = object(host.presentation, `${label}.presentation`);
   exactKeys(presentation, ["preferred", "fallback"], `${label}.presentation`);
-  if (presentation.preferred !== "mcp_apps_resource_bridge" || presentation.fallback !== "standard_views") throw new Error(`${label}.presentation must prefer MCP Apps with standard-view fallback`);
+  const preferred = object(presentation.preferred, `${label}.presentation.preferred`);
+  exactKeys(preferred, ["kind", "resource", "bridge"], `${label}.presentation.preferred`);
+  if (preferred.kind !== "mcp_apps_resource_bridge") throw new Error(`${label}.presentation.preferred must be an MCP Apps resource bridge`);
+  const resource = object(preferred.resource, `${label}.presentation.preferred.resource`);
+  exactKeys(resource, ["uri", "mime_type"], `${label}.presentation.preferred.resource`);
+  if (typeof resource.uri !== "string" || !uiResourcePattern.test(resource.uri) || resource.mime_type !== "text/html;profile=mcp-app") throw new Error(`${label}.presentation.preferred.resource must declare a ui:// MCP Apps resource`);
+  const bridge = object(preferred.bridge, `${label}.presentation.preferred.bridge`);
+  exactKeys(bridge, ["tool_name", "visibility"], `${label}.presentation.preferred.bridge`);
+  identifier(bridge.tool_name, `${label}.presentation.preferred.bridge.tool_name`);
+  if (JSON.stringify(bridge.visibility) !== JSON.stringify(["model", "app"])) throw new Error(`${label}.presentation.preferred.bridge must use canonical MCP Apps visibility`);
+  const fallback = object(presentation.fallback, `${label}.presentation.fallback`);
+  exactKeys(fallback, ["kind", "source"], `${label}.presentation.fallback`);
+  if (fallback.kind !== "standard_views" || fallback.source !== "declared_projections") throw new Error(`${label}.presentation.fallback must use declared standard views`);
 }
 
 function dataPolicy(value: unknown, label: string): void {
@@ -297,4 +381,13 @@ function exactKnownKeys(value: Record<string, unknown>, allowed: readonly string
 
 function isContainedOrEqual(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
