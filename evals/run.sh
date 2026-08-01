@@ -347,8 +347,6 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_verify_cli.sh" || result=1
   echo ""
-  bash "$EVAL_DIR/integration/test_trust_advisory_comment.sh" || result=1
-  echo ""
   bash "$EVAL_DIR/integration/test_kit_identity_trust.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_model_routing_escalation.sh" || result=1
