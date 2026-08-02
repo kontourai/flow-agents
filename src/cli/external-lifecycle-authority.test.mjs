@@ -5,6 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
 
 const {
@@ -12,6 +14,7 @@ const {
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
   invokeExternalLifecycleAuthority,
+  invokeExternalSealedLifecycleAuthority,
   sealedExecutionTransportTimeout,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
@@ -511,4 +514,57 @@ test("sealed execution transport follows the signed runtime budget rather than t
     fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 30 * 60_000 + 1, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }));
     assert.throws(() => sealedExecutionTransportTimeout(file), /authorization is invalid/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("public sealed transport remains responsive and forwards parent cancellation", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-cancellable-transport-"));
+  const authorizationFile = path.join(directory, "authorization.json");
+  fs.writeFileSync(authorizationFile, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
+  const mutableFs = createRequire(import.meta.url)("node:fs");
+  const mutableChildProcess = createRequire(import.meta.url)("node:child_process");
+  const fsMethods = ["lstatSync", "accessSync", "openSync", "fstatSync", "readFileSync", "closeSync"];
+  const originalFs = Object.fromEntries(fsMethods.map((method) => [method, mutableFs[method]]));
+  const originalSpawn = mutableChildProcess.spawn;
+  const helperDescriptor = 987654;
+  const kills = [];
+  class FakeChild extends EventEmitter {
+    stdin = new PassThrough(); stdout = new PassThrough(); stderr = new PassThrough(); closed = false;
+    kill(signal) {
+      kills.push(signal);
+      if (!this.closed) {
+        this.closed = true;
+        this.stderr.end("cancelled by parent"); this.stdout.end();
+        setImmediate(() => this.emit("close", 1, null));
+      }
+      return true;
+    }
+  }
+  try {
+    mutableFs.lstatSync = (file) => {
+      if (file === LIFECYCLE_AUTHORITY_HELPER_PATH) return protectedExecutable();
+      if (LIFECYCLE_AUTHORITY_HELPER_PATH.startsWith(`${file}/`)) return protectedDirectory();
+      return originalFs.lstatSync(file);
+    };
+    mutableFs.accessSync = (file, mode) => {
+      if (file === LIFECYCLE_AUTHORITY_HELPER_PATH || LIFECYCLE_AUTHORITY_HELPER_PATH.startsWith(`${file}/`)) { const error = new Error("EACCES"); error.code = "EACCES"; throw error; }
+      return originalFs.accessSync(file, mode);
+    };
+    mutableFs.openSync = (file, flags) => file === LIFECYCLE_AUTHORITY_HELPER_PATH ? helperDescriptor : originalFs.openSync(file, flags);
+    mutableFs.fstatSync = (descriptor) => descriptor === helperDescriptor ? protectedExecutable() : originalFs.fstatSync(descriptor);
+    mutableFs.readFileSync = (file, ...args) => originalFs.readFileSync(file, ...args);
+    mutableFs.closeSync = (descriptor) => descriptor === helperDescriptor ? undefined : originalFs.closeSync(descriptor);
+    mutableChildProcess.spawn = () => new FakeChild();
+    syncBuiltinESMExports();
+    const before = process.listenerCount("SIGTERM");
+    const pending = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
+    process.emit("SIGTERM");
+    await assert.rejects(pending, /cancelled by parent/);
+    assert.deepEqual(kills, ["SIGTERM"]);
+    assert.equal(process.listenerCount("SIGTERM"), before, "transport removes its parent signal handler after cleanup");
+  } finally {
+    for (const method of fsMethods) mutableFs[method] = originalFs[method];
+    mutableChildProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

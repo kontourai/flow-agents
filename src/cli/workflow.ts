@@ -14,7 +14,7 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
+import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
@@ -163,7 +163,7 @@ export function executeSealedWorkloadRequest(sessionDir: string, argv: string[])
   console.log(JSON.stringify({ authorization, signing_payload: canonicalJson(authorization) }, null, 2)); return 0;
 }
 
-export function executeSealedWorkload(sessionDir: string, argv: string[], json: boolean): number {
+export async function executeSealedWorkload(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]), "workflow execute-sealed-workload");
   const authorizationFile = flagString(parsed.flags, "authorization-file");
@@ -175,7 +175,7 @@ export function executeSealedWorkload(sessionDir: string, argv: string[], json: 
   const authorization = readJsonFile(authorizationFile, "sealed execution authorization");
   const requestSha256 = lifecycleAuthorityResultDigest(request);
   const authorizationSha256 = lifecycleAuthorityResultDigest(authorization);
-  const result = invokeExternalLifecycleAuthority(request);
+  const result = await invokeExternalSealedLifecycleAuthority(request);
   if (!result.safe_result) throw new Error("workflow execute-sealed-workload received no safe result");
   verifySealedExecutionCompletion(result.completion, {
     runId: result.run_id,

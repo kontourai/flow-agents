@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { generateKeyPairSync, sign } from "node:crypto";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
 import { sealedProjection, sealedWorkload } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const coordinator = fs.readFileSync(path.resolve("packaging/lifecycle-authority/coordinator.mjs"), "utf8");
@@ -248,6 +249,44 @@ test("sealed timeout kills the detached process group including a provider desce
       assert.throws(() => process.kill(descendant, 0), /ESRCH/, "the detached process group leaves no provider descendant alive");
     } finally { fs.rmSync(pidFile, { force: true }); }
   });
+});
+
+test("sealed coordinator SIGTERM kills its descendant, seals interruption, and cleans staging", async () => {
+  const controllerScript = `import { spawn } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); fs.writeFileSync(path.join(path.dirname(process.env.SEALED_INVOCATION_MANIFEST), 'descendant.pid'), String(child.pid)); setInterval(() => {}, 1000);`;
+  const fixture = await sealedCoordinatorFixture({
+    runtimeBytes: fs.readFileSync(process.execPath), controllerScript, maxRuntimeMs: 30_000,
+    instrumentSource: (source) => source.replaceAll("fs.chownSync(", "(() => undefined)("),
+  });
+  const authorization = fixture.signAuthorization("signal-cancel", "signal-cancel-nonce");
+  const { envelope } = fixture.requestFor("signal-cancel", authorization);
+  const coordinatorUrl = pathToFileURL(path.join(fixture.root, "coordinator.mjs")).href;
+  const entry = `import { main } from ${JSON.stringify(coordinatorUrl)}; process.stdout.write(JSON.stringify(await main()) + '\\n');`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", entry], {
+    env: { ...process.env, SUDO_UID: String(process.getuid()), SUDO_GID: String(process.getgid()) },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stdout = []; const stderr = [];
+  child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+  child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+  child.stdin.end(`${JSON.stringify(envelope)}\n`);
+  let descendant = null;
+  for (let attempt = 0; attempt < 200 && descendant === null; attempt += 1) {
+    const stages = fs.readdirSync(fixture.execution);
+    if (stages.length === 1) {
+      const pidFile = path.join(fixture.execution, stages[0], "descendant.pid");
+      if (fs.existsSync(pidFile)) descendant = Number(fs.readFileSync(pidFile, "utf8"));
+    }
+    if (descendant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(Number.isSafeInteger(descendant), `controller descendant started before cancellation: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
+  child.kill("SIGTERM");
+  const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+  assert.deepEqual(exit, { code: 0, signal: null }, Buffer.concat(stderr).toString("utf8"));
+  const response = JSON.parse(Buffer.concat(stdout).toString("utf8"));
+  assert.equal(response.result.safe_result.status, "interrupted");
+  assert.deepEqual(fs.readdirSync(fixture.execution), [], "signal cancellation removes the protected stage");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.throws(() => process.kill(descendant, 0), /ESRCH/, "signal cancellation leaves no provider descendant alive");
 });
 
 test("sealed bundle permits logical ESM relatives and rejects traversal, duplicate paths, and an over-budget closure before staging", async () => {

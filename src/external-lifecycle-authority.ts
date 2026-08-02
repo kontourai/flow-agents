@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash, createPrivateKey, createPublicKey, verify } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn as spawnChild } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
@@ -461,8 +461,7 @@ export function sealedExecutionTransportTimeout(authorizationFile: string): numb
   } finally { fs.closeSync(descriptor); }
 }
 
-/** The external helper owns validation, locking, replay/CAS, and every write. */
-export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
+function prepareExternalLifecycleInvocation(request: ExternalLifecycleAuthorityRequest): { envelope: JsonRecord; helper: string; requestSha256: string; timeout: number } {
   if (!ACTIONS.has(request.action)) throw new Error("unsupported lifecycle authority action");
   const fields = request.action === "resolve-critique" || request.action === "repair-critique-resolution-history"
       ? ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"]
@@ -478,18 +477,75 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
   const timeout = request.action === "execute-sealed-workload"
     ? sealedExecutionTransportTimeout(String(request.authorization_file))
     : 30_000;
+  return { envelope, helper, requestSha256, timeout };
+}
+
+function acceptExternalLifecycleOutput(output: string, request: ExternalLifecycleAuthorityRequest, requestSha256: string): ExternalLifecycleMutationResult {
+  const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
+  const expectedRunId = path.basename(String(request.session_dir));
+  if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
+  return result;
+}
+
+/** The external helper owns validation, locking, replay/CAS, and every write. */
+export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
+  if (request.action === "execute-sealed-workload") throw new Error("sealed lifecycle execution requires the cancellable asynchronous transport");
+  const { envelope, helper, requestSha256, timeout } = prepareExternalLifecycleInvocation(request);
   let output: string;
   try {
-    // SIGTERM gives sudo/the coordinator a chance to forward cancellation and
-    // synchronously kill the sealed process group. The root-side runtime cap
-    // remains the final authority if transport cleanup itself fails.
     output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout, killSignal: "SIGTERM", maxBuffer: 256 * 1024 });
   } catch (error) {
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");
   }
-  const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
-  const expectedRunId = path.basename(String(request.session_dir));
-  if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
-  return result;
+  return acceptExternalLifecycleOutput(output, request, requestSha256);
+}
+
+/**
+ * Cancellable transport for long-running sealed work. Parent signals are
+ * forwarded while Node remains responsive; the coordinator then kills and
+ * awaits its process group before returning the signed interrupted receipt.
+ */
+export async function invokeExternalSealedLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): Promise<ExternalLifecycleMutationResult> {
+  if (request.action !== "execute-sealed-workload") throw new Error("cancellable sealed transport only accepts execute-sealed-workload");
+  const { envelope, helper, requestSha256, timeout } = prepareExternalLifecycleInvocation(request);
+  return new Promise((resolve, reject) => {
+    const child = spawnChild(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], {
+      env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = []; const stderr: Buffer[] = [];
+    let outputBytes = 0; let finished = false; let escalation: NodeJS.Timeout | null = null; let runtimeTimer: NodeJS.Timeout | null = null;
+    const signals: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+    const forward = (signal: NodeJS.Signals) => {
+      if (finished) return;
+      child.kill(signal);
+      if (escalation === null) escalation = setTimeout(() => child.kill("SIGKILL"), SEALED_TRANSPORT_CLEANUP_MS);
+    };
+    const handlers = new Map(signals.map((signal) => [signal, () => forward(signal)]));
+    for (const [signal, handler] of handlers) process.once(signal, handler);
+    const cleanup = () => {
+      finished = true;
+      if (runtimeTimer !== null) clearTimeout(runtimeTimer);
+      if (escalation !== null) clearTimeout(escalation);
+      for (const [signal, handler] of handlers) process.removeListener(signal, handler);
+    };
+    const append = (target: Buffer[], chunk: Buffer) => {
+      outputBytes += chunk.length;
+      if (outputBytes > 256 * 1024) { forward("SIGTERM"); return; }
+      target.push(Buffer.from(chunk));
+    };
+    child.stdout.on("data", (chunk: Buffer) => append(stdout, chunk));
+    child.stderr.on("data", (chunk: Buffer) => append(stderr, chunk));
+    child.once("error", (error) => { cleanup(); reject(error); });
+    child.once("close", (code) => {
+      cleanup();
+      const stderrText = Buffer.concat(stderr).toString("utf8").trim();
+      if (outputBytes > 256 * 1024) { reject(new Error("external lifecycle authority response exceeded its bounded limit")); return; }
+      if (code !== 0) { reject(new Error(stderrText || "external lifecycle authority rejected the request")); return; }
+      try { resolve(acceptExternalLifecycleOutput(Buffer.concat(stdout).toString("utf8"), request, requestSha256)); }
+      catch (error) { reject(error); }
+    });
+    runtimeTimer = setTimeout(() => forward("SIGTERM"), timeout);
+    child.stdin.end(`${canonical(envelope)}\n`);
+  });
 }
