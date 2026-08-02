@@ -26,10 +26,12 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  SEALED_EXECUTION_API_REVISION,
   buildUnsignedSealedExecutionRequest,
   buildUnsignedSealedWorkloadAuthorization,
   invokeExternalLifecycleAuthority,
   invokeExternalSealedLifecycleAuthority,
+  lifecycleAuthorityResultDigest,
   validateSealedExecutionSafeResult,
   verifySealedExecutionCompletion,
 } from "./external-lifecycle-authority.js";

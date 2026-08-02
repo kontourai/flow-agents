@@ -242,7 +242,9 @@ function withCompletionVerificationKey(callback) {
 }
 
 test("lifecycle authority helper identity is immutable and ignores caller executable selection", () => {
+  assert.equal(packageApi.SEALED_EXECUTION_API_REVISION, "flow-agents.sealed-execution-api.v1", "package root identifies the sealed execution API contract");
   assert.equal(packageApi.invokeExternalSealedLifecycleAuthority, invokeExternalSealedLifecycleAuthority, "package root exports the cancellable sealed transport");
+  assert.equal(packageApi.lifecycleAuthorityResultDigest, lifecycleAuthorityResultDigest, "package root exports the canonical lifecycle digest helper");
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/usr/bin/true";
   assert.equal(LIFECYCLE_AUTHORITY_HELPER_PATH, "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1");
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);

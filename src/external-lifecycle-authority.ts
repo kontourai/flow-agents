@@ -4,6 +4,7 @@ import { createHash, createPrivateKey, createPublicKey, verify } from "node:cryp
 import { execFileSync, spawn as spawnChild } from "node:child_process";
 
 export const LIFECYCLE_AUTHORITY_PROTOCOL_VERSION = "1.0";
+export const SEALED_EXECUTION_API_REVISION = "flow-agents.sealed-execution-api.v1";
 export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1";
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
