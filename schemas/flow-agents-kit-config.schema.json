@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flow Agents committed Kit Flow config proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kit_id", "gate_overrides"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "kit_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "gate_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "required": { "type": "boolean" },
+                "accepted_statuses": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "minItems": 1,
+                  "uniqueItems": true
+                },
+                "trusted_producers": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "uniqueItems": true
+                },
+                "authority_traces": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

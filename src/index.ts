@@ -25,6 +25,9 @@
 import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
+export { inspectEffectiveFlowAgentsConfig } from "./lib/effective-flow-agents-config.js";
+export type { EffectiveFlowAgentsConfigReport, GoalFitConfig } from "./lib/effective-flow-agents-config.js";
+
 export {
   RUN_CORRELATION_IDENTITY_KEYS,
   RUN_CORRELATION_IDENTITY_STATUSES,

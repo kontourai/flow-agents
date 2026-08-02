@@ -47,6 +47,7 @@ const { withFlowRecoveryFenceReadAsync } = require('./lib/flow-recovery-fence');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
+const { resolveGoalFitConfig } = require('./lib/effective-flow-agents-config.js');
 let validateActiveTurnAuthority = () => ({ valid: false, reason: 'continuation authority validator is unavailable' });
 let validateSignedActiveTurnAssignmentAuthority = validateActiveTurnAuthority;
 try {
@@ -212,8 +213,9 @@ function resolveArtifactValidator() {
 }
 
 function sidecarValidation(root, artifactDir) {
-  const requireSidecars = String(process.env.FLOW_AGENTS_REQUIRE_SIDECARS || '').toLowerCase() === 'true';
-  const requireCritique = String(process.env.FLOW_AGENTS_REQUIRE_CRITIQUE || '').toLowerCase() === 'true';
+  const config = resolveGoalFitConfig(root).goal_fit;
+  const requireSidecars = config.require_sidecars;
+  const requireCritique = config.require_critique;
   if (!requireSidecars && !requireCritique && !hasSidecars(artifactDir)) return [];
 
   let sidecarFiles = [];
@@ -1114,7 +1116,7 @@ function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   if (declared) return { argv: declared.argv, cwd: declared.cwd || root, source: 'manifest' };
 
   // (c) free-form model command — opt-in only.
-  if (String(process.env.FLOW_AGENTS_GOAL_FIT_RECHECK || '').toLowerCase() === 'true') {
+  if (resolveGoalFitConfig(root).goal_fit.recheck) {
     const cmd = normalizeCommand(check && check.command);
     if (cmd && referencesNarrativeNamespace(root, cmd)) return { refused: cmd, refusal: 'narrative trust isolation (#619)' };
     if (cmd) return { argv: ['bash', '-lc', cmd], cwd: root, source: 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)' };
@@ -1189,9 +1191,8 @@ function declaredManifestTarget(root, check) {
   return null;
 }
 
-function resolveBackstopTimeout() {
-  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS || '', 10);
-  return Number.isInteger(raw) && raw > 0 ? raw : 120000;
+function resolveBackstopTimeout(root) {
+  return resolveGoalFitConfig(root).goal_fit.backstop_timeout_ms;
 }
 
 /**
@@ -1200,10 +1201,8 @@ function resolveBackstopTimeout() {
  * latency via FLOW_AGENTS_GOAL_FIT_BACKSTOP=off (re-run becomes warn-only) or
  * =skip (no re-run at all → record NOT_VERIFIED instead).
  */
-function resolveBackstopMode() {
-  const v = String(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP || '').trim().toLowerCase();
-  if (v === 'off' || v === 'warn' || v === 'skip' || v === 'block') return v === 'warn' ? 'off' : v;
-  return 'block';
+function resolveBackstopMode(root) {
+  return resolveGoalFitConfig(root).goal_fit.backstop;
 }
 
 /**
@@ -1237,7 +1236,7 @@ function runBackstop(trusted) {
   const result = spawnSync(trusted.argv[0], trusted.argv.slice(1), {
     cwd: trusted.cwd,
     encoding: 'utf8',
-    timeout: resolveBackstopTimeout(),
+    timeout: resolveBackstopTimeout(trusted.cwd || process.cwd()),
     killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1279,7 +1278,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
   const base = relative(root, artifactDir);
-  const backstopMode = resolveBackstopMode();
+  const backstopMode = resolveBackstopMode(root);
   const warnings = [];
   const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
   const terminalDelivered = isTerminalDeliveredState(captureState);
@@ -2499,11 +2498,8 @@ function isHardStopWarning(warning, relPath, activeTurnAuthority) {
  * the legacy FLOW_AGENTS_GOAL_FIT_STRICT=true maps to block; otherwise the
  * canonical engine default is warn.
  */
-function resolveGoalFitMode() {
-  const explicit = String(process.env.FLOW_AGENTS_GOAL_FIT_MODE || '').trim().toLowerCase();
-  if (explicit === 'block' || explicit === 'warn' || explicit === 'off') return explicit;
-  const strict = String(process.env.FLOW_AGENTS_GOAL_FIT_STRICT || '').toLowerCase() === 'true';
-  return strict ? 'block' : 'warn';
+function resolveGoalFitMode(root) {
+  return resolveGoalFitConfig(root).goal_fit.mode;
 }
 
 /**
@@ -2512,9 +2508,8 @@ function resolveGoalFitMode() {
  * After this many consecutive identical blocks the hook releases (exit 0) with a
  * loud notice. Configurable via FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS (default 3).
  */
-function resolveMaxBlocks() {
-  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS || '', 10);
-  return Number.isInteger(raw) && raw > 0 ? raw : 3;
+function resolveMaxBlocks(root) {
+  return resolveGoalFitConfig(root).goal_fit.max_blocks;
 }
 
 function blockStreakFile(root) {
@@ -2852,7 +2847,7 @@ function releaseOnNonTerminalStop(root, artifactDir) {
 async function run(rawInput) {
   const input = parseJson(rawInput);
   const root = findRepoRoot(input.cwd || process.cwd());
-  const mode = resolveGoalFitMode();
+  const mode = resolveGoalFitMode(root);
   if (mode === 'off') return rawInput;
   const result = await analyze(root);
   // #292 Wave 2: additive side effect only — never changes analyze()'s warnings/blocking
@@ -2907,7 +2902,7 @@ async function run(rawInput) {
     return { stdout: rawInput, stderr: message, exitCode: 0 };
   }
 
-  const maxBlocks = resolveMaxBlocks();
+  const maxBlocks = resolveMaxBlocks(root);
   const count = bumpBlockStreak(root, reasonsHash(remediationWarnings));
   if (count >= maxBlocks) {
     // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
