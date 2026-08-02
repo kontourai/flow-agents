@@ -337,6 +337,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
 
+      - name: Goal Fit committed config integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-committed-config-integration
+
+      - name: Effective Flow Agents config unit
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check effective-flow-agents-config-unit
+
       - name: Goal Fit escape hatch integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-escape-hatch-integration

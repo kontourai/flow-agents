@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "goal_fit": {
+    "mode": "warn",
+    "max_blocks": 3,
+    "recheck": false,
+    "backstop": "block",
+    "backstop_timeout_ms": 120000,
+    "require_sidecars": false,
+    "require_critique": false
+  }
+}

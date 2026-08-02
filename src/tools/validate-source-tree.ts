@@ -36,6 +36,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   // fails `npm run validate:source` instead of silently accumulating.
   ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/effective-flow-agents-config.js", { mirror: "context/scripts/hooks/lib/effective-flow-agents-config.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
@@ -97,6 +98,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/denial-escalation.js", { category: "shared hook library", requiredNeedles: ["recordDenial", "buildDenialResponse", "denialIdentity"] }],
   ["scripts/hooks/lib/denial-guidance.js", { category: "shared hook library", requiredNeedles: ["shapeDenialMessage", "stripIncidentRegister"] }],
+  ["scripts/hooks/lib/effective-flow-agents-config.js", { category: "shared hook library", requiredNeedles: ["Committed-only goal-fit configuration", "resolveGoalFitConfig"] }],
   ["scripts/hooks/lib/declared-artifact-roots.js", { category: "shared hook library", requiredNeedles: ["isCandidateWithinDeclaredRoots", "FAIL-CLOSED"] }],
   ["scripts/hooks/lib/flow-recovery-fence.js", { category: "shared hook library", requiredNeedles: ["assertFlowRecoveryFenceOpen", "flow.run-recovery-fence.v1"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],

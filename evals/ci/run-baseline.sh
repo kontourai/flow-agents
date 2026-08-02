@@ -53,6 +53,8 @@ CHECKS=(
   "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
   "Console tenant isolation integration|bash evals/integration/test_console_tenant_isolation.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
+  "Goal Fit committed config integration|bash evals/integration/test_goal_fit_config.sh"
+  "Effective Flow Agents config unit|node --test src/cli/effective-flow-agents-config.test.mjs"
   "Goal Fit escape hatch integration|bash evals/integration/test_goal_fit_escape_hatch.sh"
   "Plain stop messaging integration|bash evals/integration/test_plain_stop_messaging.sh"
   "Stop gate actor-scoped completion integration|bash evals/integration/test_stop_gate_actor_scoped_completion.sh"
@@ -183,6 +185,8 @@ LANE_WORKFLOW_CONTRACTS=(
 
 LANE_RUNTIME_AND_KIT=(
   "Goal Fit hook integration"
+  "Goal Fit committed config integration"
+  "Effective Flow Agents config unit"
   "Goal Fit escape hatch integration"
   "Plain stop messaging integration"
   "Stop gate actor-scoped completion integration"
