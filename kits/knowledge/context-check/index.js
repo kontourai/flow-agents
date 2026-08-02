@@ -1,11 +1,11 @@
 /**
  * Knowledge Kit Context Check — deterministic, revision-bound Living Context.
  *
- * This standalone adapter recalls claim manifests from an exact Git commit and
- * reconciles their declared affected surfaces against a bounded change set. It
- * deliberately does not use the working tree as a fallback and can write only
- * to an explicitly supplied proposal directory. It is not a Surface trust
- * derivation and it makes no effectiveness claim.
+ * This standalone adapter reads selected claim manifests from the caller's exact
+ * raw Git commit, then identifies only the claims whose declared surfaces need
+ * reconciliation. Surface intersection is not a trust or contradiction verdict.
+ * It never reads a working tree as a fallback and can write only new private
+ * proposal artifacts beneath an explicit, verified proposal directory.
  *
  * @module context-check
  */
@@ -13,9 +13,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { validate } from "../providers/lib/schema-validate.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INPUT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../schemas/knowledge/context-check-input.schema.json"), "utf8"));
+const RESULT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../schemas/knowledge/context-check-result.schema.json"), "utf8"));
 const REVISION_RE = /^[0-9a-f]{40}$/i;
+const CLAIM_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLAIM_STATUS = new Set(["current", "superseded", "unverifiable"]);
+const GIT_ENVIRONMENT = Object.freeze({ GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
 
 function error(code, message) {
   const value = new Error(message);
@@ -23,20 +30,42 @@ function error(code, message) {
   return value;
 }
 
-function isNonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0;
+function isIdentity(value) {
+  return typeof value === "string" && value.trim() === value && value.length > 0 && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 function safeRelativePath(value, field) {
-  if (!isNonEmptyString(value) || path.isAbsolute(value) || value.split(/[\\/]+/).includes("..")) {
-    throw error("INVALID_PATH", `${field} must be a non-empty repository-relative path`);
+  if (!isIdentity(value) || path.isAbsolute(value) || value.split(/[\\/]+/).includes("..")) {
+    throw error("INVALID_PATH", `${field} must be a non-empty repository-relative path without traversal`);
   }
   return value.replace(/\\/g, "/");
 }
 
+function safeClaimId(value, field) {
+  if (!isIdentity(value) || !CLAIM_ID_RE.test(value)) throw error("INVALID_IDENTITY", `${field} must be a non-blank identifier ([A-Za-z0-9._-])`);
+  return value;
+}
+
+function sanitizedGitEnvironment() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
+  return { ...env, ...GIT_ENVIRONMENT };
+}
+
+/** Run Git with all inherited Git overrides cleared and replace/graft behavior disabled. */
 function git(repoRoot, args) {
   try {
-    return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync("git", [
+      "-C", repoRoot,
+      "-c", "core.useReplaceRefs=false",
+      "-c", "core.graftFile=/dev/null",
+      "--no-replace-objects",
+      ...args,
+    ], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: sanitizedGitEnvironment(),
+    }).trim();
   } catch (cause) {
     throw error("REVISION_READ_FAILED", `Context Check could not read the requested Git revision: ${cause.stderr?.toString().trim() || cause.message}`);
   }
@@ -44,50 +73,89 @@ function git(repoRoot, args) {
 
 /** Validate the portable, revision-bound Context Check input contract. */
 export function validateContextCheckInput(input) {
-  const errors = [];
-  if (!input || typeof input !== "object" || Array.isArray(input)) return ["input must be an object"];
-  if (input.schema_version !== "1.0") errors.push("schema_version must be '1.0'");
-  for (const field of ["workspace", "repository", "target_audience"]) if (!isNonEmptyString(input[field])) errors.push(`${field} must be a non-empty string`);
-  if (!isNonEmptyString(input.revision) || !REVISION_RE.test(input.revision)) errors.push("revision must be an exact 40-character Git commit SHA");
-  const changed = Array.isArray(input.changed_surfaces) ? input.changed_surfaces : input.diff?.paths;
-  if (!Array.isArray(changed) || changed.length === 0 || changed.some((surface) => !isNonEmptyString(surface))) errors.push("changed_surfaces or diff.paths must be a non-empty string array");
-  if (!Array.isArray(input.knowledge_roots) || input.knowledge_roots.length === 0) errors.push("knowledge_roots must be a non-empty array");
-  else for (const root of input.knowledge_roots) {
-    if (!root || typeof root !== "object" || !isNonEmptyString(root.id) || root.provider !== "git-repo") errors.push("each knowledge root requires id and provider 'git-repo'");
-    try { safeRelativePath(root?.manifest_path, "knowledge_roots[].manifest_path"); } catch (cause) { errors.push(cause.message); }
-  }
-  if (input.claim_ids !== undefined && (!Array.isArray(input.claim_ids) || input.claim_ids.some((id) => !isNonEmptyString(id)))) errors.push("claim_ids must be an array of non-empty strings when supplied");
-  return errors;
+  return validate(input, INPUT_SCHEMA).errors;
 }
 
-/** Validate the stable result envelope without turning this adapter into a trust authority. */
+/** Validate the full Context Check result envelope through its shared JSON schema. */
 export function validateContextCheckResult(result) {
-  const errors = [];
-  if (!result || result.schema_version !== "1.0") errors.push("result schema_version must be '1.0'");
-  if (result?.flow !== "knowledge.context-check") errors.push("result flow must be 'knowledge.context-check'");
-  if (!Array.isArray(result?.recalls) || !Array.isArray(result?.reconciliation) || !Array.isArray(result?.proposals)) errors.push("result must contain recalls, reconciliation, and proposals arrays");
-  if (!["pass", "not_verified"].includes(result?.verdict)) errors.push("result verdict must be pass or not_verified");
-  return errors;
+  return validate(result, RESULT_SCHEMA).errors;
+}
+
+function resolveRevisionBoundRepository(repoRoot, requestedRevision) {
+  if (!isIdentity(repoRoot)) throw error("REPO_ROOT_REQUIRED", "runContextCheck requires repoRoot");
+  if (!REVISION_RE.test(requestedRevision)) throw error("INVALID_CONTEXT_CHECK_INPUT", "revision must be an exact 40-character Git commit SHA");
+  let root;
+  try { root = fs.realpathSync(repoRoot); } catch { throw error("REPO_ROOT_REQUIRED", "repoRoot must resolve to an existing repository worktree"); }
+  const gitRoot = fs.realpathSync(git(root, ["rev-parse", "--show-toplevel"]));
+  if (gitRoot !== root) throw error("REPOSITORY_IDENTITY_MISMATCH", "repoRoot must name the repository worktree root exactly");
+  if (git(root, ["rev-parse", "--is-inside-work-tree"]) !== "true") throw error("REPOSITORY_IDENTITY_MISMATCH", "repoRoot is not a Git worktree");
+  const revision = git(root, ["rev-parse", "--verify", `${requestedRevision}^{commit}`]).toLowerCase();
+  if (revision !== requestedRevision.toLowerCase()) throw error("REVISION_IDENTITY_MISMATCH", "requested revision did not resolve to its raw commit identity");
+  if (git(root, ["cat-file", "-t", revision]) !== "commit") throw error("REVISION_IDENTITY_MISMATCH", "requested revision is not a raw commit object");
+  git(root, ["cat-file", "-e", `${revision}^{commit}`]);
+  return { root, revision };
+}
+
+function normalizedAuthority(authority, field) {
+  if (!authority || typeof authority !== "object") throw error("INVALID_CLAIM_MANIFEST", `${field} requires authority`);
+  return {
+    path: safeRelativePath(authority.path, `${field}.path`),
+    citation: isIdentity(authority.citation) ? authority.citation : (() => { throw error("INVALID_CLAIM_MANIFEST", `${field}.citation must be non-blank`); })(),
+  };
 }
 
 function readClaimsAtRevision(repoRoot, revision, root) {
   const manifestPath = safeRelativePath(root.manifest_path, "knowledge_roots[].manifest_path");
-  const bytes = git(repoRoot, ["show", `${revision}:${manifestPath}`]);
+  const bytes = git(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", `${revision}:${manifestPath}`]);
   let parsed;
   try { parsed = JSON.parse(bytes); } catch { throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} at ${revision} is not valid JSON`); }
-  if (!Array.isArray(parsed.claims)) throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain a claims array`);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.keys(parsed).some((key) => key !== "claims") || !Array.isArray(parsed.claims)) {
+    throw error("INVALID_CLAIM_MANIFEST", `${manifestPath} must contain only a claims array`);
+  }
   return parsed.claims.map((claim, index) => normalizeClaim(claim, root, manifestPath, index));
 }
 
 function normalizeClaim(claim, root, manifestPath, index) {
   const prefix = `${manifestPath}: claims[${index}]`;
-  if (!claim || typeof claim !== "object" || !isNonEmptyString(claim.id) || !isNonEmptyString(claim.claim)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} requires id and claim`);
+  if (!claim || typeof claim !== "object" || Array.isArray(claim)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} must be an object`);
+  const allowed = new Set(["id", "claim", "status", "superseded_by", "authority", "owning_source", "affected_surfaces", "reconciliation_evidence"]);
+  for (const key of Object.keys(claim)) if (!allowed.has(key)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} has unexpected property '${key}'`);
+  const id = safeClaimId(claim.id, `${prefix}.id`);
+  if (!isIdentity(claim.claim)) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.claim must be non-blank`);
   if (!CLAIM_STATUS.has(claim.status)) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.status must be current, superseded, or unverifiable`);
-  if (!claim.authority || !isNonEmptyString(claim.authority.citation)) throw error("INVALID_CLAIM_MANIFEST", `${prefix} requires authoritative citation`);
-  const authorityPath = safeRelativePath(claim.authority.path, `${prefix}.authority.path`);
-  const owningPath = safeRelativePath(claim.owning_source?.path, `${prefix}.owning_source.path`);
-  if (!Array.isArray(claim.affected_surfaces) || claim.affected_surfaces.some((surface) => !isNonEmptyString(surface))) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.affected_surfaces must be a string array`);
-  return { ...claim, authority: { ...claim.authority, path: authorityPath }, owning_source: { ...claim.owning_source, path: owningPath }, root, manifestPath };
+  const authority = normalizedAuthority(claim.authority, `${prefix}.authority`);
+  if (!claim.owning_source || typeof claim.owning_source !== "object" || Array.isArray(claim.owning_source)) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.owning_source is required`);
+  const owningSource = {
+    owner: isIdentity(claim.owning_source.owner) ? claim.owning_source.owner : (() => { throw error("INVALID_CLAIM_MANIFEST", `${prefix}.owning_source.owner must be non-blank`); })(),
+    path: safeRelativePath(claim.owning_source.path, `${prefix}.owning_source.path`),
+  };
+  if (!Array.isArray(claim.affected_surfaces)) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.affected_surfaces must be a string array`);
+  const affectedSurfaces = [...new Set(claim.affected_surfaces.map((surface) => safeRelativePath(surface, `${prefix}.affected_surfaces`)))];
+  const supersededBy = claim.superseded_by === undefined ? undefined : safeClaimId(claim.superseded_by, `${prefix}.superseded_by`);
+  if (claim.status === "superseded" && !supersededBy) throw error("INVALID_CLAIM_MANIFEST", `${prefix}.superseded_by is required for superseded claims`);
+  let reconciliationEvidence;
+  if (claim.reconciliation_evidence !== undefined) {
+    if (!claim.reconciliation_evidence || typeof claim.reconciliation_evidence !== "object" || Array.isArray(claim.reconciliation_evidence)
+      || claim.reconciliation_evidence.status !== "contradicted") {
+      throw error("INVALID_CLAIM_MANIFEST", `${prefix}.reconciliation_evidence must explicitly declare status 'contradicted'`);
+    }
+    reconciliationEvidence = { authority: normalizedAuthority(claim.reconciliation_evidence.authority, `${prefix}.reconciliation_evidence.authority`) };
+  }
+  return { id, claim: claim.claim, status: claim.status, ...(supersededBy ? { superseded_by: supersededBy } : {}), authority, owning_source: owningSource, affected_surfaces: affectedSurfaces, ...(reconciliationEvidence ? { reconciliation_evidence: reconciliationEvidence } : {}), root, manifestPath };
+}
+
+function authorityAtRevision(authority, revision) {
+  return { ...authority, revision };
+}
+
+function retrievalProvenance(revision, roots) {
+  return {
+    provider: "git-repo",
+    knowledge_roots: [...new Set(roots.map((root) => root.id))],
+    manifest_paths: [...new Set(roots.map((root) => root.manifest_path))],
+    revision,
+    read_mode: "git-show",
+  };
 }
 
 function recall(claim, revision) {
@@ -96,84 +164,128 @@ function recall(claim, revision) {
     claim: claim.claim,
     status: claim.status,
     ...(claim.superseded_by ? { superseded_by: claim.superseded_by } : {}),
-    authority: { ...claim.authority, revision },
-    retrieval_provenance: {
-      provider: claim.root.provider,
-      knowledge_root: claim.root.id,
-      manifest_path: claim.manifestPath,
-      revision,
-      read_mode: "git-show"
-    }
+    authority: authorityAtRevision(claim.authority, revision),
+    retrieval_provenance: retrievalProvenance(revision, [{ id: claim.root.id, manifest_path: claim.manifestPath }]),
   };
 }
 
-function matchingSurface(claim, changedSurfaces) {
-  return changedSurfaces.find((surface) => claim.affected_surfaces.includes(surface));
+function noAnswer(claimId, revision, roots) {
+  return {
+    claim_id: claimId,
+    status: "unverifiable",
+    reason: "no_answer",
+    retrieval_provenance: retrievalProvenance(revision, roots),
+  };
 }
 
 function reconciliationFor(claim, changedSurfaces, revision) {
-  const affectedSurface = matchingSurface(claim, changedSurfaces);
-  if (!affectedSurface) return { claim_id: claim.id, status: "clean", affected_surfaces: [] };
-  if (claim.status === "unverifiable") return { claim_id: claim.id, status: "unverifiable", affected_surfaces: [affectedSurface], reason: "claim_source_unverifiable" };
-  return {
-    claim_id: claim.id,
-    status: claim.status === "superseded" ? "stale" : "contradicted",
-    affected_surfaces: [affectedSurface],
-    authority: { ...claim.authority, revision }
-  };
+  const affectedSurfaces = changedSurfaces.filter((surface) => claim.affected_surfaces.includes(surface));
+  const authority = authorityAtRevision(claim.authority, revision);
+  if (affectedSurfaces.length === 0) return { claim_id: claim.id, status: "clean", affected_surfaces: [], authority };
+  if (claim.status === "unverifiable") return { claim_id: claim.id, status: "unverifiable", affected_surfaces: affectedSurfaces, authority };
+  if (claim.reconciliation_evidence) {
+    return {
+      claim_id: claim.id,
+      status: "contradicted",
+      affected_surfaces: affectedSurfaces,
+      authority,
+      evidence: { authority: authorityAtRevision(claim.reconciliation_evidence.authority, revision) },
+    };
+  }
+  return { claim_id: claim.id, status: "affected", affected_surfaces: affectedSurfaces, authority };
 }
 
 function proposalFor(claim, reconciliation, revision) {
-  if (reconciliation.status === "clean" || reconciliation.status === "unverifiable") return null;
+  if (reconciliation.status === "clean") return null;
+  const rationale = reconciliation.status === "contradicted"
+    ? `Claim '${claim.id}' has explicit authoritative contradiction evidence for ${reconciliation.affected_surfaces.join(", ")} at ${revision}.`
+    : reconciliation.status === "unverifiable"
+      ? `Claim '${claim.id}' is affected by ${reconciliation.affected_surfaces.join(", ")} but remains unverifiable; route review to its owning source.`
+      : `Claim '${claim.id}' is affected by ${reconciliation.affected_surfaces.join(", ")} and requires reconciliation by its owning source.`;
   return {
     schema_version: "1.0",
     id: `context-update-${claim.id}`,
     status: "proposed",
     kind: "context-update",
     claim_id: claim.id,
-    route: {
-      owner: claim.owning_source.owner || "owning-source",
-      path: claim.owning_source.path
-    },
-    rationale: `Claim '${claim.id}' is ${reconciliation.status} by ${reconciliation.affected_surfaces.join(", ")} at ${revision}.`,
-    provenance: { authority: { ...claim.authority, revision }, retrieval: "git-show" }
+    route: { owner: claim.owning_source.owner, path: claim.owning_source.path },
+    rationale,
+    provenance: { authority: authorityAtRevision(claim.authority, revision), retrieval: "git-show" },
   };
 }
 
+function ensurePrivateDirectory(directory, label) {
+  let stat;
+  try { stat = fs.lstatSync(directory); } catch { throw error("UNSAFE_PROPOSAL_DIR", `${label} must already exist as a private directory`); }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw error("UNSAFE_PROPOSAL_DIR", `${label} must be a directory, never a symlink`);
+  if ((stat.mode & 0o077) !== 0) throw error("UNSAFE_PROPOSAL_DIR", `${label} must not be group/world accessible`);
+  return fs.realpathSync(directory);
+}
+
+function ensurePrivateChildDirectory(root, relative) {
+  const candidate = path.resolve(root, relative);
+  if (!candidate.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal directory escaped proposalDir: ${relative}`);
+  try { fs.mkdirSync(candidate, { mode: 0o700 }); } catch (cause) { if (cause.code !== "EEXIST") throw cause; }
+  const stat = fs.lstatSync(candidate);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) throw error("UNSAFE_PROPOSAL_DIR", `proposal directory component '${relative}' must be a private non-symlink directory`);
+  const physical = fs.realpathSync(candidate);
+  if (!physical.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal directory component '${relative}' resolves outside proposalDir`);
+  return physical;
+}
+
+function writeNewJson(root, relative, value) {
+  const destination = path.resolve(root, relative);
+  if (!destination.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal write escaped proposalDir: ${relative}`);
+  const parent = ensurePrivateDirectory(path.dirname(destination), `proposal parent for ${relative}`);
+  if (!parent.startsWith(`${root}${path.sep}`) && parent !== root) throw error("PROPOSAL_PATH_ESCAPE", `proposal parent for ${relative} resolves outside proposalDir`);
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
+  let descriptor;
+  try {
+    descriptor = fs.openSync(destination, flags, 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  } catch (cause) {
+    throw error("PROPOSAL_WRITE_FAILED", `refused proposal write '${relative}': ${cause.message}`);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 function writeResult(proposalDir, result) {
-  if (!isNonEmptyString(proposalDir)) throw error("PROPOSAL_DIR_REQUIRED", "Context Check writes require an explicit proposalDir");
-  const outputRoot = path.resolve(proposalDir);
-  fs.mkdirSync(outputRoot, { recursive: true });
-  const written = [];
-  const write = (relative, value) => {
-    const destination = path.resolve(outputRoot, relative);
-    if (!destination.startsWith(`${outputRoot}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal write escaped proposalDir: ${relative}`);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    written.push(relative);
-  };
-  write("context-check-result.json", result);
-  for (const proposal of result.proposals) write(path.join("proposals", `${proposal.id}.json`), proposal);
+  if (!isIdentity(proposalDir)) throw error("PROPOSAL_DIR_REQUIRED", "Context Check writes require an explicit proposalDir");
+  const requestedRoot = path.resolve(proposalDir);
+  const outputRoot = ensurePrivateDirectory(requestedRoot, "proposalDir");
+  const proposalsRoot = ensurePrivateChildDirectory(outputRoot, "proposals");
+  const written = ["context-check-result.json", ...result.proposals.map((proposal) => `proposals/${proposal.id}.json`)];
+  result.written = written;
+  writeNewJson(outputRoot, "context-check-result.json", result);
+  for (const proposal of result.proposals) writeNewJson(proposalsRoot, `${proposal.id}.json`, proposal);
   return written;
 }
 
 /**
  * Run a deterministic Context Check.
  *
- * The only repository reads are `git show <resolved-sha>:<manifest-path>`.
- * `write: true` requires an explicit proposalDir and never modifies repoRoot.
+ * Repository content is read only with a sanitized `git show <raw-sha>:<path>`.
+ * `write: true` requires an existing private proposalDir and only creates new,
+ * no-follow files below it; it never modifies repoRoot.
  */
 export function runContextCheck({ repoRoot, input, proposalDir, write = true } = {}) {
   const inputErrors = validateContextCheckInput(input);
   if (inputErrors.length) throw error("INVALID_CONTEXT_CHECK_INPUT", inputErrors.join("; "));
-  if (!isNonEmptyString(repoRoot)) throw error("REPO_ROOT_REQUIRED", "runContextCheck requires repoRoot");
-  const resolvedRoot = fs.realpathSync(repoRoot);
-  const revision = git(resolvedRoot, ["rev-parse", "--verify", `${input.revision}^{commit}`]).toLowerCase();
-  const changedSurfaces = [...new Set(input.changed_surfaces || input.diff.paths)];
-  const claims = input.knowledge_roots.flatMap((root) => readClaimsAtRevision(resolvedRoot, revision, root));
-  const requestedIds = input.claim_ids ? new Set(input.claim_ids) : new Set(claims.map((claim) => claim.id));
-  const selected = claims.filter((claim) => requestedIds.has(claim.id));
-  const recalls = selected.length ? selected.map((claim) => recall(claim, revision)) : [{ status: "unverifiable", reason: "no_answer", retrieval_provenance: { revision, read_mode: "git-show" } }];
+  const { root: resolvedRoot, revision } = resolveRevisionBoundRepository(repoRoot, input.revision);
+  const changedSurfaces = [...new Set(input.changed_surfaces || input.diff.paths)].map((surface) => safeRelativePath(surface, "changed surface"));
+  if (new Set(input.knowledge_roots.map((knowledgeRoot) => knowledgeRoot.id)).size !== input.knowledge_roots.length) {
+    throw error("DUPLICATE_KNOWLEDGE_ROOT_ID", "selected Knowledge root ids must be unique");
+  }
+  const claims = input.knowledge_roots.flatMap((knowledgeRoot) => readClaimsAtRevision(resolvedRoot, revision, knowledgeRoot));
+  const claimsById = new Map();
+  for (const claim of claims) {
+    if (claimsById.has(claim.id)) throw error("DUPLICATE_CLAIM_ID", `claim id '${claim.id}' appears in more than one selected Knowledge root`);
+    claimsById.set(claim.id, claim);
+  }
+  const requestedIds = input.claim_ids ?? ([...claimsById.keys()].length ? [...claimsById.keys()] : ["no-matching-claims"]);
+  const selected = requestedIds.flatMap((claimId) => claimsById.has(claimId) ? [claimsById.get(claimId)] : []);
+  const recalls = requestedIds.map((claimId) => claimsById.has(claimId) ? recall(claimsById.get(claimId), revision) : noAnswer(claimId, revision, input.knowledge_roots));
   const reconciliation = selected.map((claim) => reconciliationFor(claim, changedSurfaces, revision));
   const proposals = selected.map((claim, index) => proposalFor(claim, reconciliation[index], revision)).filter(Boolean);
   const result = {
@@ -185,16 +297,19 @@ export function runContextCheck({ repoRoot, input, proposalDir, write = true } =
       revision,
       target_audience: input.target_audience,
       changed_surfaces: changedSurfaces,
-      knowledge_roots: input.knowledge_roots.map(({ id, provider, manifest_path }) => ({ id, provider, manifest_path }))
+      knowledge_roots: input.knowledge_roots.map(({ id, provider, manifest_path }) => ({ id, provider, manifest_path })),
     },
     recalls,
     reconciliation,
     proposals,
-    verdict: recalls.some((entry) => entry.status === "unverifiable") ? "not_verified" : "pass"
+    verdict: recalls.some((entry) => entry.status === "unverifiable") ? "not_verified" : "pass",
+    written: [],
   };
   const resultErrors = validateContextCheckResult(result);
   if (resultErrors.length) throw error("INVALID_CONTEXT_CHECK_RESULT", resultErrors.join("; "));
-  result.written = write ? writeResult(proposalDir, result) : [];
+  if (write) writeResult(proposalDir, result);
+  const finalErrors = validateContextCheckResult(result);
+  if (finalErrors.length) throw error("INVALID_CONTEXT_CHECK_RESULT", finalErrors.join("; "));
   return result;
 }
 

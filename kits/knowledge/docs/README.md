@@ -205,17 +205,28 @@ const result = runContextCheck({
 });
 ```
 
-Each selected manifest is read only by `git show <resolved-sha>:<manifest-path>`; an unreadable
-revision or manifest fails closed. The adapter never falls through to a dirty working tree.
+Each selected manifest is read only by `git show <resolved-sha>:<manifest-path>` after the
+adapter verifies that `repoRoot` is the named worktree root and that the requested SHA is a raw
+commit object. It clears inherited `GIT_*` environment overrides and disables Git replacement and
+graft semantics; an unreadable revision or manifest fails closed. The adapter never falls through
+to a dirty working tree.
 Recall results use contextual statuses `current`, `superseded`, and `unverifiable`; a no-answer
-is explicit (`unverifiable` with reason `no_answer`) and makes the result `not_verified`.
+is explicit for **each missing requested claim id** (`unverifiable` with reason `no_answer`) and
+makes the result `not_verified`, even when other requested claims were recalled.
 Those are recall/currentness statements, not trust decisions.
 
 Reconciliation compares exact declared affected surfaces with the bounded input and leaves clean
-controls clean. Affected current or superseded claims yield only a minimal `context-update`
-proposal routed to the claim's declared owning source. The adapter never edits docs, decisions,
-or Knowledge records. With `write: true` (the default), `proposalDir` is required and all output
-is contained beneath it; use `write: false` for a fully read-only check.
+controls clean. An intersection is only `affected` and requires reconciliation; it is never a
+`contradicted`, broken, or trust verdict unless the selected authoritative fixture explicitly
+supplies contradiction evidence. Affected unverifiable claims remain `unverifiable` and still
+route a proposal to their owning source without deriving trust. Every intersecting surface is
+returned.
+
+Affected claims yield only a minimal `context-update` proposal routed to the claim's declared
+owning source. The adapter never edits docs, decisions, or Knowledge records. With `write: true`
+(the default), `proposalDir` must be an existing private non-symlink directory. Writes use
+exclusive no-follow file creation and reject symlink components or targets before creating output;
+use `write: false` for a fully read-only check.
 
 The flow documents the Ops #121 `holds`/`broken`/`unverifiable` terms solely as consumer
 vocabulary. Ops #121 and Surface retain any claim-evidence-freshness or trust authority; Context

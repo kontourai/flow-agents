@@ -70,7 +70,7 @@
     {
       "id": "knowledge.context-check",
       "path": "flows/context-check.flow.json",
-      "description": "Standalone Living Context recall and reconciliation (issue #1131): bind a repository/workspace and exact revision, read selected git-repo Knowledge roots only at that revision, return contextual current/superseded/unverifiable recall with authority and retrieval provenance, reconcile a bounded change without flagging clean controls, and emit minimal owning-source proposals only. It is not a Surface trust derivation or Builder integration. Executable logic: context-check/index.js."
+      "description": "Standalone Living Context recall and reconciliation (issue #1131): bind a repository/workspace and verified raw revision, read selected git-repo Knowledge roots only with sanitized Git revision reads, return contextual current/superseded/unverifiable recall with authority and retrieval provenance, return neutral affected/requires-reconciliation for bounded path intersections unless explicit authority supplies contradiction, and emit minimal owning-source proposals only. It is not a Surface trust derivation or Builder integration. Executable logic: context-check/index.js."
     }
   ],
   "workflow_triggers": [
@@ -145,7 +145,7 @@
     {
       "id": "knowledge.context-check-runner",
       "path": "context-check/index.js",
-      "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates revision-bound input/result contracts, reads manifests exclusively with git show <resolved-sha>:<path>, distinguishes contextual current/superseded/unverifiable recall from Surface trust, and writes only proposed owning-source updates under an explicit proposal directory."
+      "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
     }
   ],
   "evals": [
@@ -227,7 +227,7 @@
     {
       "id": "knowledge.context-check-suite",
       "path": "context-check/context-check.test.js",
-      "description": "Deterministic standalone Context Check contract suite (issue #1131): exact revision-only recall despite a dirty working tree, current/superseded authority status, bounded reconciliation and clean controls, explicit no-answer/not_verified behavior, owning-source proposals only, proposal-directory containment, input/result schemas, and diff-path handling."
+      "description": "Deterministic standalone Context Check contract suite (issue #1131): sanitized exact raw-revision reads despite a dirty working tree, Git replace and inherited GIT_DIR adversaries, current/superseded authority status, neutral bounded reconciliation with full surface intersection, explicit per-missing no-answer/not_verified behavior, owning-source-only proposals, no-follow symlink-safe proposal containment, complete input/result schemas, and diff-path handling."
     }
   ],
   "skills": [
