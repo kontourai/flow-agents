@@ -844,3 +844,7 @@ atomically writes an immutable
 `evidenceRef` is already shaped for `workflow evidence --evidence-ref-json`, so
 the schedule and typed mutable-resource deferral travel with the gate's ordinary
 test or acceptance evidence instead of becoming a parallel gate truth source.
+
+### Sealed external calibration boundary
+
+External calibration is a separately signed, one-shot lifecycle action, not a Builder gate evaluator. It binds the canonical session and its one work-item subject, signed closure, and explicit budgets. Root-owned nonce and completion leases recover only when a PID is dead/reused or boot identity changed, never by elapsed time alone. The exact closure is staged below a root-owned non-listable execution parent and launched through a fixed privilege-drop binary that clears supplementary groups. The signed controller, closure, signing principal, and invoking OS account are trusted local TCB: staging is an integrity/replay boundary, not secrecy from another process already running as that UID. A hostile signed controller deliberately escaping its process group is an advisory limitation. Public callers retain only a verified safe result without free-form provider output. Tracking: #1146.

@@ -798,3 +798,9 @@ that preserves the recorded runtime and active Kits.
 The package may use lower-level writer modules internally. They are not a
 supported consumer or skill surface. Consumer guidance and Builder skills use
 `flow-agents workflow` exclusively.
+
+## Sealed workload execution
+
+`workflow execute-sealed-workload-request` emits the readable unsigned `authorization` and an exact compact canonical-JSON `signing_payload` for a separately registered Ed25519 signer. The signer signs the `signing_payload` bytes verbatim and attaches that signature to the authorization. The command derives the subject from the bound one-work-item session (an optional `--subject` must match it), binds the canonical project/run/session identity and exact workload digest, and requires every finite budget flag explicitly. It never grants coordinator maxima by default. The public execute command rereads the exact signed authorization, computes request and authorization digests, and prints only a completion verified against that exact safe result.
+
+The root coordinator stages the signed closure under a root-owned per-operation leaf of a non-listable execution root, clears supplementary groups in its fixed native privilege-drop launcher, and removes and awaits the process group on every terminal outcome or forwarded cancellation before leaf cleanup. The signed controller/closure, local signing principal, and invoking OS account are trusted local TCB. Staging provides exact-byte integrity and replay control; it is not a secrecy boundary against another process already running as the invoking UID. Deliberate `setsid` escape by a hostile signed controller is likewise outside this proportional local threat model. The public command never returns raw provider material: retained artifacts are closed structured values only—booleans, finite numbers, hashes, and a fixed status vocabulary. Tracking: #1146.
