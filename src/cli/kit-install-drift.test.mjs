@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import childProcess from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { main as kitMain, setKitCliTestHooksForTests } from "../../build/src/cli/kit.js";
 import { observeKitContentHash } from "../../build/src/flow-kit/content-hash.js";
@@ -16,6 +18,66 @@ function tempRoot(prefix) {
 
 function copyFixture(destination) {
   fs.cpSync(FIXTURE, destination, { recursive: true });
+}
+
+function createGitFixture(destination) {
+  copyFixture(destination);
+  childProcess.execFileSync("git", ["init", "-q", destination]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.email", "tests@example.invalid"]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.name", "Flow Agents tests"]);
+  childProcess.execFileSync("git", ["-C", destination, "add", "."]);
+  childProcess.execFileSync("git", ["-C", destination, "commit", "-qm", "fixture"]);
+}
+
+function transactionArtifacts(target) {
+  const parent = path.dirname(target);
+  return fs.existsSync(parent)
+    ? fs.readdirSync(parent).filter((name) => name.startsWith(`.${path.basename(target)}.flow-agents-`))
+    : [];
+}
+
+async function assertRegistryWriteFailure({ git, update }) {
+  const root = tempRoot(`flow-kit-registry-write-${git ? "git" : "local"}-${update ? "update" : "fresh"}-`);
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  if (git) createGitFixture(source); else copyFixture(source);
+  const installSource = git ? pathToFileURL(source).href : source;
+  const target = path.join(dest, "kits", "local", "repositories", "example-kit");
+
+  let registryBefore;
+  let targetReadmeBefore;
+  if (update) {
+    assert.equal(await kitMain(["install", installSource, "--dest", dest]), 0);
+    const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
+    registryBefore = fs.readFileSync(registryPath, "utf8");
+    targetReadmeBefore = fs.readFileSync(path.join(target, "docs", "README.md"), "utf8");
+    fs.appendFileSync(path.join(source, "docs", "README.md"), "source update that must roll back\n");
+    if (git) {
+      childProcess.execFileSync("git", ["-C", source, "add", "."]);
+      childProcess.execFileSync("git", ["-C", source, "commit", "-qm", "update"]);
+    }
+  }
+
+  setKitCliTestHooksForTests({
+    writeRegistry() {
+      throw new Error("deterministic registry write failure");
+    },
+  });
+  try {
+    assert.equal(await kitMain(["install", installSource, "--dest", dest, ...(update ? ["--update"] : [])]), 1);
+  } finally {
+    setKitCliTestHooksForTests(undefined);
+  }
+
+  const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
+  if (update) {
+    assert.equal(fs.readFileSync(registryPath, "utf8"), registryBefore);
+    assert.equal(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8"), targetReadmeBefore);
+  } else {
+    assert.equal(fs.existsSync(registryPath), false);
+    assert.equal(fs.existsSync(target), false);
+  }
+  assert.deepEqual(transactionArtifacts(target), []);
 }
 
 test("local install records the completed copied tree hash when its source changes before copy", async () => {
@@ -88,6 +150,14 @@ test("install rolls back a replaced target when post-copy observation is unsafe"
   assert.equal(fs.lstatSync(target).isDirectory(), true);
   assert.equal(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8").includes("source update"), false);
 });
+
+for (const git of [false, true]) {
+  for (const update of [false, true]) {
+    test(`${git ? "git" : "local"} install ${update ? "update" : "fresh"} rolls back target and registry when registry writing fails`, async () => {
+      await assertRegistryWriteFailure({ git, update });
+    });
+  }
+}
 
 test("activation warns for malformed registry entries instead of silently dropping them", () => {
   const root = tempRoot("flow-kit-malformed-registry-");

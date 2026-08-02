@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
@@ -18,6 +18,7 @@ const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 export type KitCliTestHooks = {
   beforeCopy?: (source: string, target: string) => void;
   afterCopy?: (source: string, target: string) => void;
+  writeRegistry?: (root: string, registryFile: string, registry: Record<string, unknown>) => void;
 };
 
 let testHooks: KitCliTestHooks | undefined;
@@ -95,6 +96,61 @@ function loadRegistry(dest: string): { schema_version: string; kits: Record<stri
   if (!fs.existsSync(file)) return { schema_version: "1.0", kits: [] };
   const data = readJson(file) as { schema_version?: string; kits?: unknown[] };
   return { schema_version: data.schema_version ?? "1.0", kits: Array.isArray(data.kits) ? data.kits.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [] };
+}
+
+type InstalledKitRegistry = ReturnType<typeof loadRegistry>;
+
+/**
+ * Make the copied target and registry entry one transaction. The target swap
+ * remains reversible until the registry's atomic write has completed, so a
+ * registry failure cannot leave an unregistered replacement on disk.
+ */
+function installCopiedKit(options: {
+  source: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  registry: InstalledKitRegistry;
+  existing: Record<string, unknown> | undefined;
+  sourceText: string;
+  update: boolean;
+}): void {
+  const { source, dest, target, manifest, registry, existing, sourceText, update } = options;
+  const transaction = copyDirAtomicTransaction(dest, source, target, (completedTarget) => {
+    testHooks?.afterCopy?.(source, completedTarget);
+    const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
+    if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
+    return targetObservation.observed_hash;
+  });
+  if (!transaction.value) {
+    transaction.rollback();
+    throw new Error("completed copied kit did not produce a content hash");
+  }
+
+  const entry: Record<string, unknown> = {
+    id: String(manifest.id),
+    source: sourceText,
+    hash: transaction.value,
+    installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
+    installed_path: target,
+    state: "installed",
+  };
+  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
+  registry.kits = existing ? registry.kits.map((item) => item.id === entry.id ? entry : item) : [...registry.kits, entry];
+
+  try {
+    const file = registryPath(dest);
+    if (testHooks?.writeRegistry) testHooks.writeRegistry(dest, file, registry);
+    else atomicWriteJson(dest, file, registry);
+  } catch (error) {
+    try {
+      transaction.rollback();
+    } catch (rollbackError) {
+      throw new Error(`registry write failed and target rollback also failed: ${(error as Error).message}; ${(rollbackError as Error).message}`);
+    }
+    throw new Error(`registry write failed; target rolled back: ${(error as Error).message}`);
+  }
+  transaction.commit();
 }
 
 /**
@@ -205,31 +261,21 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 0;
   }
   testHooks?.beforeCopy?.(source, target);
-  let targetHash: string;
   try {
-    const observation = copyDirAtomic(dest, source, target, (completedTarget) => {
-      testHooks?.afterCopy?.(source, completedTarget);
-      const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
-      if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
-      return targetObservation.observed_hash;
+    installCopiedKit({
+      source,
+      dest,
+      target,
+      manifest,
+      registry,
+      existing,
+      sourceText,
+      update: flagBool(args.flags, "update") ?? false,
     });
-    if (!observation) throw new Error("completed copied kit did not produce a content hash");
-    targetHash = observation;
   } catch (error) {
-    console.error(`install: copied kit integrity verification failed: ${(error as Error).message}`);
+    console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
     return 1;
   }
-  const entry: Record<string, unknown> = {
-    id: kitId,
-    source: sourceText,
-    hash: targetHash,
-    installed_at: existing && existing.source === sourceText && !flagBool(args.flags, "update") ? existing.installed_at : isoNow(),
-    installed_path: target,
-    state: "installed",
-  };
-  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-  registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-  atomicWriteJson(dest, registryPath(dest), registry);
   console.log(`${existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
   return 0;
 }
@@ -314,31 +360,21 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       console.log(`kit '${kitId}' is already installed from ${sourceText}`);
       return 0;
     }
-    let targetHash: string;
     try {
-      const observation = copyDirAtomic(dest, tmpBase, target, (completedTarget) => {
-        testHooks?.afterCopy?.(tmpBase, completedTarget);
-        const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
-        if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
-        return targetObservation.observed_hash;
+      installCopiedKit({
+        source: tmpBase,
+        dest,
+        target,
+        manifest,
+        registry,
+        existing,
+        sourceText,
+        update,
       });
-      if (!observation) throw new Error("completed copied kit did not produce a content hash");
-      targetHash = observation;
     } catch (error) {
-      console.error(`install: copied kit integrity verification failed: ${(error as Error).message}`);
+      console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
       return 1;
     }
-    const entry: Record<string, unknown> = {
-      id: kitId,
-      source: sourceText,
-      hash: targetHash,
-      installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
-      installed_path: target,
-      state: "installed",
-    };
-    if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-    registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-    atomicWriteJson(dest, registryPath(dest), registry);
     console.log(`${existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
     return 0;
   } finally {

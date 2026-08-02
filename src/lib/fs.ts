@@ -145,8 +145,18 @@ function copiedTreeDigest(root: string): string {
   return hash.digest("hex");
 }
 
-/** Copy through a verified sibling directory, then swap with rollback. */
-export function copyDirAtomic<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T): T | undefined {
+export type DirectoryCopyTransaction<T> = {
+  value: T | undefined;
+  commit(): void;
+  rollback(): void;
+};
+
+/**
+ * Copy through a verified sibling directory, then swap with an explicit
+ * commit/rollback boundary. Callers that persist related metadata can retain
+ * the prior directory until that metadata write has succeeded.
+ */
+export function copyDirAtomicTransaction<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T): DirectoryCopyTransaction<T> {
   assertPathsDisjoint(src, dest);
   const parent = ensureSafeDirectory(root, path.dirname(dest));
   if (fs.existsSync(dest)) {
@@ -157,6 +167,11 @@ export function copyDirAtomic<T = void>(root: string, src: string, dest: string,
   const nonce = `${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
   const temp = path.join(parent, `.${path.basename(dest)}.flow-agents-${nonce}.tmp`);
   const backup = path.join(parent, `.${path.basename(dest)}.flow-agents-${nonce}.old`);
+  let transactionOpen = false;
+  const restore = (): void => {
+    fs.rmSync(dest, { recursive: true, force: true });
+    if (fs.existsSync(backup)) fs.renameSync(backup, dest);
+  };
   try {
     fs.cpSync(src, temp, {
       recursive: true,
@@ -176,15 +191,36 @@ export function copyDirAtomic<T = void>(root: string, src: string, dest: string,
     try {
       verified = verify?.(dest);
     } catch (error) {
-      fs.rmSync(dest, { recursive: true, force: true });
-      if (fs.existsSync(backup)) fs.renameSync(backup, dest);
+      restore();
       throw error;
     }
-    fs.rmSync(backup, { recursive: true, force: true });
-    return verified;
+    transactionOpen = true;
+    return {
+      value: verified,
+      commit(): void {
+        if (!transactionOpen) return;
+        fs.rmSync(backup, { recursive: true, force: true });
+        transactionOpen = false;
+      },
+      rollback(): void {
+        if (!transactionOpen) return;
+        restore();
+        transactionOpen = false;
+      },
+    };
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
-    if (fs.existsSync(backup) && !fs.existsSync(dest)) fs.renameSync(backup, dest);
+    if (!transactionOpen && fs.existsSync(backup) && !fs.existsSync(dest)) fs.renameSync(backup, dest);
+  }
+}
+
+/** Copy through a verified sibling directory, then swap with rollback. */
+export function copyDirAtomic<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T): T | undefined {
+  const transaction = copyDirAtomicTransaction(root, src, dest, verify);
+  try {
+    return transaction.value;
+  } finally {
+    transaction.commit();
   }
 }
 
