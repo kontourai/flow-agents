@@ -20,6 +20,8 @@ const {
   sealedExecutionTransportTimeout,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
+  sealedExecutionProvenance,
+  sealedInvocationManifestSha256,
   validateSealedExecutionSafeResult,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
@@ -65,6 +67,17 @@ test("sealed execution clients reject projection tampering, size-cap bypasses, a
   assert.throws(() => validateSealedExecutionSafeResult(oversizedProjection), /sealed execution artifact is invalid/);
   assert.throws(() => validateSealedExecutionSafeResult({ ...sealedSafeResult(), unexpected: true }), /unexpected or missing fields/);
   assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ projection_sha256: "0".repeat(64) })), /projection digest/);
+});
+
+test("sealed execution provenance is exact when present and legacy receipts remain readable", () => {
+  const provenance = { invocation_manifest_sha256: "e".repeat(64), controller_state_sha256: "f".repeat(64) };
+  assert.deepEqual(sealedExecutionProvenance(sealedSafeResult({ execution_provenance: provenance })), provenance);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ execution_provenance: { ...provenance, extra: true } })), /provenance/);
+  assert.throws(() => sealedExecutionProvenance(sealedSafeResult()), /provenance is unavailable/);
+  const workload = { runtime: { sha256: "1".repeat(64) }, controller: { logical_path: "r4/controller.mjs", sha256: "2".repeat(64) }, provider: { sha256: "3".repeat(64) }, inputs: [{ id: "plan", source: { logical_path: "data/plan.json", sha256: "4".repeat(64) } }] };
+  const authorization = { runner_entrypoint: "coordinator:sealed-runner-v1", max_runtime_ms: 1, max_output_bytes: 2, max_provider_calls: 3, max_cost_microusd: 4, max_tokens: 5 };
+  assert.match(sealedInvocationManifestSha256(workload, authorization), /^[a-f0-9]{64}$/);
+  assert.notEqual(sealedInvocationManifestSha256({ ...workload, provider: { sha256: "0".repeat(64) } }, authorization), sealedInvocationManifestSha256(workload, authorization));
 });
 
 const action = "cancel";
@@ -248,6 +261,7 @@ test("lifecycle authority helper identity is immutable and ignores caller execut
   assert.equal(packageApi.lifecycleAuthorityResultDigest, lifecycleAuthorityResultDigest, "package root exports the canonical lifecycle digest helper");
   assert.equal(sealedExecutionApi.invokeExternalSealedLifecycleAuthority, invokeExternalSealedLifecycleAuthority, "minimal sealed entrypoint exports the cancellable transport");
   assert.equal(sealedExecutionApi.lifecycleAuthorityResultDigest, lifecycleAuthorityResultDigest, "minimal sealed entrypoint exports the canonical digest helper");
+  assert.equal(sealedExecutionApi.sealedInvocationManifestSha256, sealedInvocationManifestSha256, "minimal sealed entrypoint exports the exact manifest digest helper");
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/usr/bin/true";
   assert.equal(LIFECYCLE_AUTHORITY_HELPER_PATH, "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1");
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);

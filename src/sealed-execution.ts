@@ -10,11 +10,14 @@ export {
   buildUnsignedSealedWorkloadAuthorization,
   invokeExternalSealedLifecycleAuthority,
   lifecycleAuthorityResultDigest,
+  sealedExecutionProvenance,
+  sealedInvocationManifestSha256,
   validateSealedExecutionSafeResult,
   verifySealedExecutionCompletion,
 } from "./external-lifecycle-authority.js";
 export type {
   ExternalLifecycleAuthorityRequest,
   ExternalLifecycleMutationResult,
+  SealedExecutionProvenance,
   SealedExecutionSafeResult,
 } from "./external-lifecycle-authority.js";
