@@ -41,6 +41,10 @@
       "types": "./build/src/kit-observability-conformance.d.ts",
       "import": "./build/src/kit-observability-conformance.js"
     },
+    "./sealed-execution": {
+      "types": "./build/src/sealed-execution.d.ts",
+      "import": "./build/src/sealed-execution.js"
+    },
     "./package.json": "./package.json",
     "./schemas/*.json": "./schemas/*.json"
   },
