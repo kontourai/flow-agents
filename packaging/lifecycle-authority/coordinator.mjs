@@ -26,7 +26,8 @@ export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
 export const STATE_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-authority-v1";
 // State is intentionally not traversable by the unprivileged controller.  A
 // separate root-owned execution parent is traversable but not listable, and a
-// fresh random operation leaf is the only part exposed to the dropped uid.
+// root-owned operation leaf is the only part exposed to the dropped uid. This
+// is an integrity boundary; the invoking OS account remains trusted TCB.
 export const EXECUTION_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-execution-v1";
 export const PRIVILEGE_DROP_LAUNCHER = "/usr/local/libexec/kontourai/flow-agents-lifecycle-drop-v1";
 export const REGISTRY_FILE = `${CONFIG_ROOT}/keys.json`;
@@ -1441,6 +1442,10 @@ function reclaimStaleDurableLock(lock, ownerFile) {
     throw error;
   }
 }
+export function globalNonceLockId(keyId, nonce) {
+  if (typeof keyId !== "string" || !keyId || typeof nonce !== "string" || !nonce) throw new Error("durable lifecycle nonce identity is invalid");
+  return sha256({ lifecycle_nonce_key: keyId, nonce });
+}
 async function withDurableLock(requestSha256, callback) {
   const lock = path.join(STATE_ROOT, "locks", requestSha256);
   const ownerFile = path.join(lock, "lease.json");
@@ -2530,7 +2535,8 @@ function sealedArgv(argv, controller, provider, inputs) {
 }
 const SEALED_ARTIFACT_ENUMS = new Set(["ok", "threshold_fail", "invalid", "execution_error", "pass", "fail", "unknown", "accepted", "rejected", "not_observed", "not_verified"]);
 function sealedSafeArtifactJson(value, depth = 0) {
-  if (depth > 32 || value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
+  if (depth > 32) throw new Error("sealed execution artifact nesting exceeds its bounded limit");
+  if (value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
   if (typeof value === "string") {
     if (/^[a-f0-9]{64}$/.test(value) || SEALED_ARTIFACT_ENUMS.has(value)) return;
     throw new Error("sealed execution artifact contains free-form text");
@@ -2593,7 +2599,7 @@ export function sealedProjection(value) {
   return value;
 }
 async function runSealedStage(runtime, argv, environment, identity, authorization) {
-  const started = Date.now(); let timedOut = false; let limited = false;
+  const started = Date.now(); let timedOut = false; let limited = false; let interrupted = false;
   const stdout = []; const stderr = []; let stdoutBytes = 0; let stderrBytes = 0;
   const append = (target, chunk) => {
     const available = authorization.max_output_bytes - stdoutBytes - stderrBytes;
@@ -2616,16 +2622,20 @@ async function runSealedStage(runtime, argv, environment, identity, authorizatio
       try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); }
       catch { child.kill("SIGKILL"); }
     };
+    const forwardedSignals = ["SIGTERM", "SIGINT", "SIGHUP"];
+    const interrupt = () => { interrupted = true; terminate(); };
+    const clearSignalHandlers = () => forwardedSignals.forEach((signal) => process.removeListener(signal, interrupt));
+    forwardedSignals.forEach((signal) => process.once(signal, interrupt));
     const timer = setTimeout(() => { timedOut = true; terminate(); }, authorization.max_runtime_ms);
     child.stdout.on("data", (chunk) => { append(stdout, chunk); if (limited) terminate(); });
     child.stderr.on("data", (chunk) => { append(stderr, chunk); if (limited) terminate(); });
-    child.once("error", () => { clearTimeout(timer); terminate(); resolve({ status: "spawn_error", exit_code: null }); });
+    child.once("error", () => { clearTimeout(timer); clearSignalHandlers(); terminate(); resolve({ status: "spawn_error", exit_code: null }); });
     // A controller can exit while a descendant still owns the pipes.  Always
     // kill and await its initial detached group before accepting any terminal
     // outcome or allowing stage cleanup. setsid escapes by a trusted signed
     // controller are outside this proportional local-TCB threat model.
     child.once("exit", (code) => { clearTimeout(timer); terminate(); });
-    child.once("close", (code) => { clearTimeout(timer); resolve({ status: timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
+    child.once("close", (code) => { clearTimeout(timer); clearSignalHandlers(); resolve({ status: interrupted ? "interrupted" : timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
   });
   const stdoutValue = Buffer.concat(stdout);
   let projection = null; let status = result.status;
@@ -2659,7 +2669,7 @@ async function processSealedExecution(envelope) {
   // The nonce is global to its signing key, not to a workflow run.  Acquire it
   // before the per-run lock so two sessions cannot both observe an absent
   // nonce and rename over one another's prepared record.
-  const nonceLockId = sha256({ sealed_nonce_key: identity.keyId, nonce: identity.nonce });
+  const nonceLockId = globalNonceLockId(identity.keyId, identity.nonce);
   return withDurableLock(nonceLockId, () => withDurableLock(sha256({ project: identity.project, run_id: identity.runId }), async () => {
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "sealed execution completion record");
@@ -2737,7 +2747,7 @@ async function processRootOperation(envelope) {
   // Every lifecycle action shares the signing-key nonce namespace.  Maintain
   // the same global-key+nonce then run order as sealed execution to prevent a
   // cross-action AB/BA deadlock or nonce split-brain.
-  const nonceLockId = sha256({ lifecycle_nonce_key: identity.keyId, nonce: identity.nonce });
+  const nonceLockId = globalNonceLockId(identity.keyId, identity.nonce);
   return withDurableLock(nonceLockId, () => withDurableLock(runLockId, async () => {
     const caller = callerIdentity();
     if (fs.existsSync(completionFile)) {

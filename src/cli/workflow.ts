@@ -157,7 +157,10 @@ export function executeSealedWorkloadRequest(sessionDir: string, argv: string[])
     workloadSha256: createHash("sha256").update(workload).digest("hex"), nonce: flagString(parsed.flags, "nonce") ?? `sealed-${randomBytes(16).toString("hex")}`,
     issuedAt: issuedAt.toISOString(), expiresAt: new Date(issuedAt.getTime() + minutes * 60_000).toISOString(),
     maxStagedBytes: Number(flagString(parsed.flags, "max-staged-bytes")), maxRuntimeMs: Number(flagString(parsed.flags, "max-runtime-ms")), maxOutputBytes: Number(flagString(parsed.flags, "max-output-bytes")), maxProviderCalls: Number(flagString(parsed.flags, "max-provider-calls")), maxCostMicrousd: Number(flagString(parsed.flags, "max-cost-microusd")), maxTokens: Number(flagString(parsed.flags, "max-tokens")) });
-  console.log(JSON.stringify(authorization, null, 2)); return 0;
+  // Emit the exact compact bytes covered by Ed25519 alongside the readable
+  // object. External signers must sign signing_payload verbatim; pretty JSON
+  // is presentation only and is never the signature contract.
+  console.log(JSON.stringify({ authorization, signing_payload: canonicalJson(authorization) }, null, 2)); return 0;
 }
 
 export function executeSealedWorkload(sessionDir: string, argv: string[], json: boolean): number {

@@ -45,6 +45,13 @@ test("sealed execution clients reject projection tampering, size-cap bypasses, a
   privateProjection.projection.artifacts = [{ id: "private", sha256: createHash("sha256").update(privateArtifact).digest("hex"), bytes: privateArtifact.length, media_type: "application/json", content_base64: privateArtifact.toString("base64") }];
   privateProjection.projection_sha256 = lifecycleAuthorityResultDigest(privateProjection.projection);
   assert.throws(() => validateSealedExecutionSafeResult(privateProjection), /free-form text/);
+  let deeplyNested = "must not survive the public validator";
+  for (let depth = 0; depth < 34; depth += 1) deeplyNested = { nested: deeplyNested };
+  const deepArtifact = Buffer.from(JSON.stringify(deeplyNested));
+  const deepProjection = sealedSafeResult();
+  deepProjection.projection.artifacts = [{ id: "deep", sha256: createHash("sha256").update(deepArtifact).digest("hex"), bytes: deepArtifact.length, media_type: "application/json", content_base64: deepArtifact.toString("base64") }];
+  deepProjection.projection_sha256 = lifecycleAuthorityResultDigest(deepProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(deepProjection), /nesting exceeds/);
   assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ stdout_bytes: 256 * 1024, stderr_bytes: 1 })), /sealed execution result is invalid/);
   const oversized = Buffer.from(JSON.stringify({ policy: "x".repeat(65 * 1024) }));
   const oversizedProjection = sealedSafeResult();

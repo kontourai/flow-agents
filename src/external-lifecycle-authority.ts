@@ -45,7 +45,8 @@ const SEALED_TRANSPORT_HARD_MAX_MS = 30 * 60_000 + SEALED_TRANSPORT_CLEANUP_MS;
 const SEALED_ARTIFACT_ENUMS = new Set(["ok", "threshold_fail", "invalid", "execution_error", "pass", "fail", "unknown", "accepted", "rejected", "not_observed", "not_verified"]);
 
 function sealedPrivacySafeJson(value: unknown, depth = 0): void {
-  if (depth > 32 || value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
+  if (depth > 32) throw new Error("sealed execution artifact nesting exceeds its bounded limit");
+  if (value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
   if (typeof value === "string") {
     if (/^[a-f0-9]{64}$/.test(value) || SEALED_ARTIFACT_ENUMS.has(value)) return;
     throw new Error("sealed execution artifact contains free-form text");
@@ -479,7 +480,10 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
     : 30_000;
   let output: string;
   try {
-    output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout, killSignal: "SIGKILL", maxBuffer: 256 * 1024 });
+    // SIGTERM gives sudo/the coordinator a chance to forward cancellation and
+    // synchronously kill the sealed process group. The root-side runtime cap
+    // remains the final authority if transport cleanup itself fails.
+    output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout, killSignal: "SIGTERM", maxBuffer: 256 * 1024 });
   } catch (error) {
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");

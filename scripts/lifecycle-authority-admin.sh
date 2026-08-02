@@ -115,7 +115,11 @@ NODE
     for authority_file in "$authority_config_root/keys.json" "$authority_config_root/completion-signing-key.pem" "$authority_config_root/completion-verification-key.pem"; do
       if [ -e "$authority_file" ]; then
         test "$(stat -f '%u' "$authority_file" 2>/dev/null || stat -c '%u' "$authority_file")" = 0
-        test $(( $(stat -f '%Lp' "$authority_file" 2>/dev/null || stat -c '%a' "$authority_file") & 22 )) = 0
+        authority_mode="$(stat -f '%Lp' "$authority_file" 2>/dev/null || stat -c '%a' "$authority_file")"
+        authority_mode_suffix="${authority_mode#${authority_mode%??}}"
+        case "$authority_mode_suffix" in
+          [2367]?|?[2367]) echo "$authority_file must not be group/world writable" >&2; exit 77 ;;
+        esac
       fi
     done
     flow_stage="$target_flow.$$"
@@ -152,13 +156,17 @@ NODE
     install_sudoers_rule
     ;;
   rollback)
-    test -f "$backup" && test -f "$backup_runtime" && test -f "$backup_pin" && test -d "$backup_flow" && test -f "$drop_backup"
+    test -f "$backup" && test -f "$backup_runtime" && test -f "$backup_pin" && test -d "$backup_flow"
     mv -f "$backup" "$target"
     chown root:wheel "$target" 2>/dev/null || chown root:root "$target"
     chmod 755 "$target"
-    mv -f "$drop_backup" "$drop_target"
-    chown root:wheel "$drop_target" 2>/dev/null || chown root:root "$drop_target"
-    chmod 755 "$drop_target"
+    if [ -f "$drop_backup" ]; then
+      mv -f "$drop_backup" "$drop_target"
+      chown root:wheel "$drop_target" 2>/dev/null || chown root:root "$drop_target"
+      chmod 755 "$drop_target"
+    else
+      rm -f "$drop_target"
+    fi
     mv -f "$backup_runtime" "$target_runtime"
     chown root:wheel "$target_runtime" 2>/dev/null || chown root:root "$target_runtime"
     chmod 644 "$target_runtime"

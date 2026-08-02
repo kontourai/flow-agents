@@ -9,6 +9,8 @@ import { pathToFileURL } from "node:url";
 import { sealedProjection, sealedWorkload } from "../../packaging/lifecycle-authority/coordinator.mjs";
 
 const coordinator = fs.readFileSync(path.resolve("packaging/lifecycle-authority/coordinator.mjs"), "utf8");
+const workflowSource = fs.readFileSync(path.resolve("src/cli/workflow.ts"), "utf8");
+const adminSource = fs.readFileSync(path.resolve("scripts/lifecycle-authority-admin.sh"), "utf8");
 const operation = coordinator.slice(coordinator.indexOf("async function processSealedExecution"), coordinator.indexOf("async function processRootOperation"));
 const sourceRead = coordinator.slice(coordinator.indexOf("function readSealedSource"), coordinator.indexOf("function stageSealedDirectory"));
 const staging = coordinator.slice(coordinator.indexOf("function stageSealedDirectory"), coordinator.indexOf("function sealedArgv"));
@@ -21,9 +23,19 @@ test("sealed execution authenticates and validates its capped closure before non
   assert.match(coordinator, /expires - issued > 60 \* 60_000/);
 });
 
+test("sealed request exposes exact canonical signing bytes and installer handles modes and pre-launcher rollback", () => {
+  assert.match(workflowSource, /signing_payload: canonicalJson\(authorization\)/);
+  assert.match(adminSource, /authority_mode_suffix="\$\{authority_mode#\$\{authority_mode%\?\?\}\}"/);
+  assert.match(adminSource, /\[2367\]\?\|\?\[2367\]/);
+  assert.doesNotMatch(adminSource, /\$\(\( \$\(stat .* & 22 \)\)/);
+  assert.match(adminSource, /if \[ -f "\$drop_backup" \]; then[\s\S]*else[\s\S]*rm -f "\$drop_target"/);
+});
+
 test("all lifecycle actions acquire the global signing-key nonce lease before their run lease", () => {
   const ordinary = coordinator.slice(coordinator.indexOf("async function processRootOperation"), coordinator.indexOf("function response"));
   assert.ok(ordinary.indexOf("withDurableLock(nonceLockId") < ordinary.indexOf("withDurableLock(runLockId"));
+  assert.match(operation, /globalNonceLockId\(identity\.keyId, identity\.nonce\)/);
+  assert.match(ordinary, /globalNonceLockId\(identity\.keyId, identity\.nonce\)/);
   assert.match(coordinator, /fs\.renameSync\(lock, quarantine\)/, "stale lease recovery atomically claims the observed stale directory before deleting it");
   assert.match(coordinator, /owner\.boot !== processBootIdentity\(\) \|\| processStartIdentity\(owner\.pid\) !== owner\.start/, "stale recovery never uses elapsed time alone");
 });
@@ -47,6 +59,8 @@ test("sealed execution launches only the protected runtime/controller/provider c
   assert.match(coordinator, /PATH: "\/usr\/bin:\/bin", LANG: "C", LC_ALL: "C"/);
   assert.match(coordinator, /detached: process\.platform !== "win32"/);
   assert.match(coordinator, /process\.kill\(-child\.pid, "SIGKILL"\)/);
+  assert.match(coordinator, /forwardedSignals = \["SIGTERM", "SIGINT", "SIGHUP"\]/);
+  assert.match(coordinator, /interrupted \? "interrupted"/);
   assert.match(coordinator, /Object\.keys\(value\.environment\)\.length !== 0/);
   assert.match(coordinator, /kind !== "flow-agents\.sealed-result\.v1"/);
   assert.match(coordinator, /content_base64/);
@@ -59,6 +73,10 @@ test("sealed result projection keeps bounded, replayable policy artifacts but re
   assert.deepEqual(sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "threshold_fail", metrics: { primary_agreement: 1, validated_calls: 32 }, artifacts: [artifact], policy_chain: [{ id: "r4-policy", sha256: "b".repeat(64) }] }).artifacts, [artifact]);
   const forbidden = Buffer.from(JSON.stringify({ innocuous: "do not retain me" }));
   assert.throws(() => sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "invalid", metrics: {}, artifacts: [{ ...artifact, bytes: forbidden.length, sha256: createHash("sha256").update(forbidden).digest("hex"), content_base64: forbidden.toString("base64") }], policy_chain: [] }), /free-form text/);
+  let deeplyNested = "must not hide below the depth cap";
+  for (let depth = 0; depth < 34; depth += 1) deeplyNested = { nested: deeplyNested };
+  const deepBytes = Buffer.from(JSON.stringify(deeplyNested));
+  assert.throws(() => sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "invalid", metrics: {}, artifacts: [{ ...artifact, bytes: deepBytes.length, sha256: createHash("sha256").update(deepBytes).digest("hex"), content_base64: deepBytes.toString("base64") }], policy_chain: [] }), /nesting exceeds/);
 });
 
 async function sealedCoordinatorFixture({ controllerScript = null, maxRuntimeMs = 5000, maxOutputBytes = 64 * 1024, runtimeBytes = null, instrumentSource = (source) => source } = {}) {
@@ -117,6 +135,24 @@ async function withFixtureCaller(callback) {
     if (oldGid === undefined) delete process.env.SUDO_GID; else process.env.SUDO_GID = oldGid;
   }
 }
+
+test("sealed and ordinary contenders dynamically share one global nonce lease", async () => {
+  const fixture = await sealedCoordinatorFixture({ instrumentSource: (source) => source.replace("async function withDurableLock(requestSha256, callback)", "export async function withDurableLock(requestSha256, callback)") });
+  const lockId = fixture.coordinatorModule.globalNonceLockId("fixture", "cross-action-nonce");
+  const consumed = path.join(fixture.state, "nonces", "cross-action-test.json");
+  const entered = [];
+  const redeem = (action) => fixture.coordinatorModule.withDurableLock(lockId, async () => {
+    if (fs.existsSync(consumed)) throw new Error("global nonce already consumed");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    fs.writeFileSync(consumed, action, { flag: "wx" });
+    entered.push(action);
+    return action;
+  });
+  const results = await Promise.allSettled([redeem("execute-sealed-workload"), redeem("cancel")]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(entered.length, 1, "cross-action nonce redemption enters exactly one mutation");
+});
 
 test("fake signed coordinator execution has one global nonce winner and cleans its protected stage", async () => {
   await withFixtureCaller(async () => {
