@@ -74,7 +74,7 @@ repository.
 - `missing`: the registered copied tree is absent.
 - `invalid`: the registry entry or copied tree cannot be safely observed (including symlinks, special files, unreadable paths, and paths replaced during observation).
 
-The canonical tree hash sorts relative paths and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation never follows symlinks. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
+The canonical tree hash sorts relative paths in locale-independent code-unit order and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation never follows symlinks: for an installed Kit it checks every component from the requested destination root through the copied Kit root, so intermediate and dangling links are invalid too. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
 
 ## Runtime Activation
 
@@ -92,7 +92,7 @@ The `codex-local` adapter supports assets declared in `flows`, `skills`, and `do
 <dest>/kits/local/repositories/<kit-id>/
 ```
 
-Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`. It performs the same read-only integrity observation as `kit status`: missing and invalid local copies are skipped with a warning, and a drifted but safely readable copy emits a warning with both hashes and remains activatable for this warning-only rollout. Drift is therefore never represented as registry-matched, but it is not yet an activation blocker.
+Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`. It performs the same read-only integrity observation as `kit status`: missing and invalid local copies are skipped with a warning, and a drifted but safely readable copy emits a warning with both hashes and remains activatable for this warning-only rollout. Before generating runtime files, activation copies a safely observed local Kit to a private staging snapshot and generates only from that snapshot, so a later replacement cannot change the activated bytes. Malformed registry entries, including missing or non-string ids, are warnings and are skipped. Drift is therefore never represented as registry-matched, but it is not yet an activation blocker.
 
 Generated adapter projections are written under:
 

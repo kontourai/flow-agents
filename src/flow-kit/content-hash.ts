@@ -22,6 +22,11 @@ export type InstalledKitIntegrity = {
   diagnostic: string | null;
 };
 
+export type KitContentHashOptions = {
+  /** Existing destination root whose path components must never be followed. */
+  trustedRoot?: string;
+};
+
 function sameIdentity(left: fs.Stats, right: fs.Stats): boolean {
   return (
     left.dev === right.dev &&
@@ -43,6 +48,34 @@ function invalid(message: string): KitContentHashObservation {
   return { state: "invalid", observed_hash: null, diagnostic: message };
 }
 
+function comparePathNames(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function inspectTrustedPath(root: string, trustedRoot: string): KitContentHashObservation | null {
+  const trusted = path.resolve(trustedRoot);
+  const relative = path.relative(trusted, root);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return invalid(`kit path escapes trusted destination root ${trusted}: ${root}`);
+  }
+  let current = trusted;
+  for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+    if (segment) current = path.join(current, segment);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { state: "missing", observed_hash: null, diagnostic: `installed kit copy is missing at ${root}` };
+      }
+      return invalid(`cannot inspect trusted kit path ${current}: ${(error as Error).message}`);
+    }
+    if (stat.isSymbolicLink()) return invalid(`refusing symbolic link in trusted kit path: ${current}`);
+    if (!stat.isDirectory()) return invalid(`trusted kit path component is not a directory: ${current}`);
+  }
+  return null;
+}
+
 /**
  * Observe a Kit tree with the same canonical algorithm used at install time.
  *
@@ -50,8 +83,12 @@ function invalid(message: string): KitContentHashObservation {
  * rejects special files, unreadable paths, and replacements observed while it
  * traverses so callers never mistake a partial or redirected tree for a hash.
  */
-export function observeKitContentHash(root: string): KitContentHashObservation {
+export function observeKitContentHash(root: string, options: KitContentHashOptions = {}): KitContentHashObservation {
   const resolvedRoot = path.resolve(root);
+  if (options.trustedRoot) {
+    const trustedPathResult = inspectTrustedPath(resolvedRoot, options.trustedRoot);
+    if (trustedPathResult) return trustedPathResult;
+  }
   let rootStat: fs.Stats;
   try {
     rootStat = fs.lstatSync(resolvedRoot);
@@ -85,7 +122,7 @@ export function observeKitContentHash(root: string): KitContentHashObservation {
 
       const entries = fs
         .readdirSync(directory, { withFileTypes: true })
-        .sort((left, right) => left.name.localeCompare(right.name));
+        .sort((left, right) => comparePathNames(left.name, right.name));
       for (const entry of entries) {
         const file = path.join(directory, entry.name);
         const relative = relativeDirectory
@@ -170,7 +207,7 @@ export function observeInstalledKitIntegrity(
       diagnostic: `registry installed_path does not match expected local path ${expectedPath}`,
     };
   }
-  const observation = observeKitContentHash(expectedPath);
+  const observation = observeKitContentHash(expectedPath, { trustedRoot: dest });
   if (observation.state === "missing") {
     return {
       state: "missing",

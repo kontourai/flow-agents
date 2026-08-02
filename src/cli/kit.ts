@@ -15,6 +15,18 @@ import { root } from "../tools/common.js";
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 
+export type KitCliTestHooks = {
+  beforeCopy?: (source: string, target: string) => void;
+  afterCopy?: (source: string, target: string) => void;
+};
+
+let testHooks: KitCliTestHooks | undefined;
+
+/** Test-only deterministic race seam. Production callers never set this. */
+export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): void {
+  testHooks = hooks;
+}
+
 const KIT_USAGE: Record<string, string> = {
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]",
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
@@ -192,11 +204,25 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.log(`kit '${kitId}' is already installed from ${sourceText}`);
     return 0;
   }
-  copyDirAtomic(dest, source, target);
+  testHooks?.beforeCopy?.(source, target);
+  let targetHash: string;
+  try {
+    const observation = copyDirAtomic(dest, source, target, (completedTarget) => {
+      testHooks?.afterCopy?.(source, completedTarget);
+      const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
+      if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
+      return targetObservation.observed_hash;
+    });
+    if (!observation) throw new Error("completed copied kit did not produce a content hash");
+    targetHash = observation;
+  } catch (error) {
+    console.error(`install: copied kit integrity verification failed: ${(error as Error).message}`);
+    return 1;
+  }
   const entry: Record<string, unknown> = {
     id: kitId,
     source: sourceText,
-    hash,
+    hash: targetHash,
     installed_at: existing && existing.source === sourceText && !flagBool(args.flags, "update") ? existing.installed_at : isoNow(),
     installed_path: target,
     state: "installed",
@@ -288,11 +314,24 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       console.log(`kit '${kitId}' is already installed from ${sourceText}`);
       return 0;
     }
-    copyDirAtomic(dest, tmpBase, target);
+    let targetHash: string;
+    try {
+      const observation = copyDirAtomic(dest, tmpBase, target, (completedTarget) => {
+        testHooks?.afterCopy?.(tmpBase, completedTarget);
+        const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
+        if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
+        return targetObservation.observed_hash;
+      });
+      if (!observation) throw new Error("completed copied kit did not produce a content hash");
+      targetHash = observation;
+    } catch (error) {
+      console.error(`install: copied kit integrity verification failed: ${(error as Error).message}`);
+      return 1;
+    }
     const entry: Record<string, unknown> = {
       id: kitId,
       source: sourceText,
-      hash,
+      hash: targetHash,
       installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
       installed_path: target,
       state: "installed",

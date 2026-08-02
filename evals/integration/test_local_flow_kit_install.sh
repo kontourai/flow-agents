@@ -287,6 +287,78 @@ else
   pass "special-file observation skipped because mkfifo is unavailable"
 fi
 
+# Every destination component is trusted: an installed registry must never
+# redirect observation or activation through an intermediate or dangling link.
+flow_agents_node "$CLI" install "$VALID_SRC" --dest "$INTEGRITY_DEST" --force >/dev/null 2>&1
+INTERMEDIATE_REAL="$TMP_DIR/intermediate-repositories"
+mv "$INTEGRITY_DEST/kits/local/repositories" "$INTERMEDIATE_REAL"
+ln -s "$INTERMEDIATE_REAL" "$INTEGRITY_DEST/kits/local/repositories"
+if flow_agents_node "$CLI" status example-kit --dest "$INTEGRITY_DEST" >"$integrity_status" 2>&1 \
+  && rg -q '"state": "invalid"' "$integrity_status" \
+  && rg -q 'trusted kit path' "$integrity_status" \
+  && flow_agents_node "$CLI" activate --dest "$INTEGRITY_DEST" --source-root "$ROOT" >"$TMP_DIR/intermediate-activation.out" 2>&1 \
+  && rg -q 'example-kit.*integrity is invalid.*warning-only.*skips' "$TMP_DIR/intermediate-activation.out"; then
+  pass "intermediate destination symlink is invalid for status and warning-only/skipped for activation"
+else
+  fail "intermediate destination symlink was followed"
+  sed -n '1,160p' "$integrity_status"
+  sed -n '1,220p' "$TMP_DIR/intermediate-activation.out"
+fi
+
+rm "$INTEGRITY_DEST/kits/local/repositories"
+ln -s "$TMP_DIR/dangling-repositories" "$INTEGRITY_DEST/kits/local/repositories"
+if flow_agents_node "$CLI" status example-kit --dest "$INTEGRITY_DEST" >"$integrity_status" 2>&1 \
+  && rg -q '"state": "invalid"' "$integrity_status" \
+  && rg -q 'symbolic link in trusted kit path' "$integrity_status"; then
+  pass "dangling intermediate destination symlink is invalid"
+else
+  fail "dangling intermediate destination symlink was not invalid"
+  sed -n '1,160p' "$integrity_status"
+fi
+
+# Canonical tree order must be JavaScript code-unit order, never host locale.
+UNICODE_SRC="$TMP_DIR/unicode-source"
+UNICODE_DEST="$TMP_DIR/unicode-dest"
+cp -R "$VALID_SRC" "$UNICODE_SRC"
+printf 'z\n' > "$UNICODE_SRC/z.txt"
+printf 'a-umlaut\n' > "$UNICODE_SRC/ä.txt"
+if flow_agents_node "$CLI" install "$UNICODE_SRC" --dest "$UNICODE_DEST" >"$TMP_DIR/unicode-install.out" 2>&1 \
+  && flow_agents_node "$CLI" status example-kit --dest "$UNICODE_DEST" >"$TMP_DIR/unicode-status.json" 2>&1 \
+  && node - "$UNICODE_DEST/kits/local/repositories/example-kit" "$TMP_DIR/unicode-status.json" <<'NODE'
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const status = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const ignored = new Set([".git", "__pycache__", ".pytest_cache"]);
+const files = [];
+function visit(directory, relative = "") {
+  for (const name of fs.readdirSync(directory).sort()) {
+    const file = path.join(directory, name);
+    const rel = relative ? `${relative}/${name}` : name;
+    const stat = fs.lstatSync(file);
+    if (stat.isDirectory()) visit(file, rel);
+    else if (stat.isFile()) files.push([rel, file]);
+  }
+}
+visit(root);
+const hash = crypto.createHash("sha256");
+for (const [relative, file] of files) {
+  if (relative.split("/").some((part) => ignored.has(part))) continue;
+  hash.update(relative); hash.update("\0"); hash.update(fs.readFileSync(file)); hash.update("\0");
+}
+const expected = `sha256:${hash.digest("hex")}`;
+if (status.state !== "installed" || status.observed_hash !== expected || status.recorded_hash !== expected) throw new Error(JSON.stringify({ expected, status }));
+console.log("ok");
+NODE
+then
+  pass "Unicode filenames use locale-independent canonical code-unit ordering"
+else
+  fail "Unicode filename hash ordering was locale-dependent"
+  sed -n '1,160p' "$TMP_DIR/unicode-install.out"
+  sed -n '1,160p' "$TMP_DIR/unicode-status.json"
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "Local Flow Kit install checks passed."

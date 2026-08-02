@@ -1,9 +1,10 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
-import { atomicCopyFile, atomicWriteJson, ensureSafeDirectory, readJson, relPath } from "./lib/fs.js";
+import { atomicCopyFile, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, readJson, relPath } from "./lib/fs.js";
 import { flowAgentsArtifactRoot } from "./lib/local-artifact-root.js";
 import { parseKitDependencies, parseKitHookInfluenceExpectations, parseKitWorkflowTriggers } from "./flow-kit/validate.js";
-import { observeInstalledKitIntegrity } from "./flow-kit/content-hash.js";
+import { observeInstalledKitIntegrity, observeKitContentHash } from "./flow-kit/content-hash.js";
 
 export type KitAsset = {
   kit_id: string;
@@ -46,6 +47,11 @@ export type KitInventory = {
   hook_influence_expectations: KitHookInfluenceExpectationRef[];
   warnings: string[];
   errors: string[];
+  dispose(): void;
+};
+
+export type RuntimeAdapterTestHooks = {
+  afterLocalSnapshot?: (original: string, snapshot: string) => void;
 };
 
 /** A cross-kit dependency edge discovered while loading a kit manifest. */
@@ -167,7 +173,7 @@ function expandKitIdFilter(requested: Set<string> | undefined, dependencies: Kit
   return selected;
 }
 
-export function readKitInventory(sourceRoot: string, dest: string, options: { kitIdFilter?: string[] } = {}): KitInventory {
+export function readKitInventory(sourceRoot: string, dest: string, options: { kitIdFilter?: string[]; snapshotLocalKits?: boolean; testHooks?: RuntimeAdapterTestHooks } = {}): KitInventory {
   const warnings: string[] = [];
   const errors: string[] = [];
   const assets: KitAsset[] = [];
@@ -175,6 +181,7 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
   const workflow_triggers: KitWorkflowTriggerRef[] = [];
   const hook_influence_expectations: KitHookInfluenceExpectationRef[] = [];
   const loadedKits: LoadedKit[] = [];
+  const snapshots: string[] = [];
   const presentKitIds = new Set<string>();
   const kitIdFilter = options.kitIdFilter ? new Set(options.kitIdFilter) : undefined;
   const catalogPath = path.join(sourceRoot, "kits", "catalog.json");
@@ -204,20 +211,62 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
     const registry = readJson(registryPath) as Record<string, unknown>;
     const kits = registry.kits;
     if (Array.isArray(kits)) {
-      kits.forEach((entry) => {
-        if (typeof entry !== "object" || entry === null) return;
+      kits.forEach((entry, index) => {
+        if (typeof entry !== "object" || entry === null) {
+          warnings.push(`local kit registry entry ${index} is invalid: entry must be an object; activation is warning-only and skips this entry`);
+          return;
+        }
         const record = entry as Record<string, unknown>;
         const id = record.id;
-        if (typeof id !== "string") return;
+        if (typeof id !== "string") {
+          warnings.push(`local kit registry entry ${index} is invalid: id must be a string; activation is warning-only and skips this entry`);
+          return;
+        }
         const kitRoot = path.join(dest, "kits", "local", "repositories", id);
         const integrity = observeInstalledKitIntegrity(record, dest);
         if (integrity.state === "missing" || integrity.state === "invalid") {
           warnings.push(`local kit '${id}' integrity is ${integrity.state} (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: ${integrity.observed_hash ?? "none"}): ${integrity.diagnostic}; activation is warning-only and skips this kit`);
         } else {
-          if (integrity.state === "drifted") {
-            warnings.push(`local kit '${id}' integrity is drifted (recorded_hash: ${integrity.recorded_hash}; observed_hash: ${integrity.observed_hash}): ${integrity.diagnostic}; activation is warning-only and continues with the observed installed bytes`);
+          let activationRoot = kitRoot;
+          let observedIntegrity = integrity;
+          if (options.snapshotLocalKits) {
+            const snapshotParent = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-kit-activation-"));
+            const snapshotRoot = path.join(snapshotParent, "kit");
+            try {
+              const snapshotHash = copyDirAtomic(snapshotParent, kitRoot, snapshotRoot, (completedSnapshot) => {
+                options.testHooks?.afterLocalSnapshot?.(kitRoot, completedSnapshot);
+                const observation = observeKitContentHash(completedSnapshot, { trustedRoot: snapshotParent });
+                if (observation.state !== "observed") {
+                  throw new Error(observation.diagnostic ?? "snapshot content could not be observed");
+                }
+                return observation.observed_hash;
+              });
+              if (!snapshotHash) throw new Error("stable kit snapshot did not produce a content hash");
+              observedIntegrity = {
+                ...integrity,
+                state: integrity.recorded_hash === snapshotHash ? "installed" : "drifted",
+                observed_hash: snapshotHash,
+                diagnostic: integrity.recorded_hash === snapshotHash ? null : "installed kit content does not match the registry hash",
+              };
+              activationRoot = snapshotRoot;
+              snapshots.push(snapshotParent);
+            } catch (error) {
+              fs.rmSync(snapshotParent, { recursive: true, force: true });
+              warnings.push(`local kit '${id}' integrity is invalid (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: none): cannot create a stable activation snapshot: ${(error as Error).message}; activation is warning-only and skips this kit`);
+              return;
+            }
           }
-          const loaded = loadKitAssets(kitRoot, "local", warnings, errors);
+          if (observedIntegrity.state === "drifted") {
+            warnings.push(`local kit '${id}' integrity is drifted (recorded_hash: ${observedIntegrity.recorded_hash}; observed_hash: ${observedIntegrity.observed_hash}): ${observedIntegrity.diagnostic}; activation is warning-only and continues with the observed installed bytes`);
+          }
+          const loaded = loadKitAssets(activationRoot, "local", warnings, errors);
+          if (activationRoot !== kitRoot) {
+            for (const asset of loaded.assets) {
+              const relative = path.relative(activationRoot, asset.source_path);
+              asset.source_path = path.join(kitRoot, relative);
+              (asset as KitAsset & { activation_source_path?: string }).activation_source_path = path.join(activationRoot, relative);
+            }
+          }
           loadedKits.push(loaded);
           if (loaded.kit_id) presentKitIds.add(loaded.kit_id);
         }
@@ -241,7 +290,17 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
       errors.push(`${dep.from_kit_id}: declares a dependency on kit '${dep.kit_id}'${dep.reason ? ` (${dep.reason})` : ""} which is not installed or activated. Install it with 'flow-agents kit install <source>' and re-activate, or remove the dependency declaration if it is no longer needed.`);
     }
   }
-  return { assets, dependencies, workflow_triggers, hook_influence_expectations, warnings, errors };
+  return {
+    assets,
+    dependencies,
+    workflow_triggers,
+    hook_influence_expectations,
+    warnings,
+    errors,
+    dispose() {
+      for (const snapshot of snapshots) fs.rmSync(snapshot, { recursive: true, force: true });
+    },
+  };
 }
 
 function safeSegment(value: string): string {
@@ -254,13 +313,14 @@ function safeSegment(value: string): string {
 // docs: documentation markdown copied to docs/<kit-id>/ for agent reference.
 const ACTIVATED_ASSET_CLASSES = new Set(["flows", "skills", "docs"]);
 
-export function activateCodexLocal(sourceRoot: string, dest: string, options: { kitIdFilter?: string[] } = {}): Record<string, unknown> {
-  const inventory = readKitInventory(sourceRoot, dest, options);
+export function activateCodexLocal(sourceRoot: string, dest: string, options: { kitIdFilter?: string[]; testHooks?: RuntimeAdapterTestHooks } = {}): Record<string, unknown> {
+  const inventory = readKitInventory(sourceRoot, dest, { ...options, snapshotLocalKits: true });
   const runtimeDir = path.join(flowAgentsArtifactRoot(dest), "projections", "codex");
   const writeRoot = path.resolve(runtimeDir, "../../..");
   ensureSafeDirectory(writeRoot, runtimeDir);
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
+  try {
   for (const asset of inventory.assets) {
     if (asset.asset_class === "flows") {
       if (!asset.asset_id) {
@@ -268,7 +328,7 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
         continue;
       }
       const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-      atomicCopyFile(writeRoot, asset.source_path, output);
+      atomicCopyFile(writeRoot, (asset as KitAsset & { activation_source_path?: string }).activation_source_path ?? asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
     } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
       // Copy skills and docs to runtime/<adapter>/<class>/<kit-id>/<filename> so the
@@ -282,7 +342,7 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
       const output = asset.asset_class === "skills"
         ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
         : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
-      atomicCopyFile(writeRoot, asset.source_path, output);
+      atomicCopyFile(writeRoot, (asset as KitAsset & { activation_source_path?: string }).activation_source_path ?? asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
     } else {
       skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by codex-local" });
@@ -294,6 +354,9 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
   atomicWriteJson(writeRoot, manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "codex-local.activation", source_path: manifestPath.split(path.sep).join("/") });
   return { selected_adapter: "codex-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  } finally {
+    inventory.dispose();
+  }
 }
 
 // Decision Q3 (Issue #32): Option (a) — new adapter id "strands-local" rather than
@@ -302,8 +365,8 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
 // Keeping it in the CLI adapter layer maximises reuse of readKitInventory and safeSegment,
 // mirrors the codex-local pattern exactly, and keeps framework adapters free of catalog-
 // layout knowledge. The Strands steering layer then reads the written runtime files.
-export function activateStrandsLocal(sourceRoot: string, dest: string, options: { kitIdFilter?: string[] } = {}): Record<string, unknown> {
-  const inventory = readKitInventory(sourceRoot, dest, options);
+export function activateStrandsLocal(sourceRoot: string, dest: string, options: { kitIdFilter?: string[]; testHooks?: RuntimeAdapterTestHooks } = {}): Record<string, unknown> {
+  const inventory = readKitInventory(sourceRoot, dest, { ...options, snapshotLocalKits: true });
   // Runtime flows land at .kontourai/flow-agents/projections/strands/flows/<kit-id>/<asset-id>.flow.json
   // so the Strands steering context can glob for *.flow.json under this path.
   // Runtime skills land at .kontourai/flow-agents/projections/strands/skills/<kit-id>/<filename> and
@@ -313,6 +376,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
   ensureSafeDirectory(writeRoot, runtimeDir);
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
+  try {
   for (const asset of inventory.assets) {
     if (asset.asset_class === "flows") {
       if (!asset.asset_id) {
@@ -320,7 +384,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
         continue;
       }
       const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-      atomicCopyFile(writeRoot, asset.source_path, output);
+      atomicCopyFile(writeRoot, (asset as KitAsset & { activation_source_path?: string }).activation_source_path ?? asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
     } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
       // Mirror the codex-local layout: strands/<class>/<kit-id>/<filename>.
@@ -334,7 +398,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
       const output = asset.asset_class === "skills"
         ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
         : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
-      atomicCopyFile(writeRoot, asset.source_path, output);
+      atomicCopyFile(writeRoot, (asset as KitAsset & { activation_source_path?: string }).activation_source_path ?? asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
     } else {
       skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by strands-local" });
@@ -346,4 +410,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
   atomicWriteJson(writeRoot, manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "strands-local.activation", source_path: manifestPath.split(path.sep).join("/") });
   return { selected_adapter: "strands-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  } finally {
+    inventory.dispose();
+  }
 }

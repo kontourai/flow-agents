@@ -146,7 +146,7 @@ function copiedTreeDigest(root: string): string {
 }
 
 /** Copy through a verified sibling directory, then swap with rollback. */
-export function copyDirAtomic(root: string, src: string, dest: string): void {
+export function copyDirAtomic<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T): T | undefined {
   assertPathsDisjoint(src, dest);
   const parent = ensureSafeDirectory(root, path.dirname(dest));
   if (fs.existsSync(dest)) {
@@ -172,7 +172,16 @@ export function copyDirAtomic(root: string, src: string, dest: string): void {
       if (fs.existsSync(backup)) fs.renameSync(backup, dest);
       throw error;
     }
+    let verified: T | undefined;
+    try {
+      verified = verify?.(dest);
+    } catch (error) {
+      fs.rmSync(dest, { recursive: true, force: true });
+      if (fs.existsSync(backup)) fs.renameSync(backup, dest);
+      throw error;
+    }
     fs.rmSync(backup, { recursive: true, force: true });
+    return verified;
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
     if (fs.existsSync(backup) && !fs.existsSync(dest)) fs.renameSync(backup, dest);
