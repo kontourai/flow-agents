@@ -35,6 +35,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   // silently because nothing validated them. Enforce byte-identical mirrors so future drift
   // fails `npm run validate:source` instead of silently accumulating.
   ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
+  ["scripts/hooks/continuation-turn-fence.js", { mirror: "context/scripts/hooks/continuation-turn-fence.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/effective-flow-agents-config.js", { mirror: "context/scripts/hooks/lib/effective-flow-agents-config.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
@@ -74,6 +75,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/codex-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["codex", "telemetry"] }],
   ["scripts/hooks/run-hook.js", { category: "hook runner", requiredNeedles: ["isHookEnabled", "Path traversal rejected"] }],
   ["scripts/hooks/config-protection.js", { category: "policy hook", requiredNeedles: ["Config Protection Hook"] }],
+  ["scripts/hooks/continuation-turn-fence.js", { category: "policy hook", requiredNeedles: ["Continuation Turn Fence", "RETURN_CONTROL"] }],
   ["scripts/hooks/evidence-capture.js", { category: "policy hook", requiredNeedles: ["Evidence Capture Hook"] }],
   ["scripts/hooks/governance-audit.sh", { category: "policy hook", requiredNeedles: ["governance-audit.sh", "audit_emit"] }],
   ["scripts/hooks/opencode-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["opencode", "run-hook.js"] }],

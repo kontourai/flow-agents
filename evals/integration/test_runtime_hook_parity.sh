@@ -22,7 +22,7 @@ _pass() { echo "  PASS: $1"; }
 _fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }
 
 # Canonical policies every runtime must run unless it declares otherwise.
-UNIVERSAL_HOOKS=(config-protection quality-gate evidence-capture stop-goal-fit workflow-steering)
+UNIVERSAL_HOOKS=(config-protection quality-gate evidence-capture continuation-turn-fence stop-goal-fit workflow-steering)
 
 echo ""
 echo "=== bundles ==="
@@ -97,7 +97,7 @@ fi
 # behind a fully green evidence trail. Mention is not wiring.
 if node -e '
   const m = require("./build/src/tools/build-universal-bundles.js");
-  const mentionOnly = "// mentions config-protection.js quality-gate.js evidence-capture.js stop-goal-fit.js workflow-steering.js\nexport default function(){ return {}; }";
+  const mentionOnly = "// mentions config-protection.js quality-gate.js evidence-capture.js continuation-turn-fence.js stop-goal-fit.js workflow-steering.js\nexport default function(){ return {}; }";
   try { m.assertGeneratedPolicyCoverage("opencode", mentionOnly); process.exit(1); } catch { process.exit(0); }
 ' 2>/dev/null; then
   _pass "a source that only MENTIONS the hook scripts in a comment is refused (mention is not wiring)"
@@ -116,6 +116,8 @@ if node -e '
     "runAdapter(a, \"session.idle\", d, \"config-protection\", \"config-protection.js\");",
     "runAdapter(a, \"tool.execute.after\", d, \"quality-gate\", \"quality-gate.js\");",
     "runAdapter(a, \"tool.execute.after\", d, \"evidence-capture\", \"evidence-capture.js\");",
+    "runAdapter(a, \"tool.execute.before\", d, \"continuation-turn-fence-pre\", \"continuation-turn-fence.js\");",
+    "runAdapter(a, \"tool.execute.after\", d, \"continuation-turn-fence-post\", \"continuation-turn-fence.js\");",
     "runAdapter(a, \"session.idle\", d, \"stop-goal-fit\", \"stop-goal-fit.js\");",
   ].join("\n");
   try { m.assertGeneratedPolicyCoverage("opencode", wrongEvent); process.exit(1); } catch { process.exit(0); }

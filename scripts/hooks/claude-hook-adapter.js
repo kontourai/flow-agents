@@ -169,12 +169,39 @@ function blockedOutput(event, reason, escalate = false) {
   };
 }
 
+function returnControlOutput(event, reason) {
+  if (event === 'PreToolUse') {
+    return {
+      continue: false,
+      stopReason: reason,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    };
+  }
+  return {
+    continue: false,
+    stopReason: reason,
+    hookSpecificOutput: {
+      hookEventName: event,
+      additionalContext: reason,
+    },
+  };
+}
+
 async function main() {
   const [, , eventArg = 'unknown', hookId, relScriptPath, profilesCsv] = process.argv;
   const { raw, truncated } = await readStdinRaw();
   const event = parseEvent(raw, eventArg);
 
   if (!hookId || !relScriptPath) {
+    process.stdout.write(`${JSON.stringify(successOutput(event))}\n`);
+    return;
+  }
+  if (hookId.startsWith('continuation-turn-fence-')
+    && (!process.env.FLOW_AGENTS_CONTINUATION_RUN_ID || !process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET)) {
     process.stdout.write(`${JSON.stringify(successOutput(event))}\n`);
     return;
   }
@@ -192,6 +219,14 @@ async function main() {
     },
     timeout: Number(process.env.FLOW_AGENTS_CLAUDE_HOOK_TIMEOUT_MS || 30000),
   });
+
+  if (result.status === 3
+    && ((hookId === 'continuation-turn-fence-pre' && event === 'PreToolUse')
+      || (hookId === 'continuation-turn-fence-post' && event === 'PostToolUse'))
+    && relScriptPath === 'continuation-turn-fence.js') {
+    process.stdout.write(`${JSON.stringify(returnControlOutput(event, messageFrom(result)))}\n`);
+    return;
+  }
 
   if (result.status === 2) {
     // Stop keeps its own contract (see header): it is not routed through the graduated

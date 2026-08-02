@@ -11,6 +11,7 @@ import { MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES, MAX_CONTINUATION_TURN_RESULT_B
 import { executeContinuationAdapter, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "../../build/src/cli/continuation-adapter.js";
 import { EVIDENCE_REF_JSON_SCHEMA, installedBuilderGateActionAuthority } from "../../build/src/builder-gate-action-envelope.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
+import { markVerifiedContinuationBoundary } from "../../build/src/continuation-boundary-result.js";
 
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
 const TEST_DEFINITION_DIGEST = "0".repeat(64);
@@ -507,12 +508,18 @@ test("conforming canonical advancement and same-step evidence/artifact progress 
       synchronize: async () => advanced
         ? envelopeSnapshot("execute", { evidence: ["plan-gate:advancing-evidence"], artifacts: ["plan.md:new-hash"], implementationAllowed: true })
         : envelopeSnapshot("plan", { artifacts: ["plan.md:absent"] }),
-      execute: async () => { advanced = true; return { status: "completed" }; },
+      execute: async () => {
+        advanced = true;
+        return markVerifiedContinuationBoundary({ status: "completed", completion_reason: "gate_boundary" });
+      },
     },
   });
   const advancedProgress = advancingStore.events.find((event) => event.type === "turn_completed").progress;
   assert.equal(advancedProgress.step_advanced, true);
   assert.deepEqual(advancedProgress.evidence_added, ["plan-gate:advancing-evidence"]);
+  const boundary = advancingStore.events.find((event) => event.type === "turn_boundary_reached");
+  assert.equal(boundary.current_step, "execute");
+  assert.match(boundary.summary, /bounded turn for plan advanced to execute/);
   assert.deepEqual(advancedProgress.artifact_changes, ["plan.md:new-hash"]);
   assert.equal(advancedProgress.no_progress, false);
 
@@ -766,7 +773,7 @@ test("interrupted turns are reconciled before waiting and terminal disposition b
 });
 
 test("interruption recovery retains final terminal progress snapshots", async (t) => {
-  for (const [status, outcome] of [["completed", "done"], ["failed", "failed"]]) await t.test(outcome, async () => {
+  for (const [status, outcome] of [["completed", "done"], ["canceled", "done"], ["failed", "failed"]]) await t.test(`${status}-${outcome}`, async () => {
     const baseline = { current_step: "learn", canonical_status: "active", canonical_evidence: ["learn:before"], observed_artifacts: ["learning.json:before"] };
     const store = memoryStore({
       schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
@@ -798,6 +805,7 @@ test("interruption recovery retains final terminal progress snapshots", async (t
 test("a crash after accepted-turn measurement is journaled and completed exactly once on restart", async () => {
   const durable = memoryStore();
   let injected = false;
+  let advanced = false;
   const crashing = {
     ...durable,
     load: () => {
@@ -817,8 +825,15 @@ test("a crash after accepted-turn measurement is journaled and completed exactly
     store: crashing,
     runtime: {
       inspect: async () => envelopeSnapshot("plan"),
-      synchronize: async () => envelopeSnapshot("plan"),
-      execute: async () => ({ status: "completed", summary: "accepted before crash" }),
+      synchronize: async () => envelopeSnapshot(advanced ? "execute" : "plan"),
+      execute: async () => {
+        advanced = true;
+        return markVerifiedContinuationBoundary({
+          status: "completed",
+          completion_reason: "gate_boundary",
+          summary: "accepted before crash",
+        });
+      },
     },
   }), /injected process death/);
   assert.equal(durable.value().active_turn_phase, "measured");
@@ -837,6 +852,7 @@ test("a crash after accepted-turn measurement is journaled and completed exactly
   assert.equal(durable.accepted.length, 1);
   assert.equal(durable.accepted[0].request.current_step, "plan");
   assert.equal(durable.events.filter((event) => event.type === "turn_completed").length, 1);
+  assert.equal(durable.events.filter((event) => event.type === "turn_boundary_reached").length, 1);
   assert.equal(durable.events.filter((event) => event.type === "turn_recovered").length, 1);
   assert.equal(durable.value().active_turn_phase, null);
 });
@@ -996,6 +1012,39 @@ test("adapter completion cannot declare the workflow done while canonical Flow r
   const result = await runContinuationDriver({ maxTurns: 1, store, runtime });
   assert.equal(result.outcome, "budget_exhausted");
   assert.equal(result.snapshot.status, "active");
+});
+
+test("an adapter cannot label an unchanged canonical step as a gate boundary", async () => {
+  const store = memoryStore();
+  const result = await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: {
+      inspect: async () => snapshot("plan"),
+      synchronize: async () => snapshot("plan"),
+      execute: async () => markVerifiedContinuationBoundary({ status: "completed", completion_reason: "gate_boundary" }),
+    },
+  });
+
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(store.events.some((event) => event.type === "turn_boundary_reached"), false);
+  assert.match(store.events.find((event) => event.type === "turn_failed")?.summary, /without canonical advancement/);
+});
+
+test("adapter JSON cannot mint a gate boundary without the parent receipt verifier", async () => {
+  const store = memoryStore();
+  await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: {
+      inspect: async () => snapshot("plan"),
+      synchronize: async () => snapshot("execute"),
+      execute: async () => ({ status: "completed", completion_reason: "gate_boundary" }),
+    },
+  });
+
+  assert.equal(store.events.some((event) => event.type === "turn_boundary_reached"), false);
+  assert.match(store.events.find((event) => event.type === "turn_failed")?.summary, /requires a verified boundary receipt/);
 });
 
 test("adapter evidence is bounded before the driver accepts the turn", async () => {
@@ -1399,6 +1448,46 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
     assert.equal(forgedValidation.valid, false, "a self-consistent attacker record is rejected by the mission signer anchor");
     assert.match(forgedValidation.reason, /driver mission does not match/);
     fs.writeFileSync(authorityFile, JSON.stringify(record));
+
+    const advancedState = { ...canonicalState, current_step: "execute" };
+    activeTurnAuthority.recordActiveTurnBoundary({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+      canonicalState: advancedState,
+    });
+    const boundaryFile = activeTurnAuthority.activeTurnBoundaryFile(sessionDir);
+    const boundary = activeTurnAuthority.readActiveTurnBoundary({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+    });
+    assert.equal(boundary.valid, true);
+    assert.equal(boundary.record.issued_step, "plan");
+    assert.equal(boundary.record.canonical_step, "execute");
+    const boundaryRecord = JSON.parse(fs.readFileSync(boundaryFile, "utf8"));
+    fs.writeFileSync(boundaryFile, JSON.stringify({ ...boundaryRecord, canonical_step: "verify" }));
+    const tamperedBoundary = activeTurnAuthority.readActiveTurnBoundary({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+    });
+    assert.equal(tamperedBoundary.valid, false, "a modified boundary receipt is rejected");
+    assert.match(tamperedBoundary.reason, /does not match signed authority/);
+    fs.writeFileSync(boundaryFile, JSON.stringify(boundaryRecord));
+    activeTurnAuthority.recordActiveTurnBoundary({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+      canonicalState: { ...canonicalState, status: "completed" },
+    });
+    const terminalBoundary = activeTurnAuthority.readActiveTurnBoundary({
+      sessionDir,
+      runId: issued.runId,
+      turnSecret: issued.turnSecret,
+    });
+    assert.equal(terminalBoundary.valid, true, "terminal canonical advancement receives a causal receipt");
+    assert.equal(terminalBoundary.record.canonical_status, "completed");
   });
 
   assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
@@ -1410,6 +1499,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
   }).valid, false, "a dead driver lock must not authorize Stop");
   assert.equal(issued.cleanup(), true);
   assert.equal(fs.existsSync(activeTurnAuthority.activeTurnFile(sessionDir)), false, "cleanup removes only the matching authority");
+  assert.equal(fs.existsSync(activeTurnAuthority.activeTurnBoundaryFile(sessionDir)), false, "cleanup removes the matching boundary receipt");
   assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
     sessionDir,
     runId: issued.runId,
@@ -1963,6 +2053,100 @@ test("explicit adapter argv receives one structured action without a shell", asy
   }, { cwd: root, timeoutMs: 5_000 });
 
   assert.deepEqual(result, { status: "completed", summary: `${fs.realpathSync(root)}|plan` });
+});
+
+test("a signed boundary receipt returns a host-aborted adapter to the driver causally", { skip: process.platform === "win32" }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-boundary-adapter-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const runId = "boundary-adapter";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", runId);
+  const adapter = path.join(root, "adapter.cjs");
+  const commandFile = path.join(root, "command.json");
+  const descendantMarker = path.join(root, "boundary-descendant-survived");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  writeAuthorityAssignment(sessionDir, "codex:authority-test");
+  fs.writeFileSync(adapter, `
+    const { spawn } = require("node:child_process");
+    const authority = require(${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/continuation-turn-authority.js"))});
+    spawn(process.execPath, ["-e", ${JSON.stringify(`
+      process.on("SIGTERM", () => {});
+      setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(descendantMarker)}, "survived"), 600);
+      setInterval(() => {}, 1000);
+    `)}], { stdio: "ignore" }).unref();
+    authority.recordActiveTurnBoundary({
+      sessionDir: ${JSON.stringify(sessionDir)},
+      runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
+      turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
+      canonicalState: {
+        run_id: ${JSON.stringify(runId)},
+        definition_id: "builder.build",
+        definition_version: "1.3",
+        definition_digest: ${JSON.stringify(TEST_DEFINITION_DIGEST)},
+        current_step: "execute",
+        status: "active",
+      },
+    });
+    setInterval(() => {}, 1000);
+  `);
+  fs.writeFileSync(commandFile, JSON.stringify({ argv: [process.execPath, adapter] }));
+  const command = loadContinuationAdapterCommand(commandFile);
+
+  await withContinuationDriverLock(sessionDir, async (lock) => {
+    const driverDir = path.join(sessionDir, "continuation-driver");
+    fs.writeFileSync(path.join(driverDir, "state.json"), JSON.stringify({
+      schema_version: "1.0",
+      run_id: runId,
+      definition_id: "builder.build",
+      max_turns: 1,
+      adapter_command_identity: command.identity,
+      status: "active",
+      turns_started: 1,
+      active_turn_step: "plan",
+      pending_barrier: null,
+    }));
+    const issued = activeTurnAuthority.issueActiveTurnAuthority({
+      sessionDir,
+      runId,
+      definitionId: "builder.build",
+      definitionVersion: "1.3",
+      definitionDigest: TEST_DEFINITION_DIGEST,
+      currentStep: "plan",
+      iteration: 1,
+      maxTurns: 1,
+      adapterCommandIdentity: command.identity,
+      assignmentActor: "codex:authority-test",
+      assignmentActorStruct: authorityActorStruct,
+      lock,
+      timeoutMs: 5_000,
+    });
+    bindAuthoritySigner(sessionDir, issued);
+    try {
+      const result = await executeLoadedContinuationAdapter(command, {
+        schema_version: "1.0",
+        run_id: runId,
+        definition_id: "builder.build",
+        current_step: "plan",
+        iteration: 1,
+        max_turns: 1,
+        next_action: null,
+      }, {
+        cwd: root,
+        timeoutMs: 5_000,
+        continuationTurnSecret: issued.turnSecret,
+        continuationRunId: runId,
+        continuationSessionDir: sessionDir,
+      });
+      assert.deepEqual(result, {
+        status: "completed",
+        completion_reason: "gate_boundary",
+        summary: "Continuation boundary advanced plan to execute.",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      assert.equal(fs.existsSync(descendantMarker), false, "forced boundary termination reaches descendants after the leader closes");
+    } finally {
+      issued.cleanup();
+    }
+  });
 });
 
 test("adapter descendants preserve ordinary actor resolution and receive only fresh turn capability companions", async (t) => {

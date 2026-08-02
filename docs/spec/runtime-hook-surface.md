@@ -170,6 +170,7 @@ Canonical hook scripts in `scripts/hooks/` use the following exit code contract 
 | --- | --- |
 | `0` | Allow / pass through. The policy has no objection. |
 | `2` | Block. The policy is vetoing the action (applicable to `preToolUse` and strict stop hooks). |
+| `3` | Return a live signed continuation turn to its driver. Only the exact continuation-fence hook id, script path, and mapped pre/post-tool event may translate this status; every other use remains an error. |
 | other | Error. Adapters must treat errors as fail-open (allow). |
 
 Adapters translate these exit codes into the host-native response format. The `claude-hook-adapter.js` and `codex-hook-adapter.js` wrappers perform this translation, and all errors fail open so hook runtime failures never block agent work.
@@ -192,7 +193,7 @@ The reason text is the canonical steering message: it should tell the agent what
 
 ## 2. Policy Classes
 
-Flow Agents currently ships five canonical policy classes. Each policy class has a canonical hook script under `scripts/hooks/` and may be wired to one or more canonical trigger events.
+Flow Agents currently ships six canonical policy classes. Each policy class has a canonical hook script under `scripts/hooks/` and may be wired to one or more canonical trigger events.
 
 ### 2.1 Workflow Steering
 
@@ -326,6 +327,22 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 **Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results are not captured. The Stop gate then has no capture log to cross-reference and falls back to its trusted backstop re-run (§2.3) for claimed-pass command checks. Log the gap as `postToolUse: no native equivalent — evidence capture unavailable; Stop gate relies on backstop re-run only`.
 
+### 2.6 Continuation Turn Fence
+
+**Intent**: Keep one signed continuation adapter turn bounded to the canonical Flow step for which the driver issued it. Once a tool advances Flow, return control before the model begins the next step with stale instructions or artifacts.
+
+**Canonical script**: `scripts/hooks/continuation-turn-fence.js`
+
+**Canonical trigger events**: `preToolUse` and `postToolUse`.
+
+**Inputs consumed**: the driver-issued `FLOW_AGENTS_CONTINUATION_RUN_ID` and `FLOW_AGENTS_CONTINUATION_TURN_SECRET`, the signed `active-turn.json`, the live driver mission and lock, the exact assignment record, and canonical Flow state.
+
+**Decision contract**: Ordinary sessions and signed turns that remain on their issued step exit `0`. After canonical Flow leaves the issued step, the fence first preserves any existing Stop-Goal-Fit hard-block repair obligation for that issued gate. Otherwise it writes a secret-authenticated `turn-boundary.json` receipt and exits `3`. Runtime adapters translate `3` only for the exact fence id/script/event tuple: pre-tool adapters deny the queued tool and end the turn; post-tool adapters end the turn after the completed tool. The continuation parent verifies the receipt, terminates the adapter process group, and records a causal gate-boundary completion even when the host's native abort prevents final adapter JSON.
+
+Invalid or unavailable canonical identity returns control rather than granting additional work. The receipt is bound to the run, definition version and digest, issued step, canonical disposition, ephemeral signer, turn secret, live mission, assignment, and driver lock. It is removed with the active-turn authority. This is a turn boundary, not a Flow gate, evidence claim, grader signal, or permission to skip repair.
+
+**Degradation when host lacks pre-tool denial or turn abort**: the post-tool fence still detects advancement, and the parent receipt watcher remains the provider-neutral backstop. A host that can neither run the mapped hooks nor isolate one adapter process per signed turn must declare the continuation-fence capability unavailable.
+
 ---
 
 ## 3. Hook Profiles
@@ -352,7 +369,7 @@ The adapter wires the canonical telemetry script (`scripts/telemetry/telemetry.s
 
 **Required**: At minimum, `agentSpawn` telemetry fires on session start.
 
-**Permitted gaps**: All policy classes (workflow steering, quality gate, stop-goal-fit, config protection) are absent.
+**Permitted gaps**: All policy classes are absent.
 
 **Use case**: Framework adapters and runtimes where the telemetry signal is valuable but blocking or injecting context is not feasible.
 
@@ -380,8 +397,9 @@ The adapter implements L1 plus all blocking policy classes.
 - Quality gate fires on `postToolUse`.
 - Stop-goal-fit fires on `stop` with `FLOW_AGENTS_GOAL_FIT_MODE` configurable. Shipped L2 configs default to `block`; the canonical engine default remains `warn`, and any mode must be operator-overridable.
 - Workflow steering additionally re-grounds the active goal on `agentSpawn`/`SessionStart` so an in-flight goal survives context compaction and resume.
+- Continuation turn fencing runs on pre- and post-tool events when the adapter is executing a driver-issued signed turn.
 
-**Permitted gaps**: None. All four policy classes are wired. Any missing host trigger must be documented as a named gap in the adapter's conformance declaration.
+**Permitted gaps**: None. All canonical policy classes are wired. Any missing host trigger must be documented as a named gap in the adapter's conformance declaration.
 
 **Use case**: Claude Code (current reference implementation), Codex (current reference implementation). The target conformance level for new harness adapters.
 

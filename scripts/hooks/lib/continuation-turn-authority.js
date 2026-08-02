@@ -6,11 +6,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { createHash, generateKeyPairSync, randomBytes, randomUUID, sign, verify } = require('crypto');
+const { createHash, createHmac, generateKeyPairSync, randomBytes, randomUUID, sign, verify } = require('crypto');
 const { isDeepStrictEqual } = require('util');
 
 const SCHEMA_VERSION = '3.0';
 const FILE_NAME = 'active-turn.json';
+const BOUNDARY_FILE_NAME = 'turn-boundary.json';
 const MAX_ACTIVE_TURN_BYTES = 16 * 1024;
 const MAX_DRIVER_RECORD_BYTES = 1024 * 1024;
 const MAX_ASSIGNMENT_RECORD_BYTES = 1024 * 1024;
@@ -19,6 +20,10 @@ const MAX_TIMEOUT_MS = 86_400_000;
 
 function activeTurnFile(sessionDir) {
   return path.join(path.resolve(sessionDir), 'continuation-driver', FILE_NAME);
+}
+
+function activeTurnBoundaryFile(sessionDir) {
+  return path.join(path.resolve(sessionDir), 'continuation-driver', BOUNDARY_FILE_NAME);
 }
 
 function issueActiveTurnAuthority(input) {
@@ -82,12 +87,118 @@ function removeActiveTurnAuthority(sessionDir, turnSecretSha256, issuedParents) 
     const current = fileIdentity(file, 'continuation active turn');
     if (!sameIdentity(current, loaded.identity)) return false;
     fs.unlinkSync(file);
+    removeActiveTurnBoundary(sessionDir, turnSecretSha256, parents);
     assertParentsStable(parents);
     return true;
   } catch {
     // Do not unlink through a changed parent. The signed record expires.
     return false;
   }
+}
+
+function recordActiveTurnBoundary(input) {
+  const sessionDir = path.resolve(input.sessionDir);
+  const turnSecret = requiredTurnSecret(input.turnSecret);
+  const canonicalState = input.canonicalState;
+  const authority = validateSignedActiveTurnAssignmentAuthority({
+    sessionDir,
+    runId: input.runId,
+    turnSecret,
+  });
+  if (!authority.valid) throw new Error(`continuation boundary authority is invalid: ${authority.reason}`);
+  const canonicalIdentity = validateCanonicalTurnIdentity(authority.record, canonicalState, false);
+  if (!canonicalIdentity.valid) throw new Error(`continuation boundary canonical identity is invalid: ${canonicalIdentity.reason}`);
+  if (canonicalState.status === 'active' && canonicalState.current_step === authority.record.issued_step) {
+    throw new Error('continuation boundary requires canonical Flow to leave the issued step');
+  }
+  const parents = captureParents(sessionDir, false);
+  const record = {
+    schema_version: '1.0',
+    run_id: authority.record.run_id,
+    definition_id: authority.record.definition_id,
+    definition_version: authority.record.definition_version,
+    definition_digest: authority.record.definition_digest,
+    issued_step: authority.record.issued_step,
+    canonical_status: requiredString(canonicalState.status, 'canonical_status'),
+    canonical_step: requiredString(canonicalState.current_step, 'canonical_step'),
+    public_key_digest: authority.record.public_key_digest,
+    turn_secret_sha256: authority.record.turn_secret_sha256,
+    observed_at: new Date().toISOString(),
+  };
+  record.hmac_sha256 = boundaryHmac(record, turnSecret);
+  writeBoundaryRecord(sessionDir, parents, record);
+  return record;
+}
+
+function readActiveTurnBoundary(input) {
+  try {
+    const sessionDir = path.resolve(input.sessionDir);
+    const turnSecret = requiredTurnSecret(input.turnSecret);
+    const base = validateSignedActiveTurnAssignmentAuthority({
+      sessionDir,
+      runId: input.runId,
+      turnSecret,
+    });
+    if (!base.valid) return base;
+    const parents = captureParents(sessionDir, false);
+    const loaded = readRegularJson(activeTurnBoundaryFile(sessionDir), 'continuation turn boundary', parents, MAX_ACTIVE_TURN_BYTES);
+    const record = loaded.value;
+    validateBoundaryRecord(record);
+    if (!equalText(record.run_id, base.record.run_id)
+      || !equalText(record.definition_id, base.record.definition_id)
+      || !equalText(record.definition_version, base.record.definition_version)
+      || !equalText(record.definition_digest, base.record.definition_digest)
+      || !equalText(record.issued_step, base.record.issued_step)
+      || !equalText(record.public_key_digest, base.record.public_key_digest)
+      || !equalText(record.turn_secret_sha256, base.record.turn_secret_sha256)
+      || !equalText(record.hmac_sha256, boundaryHmac(record, turnSecret))) return invalid('continuation boundary receipt does not match signed authority');
+    return { valid: true, record };
+  } catch (error) {
+    return invalid(error && error.message ? error.message : 'continuation boundary receipt is malformed');
+  }
+}
+
+function writeBoundaryRecord(sessionDir, parents, record) {
+  assertParentsStable(parents);
+  const file = activeTurnBoundaryFile(sessionDir);
+  const temp = path.join(path.dirname(file), `.${BOUNDARY_FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
+  let tempIdentity = null;
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(record)}\n`, { flag: 'wx', mode: 0o600 });
+    tempIdentity = fileIdentity(temp, 'continuation turn boundary temporary file');
+    assertParentsStable(parents);
+    fs.renameSync(temp, file);
+    assertParentsStable(parents);
+  } finally {
+    removeOwnedTemp(temp, tempIdentity, parents);
+  }
+}
+
+function removeActiveTurnBoundary(sessionDir, turnSecretSha256, parents) {
+  try {
+    const file = activeTurnBoundaryFile(sessionDir);
+    if (!fs.existsSync(file)) return;
+    const loaded = readRegularJson(file, 'continuation turn boundary', parents, MAX_ACTIVE_TURN_BYTES);
+    if (!equalText(loaded.value.turn_secret_sha256, turnSecretSha256)) return;
+    fs.unlinkSync(file);
+    assertParentsStable(parents);
+  } catch {
+    // The bounded receipt expires with its active-turn authority.
+  }
+}
+
+function validateBoundaryRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record) || record.schema_version !== '1.0') throw new Error('continuation boundary schema is unsupported');
+  for (const field of ['run_id', 'definition_id', 'definition_version', 'definition_digest', 'issued_step', 'canonical_status', 'canonical_step', 'public_key_digest', 'turn_secret_sha256', 'observed_at', 'hmac_sha256']) requiredString(record[field], field);
+  requiredSafeRunId(record.run_id, 'run_id');
+  for (const field of ['definition_digest', 'public_key_digest', 'turn_secret_sha256', 'hmac_sha256']) requiredDigest(record[field], field);
+  requiredTimestamp(record.observed_at, 'observed_at');
+}
+
+function boundaryHmac(record, turnSecret) {
+  const unsigned = { ...record };
+  delete unsigned.hmac_sha256;
+  return createHmac('sha256', turnSecret).update(canonicalBytes(unsigned)).digest('hex');
 }
 
 // Validates the signed, live assignment capability without consulting Flow's
@@ -142,20 +253,23 @@ function validateActiveTurnAuthority(input) {
   const base = validateSignedActiveTurnAssignmentAuthority(input);
   if (!base.valid) return base;
   try {
-    const canonical = input.canonicalState;
-    const record = base.record;
-    // The issued step remains bound to the driver mission, while canonical
-    // Flow may advance during the adapter's Stop callback.
-    if (!canonical || canonical.status !== 'active'
-      || canonical.run_id !== record.run_id
-      || canonical.definition_id !== record.definition_id
-      || canonical.definition_version !== record.definition_version
-      || canonical.definition_digest !== record.definition_digest
-      || typeof canonical.current_step !== 'string' || !canonical.current_step) return invalid('canonical Flow state does not match');
-    return base;
+    const canonical = validateCanonicalTurnIdentity(base.record, input.canonicalState, true);
+    return canonical.valid ? base : canonical;
   } catch (error) {
     return invalid(error && error.message ? error.message : 'canonical Flow state is malformed');
   }
+}
+
+function validateCanonicalTurnIdentity(record, canonical, requireActive) {
+  if (!canonical || typeof canonical !== 'object' || Array.isArray(canonical)
+    || (requireActive && canonical.status !== 'active')
+    || typeof canonical.status !== 'string' || !canonical.status
+    || canonical.run_id !== record.run_id
+    || canonical.definition_id !== record.definition_id
+    || canonical.definition_version !== record.definition_version
+    || canonical.definition_digest !== record.definition_digest
+    || typeof canonical.current_step !== 'string' || !canonical.current_step) return invalid('canonical Flow state does not match');
+  return { valid: true };
 }
 
 function invalid(reason) {
@@ -394,8 +508,11 @@ function requiredTimestamp(value, label) {
 
 module.exports = {
   activeTurnFile,
+  activeTurnBoundaryFile,
   issueActiveTurnAuthority,
   removeActiveTurnAuthority,
+  recordActiveTurnBoundary,
+  readActiveTurnBoundary,
   validateActiveTurnAuthority,
   validateSignedActiveTurnAssignmentAuthority,
 };

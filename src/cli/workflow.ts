@@ -977,6 +977,7 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
         timeoutMs: turnTimeoutMs,
         continuationTurnSecret: context?.continuationTurnSecret,
         continuationRunId: context?.continuationRunId,
+        continuationSessionDir: sessionDir,
       }),
       ...(evidenceSigningKeyFile ? { preflightTurn: async (request) => {
         assertAcceptedTurnEvidenceCapacity(attestationTurns(continuationStore.acceptedTurns()), request);
