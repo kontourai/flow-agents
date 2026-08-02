@@ -536,6 +536,7 @@ export async function invokeExternalSealedLifecycleAuthority(request: ExternalLi
     };
     child.stdout.on("data", (chunk: Buffer) => append(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => append(stderr, chunk));
+    child.stdin.on("error", () => forward("SIGTERM"));
     child.once("error", (error) => { cleanup(); reject(error); });
     child.once("close", (code) => {
       cleanup();
@@ -545,7 +546,9 @@ export async function invokeExternalSealedLifecycleAuthority(request: ExternalLi
       try { resolve(acceptExternalLifecycleOutput(Buffer.concat(stdout).toString("utf8"), request, requestSha256)); }
       catch (error) { reject(error); }
     });
-    runtimeTimer = setTimeout(() => forward("SIGTERM"), timeout);
+    // `timeout` is the hard runtime+cleanup bound. Begin graceful termination
+    // at the signed runtime so the escalation cannot extend beyond that bound.
+    runtimeTimer = setTimeout(() => forward("SIGTERM"), Math.max(1, timeout - SEALED_TRANSPORT_CLEANUP_MS));
     child.stdin.end(`${canonical(envelope)}\n`);
   });
 }

@@ -29,6 +29,7 @@ export {
   buildUnsignedSealedExecutionRequest,
   buildUnsignedSealedWorkloadAuthorization,
   invokeExternalLifecycleAuthority,
+  invokeExternalSealedLifecycleAuthority,
   validateSealedExecutionSafeResult,
   verifySealedExecutionCompletion,
 } from "./external-lifecycle-authority.js";

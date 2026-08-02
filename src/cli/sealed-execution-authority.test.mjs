@@ -60,7 +60,8 @@ test("sealed execution launches only the protected runtime/controller/provider c
   assert.match(coordinator, /PATH: "\/usr\/bin:\/bin", LANG: "C", LC_ALL: "C"/);
   assert.match(coordinator, /detached: process\.platform !== "win32"/);
   assert.match(coordinator, /process\.kill\(-child\.pid, "SIGKILL"\)/);
-  assert.match(coordinator, /forwardedSignals = \["SIGTERM", "SIGINT", "SIGHUP"\]/);
+  assert.match(coordinator, /function sealedCancellationScope\(\)/);
+  assert.match(coordinator, /process\.on\(signal, interrupt\)/);
   assert.match(coordinator, /interrupted \? "interrupted"/);
   assert.match(coordinator, /Object\.keys\(value\.environment\)\.length !== 0/);
   assert.match(coordinator, /kind !== "flow-agents\.sealed-result\.v1"/);
@@ -280,6 +281,7 @@ test("sealed coordinator SIGTERM kills its descendant, seals interruption, and c
   }
   assert.ok(Number.isSafeInteger(descendant), `controller descendant started before cancellation: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
   child.kill("SIGTERM");
+  child.kill("SIGTERM");
   const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
   assert.deepEqual(exit, { code: 0, signal: null }, Buffer.concat(stderr).toString("utf8"));
   const response = JSON.parse(Buffer.concat(stdout).toString("utf8"));
@@ -287,6 +289,41 @@ test("sealed coordinator SIGTERM kills its descendant, seals interruption, and c
   assert.deepEqual(fs.readdirSync(fixture.execution), [], "signal cancellation removes the protected stage");
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.throws(() => process.kill(descendant, 0), /ESRCH/, "signal cancellation leaves no provider descendant alive");
+});
+
+test("sealed cancellation during prepared staging remains owned through a durable interrupted receipt", async () => {
+  const prepareMarker = "    atomicWrite(nonceFile, `${JSON.stringify(prepared)}\\n`);";
+  const fixture = await sealedCoordinatorFixture({
+    runtimeBytes: fs.readFileSync(process.execPath), controllerScript: "setInterval(() => {}, 1000);", maxRuntimeMs: 30_000,
+    instrumentSource: (source) => source
+      .replaceAll("fs.chownSync(", "(() => undefined)(")
+      .replace(prepareMarker, `${prepareMarker}\n    await new Promise((resolve) => setTimeout(resolve, 250));`),
+  });
+  const authorization = fixture.signAuthorization("staging-cancel", "staging-cancel-nonce");
+  const { envelope } = fixture.requestFor("staging-cancel", authorization);
+  const coordinatorUrl = pathToFileURL(path.join(fixture.root, "coordinator.mjs")).href;
+  const entry = `import { main } from ${JSON.stringify(coordinatorUrl)}; process.stdout.write(JSON.stringify(await main()) + '\\n');`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", entry], {
+    env: { ...process.env, SUDO_UID: String(process.getuid()), SUDO_GID: String(process.getgid()) }, stdio: ["pipe", "pipe", "pipe"],
+  });
+  const stdout = []; const stderr = [];
+  child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+  child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+  child.stdin.end(`${JSON.stringify(envelope)}\n`);
+  let preparedFile = null;
+  for (let attempt = 0; attempt < 300 && preparedFile === null; attempt += 1) {
+    const nonces = fs.readdirSync(path.join(fixture.state, "nonces")).filter((file) => file.endsWith(".json"));
+    if (nonces.length === 1) preparedFile = path.join(fixture.state, "nonces", nonces[0]);
+    else await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(preparedFile, `prepared nonce became durable before staging cancellation: ${Buffer.concat(stderr).toString("utf8")}`);
+  child.kill("SIGTERM"); child.kill("SIGTERM");
+  const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+  assert.deepEqual(exit, { code: 0, signal: null }, Buffer.concat(stderr).toString("utf8"));
+  const response = JSON.parse(Buffer.concat(stdout).toString("utf8"));
+  assert.equal(response.result.safe_result.status, "interrupted");
+  assert.equal(JSON.parse(fs.readFileSync(preparedFile, "utf8")).status, "applied");
+  assert.deepEqual(fs.readdirSync(fixture.execution), []);
 });
 
 test("sealed bundle permits logical ESM relatives and rejects traversal, duplicate paths, and an over-budget closure before staging", async () => {

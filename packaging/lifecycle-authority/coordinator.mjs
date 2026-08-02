@@ -2598,7 +2598,19 @@ export function sealedProjection(value) {
   if (artifactBytes > 128 * 1024) throw new Error("sealed execution projection artifact content exceeds its bounded limit");
   return value;
 }
-async function runSealedStage(runtime, argv, environment, identity, authorization) {
+function sealedCancellationScope() {
+  let cancelled = false; let terminate = null;
+  const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
+  const interrupt = () => { cancelled = true; if (terminate) terminate(); };
+  for (const signal of signals) process.on(signal, interrupt);
+  return {
+    get cancelled() { return cancelled; },
+    bind(nextTerminate) { terminate = nextTerminate; if (cancelled && terminate) terminate(); },
+    unbind() { terminate = null; },
+    close() { terminate = null; for (const signal of signals) process.removeListener(signal, interrupt); },
+  };
+}
+async function runSealedStage(runtime, argv, environment, identity, authorization, cancellation) {
   const started = Date.now(); let timedOut = false; let limited = false; let interrupted = false;
   const stdout = []; const stderr = []; let stdoutBytes = 0; let stderrBytes = 0;
   const append = (target, chunk) => {
@@ -2622,20 +2634,17 @@ async function runSealedStage(runtime, argv, environment, identity, authorizatio
       try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); }
       catch { child.kill("SIGKILL"); }
     };
-    const forwardedSignals = ["SIGTERM", "SIGINT", "SIGHUP"];
-    const interrupt = () => { interrupted = true; terminate(); };
-    const clearSignalHandlers = () => forwardedSignals.forEach((signal) => process.removeListener(signal, interrupt));
-    forwardedSignals.forEach((signal) => process.once(signal, interrupt));
+    cancellation.bind(() => { interrupted = true; terminate(); });
     const timer = setTimeout(() => { timedOut = true; terminate(); }, authorization.max_runtime_ms);
     child.stdout.on("data", (chunk) => { append(stdout, chunk); if (limited) terminate(); });
     child.stderr.on("data", (chunk) => { append(stderr, chunk); if (limited) terminate(); });
-    child.once("error", () => { clearTimeout(timer); clearSignalHandlers(); terminate(); resolve({ status: "spawn_error", exit_code: null }); });
+    child.once("error", () => { clearTimeout(timer); cancellation.unbind(); terminate(); resolve({ status: "spawn_error", exit_code: null }); });
     // A controller can exit while a descendant still owns the pipes.  Always
     // kill and await its initial detached group before accepting any terminal
     // outcome or allowing stage cleanup. setsid escapes by a trusted signed
     // controller are outside this proportional local-TCB threat model.
     child.once("exit", (code) => { clearTimeout(timer); terminate(); });
-    child.once("close", (code) => { clearTimeout(timer); clearSignalHandlers(); resolve({ status: interrupted ? "interrupted" : timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
+    child.once("close", (code) => { clearTimeout(timer); cancellation.unbind(); resolve({ status: interrupted ? "interrupted" : timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
   });
   const stdoutValue = Buffer.concat(stdout);
   let projection = null; let status = result.status;
@@ -2666,11 +2675,12 @@ async function processSealedExecution(envelope) {
   const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
   const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
   const stage = path.join(EXECUTION_ROOT, identity.id);
+  const cancellation = sealedCancellationScope();
   // The nonce is global to its signing key, not to a workflow run.  Acquire it
   // before the per-run lock so two sessions cannot both observe an absent
   // nonce and rename over one another's prepared record.
   const nonceLockId = globalNonceLockId(identity.keyId, identity.nonce);
-  return withDurableLock(nonceLockId, () => withDurableLock(sha256({ project: identity.project, run_id: identity.runId }), async () => {
+  try { return await withDurableLock(nonceLockId, () => withDurableLock(sha256({ project: identity.project, run_id: identity.runId }), async () => {
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "sealed execution completion record");
       const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
@@ -2692,6 +2702,7 @@ async function processSealedExecution(envelope) {
     }
     // Every validation above is intentionally before this mutation: malformed
     // authorizations cannot allocate a stage or consume a one-shot nonce.
+    if (cancellation.cancelled) throw new Error("sealed execution was cancelled before nonce consumption");
     atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
     const caller = callerIdentity();
     let safeResult;
@@ -2706,7 +2717,7 @@ async function processSealedExecution(envelope) {
       const manifestFd = fs.openSync(manifest, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o440);
       try { fs.writeFileSync(manifestFd, manifestBytes); fs.fsyncSync(manifestFd); } finally { fs.closeSync(manifestFd); }
       fs.chownSync(manifest, 0, caller.gid); fs.chmodSync(manifest, 0o440);
-      safeResult = await runSealedStage(runtime, sealedArgv(workload.argv, controller, provider, inputs), { ...workload.environment, SEALED_PROVIDER_PATH: provider, SEALED_INVOCATION_MANIFEST: manifest }, caller, authorization);
+      safeResult = await runSealedStage(runtime, sealedArgv(workload.argv, controller, provider, inputs), { ...workload.environment, SEALED_PROVIDER_PATH: provider, SEALED_INVOCATION_MANIFEST: manifest }, caller, authorization, cancellation);
     } finally {
       // The stage is never evidence.  Completion and nonce state retain only
       // bounded metadata/digests, and cleanup runs for success, failure, and
@@ -2718,7 +2729,7 @@ async function processSealedExecution(envelope) {
     atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
     atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, resultCoreSha256))}\n`);
     return { completionRecord, replayed: false, safeResult };
-  }));
+  })); } finally { cancellation.close(); }
 }
 async function processRootOperation(envelope) {
   if (envelope.action === "execute-sealed-workload") return processSealedExecution(envelope);

@@ -8,6 +8,7 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
+import * as packageApi from "../../build/src/index.js";
 
 const {
   LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH,
@@ -241,6 +242,7 @@ function withCompletionVerificationKey(callback) {
 }
 
 test("lifecycle authority helper identity is immutable and ignores caller executable selection", () => {
+  assert.equal(packageApi.invokeExternalSealedLifecycleAuthority, invokeExternalSealedLifecycleAuthority, "package root exports the cancellable sealed transport");
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/usr/bin/true";
   assert.equal(LIFECYCLE_AUTHORITY_HELPER_PATH, "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1");
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);
@@ -511,6 +513,8 @@ test("sealed execution transport follows the signed runtime budget rather than t
   try {
     fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
     assert.equal(sealedExecutionTransportTimeout(file), 91_000);
+    const transportSource = fs.readFileSync(new URL("../../src/external-lifecycle-authority.ts", import.meta.url), "utf8");
+    assert.match(transportSource, /timeout - SEALED_TRANSPORT_CLEANUP_MS/, "graceful termination starts at signed runtime, leaving one cleanup allowance before the hard bound");
     fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 30 * 60_000 + 1, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }));
     assert.throws(() => sealedExecutionTransportTimeout(file), /authorization is invalid/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
@@ -527,6 +531,7 @@ test("public sealed transport remains responsive and forwards parent cancellatio
   const originalSpawn = mutableChildProcess.spawn;
   const helperDescriptor = 987654;
   const kills = [];
+  let spawnedChild = null;
   class FakeChild extends EventEmitter {
     stdin = new PassThrough(); stdout = new PassThrough(); stderr = new PassThrough(); closed = false;
     kill(signal) {
@@ -553,7 +558,7 @@ test("public sealed transport remains responsive and forwards parent cancellatio
     mutableFs.fstatSync = (descriptor) => descriptor === helperDescriptor ? protectedExecutable() : originalFs.fstatSync(descriptor);
     mutableFs.readFileSync = (file, ...args) => originalFs.readFileSync(file, ...args);
     mutableFs.closeSync = (descriptor) => descriptor === helperDescriptor ? undefined : originalFs.closeSync(descriptor);
-    mutableChildProcess.spawn = () => new FakeChild();
+    mutableChildProcess.spawn = () => (spawnedChild = new FakeChild());
     syncBuiltinESMExports();
     const before = process.listenerCount("SIGTERM");
     const pending = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
@@ -561,6 +566,11 @@ test("public sealed transport remains responsive and forwards parent cancellatio
     await assert.rejects(pending, /cancelled by parent/);
     assert.deepEqual(kills, ["SIGTERM"]);
     assert.equal(process.listenerCount("SIGTERM"), before, "transport removes its parent signal handler after cleanup");
+    kills.length = 0;
+    const pipeFailure = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
+    spawnedChild.stdin.emit("error", Object.assign(new Error("EPIPE"), { code: "EPIPE" }));
+    await assert.rejects(pipeFailure, /cancelled by parent/);
+    assert.deepEqual(kills, ["SIGTERM"], "request-pipe failure is contained through the same bounded cancellation path");
   } finally {
     for (const method of fsMethods) mutableFs[method] = originalFs[method];
     mutableChildProcess.spawn = originalSpawn;
