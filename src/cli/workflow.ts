@@ -14,7 +14,7 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion } from "../external-lifecycle-authority.js";
+import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
@@ -44,7 +44,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "execute-sealed-workload-request", "execute-sealed-workload", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
 const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
 const PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION = "provisional-delivery.authority-completion.json";
@@ -75,6 +75,8 @@ Public workflow verbs:
   publish-provisional-delivery-request  Build the exact provisional-delivery authorization payload.
   publish-provisional-delivery  Publish a checkpoint-bound bundle for required PR CI reconciliation.
   publish-delivery    Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.
+  execute-sealed-workload  Execute one externally signed, staged provider workload.
+  execute-sealed-workload-request  Emit the exact canonical authorization payload for external signing.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -126,10 +128,64 @@ export async function main(argv: string[]): Promise<number> {
     if (!authorizationFile) throw new Error("workflow publish-provisional-delivery requires --authorization-file <signed authority>");
     return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"), "provisional", authorizationFile);
   }
+  if (verb === "execute-sealed-workload-request") return executeSealedWorkloadRequest(sessionDir, argv.slice(1));
+  if (verb === "execute-sealed-workload") return executeSealedWorkload(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+export function executeSealedWorkloadRequest(sessionDir: string, argv: string[]): number {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "sealed-workload-file", "subject", "nonce", "expires-in-minutes", "max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"]), "workflow execute-sealed-workload-request");
+  const workloadFile = flagString(parsed.flags, "sealed-workload-file"); const explicitSubject = flagString(parsed.flags, "subject");
+  if (!workloadFile) throw new Error("workflow execute-sealed-workload-request requires --sealed-workload-file");
+  const workload = fs.readFileSync(workloadFile); if (workload.length > 1024 * 1024) throw new Error("sealed workload request exceeds 1MiB");
+  const minutes = Number(flagString(parsed.flags, "expires-in-minutes") ?? "5");
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 60) throw new Error("--expires-in-minutes must be between 0 and 60");
+  const issuedAt = new Date(); const bound = readBoundSession(sessionDir);
+  const state = readJsonFile(path.join(sessionDir, "state.json"), "sealed workload session state");
+  const derivedSubject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 && typeof state.work_item_refs[0] === "string" ? state.work_item_refs[0] : null;
+  if (!derivedSubject || !derivedSubject) throw new Error("workflow execute-sealed-workload-request requires a canonical one-work-item session");
+  if (explicitSubject && explicitSubject !== derivedSubject) throw new Error("workflow execute-sealed-workload-request --subject does not match the canonical session subject");
+  // Explicit finite budgets are mandatory: the command must never silently
+  // grant a controller the coordinator maxima.
+  const budgetNames = ["max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"];
+  for (const name of budgetNames) if (!flagString(parsed.flags, name)) throw new Error(`workflow execute-sealed-workload-request requires --${name}`);
+  const authorization = buildUnsignedSealedWorkloadAuthorization({ projectRoot: bound.projectRoot, runId: path.basename(sessionDir), subject: derivedSubject,
+    workloadSha256: createHash("sha256").update(workload).digest("hex"), nonce: flagString(parsed.flags, "nonce") ?? `sealed-${randomBytes(16).toString("hex")}`,
+    issuedAt: issuedAt.toISOString(), expiresAt: new Date(issuedAt.getTime() + minutes * 60_000).toISOString(),
+    maxStagedBytes: Number(flagString(parsed.flags, "max-staged-bytes")), maxRuntimeMs: Number(flagString(parsed.flags, "max-runtime-ms")), maxOutputBytes: Number(flagString(parsed.flags, "max-output-bytes")), maxProviderCalls: Number(flagString(parsed.flags, "max-provider-calls")), maxCostMicrousd: Number(flagString(parsed.flags, "max-cost-microusd")), maxTokens: Number(flagString(parsed.flags, "max-tokens")) });
+  // Emit the exact compact bytes covered by Ed25519 alongside the readable
+  // object. External signers must sign signing_payload verbatim; pretty JSON
+  // is presentation only and is never the signature contract.
+  console.log(JSON.stringify({ authorization, signing_payload: canonicalJson(authorization) }, null, 2)); return 0;
+}
+
+export async function executeSealedWorkload(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]), "workflow execute-sealed-workload");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  const sealedWorkloadFile = flagString(parsed.flags, "sealed-workload-file");
+  if (!authorizationFile || !sealedWorkloadFile) throw new Error("workflow execute-sealed-workload requires --authorization-file and --sealed-workload-file");
+  const request = buildUnsignedSealedExecutionRequest({ projectRoot: readBoundSession(sessionDir).projectRoot, sessionDir, authorizationFile, sealedWorkloadFile });
+  // Bind the invocation to the exact authorization the public caller saw;
+  // completion verification rejects a helper result for any substituted file.
+  const authorization = readJsonFile(authorizationFile, "sealed execution authorization");
+  const requestSha256 = lifecycleAuthorityResultDigest(request);
+  const authorizationSha256 = lifecycleAuthorityResultDigest(authorization);
+  const result = await invokeExternalSealedLifecycleAuthority(request);
+  if (!result.safe_result) throw new Error("workflow execute-sealed-workload received no safe result");
+  verifySealedExecutionCompletion(result.completion, {
+    runId: result.run_id,
+    requestSha256,
+    authorizationSha256,
+    safeResult: result.safe_result,
+  });
+  const output = { action: request.action, run_id: result.run_id, operation_status: result.operation_status, completion: result.completion, safe_result: result.safe_result };
+  console.log(json ? JSON.stringify(output) : JSON.stringify(output, null, 2));
+  return 0;
 }
 
 type DeliveryPublicationKind = "provisional" | "terminal";
