@@ -22,7 +22,13 @@ import { distill } from "./distill.js";
 import { link } from "./link.js";
 import { health } from "./health.js";
 
-export { ingestSession } from "./ingest.js";
+export {
+  ingestFromSource,
+  ingestRuntimeSessions,
+  ingestSession,
+  SESSION_SOURCE_IDS,
+} from "./ingest.js";
+export { scrubRuntimeResidueText } from "./runtime-session.js";
 export { distill } from "./distill.js";
 export { link } from "./link.js";
 export { health } from "./health.js";

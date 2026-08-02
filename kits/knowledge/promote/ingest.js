@@ -12,6 +12,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readIfExists, markdownSection, parseDecisionList } from "./lib.js";
+import { ingestRuntimeSessions } from "./runtime-session.js";
+
+export const SESSION_SOURCE_IDS = Object.freeze([
+  "workflow-sidecar",
+  "runtime-session",
+]);
 
 function readJson(file) {
   const raw = readIfExists(file);
@@ -101,3 +107,34 @@ export function ingestSession(sessionDir, options = {}) {
     touchedFiles: [...touchedFiles].sort(),
   };
 }
+
+/**
+ * Pluggable source dispatcher with one normalized batch result. The existing
+ * ingestSession API remains byte-compatible for workflow-sidecar callers.
+ */
+export function ingestFromSource(source, input, options = {}) {
+  if (source === "workflow-sidecar") {
+    return {
+      residues: [ingestSession(input, options)],
+      report: {
+        schema_version: "1.0",
+        telemetry_records_scanned: 0,
+        sessions_ingested: 1,
+        records_skipped: 0,
+        blocked: false,
+        failures: [],
+      },
+      cursor: null,
+    };
+  }
+  if (source === "runtime-session") {
+    return ingestRuntimeSessions({ ...input, ...options });
+  }
+  throw new Error(
+    `unknown promote session source '${source}'; expected ${SESSION_SOURCE_IDS.join(
+      ", ",
+    )}`,
+  );
+}
+
+export { ingestRuntimeSessions };
