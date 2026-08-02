@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
@@ -10,6 +12,7 @@ const {
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
   invokeExternalLifecycleAuthority,
+  sealedExecutionTransportTimeout,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
   validateSealedExecutionSafeResult,
@@ -41,7 +44,7 @@ test("sealed execution clients reject projection tampering, size-cap bypasses, a
   const privateProjection = sealedSafeResult();
   privateProjection.projection.artifacts = [{ id: "private", sha256: createHash("sha256").update(privateArtifact).digest("hex"), bytes: privateArtifact.length, media_type: "application/json", content_base64: privateArtifact.toString("base64") }];
   privateProjection.projection_sha256 = lifecycleAuthorityResultDigest(privateProjection.projection);
-  assert.throws(() => validateSealedExecutionSafeResult(privateProjection), /forbidden raw\/private/);
+  assert.throws(() => validateSealedExecutionSafeResult(privateProjection), /free-form text/);
   assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ stdout_bytes: 256 * 1024, stderr_bytes: 1 })), /sealed execution result is invalid/);
   const oversized = Buffer.from(JSON.stringify({ policy: "x".repeat(65 * 1024) }));
   const oversizedProjection = sealedSafeResult();
@@ -490,4 +493,15 @@ test("package-side bundle validation cannot turn a helper response into authoriz
   const verifyBase = { ...valid, action: "verify-authorization", result: { verified: true } };
   assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify(verifyBase)}\n`, "verify-authorization", digest), /mutation result/);
   assert.throws(() => invokeExternalLifecycleAuthority({ action: "verify-authorization", project_root: "/tmp/project", payload: "forged", signature: {} }), /unsupported lifecycle authority action/);
+});
+
+test("sealed execution transport follows the signed runtime budget rather than the ordinary 30-second helper timeout", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-transport-"));
+  const file = path.join(directory, "authorization.json");
+  try {
+    fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
+    assert.equal(sealedExecutionTransportTimeout(file), 91_000);
+    fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 30 * 60_000 + 1, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }));
+    assert.throws(() => sealedExecutionTransportTimeout(file), /authorization is invalid/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

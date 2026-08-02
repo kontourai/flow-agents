@@ -40,15 +40,21 @@ const SEALED_POLICY_FIELDS = ["id", "sha256"];
 const SEALED_SAFE_MAX_RUNTIME_MS = 30 * 60_000;
 const SEALED_SAFE_MAX_OUTPUT_BYTES = 256 * 1024;
 const SEALED_SAFE_MAX_ARTIFACT_BYTES = 128 * 1024;
+const SEALED_TRANSPORT_CLEANUP_MS = 60_000;
+const SEALED_TRANSPORT_HARD_MAX_MS = 30 * 60_000 + SEALED_TRANSPORT_CLEANUP_MS;
+const SEALED_ARTIFACT_ENUMS = new Set(["ok", "threshold_fail", "invalid", "execution_error", "pass", "fail", "unknown", "accepted", "rejected", "not_observed", "not_verified"]);
 
-function sealedPrivacySafeJson(value: unknown): void {
-  if (Array.isArray(value)) { value.forEach(sealedPrivacySafeJson); return; }
-  if (!record(value)) return;
+function sealedPrivacySafeJson(value: unknown, depth = 0): void {
+  if (depth > 32 || value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
+  if (typeof value === "string") {
+    if (/^[a-f0-9]{64}$/.test(value) || SEALED_ARTIFACT_ENUMS.has(value)) return;
+    throw new Error("sealed execution artifact contains free-form text");
+  }
+  if (Array.isArray(value)) { value.forEach((item) => sealedPrivacySafeJson(item, depth + 1)); return; }
+  if (!record(value)) throw new Error("sealed execution artifact has an unsupported value");
   for (const [key, nested] of Object.entries(value)) {
-    if (/(prompt|response|reasoning|message|transcript|secret|token|api[_-]?key|authorization)/i.test(key)) {
-      throw new Error("sealed execution artifact contains forbidden raw/private material");
-    }
-    sealedPrivacySafeJson(nested);
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key)) throw new Error("sealed execution artifact key is invalid");
+    sealedPrivacySafeJson(nested, depth + 1);
   }
 }
 
@@ -109,6 +115,7 @@ export function validateSealedExecutionSafeResult(value: unknown): SealedExecuti
     artifactBytes += bytes.length;
     let parsed: unknown;
     try { parsed = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("sealed execution artifact content must be JSON"); }
+    if (!record(parsed) && !Array.isArray(parsed)) throw new Error("sealed execution artifact content must be a structured value");
     sealedPrivacySafeJson(parsed);
   }
   if (artifactBytes > SEALED_SAFE_MAX_ARTIFACT_BYTES) throw new Error("sealed execution projection artifact content exceeds its bounded limit");
@@ -432,6 +439,27 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   return parsed.result;
 }
 
+/**
+ * The helper transport must outlive a signed controller budget. This is only
+ * a fail-closed structural read for transport sizing; the root coordinator
+ * verifies the registered signature before it acts on the authorization.
+ */
+export function sealedExecutionTransportTimeout(authorizationFile: string): number {
+  const descriptor = fs.openSync(authorizationFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 64 * 1024) throw new Error("sealed execution authorization is not a protected regular file");
+    let value: unknown;
+    try { value = JSON.parse(fs.readFileSync(descriptor, "utf8")); } catch { throw new Error("sealed execution authorization is invalid"); }
+    if (!record(value) || value.schema_version !== "1.0" || value.operation !== "execute-sealed-workload"
+      || !Number.isSafeInteger(value.max_runtime_ms) || Number(value.max_runtime_ms) <= 0 || Number(value.max_runtime_ms) > 30 * 60_000
+      || !record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.key_id !== "string" || typeof value.signature.value !== "string") {
+      throw new Error("sealed execution authorization is invalid");
+    }
+    return Math.min(Number(value.max_runtime_ms) + SEALED_TRANSPORT_CLEANUP_MS, SEALED_TRANSPORT_HARD_MAX_MS);
+  } finally { fs.closeSync(descriptor); }
+}
+
 /** The external helper owns validation, locking, replay/CAS, and every write. */
 export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAuthorityRequest): ExternalLifecycleMutationResult {
   if (!ACTIONS.has(request.action)) throw new Error("unsupported lifecycle authority action");
@@ -446,9 +474,12 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
   const requestSha256 = digest(requestBody);
   const envelope = { schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION, action: request.action, request_sha256: requestSha256, request: requestBody };
   const helper = trustedHelper();
+  const timeout = request.action === "execute-sealed-workload"
+    ? sealedExecutionTransportTimeout(String(request.authorization_file))
+    : 30_000;
   let output: string;
   try {
-    output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout: 30_000, maxBuffer: 256 * 1024 });
+    output = execFileSync(LIFECYCLE_AUTHORITY_SUDO_COMMAND, ["-n", "--", helper], { input: `${canonical(envelope)}\n`, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" }, timeout, killSignal: "SIGKILL", maxBuffer: 256 * 1024 });
   } catch (error) {
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");

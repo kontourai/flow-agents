@@ -21,6 +21,13 @@ test("sealed execution authenticates and validates its capped closure before non
   assert.match(coordinator, /expires - issued > 60 \* 60_000/);
 });
 
+test("all lifecycle actions acquire the global signing-key nonce lease before their run lease", () => {
+  const ordinary = coordinator.slice(coordinator.indexOf("async function processRootOperation"), coordinator.indexOf("function response"));
+  assert.ok(ordinary.indexOf("withDurableLock(nonceLockId") < ordinary.indexOf("withDurableLock(runLockId"));
+  assert.match(coordinator, /fs\.renameSync\(lock, quarantine\)/, "stale lease recovery atomically claims the observed stale directory before deleting it");
+  assert.match(coordinator, /owner\.boot !== processBootIdentity\(\) \|\| processStartIdentity\(owner\.pid\) !== owner\.start/, "stale recovery never uses elapsed time alone");
+});
+
 test("sealed execution stages descriptor-read bytes as root-owned group-readable files, never caller-owned files", () => {
   assert.match(sourceRead, /O_RDONLY \| fs\.constants\.O_NOFOLLOW/);
   assert.match(sourceRead, /fs\.fstatSync\(descriptor\)/);
@@ -43,29 +50,32 @@ test("sealed execution launches only the protected runtime/controller/provider c
   assert.match(coordinator, /Object\.keys\(value\.environment\)\.length !== 0/);
   assert.match(coordinator, /kind !== "flow-agents\.sealed-result\.v1"/);
   assert.match(coordinator, /content_base64/);
-  assert.match(coordinator, /forbidden raw\/private material/);
+  assert.match(coordinator, /free-form text/);
 });
 
 test("sealed result projection keeps bounded, replayable policy artifacts but rejects raw provider material", () => {
   const content = Buffer.from(JSON.stringify({ calibration: { primary_agreement: 1, policy_digest: "a".repeat(64) } }));
   const artifact = { id: "calibration.policy", sha256: createHash("sha256").update(content).digest("hex"), bytes: content.length, media_type: "application/json", content_base64: content.toString("base64") };
   assert.deepEqual(sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "threshold_fail", metrics: { primary_agreement: 1, validated_calls: 32 }, artifacts: [artifact], policy_chain: [{ id: "r4-policy", sha256: "b".repeat(64) }] }).artifacts, [artifact]);
-  const forbidden = Buffer.from(JSON.stringify({ prompt: "do not retain me" }));
-  assert.throws(() => sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "invalid", metrics: {}, artifacts: [{ ...artifact, bytes: forbidden.length, sha256: createHash("sha256").update(forbidden).digest("hex"), content_base64: forbidden.toString("base64") }], policy_chain: [] }), /forbidden raw\/private material/);
+  const forbidden = Buffer.from(JSON.stringify({ innocuous: "do not retain me" }));
+  assert.throws(() => sealedProjection({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "invalid", metrics: {}, artifacts: [{ ...artifact, bytes: forbidden.length, sha256: createHash("sha256").update(forbidden).digest("hex"), content_base64: forbidden.toString("base64") }], policy_chain: [] }), /free-form text/);
 });
 
 async function sealedCoordinatorFixture({ controllerScript = null, maxRuntimeMs = 5000, maxOutputBytes = 64 * 1024, runtimeBytes = null, instrumentSource = (source) => source } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-exec-coordinator-"));
-  const config = path.join(root, "config"); const state = path.join(root, "state");
+  const config = path.join(root, "config"); const state = path.join(root, "state"); const execution = path.join(root, "execution");
   fs.mkdirSync(config, { recursive: true });
-  for (const directory of [state, path.join(state, "stages"), path.join(state, "nonces"), path.join(state, "completions"), path.join(state, "locks")]) fs.mkdirSync(directory, { recursive: true });
+  for (const directory of [state, execution, path.join(state, "stages"), path.join(state, "nonces"), path.join(state, "completions"), path.join(state, "locks")]) fs.mkdirSync(directory, { recursive: true });
+  const fakeDrop = path.join(root, "fake-drop"); fs.writeFileSync(fakeDrop, "#!/bin/sh\nshift 2\nexec \"$@\"\n", { mode: 0o755 });
   const operator = generateKeyPairSync("ed25519"); const completion = generateKeyPairSync("ed25519");
   fs.writeFileSync(path.join(config, "keys.json"), JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: operator.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
   fs.writeFileSync(path.join(config, "completion-signing-key.pem"), completion.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
   fs.writeFileSync(path.join(config, "completion-verification-key.pem"), completion.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
   let source = fs.readFileSync(path.resolve("packaging/lifecycle-authority/coordinator.mjs"), "utf8");
   source = source.replace(/export const CONFIG_ROOT = .*?;/, `export const CONFIG_ROOT = ${JSON.stringify(config)};`)
-    .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(state)};`);
+    .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(state)};`)
+    .replace(/export const EXECUTION_ROOT = .*?;/, `export const EXECUTION_ROOT = ${JSON.stringify(execution)};`)
+    .replace(/export const PRIVILEGE_DROP_LAUNCHER = .*?;/, `export const PRIVILEGE_DROP_LAUNCHER = ${JSON.stringify(fakeDrop)};`);
   source = instrumentSource(source);
   fs.copyFileSync(path.resolve("packaging/lifecycle-authority/runtime-v1.mjs"), path.join(root, "runtime-v1.mjs"));
   fs.writeFileSync(path.join(root, "coordinator.mjs"), source);
@@ -80,10 +90,11 @@ async function sealedCoordinatorFixture({ controllerScript = null, maxRuntimeMs 
   const workloadFile = write("workload.json", JSON.stringify(workload));
   const signAuthorization = (runId, nonce, time = Date.now(), expiryOffset = 30_000, limits = {}) => {
     const unsigned = { schema_version: "1.0", operation: "execute-sealed-workload", project_root: root, run_id: runId, subject: "fake-only", workload_sha256: createHash("sha256").update(fs.readFileSync(workloadFile)).digest("hex"), runner_kind: "flow-agents.sealed-exec.v1", runner_schema_version: "1.0", runner_entrypoint: "coordinator:sealed-runner-v1", max_staged_bytes: 384 * 1024 * 1024, max_runtime_ms: maxRuntimeMs, max_output_bytes: maxOutputBytes, max_provider_calls: 34, max_cost_microusd: 4_760_000, max_tokens: 748_000, issued_at: new Date(time).toISOString(), expires_at: new Date(time + expiryOffset).toISOString(), nonce, ...limits };
-    return { ...unsigned, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsigned)), operator.privateKey).toString("base64") } };
+    return { ...unsigned, signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(coordinatorModule.canonicalJson(unsigned)), operator.privateKey).toString("base64") } };
   };
   const requestFor = (runId, authorization) => {
     const session = path.join(root, ".kontourai", "flow-agents", runId); fs.mkdirSync(session, { recursive: true });
+    fs.writeFileSync(path.join(session, "state.json"), JSON.stringify({ work_item_refs: ["fake-only"] }));
     const authorizationFile = write(`auth-${runId}.json`, JSON.stringify(authorization));
     const request = { action: "execute-sealed-workload", project_root: root, session_dir: session, authorization_file: authorizationFile, sealed_workload_file: workloadFile };
     const envelope = { schema_version: "1.0", action: request.action, request_sha256: coordinatorModule.sha256(request), request };
@@ -93,7 +104,7 @@ async function sealedCoordinatorFixture({ controllerScript = null, maxRuntimeMs 
     const { envelope } = requestFor(runId, authorization);
     return coordinatorModule.main(`${JSON.stringify(envelope)}\n`);
   };
-  return { root, state, invoke, requestFor, signAuthorization, sourceRef, write, coordinatorModule, workload, workloadFile, runtime, controller, provider };
+  return { root, state, execution, invoke, requestFor, signAuthorization, sourceRef, write, coordinatorModule, workload, workloadFile, runtime, controller, provider };
 }
 
 async function withFixtureCaller(callback) {
@@ -143,7 +154,7 @@ test("matching prepared crash recovery is terminal, removes an abandoned stage, 
     const operationId = fixture.coordinatorModule.sha256({ project: fixture.root, run_id: "crash-run", action: "execute-sealed-workload", key_id: "fixture", nonce: "crash-nonce" });
     const nonceFile = path.join(fixture.state, "nonces", `${fixture.coordinatorModule.sha256("fixture\0crash-nonce")}.json`);
     fs.writeFileSync(nonceFile, `${JSON.stringify({ schema_version: "1.0", operation_id: operationId, authorization_sha256: authorizationSha256, key_id: "fixture", nonce: "crash-nonce", request_sha256: envelope.request_sha256, status: "prepared" })}\n`);
-    const abandonedStage = path.join(fixture.state, "stages", operationId); fs.mkdirSync(abandonedStage); fs.writeFileSync(path.join(abandonedStage, "private"), "never launch");
+    const abandonedStage = path.join(fixture.execution, operationId); fs.mkdirSync(abandonedStage); fs.writeFileSync(path.join(abandonedStage, "private"), "never launch");
     const first = await fixture.invoke("crash-run", authorization);
     assert.equal(first.result.safe_result.status, "interrupted");
     assert.equal(fs.existsSync(abandonedStage), false, "prepared recovery removes private staging bytes before recording interruption");
@@ -171,7 +182,7 @@ for (const [label, controllerScript, options] of [
   ["malformed result", "process.stdout.write('not-json\\n');", {}],
   ["timeout", "setInterval(() => {}, 1000);", { maxRuntimeMs: 50 }],
   ["output cap", "process.stdout.write('x'.repeat(4096));", { maxOutputBytes: 128 }],
-  ["spawn failure", null, { instrumentSource: (source) => source.replace("child = spawn(runtime, argv,", "throw new Error(\"fixture spawn failure\"); child = spawn(runtime, argv,") }],
+  ["spawn failure", null, { instrumentSource: (source) => source.replace("child = spawn(PRIVILEGE_DROP_LAUNCHER,", "throw new Error(\"fixture spawn failure\"); child = spawn(PRIVILEGE_DROP_LAUNCHER,") }],
 ]) test(`sealed ${label} writes one terminal receipt, consumes the nonce, and removes staging`, async () => {
   await withFixtureCaller(async () => {
     const fixture = await sealedCoordinatorFixture({ controllerScript, runtimeBytes: fs.readFileSync(process.execPath), ...options });

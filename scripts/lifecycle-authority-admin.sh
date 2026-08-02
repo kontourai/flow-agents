@@ -2,6 +2,7 @@
 set -eu
 action="${1:-}"
 source_file="${2:-packaging/lifecycle-authority/coordinator.mjs}"
+drop_source="$(dirname "$source_file")/drop-privileges.c"
 runtime_file="$(dirname "$source_file")/runtime-v1.mjs"
 reducer_pin_file="$(dirname "$source_file")/flow-reducer-v1.json"
 flow_node_modules="${3:-node_modules}"
@@ -21,6 +22,9 @@ sudoers_file="$sudoers_dir/kontourai-flow-agents-lifecycle-authority-v1"
 sudoers_backup="$sudoers_file.previous"
 authority_config_root="/etc/kontourai/flow-agents-lifecycle-authority-v1"
 authority_state_root="/var/lib/kontourai/flow-agents-lifecycle-authority-v1"
+authority_execution_root="/var/lib/kontourai/flow-agents-lifecycle-execution-v1"
+drop_target="$install_dir/flow-agents-lifecycle-drop-v1"
+drop_backup="$install_dir/flow-agents-lifecycle-drop-v1.previous"
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
 ensure_operator_group() {
   case "$(uname -s)" in
@@ -56,7 +60,7 @@ install_sudoers_rule() {
 }
 case "$action" in
   install|upgrade)
-    test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file"
+    test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file" && test -f "$drop_source"
     test -f "$flow_node_modules/@kontourai/flow/package.json" && test -f "$flow_node_modules/@kontourai/flow/dist/index.js"
     node - "$flow_node_modules" "$reducer_pin_file" <<'NODE'
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
@@ -98,14 +102,22 @@ NODE
     # parents here so a caller can never race directory ownership during a
     # signed execution.  Individual stages remain root-owned and are deleted
     # by the coordinator on every terminal path.
-    for authority_dir in "$authority_config_root" "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks" "$authority_state_root/stages"; do
+    for authority_dir in "$authority_config_root" "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks" "$authority_execution_root"; do
       test ! -L "$authority_dir"
       mkdir -p "$authority_dir"
       test ! -L "$authority_dir"
       chown root:wheel "$authority_dir" 2>/dev/null || chown root:root "$authority_dir"
     done
     chmod 755 "$authority_config_root"
-    chmod 700 "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks" "$authority_state_root/stages"
+    chmod 700 "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks"
+    chmod 711 "$authority_execution_root"
+    test ! -L "$authority_config_root/keys.json" && test ! -L "$authority_config_root/completion-signing-key.pem" && test ! -L "$authority_config_root/completion-verification-key.pem"
+    for authority_file in "$authority_config_root/keys.json" "$authority_config_root/completion-signing-key.pem" "$authority_config_root/completion-verification-key.pem"; do
+      if [ -e "$authority_file" ]; then
+        test "$(stat -f '%u' "$authority_file" 2>/dev/null || stat -c '%u' "$authority_file")" = 0
+        test $(( $(stat -f '%Lp' "$authority_file" 2>/dev/null || stat -c '%a' "$authority_file") & 22 )) = 0
+      fi
+    done
     flow_stage="$target_flow.$$"
     mkdir -p "$flow_stage"
     cp -R "$flow_node_modules" "$flow_stage/node_modules"
@@ -113,6 +125,7 @@ NODE
     chmod -R go-w "$flow_stage"
     node "$closure_verifier" "$flow_stage/node_modules" "$reducer_pin_file"
     if [ -f "$target" ]; then cp -p "$target" "$backup"; fi
+    if [ -f "$drop_target" ]; then cp -p "$drop_target" "$drop_backup"; fi
     if [ -f "$target_runtime" ]; then cp -p "$target_runtime" "$backup_runtime"; fi
     if [ -f "$target_pin" ]; then cp -p "$target_pin" "$backup_pin"; fi
     if [ -d "$target_flow" ]; then rm -rf "$backup_flow"; mv "$target_flow" "$backup_flow"; fi
@@ -120,6 +133,10 @@ NODE
     cp "$source_file" "$temporary"
     chown root:wheel "$temporary" 2>/dev/null || chown root:root "$temporary"
     chmod 755 "$temporary"
+    trap 'rm -f "$drop_target.$$" "$temporary"' EXIT HUP INT TERM
+    cc -O2 -Wall -Wextra -o "$drop_target.$$" "$drop_source"
+    chown root:wheel "$drop_target.$$" 2>/dev/null || chown root:root "$drop_target.$$"
+    chmod 755 "$drop_target.$$"
     cp "$runtime_file" "$target_runtime.$$"
     chown root:wheel "$target_runtime.$$" 2>/dev/null || chown root:root "$target_runtime.$$"
     chmod 644 "$target_runtime.$$"
@@ -130,13 +147,18 @@ NODE
     mv -f "$target_pin.$$" "$target_pin"
     mv "$flow_stage" "$target_flow"
     mv -f "$temporary" "$target"
+    mv -f "$drop_target.$$" "$drop_target"
+    trap - EXIT HUP INT TERM
     install_sudoers_rule
     ;;
   rollback)
-    test -f "$backup" && test -f "$backup_runtime" && test -f "$backup_pin" && test -d "$backup_flow"
+    test -f "$backup" && test -f "$backup_runtime" && test -f "$backup_pin" && test -d "$backup_flow" && test -f "$drop_backup"
     mv -f "$backup" "$target"
     chown root:wheel "$target" 2>/dev/null || chown root:root "$target"
     chmod 755 "$target"
+    mv -f "$drop_backup" "$drop_target"
+    chown root:wheel "$drop_target" 2>/dev/null || chown root:root "$drop_target"
+    chmod 755 "$drop_target"
     mv -f "$backup_runtime" "$target_runtime"
     chown root:wheel "$target_runtime" 2>/dev/null || chown root:root "$target_runtime"
     chmod 644 "$target_runtime"
