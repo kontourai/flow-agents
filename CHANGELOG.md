@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.7.0](https://github.com/kontourai/flow-agents/compare/v5.6.0...v5.7.0) (2026-08-02)
+
+
+### Features
+
+* add sealed evaluation lifecycle authority ([#1147](https://github.com/kontourai/flow-agents/issues/1147)) ([3f795f5](https://github.com/kontourai/flow-agents/commit/3f795f5b19cc84de1acce46e31772309a7d5d03c))
+* **config:** add protected committed Kit policy ([#1138](https://github.com/kontourai/flow-agents/issues/1138)) ([80fff77](https://github.com/kontourai/flow-agents/commit/80fff770721051fe05975307068074e096299625))
+* **flow:** compose multiple kit flows ([#1136](https://github.com/kontourai/flow-agents/issues/1136)) ([6bef2f4](https://github.com/kontourai/flow-agents/commit/6bef2f419a48d154a0e8d464505208f73d45caf2))
+
+
+### Fixes
+
+* export lifecycle result digest ([#1148](https://github.com/kontourai/flow-agents/issues/1148)) ([d5226fc](https://github.com/kontourai/flow-agents/commit/d5226fc483b5e629e147fb5ade124040a46ef1a0))
+* expose minimal sealed execution surface ([#1149](https://github.com/kontourai/flow-agents/issues/1149)) ([ed8e79b](https://github.com/kontourai/flow-agents/commit/ed8e79b490b4e1c1a82459d01b3c126e74622fae))
+* **workflow:** accept complete public evidence over planning placeholders ([#1128](https://github.com/kontourai/flow-agents/issues/1128)) ([56b6c02](https://github.com/kontourai/flow-agents/commit/56b6c02ad2e32bc500ebc0b009b4e6078663b2b1))
+* **workflow:** admit coordinated receipt evidence ([#1150](https://github.com/kontourai/flow-agents/issues/1150)) ([618a79c](https://github.com/kontourai/flow-agents/commit/618a79c073118092fa1021001af444f76aa44e13))
+
 ## [5.6.0](https://github.com/kontourai/flow-agents/compare/v5.5.0...v5.6.0) (2026-08-01)
 
 
