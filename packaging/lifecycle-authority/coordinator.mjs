@@ -44,7 +44,28 @@ const ACTION_FIELDS = {
   "publish-provisional-delivery": ["action", "project_root", "session_dir", "authorization_file"],
   "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
   "authorize-workflow-evidence": ["action", "project_root", "session_dir", "authorization_file"],
+  "execute-sealed-workload": ["action", "project_root", "session_dir", "authorization_file", "sealed_workload_file"],
 };
+// This is deliberately a closed launcher contract.  The caller supplies a
+// convenient request file, but every byte which can affect execution is
+// covered by this authorization and re-read through an O_NOFOLLOW descriptor
+// before the coordinator creates its root-owned stage.
+const SEALED_EXECUTION_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "workload_sha256",
+  "runner_kind", "runner_schema_version", "runner_entrypoint", "max_staged_bytes",
+  "max_runtime_ms", "max_output_bytes", "max_provider_calls", "max_cost_microusd", "max_tokens", "issued_at", "expires_at", "nonce", "signature",
+];
+const SEALED_EXECUTION_WORKLOAD_FIELDS = [
+  "schema_version", "kind", "runtime", "controller", "provider", "inputs", "argv", "environment",
+];
+const SEALED_EXECUTION_SOURCE_FIELDS = ["path", "sha256", "bytes"];
+const SEALED_EXECUTION_BUNDLE_SOURCE_FIELDS = ["path", "sha256", "bytes", "logical_path"];
+const SEALED_EXECUTION_HARD_MAX_STAGE_BYTES = 384 * 1024 * 1024;
+const SEALED_EXECUTION_HARD_MAX_RUNTIME_MS = 30 * 60_000;
+const SEALED_EXECUTION_HARD_MAX_OUTPUT_BYTES = 256 * 1024;
+const SEALED_EXECUTION_HARD_MAX_PROVIDER_CALLS = 64;
+const SEALED_EXECUTION_HARD_MAX_COST_MICROUSD = 5_000_000;
+const SEALED_EXECUTION_HARD_MAX_TOKENS = 750_000;
 const PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation",
   "published_head_sha", "provider_record_id", "provider_observation_sha256",
@@ -222,13 +243,15 @@ function assertPrivilegedAuthorizationShape(authorization) {
         ? EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS
       : authorization.operation === "authorize-workflow-evidence"
         ? HOST_WORKFLOW_AUTHORIZATION_FIELDS
-      : null;
+        : authorization.operation === "execute-sealed-workload"
+          ? SEALED_EXECUTION_AUTHORIZATION_FIELDS
+        : null;
   if (!fields) return authorization;
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
   exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   if (authorization.operation !== "recover-exact-current-completion") {
     const issuedAt = Date.parse(
-      authorization.operation === "authorize-workflow-evidence"
+      authorization.operation === "authorize-workflow-evidence" || authorization.operation === "execute-sealed-workload"
         ? authorization.issued_at
         : authorization.requested_at,
     );
@@ -245,6 +268,36 @@ function assertPrivilegedAuthorizationShape(authorization) {
     }
     for (const field of ["actor_key", "binding_actor_key", "binding_id", "nonce"]) {
       if (typeof authorization[field] !== "string" || !authorization[field]) throw new Error(`host workflow authorization ${field} is invalid`);
+    }
+  }
+  if (authorization.operation === "execute-sealed-workload") {
+    if (authorization.schema_version !== PROTOCOL_VERSION || authorization.operation !== "execute-sealed-workload"
+        || !["project_root", "run_id", "subject", "nonce"].every((field) => typeof authorization[field] === "string" && authorization[field])) {
+      throw new Error("sealed execution authorization identity is invalid");
+    }
+    if (authorization.runner_kind !== "flow-agents.sealed-exec.v1"
+        || authorization.runner_schema_version !== "1.0"
+        || authorization.runner_entrypoint !== "coordinator:sealed-runner-v1") {
+      throw new Error("sealed execution authorization selects an unsupported runner");
+    }
+    for (const field of ["workload_sha256"]) if (!/^[a-f0-9]{64}$/.test(String(authorization[field]))) {
+      throw new Error(`sealed execution authorization ${field} is invalid`);
+    }
+    for (const field of ["max_staged_bytes", "max_runtime_ms", "max_output_bytes", "max_provider_calls", "max_cost_microusd", "max_tokens"]) {
+      if (!Number.isSafeInteger(authorization[field]) || authorization[field] <= 0) throw new Error(`sealed execution authorization ${field} is invalid`);
+    }
+    if (authorization.max_staged_bytes > SEALED_EXECUTION_HARD_MAX_STAGE_BYTES
+        || authorization.max_runtime_ms > SEALED_EXECUTION_HARD_MAX_RUNTIME_MS
+        || authorization.max_output_bytes > SEALED_EXECUTION_HARD_MAX_OUTPUT_BYTES
+        || authorization.max_provider_calls > SEALED_EXECUTION_HARD_MAX_PROVIDER_CALLS
+        || authorization.max_cost_microusd > SEALED_EXECUTION_HARD_MAX_COST_MICROUSD
+        || authorization.max_tokens > SEALED_EXECUTION_HARD_MAX_TOKENS) {
+      throw new Error("sealed execution authorization exceeds coordinator safety caps");
+    }
+    const issued = Date.parse(authorization.issued_at), expires = Date.parse(authorization.expires_at);
+    if (!Number.isFinite(issued) || !Number.isFinite(expires) || expires < issued || issued > Date.now() + 5 * 60_000
+        || expires - issued > 60 * 60_000 || Date.now() > expires) {
+      throw new Error("sealed execution authorization time window is invalid");
     }
   }
   return authorization;
@@ -2141,7 +2194,9 @@ function operationIdentity(envelope, authorization) {
 }
 function durableJson(file, label) { return JSON.parse(protectedRegularFile(file, label, 256 * 1024).toString("utf8")); }
 function durableCompletionRecord(prior, envelope, identity, authorizationSha256) {
-  exact(prior, ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
+  exact(prior, envelope.action === "execute-sealed-workload"
+    ? ["authorization_sha256", "request_sha256", "result_core_sha256", "safe_result", "completion"]
+    : ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
   if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
   const completionRecord = prior.completion;
   const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
@@ -2288,7 +2343,249 @@ async function interactiveExactCurrentRecoveryInvocation(payload, identity, sign
     throw error;
   }
 }
+function sealedSource(value, label) {
+  exact(value, SEALED_EXECUTION_SOURCE_FIELDS, `sealed execution ${label}`);
+  if (typeof value.path !== "string" || !path.isAbsolute(value.path) || value.path.includes("\0")
+      || !/^[a-f0-9]{64}$/.test(value.sha256) || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
+    throw new Error(`sealed execution ${label} is invalid`);
+  }
+  return value;
+}
+function sealedBundleSource(value, label) {
+  exact(value, SEALED_EXECUTION_BUNDLE_SOURCE_FIELDS, `sealed execution ${label}`);
+  const source = { path: value.path, sha256: value.sha256, bytes: value.bytes };
+  sealedSource(source, label);
+  const logicalPath = value.logical_path;
+  if (typeof logicalPath !== "string" || logicalPath.includes("\0") || path.posix.isAbsolute(logicalPath)
+      || path.posix.normalize(logicalPath) !== logicalPath || logicalPath.split("/").some((part) => !part || part === "." || part === "..")
+      || !/^[A-Za-z0-9._/-]{1,512}$/.test(logicalPath)) throw new Error(`sealed execution ${label} logical path is invalid`);
+  return { ...source, logical_path: logicalPath };
+}
+export function sealedWorkload(bytes, authorization) {
+  if (bytes.length > 1024 * 1024 || sha256(bytes) !== authorization.workload_sha256) {
+    throw new Error("sealed execution workload digest is invalid");
+  }
+  const value = JSON.parse(bytes.toString("utf8"));
+  exact(value, SEALED_EXECUTION_WORKLOAD_FIELDS, "sealed execution workload");
+  if (value.schema_version !== "1.0" || value.kind !== "flow-agents.sealed-workload.v1"
+      || !Array.isArray(value.inputs) || !Array.isArray(value.argv) || !record(value.environment)) {
+    throw new Error("sealed execution workload identity is invalid");
+  }
+  const runtime = sealedSource(value.runtime, "runtime");
+  const controller = sealedBundleSource(value.controller, "controller");
+  const provider = sealedSource(value.provider, "provider");
+  const inputs = value.inputs.map((input, index) => {
+    if (!record(input) || canonicalJson(Object.keys(input).sort()) !== canonicalJson(["id", "source"].sort())
+        || typeof input.id !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(input.id)) throw new Error(`sealed execution input ${index} is invalid`);
+    return { id: input.id, source: sealedBundleSource(input.source, `input ${input.id}`) };
+  });
+  if (new Set(inputs.map((input) => input.id)).size !== inputs.length
+      || new Set([controller.logical_path, ...inputs.map((input) => input.source.logical_path)]).size !== inputs.length + 1
+      || value.argv.some((argument) => typeof argument !== "string" || Buffer.byteLength(argument) > 4096)
+      || Object.keys(value.environment).length !== 0) {
+    throw new Error("sealed execution workload arguments or environment are invalid");
+  }
+  const declaredBytes = [runtime, controller, provider, ...inputs.map((input) => input.source)].reduce((sum, source) => sum + source.bytes, 0);
+  if (!Number.isSafeInteger(declaredBytes) || declaredBytes > authorization.max_staged_bytes) {
+    throw new Error("sealed execution workload exceeds its signed staging budget");
+  }
+  return { runtime, controller, provider, inputs, argv: value.argv, environment: value.environment, declaredBytes };
+}
+function readSealedSource(source, label) {
+  const descriptor = fs.openSync(source.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size !== source.bytes || stat.size > SEALED_EXECUTION_HARD_MAX_STAGE_BYTES) {
+      throw new Error(`sealed execution ${label} source is not the authorized regular file`);
+    }
+    const bytes = fs.readFileSync(descriptor);
+    if (sha256(bytes) !== source.sha256) throw new Error(`sealed execution ${label} source digest changed`);
+    return bytes;
+  } finally { fs.closeSync(descriptor); }
+}
+function stageSealedDirectory(stage, relative, identity) {
+  const target = path.join(stage, relative);
+  fs.mkdirSync(target, { recursive: false, mode: 0o710 });
+  fs.chownSync(target, 0, identity.gid); fs.chmodSync(target, 0o710);
+  return target;
+}
+function stageSealedSource(stage, relative, source, label, mode, identity) {
+  const bytes = readSealedSource(source, label);
+  const target = path.join(stage, relative);
+  if (path.dirname(target) !== stage) {
+    let parent = "";
+    for (const component of path.relative(stage, path.dirname(target)).split(path.sep)) {
+      parent = parent ? path.join(parent, component) : component;
+      if (!fs.existsSync(path.join(stage, parent))) stageSealedDirectory(stage, parent, identity);
+    }
+  }
+  const descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode);
+  try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  fs.chownSync(target, 0, identity.gid);
+  fs.chmodSync(target, mode);
+  return target;
+}
+function sealedArgv(argv, controller, provider, inputs) {
+  return argv.map((argument) => {
+    if (argument === "${SEALED_CONTROLLER}") return controller;
+    if (argument === "${SEALED_PROVIDER}") return provider;
+    const match = /^\$\{SEALED_INPUT:([a-z][a-z0-9_-]{0,63})\}$/.exec(argument);
+    if (!match) return argument;
+    const input = inputs.get(match[1]);
+    if (!input) throw new Error("sealed execution argument references an undeclared input");
+    return input;
+  });
+}
+export function sealedProjection(value) {
+  exact(value, ["schema_version", "kind", "outcome", "metrics", "artifacts", "policy_chain"], "sealed execution projection");
+  if (value.schema_version !== "1.0" || value.kind !== "flow-agents.sealed-result.v1"
+      || !["ok", "threshold_fail", "invalid", "execution_error"].includes(value.outcome)
+      || !record(value.metrics) || !Array.isArray(value.artifacts) || !Array.isArray(value.policy_chain)) {
+    throw new Error("sealed execution projection identity is invalid");
+  }
+  for (const [key, metric] of Object.entries(value.metrics)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key) || !(typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric)))) {
+      throw new Error("sealed execution projection metrics must be finite numeric or boolean values");
+    }
+  }
+  if (Object.keys(value.metrics).length > 128 || value.artifacts.length > 128 || value.policy_chain.length > 128) throw new Error("sealed execution projection exceeds its bounded shape");
+  let artifactBytes = 0;
+  for (const [label, values] of [["artifact", value.artifacts], ["policy", value.policy_chain]]) for (const item of values) {
+    exact(item, label === "artifact" ? ["id", "sha256", "bytes", "media_type", "content_base64"] : ["id", "sha256"], `sealed execution ${label}`);
+    if (typeof item.id !== "string" || !/^[a-z][a-z0-9_.-]{0,127}$/.test(item.id) || !/^[a-f0-9]{64}$/.test(item.sha256)
+        || (label === "artifact" && (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 64 * 1024
+          || item.media_type !== "application/json" || typeof item.content_base64 !== "string"))) {
+      throw new Error(`sealed execution ${label} is invalid`);
+    }
+    if (label === "artifact") {
+      const bytes = Buffer.from(item.content_base64, "base64");
+      if (bytes.toString("base64") !== item.content_base64 || bytes.length !== item.bytes || sha256(bytes) !== item.sha256) throw new Error("sealed execution artifact content does not match its address");
+      artifactBytes += bytes.length;
+      let parsed;
+      try { parsed = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("sealed execution artifact content must be JSON"); }
+      const walk = (candidate) => {
+        if (Array.isArray(candidate)) return candidate.forEach(walk);
+        if (!record(candidate)) return;
+        for (const [key, nested] of Object.entries(candidate)) {
+          if (/(prompt|response|reasoning|message|transcript|secret|token|api[_-]?key|authorization)/i.test(key)) throw new Error("sealed execution artifact contains forbidden raw/private material");
+          walk(nested);
+        }
+      };
+      walk(parsed);
+    }
+  }
+  if (artifactBytes > 128 * 1024) throw new Error("sealed execution projection artifact content exceeds its bounded limit");
+  return value;
+}
+async function runSealedStage(runtime, argv, environment, identity, authorization) {
+  const started = Date.now(); let timedOut = false; let limited = false;
+  const stdout = []; const stderr = []; let stdoutBytes = 0; let stderrBytes = 0;
+  const append = (target, chunk) => {
+    const available = authorization.max_output_bytes - stdoutBytes - stderrBytes;
+    if (available <= 0) { limited = true; return; }
+    const kept = Buffer.from(chunk).subarray(0, available); target.push(kept);
+    if (target === stdout) stdoutBytes += kept.length; else stderrBytes += kept.length;
+    if (kept.length !== chunk.length) limited = true;
+  };
+  const result = await new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(runtime, argv, { cwd: path.dirname(runtime), uid: identity.uid, gid: identity.gid, detached: process.platform !== "win32",
+        env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C", ...environment }, stdio: ["ignore", "pipe", "pipe"] });
+    } catch { resolve({ status: "spawn_error", exit_code: null }); return; }
+    const terminate = () => {
+      try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); }
+      catch { child.kill("SIGKILL"); }
+    };
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, authorization.max_runtime_ms);
+    child.stdout.on("data", (chunk) => { append(stdout, chunk); if (limited) terminate(); });
+    child.stderr.on("data", (chunk) => { append(stderr, chunk); if (limited) terminate(); });
+    child.once("error", () => resolve({ status: "spawn_error", exit_code: null }));
+    child.once("close", (code) => { clearTimeout(timer); resolve({ status: timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
+  });
+  const stdoutValue = Buffer.concat(stdout);
+  let projection = null; let status = result.status;
+  if (status === "ok") {
+    try {
+      const text = stdoutValue.toString("utf8");
+      if (!text.endsWith("\n") || text.slice(0, -1).includes("\n") || text.slice(0, -1).includes("\r")) throw new Error("sealed result must be one JSON line");
+      projection = sealedProjection(JSON.parse(text.slice(0, -1)));
+    } catch { status = "malformed_result"; }
+  }
+  const safe = { ...result, status, runtime_ms: Math.min(Date.now() - started, authorization.max_runtime_ms), stdout_bytes: stdoutBytes, stderr_bytes: stderrBytes,
+    projection, projection_sha256: projection === null ? null : sha256(projection), stdout_sha256: sha256(stdoutValue), stderr_sha256: sha256(Buffer.concat(stderr)) };
+  for (const chunk of [...stdout, ...stderr]) chunk.fill(0);
+  return safe;
+}
+async function processSealedExecution(envelope) {
+  const authorization = verifyAuthorization(path.resolve(envelope.request.authorization_file), { requireCurrentExpiry: true });
+  const identity = operationIdentity(envelope, authorization);
+  if (authorization.operation !== envelope.action || authorization.project_root !== path.resolve(envelope.request.project_root) || authorization.run_id !== identity.runId) {
+    throw new Error("sealed execution authorization does not bind the requested workload");
+  }
+  const workloadBytes = protectedRegularFile(path.resolve(envelope.request.sealed_workload_file), "sealed execution workload", 1024 * 1024);
+  const workload = sealedWorkload(workloadBytes, authorization);
+  const authorizationSha256 = sha256(canonicalJson(authorization));
+  const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);
+  const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
+  const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+  const stage = path.join(STATE_ROOT, "stages", identity.id);
+  // The nonce is global to its signing key, not to a workflow run.  Acquire it
+  // before the per-run lock so two sessions cannot both observe an absent
+  // nonce and rename over one another's prepared record.
+  const nonceLockId = sha256({ sealed_nonce_key: identity.keyId, nonce: identity.nonce });
+  return withDurableLock(nonceLockId, () => withDurableLock(sha256({ project: identity.project, run_id: identity.runId }), async () => {
+    if (fs.existsSync(completionFile)) {
+      const prior = durableJson(completionFile, "sealed execution completion record");
+      const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
+      reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
+      return { completionRecord, replayed: true, safeResult: prior.safe_result };
+    }
+    if (fs.existsSync(nonceFile)) {
+      const prior = durableJson(nonceFile, "sealed execution nonce record");
+      assertPreparedNonceRecord(prior, prepared);
+      // A power loss after prepare is terminal: never replay a provider call.
+      // Remove the abandoned root stage and seal an indeterminate receipt.
+      fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });
+      const safeResult = { status: "interrupted", exit_code: null, runtime_ms: 0, stdout_bytes: 0, stderr_bytes: 0, projection: null, projection_sha256: null, stdout_sha256: sha256(Buffer.alloc(0)), stderr_sha256: sha256(Buffer.alloc(0)) };
+      const resultCoreSha256 = sha256({ authorization_sha256: authorizationSha256, safe_result: safeResult });
+      const completionRecord = completion(envelope, { runId: identity.runId }, "applied", resultCoreSha256);
+      atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
+      atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, resultCoreSha256))}\n`);
+      return { completionRecord, replayed: false, safeResult };
+    }
+    // Every validation above is intentionally before this mutation: malformed
+    // authorizations cannot allocate a stage or consume a one-shot nonce.
+    atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    const caller = callerIdentity();
+    let safeResult;
+    try {
+      fs.mkdirSync(stage, { recursive: false, mode: 0o710 }); fs.chownSync(stage, 0, caller.gid); fs.chmodSync(stage, 0o710);
+      const runtime = stageSealedSource(stage, "runtime", workload.runtime, "runtime", 0o550, caller);
+      const controller = stageSealedSource(stage, path.posix.join("bundle", workload.controller.logical_path), workload.controller, "controller", 0o440, caller);
+      const provider = stageSealedSource(stage, "provider", workload.provider, "provider", 0o550, caller);
+      const inputs = new Map(workload.inputs.map((input) => [input.id, stageSealedSource(stage, path.posix.join("bundle", input.source.logical_path), input.source, `input ${input.id}`, 0o440, caller)]));
+      const manifest = path.join(stage, "invocation-manifest.json");
+      const manifestBytes = Buffer.from(`${canonicalJson({ schema_version: "1.0", kind: "flow-agents.sealed-invocation.v1", authorization_sha256: authorizationSha256, runner: authorization.runner_entrypoint, budgets: { max_runtime_ms: authorization.max_runtime_ms, max_output_bytes: authorization.max_output_bytes, max_provider_calls: authorization.max_provider_calls, max_cost_microusd: authorization.max_cost_microusd, max_tokens: authorization.max_tokens }, runtime_sha256: workload.runtime.sha256, controller: { logical_path: workload.controller.logical_path, sha256: workload.controller.sha256 }, provider_sha256: workload.provider.sha256, inputs: workload.inputs.map((input) => ({ id: input.id, logical_path: input.source.logical_path, sha256: input.source.sha256 })) })}\n`);
+      const manifestFd = fs.openSync(manifest, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o440);
+      try { fs.writeFileSync(manifestFd, manifestBytes); fs.fsyncSync(manifestFd); } finally { fs.closeSync(manifestFd); }
+      fs.chownSync(manifest, 0, caller.gid); fs.chmodSync(manifest, 0o440);
+      safeResult = await runSealedStage(runtime, sealedArgv(workload.argv, controller, provider, inputs), { ...workload.environment, SEALED_PROVIDER_PATH: provider, SEALED_INVOCATION_MANIFEST: manifest }, caller, authorization);
+    } finally {
+      // The stage is never evidence.  Completion and nonce state retain only
+      // bounded metadata/digests, and cleanup runs for success, failure, and
+      // launch errors alike.
+      fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });
+    }
+    const resultCoreSha256 = sha256({ authorization_sha256: authorizationSha256, safe_result: safeResult });
+    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", resultCoreSha256);
+    atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
+    atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, resultCoreSha256))}\n`);
+    return { completionRecord, replayed: false, safeResult };
+  }));
+}
 async function processRootOperation(envelope) {
+  if (envelope.action === "execute-sealed-workload") return processSealedExecution(envelope);
   const authorizationPath = path.resolve(envelope.request.authorization_file);
   // Authenticate and bind before consulting durable state. Expiry is a live
   // permission check, not a reason to lose an exact completed/prepared recovery.
@@ -2441,7 +2738,10 @@ async function processRootOperation(envelope) {
   });
 }
 function response(envelope, outcome) {
-  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord } };
+  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: {
+    run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord,
+    ...(envelope.action === "execute-sealed-workload" ? { safe_result: outcome.safeResult } : {}),
+  } };
 }
 function provisionalReceiptEventIndex(events, paths, completion, label) {
   const index = events.findIndex((event) =>

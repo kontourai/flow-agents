@@ -19,6 +19,8 @@ backup_flow="$install_dir/flow-reducer.previous"
 sudoers_dir="/etc/sudoers.d"
 sudoers_file="$sudoers_dir/kontourai-flow-agents-lifecycle-authority-v1"
 sudoers_backup="$sudoers_file.previous"
+authority_config_root="/etc/kontourai/flow-agents-lifecycle-authority-v1"
+authority_state_root="/var/lib/kontourai/flow-agents-lifecycle-authority-v1"
 if [ "$(id -u)" -ne 0 ]; then echo "lifecycle authority administration requires root" >&2; exit 77; fi
 ensure_operator_group() {
   case "$(uname -s)" in
@@ -92,6 +94,18 @@ NODE
     mkdir -p "$install_dir"
     chown root:wheel "$install_dir" 2>/dev/null || chown root:root "$install_dir"
     chmod 755 "$install_dir"
+    # The coordinator creates one-shot stages below this root.  Provision the
+    # parents here so a caller can never race directory ownership during a
+    # signed execution.  Individual stages remain root-owned and are deleted
+    # by the coordinator on every terminal path.
+    for authority_dir in "$authority_config_root" "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks" "$authority_state_root/stages"; do
+      test ! -L "$authority_dir"
+      mkdir -p "$authority_dir"
+      test ! -L "$authority_dir"
+      chown root:wheel "$authority_dir" 2>/dev/null || chown root:root "$authority_dir"
+    done
+    chmod 755 "$authority_config_root"
+    chmod 700 "$authority_state_root" "$authority_state_root/nonces" "$authority_state_root/completions" "$authority_state_root/locks" "$authority_state_root/stages"
     flow_stage="$target_flow.$$"
     mkdir -p "$flow_stage"
     cp -R "$flow_node_modules" "$flow_stage/node_modules"

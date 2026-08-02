@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
 
@@ -12,12 +12,45 @@ const {
   invokeExternalLifecycleAuthority,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
+  validateSealedExecutionSafeResult,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
   verifyHistoricalLifecycleAuthorityCompletion,
   verifyLifecycleAuthorityCompletion,
   verifyProvisionalDeliveryLifecycleCompletion,
 } = lifecycleAuthority;
+
+function sealedSafeResult(overrides = {}) {
+  const artifactContent = Buffer.from(JSON.stringify({ calibration: { primary_agreement: 1, policy_digest: "a".repeat(64) } }));
+  const projection = {
+    schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "threshold_fail",
+    metrics: { primary_agreement: 1, validated_calls: 32 },
+    artifacts: [{ id: "r4.policy", sha256: createHash("sha256").update(artifactContent).digest("hex"), bytes: artifactContent.length, media_type: "application/json", content_base64: artifactContent.toString("base64") }],
+    policy_chain: [{ id: "r4-preregistered-policy", sha256: "b".repeat(64) }],
+  };
+  return {
+    status: "ok", exit_code: 0, runtime_ms: 52_000, stdout_bytes: 123, stderr_bytes: 0,
+    stdout_sha256: "c".repeat(64), stderr_sha256: "d".repeat(64),
+    projection, projection_sha256: lifecycleAuthorityResultDigest(projection), ...overrides,
+  };
+}
+
+test("sealed execution clients reject projection tampering, size-cap bypasses, and private result material", () => {
+  assert.equal(validateSealedExecutionSafeResult(sealedSafeResult()).status, "ok");
+  const privateArtifact = Buffer.from(JSON.stringify({ transcript: "must not leave the sealed stage" }));
+  const privateProjection = sealedSafeResult();
+  privateProjection.projection.artifacts = [{ id: "private", sha256: createHash("sha256").update(privateArtifact).digest("hex"), bytes: privateArtifact.length, media_type: "application/json", content_base64: privateArtifact.toString("base64") }];
+  privateProjection.projection_sha256 = lifecycleAuthorityResultDigest(privateProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(privateProjection), /forbidden raw\/private/);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ stdout_bytes: 256 * 1024, stderr_bytes: 1 })), /sealed execution result is invalid/);
+  const oversized = Buffer.from(JSON.stringify({ policy: "x".repeat(65 * 1024) }));
+  const oversizedProjection = sealedSafeResult();
+  oversizedProjection.projection.artifacts = [{ id: "oversized", sha256: createHash("sha256").update(oversized).digest("hex"), bytes: oversized.length, media_type: "application/json", content_base64: oversized.toString("base64") }];
+  oversizedProjection.projection_sha256 = lifecycleAuthorityResultDigest(oversizedProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(oversizedProjection), /sealed execution artifact is invalid/);
+  assert.throws(() => validateSealedExecutionSafeResult({ ...sealedSafeResult(), unexpected: true }), /unexpected or missing fields/);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ projection_sha256: "0".repeat(64) })), /projection digest/);
+});
 
 const action = "cancel";
 const digest = "a".repeat(64);
