@@ -126,6 +126,21 @@ function successOutput(event, additionalContext = '') {
       },
     };
   }
+  if (event === 'PreToolUse' && context) {
+    // #1099: a PreToolUse hook that ALLOWS but has something to say had no channel — the
+    // guidance was computed and then dropped here, so the only way to be heard on this event was
+    // to deny. That is precisely the pressure that turns an advisory into a block. Carried as
+    // `additionalContext` and deliberately WITHOUT a `permissionDecision`: an explicit `allow`
+    // would bypass the user's own permission rules as a side effect of wanting to print a line.
+    return {
+      continue: true,
+      suppressOutput: false,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: context,
+      },
+    };
+  }
   return { continue: true, suppressOutput: true };
 }
 

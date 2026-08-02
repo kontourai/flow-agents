@@ -2721,9 +2721,57 @@ function assertCanonicalBuilderArtifactRoot(root: string, flowId: "builder.build
   }
 }
 
+/**
+ * Resolve the session slug for ensure-session — the subject id, and therefore the liveness
+ * COLLISION KEY (#1099).
+ *
+ * The rule: when the session is bound to a provider-backed Work Item, the subject id is DERIVED
+ * from that item (`workItemSlug`), never chosen. `--task-slug` may agree with the derivation or
+ * be omitted; it may not disagree. Before this, `--task-slug` simply won, which is how one repo
+ * accumulated 95 subjects across four naming schemes — and why two lanes on the same issue could
+ * pick `octo-demo-1254` and `s1254-tokens` and never see each other in `freshHolders`.
+ * (The public `workflow start` path already refused a free `--task-slug` for a provider Work Item;
+ * this closes the same hole on the direct sidecar path, which is what real sessions call.)
+ *
+ * Free text stays available, in its OWN namespace rather than as the default: no `--work-item`
+ * means a `local:<slug>` Work Item, joinable only with itself, which is the honest answer for work
+ * with genuinely no backlog item.
+ *
+ * MIGRATION — nothing is renamed. An EXISTING session directory is grandfathered: a session
+ * already created under a legacy slug keeps resolving, is never refused on resume, and still
+ * collide-detects, because the alias join keys off the Work Item ref the session already records
+ * (see scripts/hooks/lib/subject-identity.js). Only the creation of a NEW divergent subject is
+ * refused, which is the only moment a new collision key could be minted.
+ */
+function resolveEnsureSessionSlug(p: ReturnType<typeof parseArgs>, root: string): string {
+  const explicit = opt(p, "task-slug");
+  const ref = opt(p, "work-item");
+  if (!ref) {
+    if (!explicit) die("--task-slug is required (or pass --work-item to derive it)");
+    return explicit;
+  }
+  if (ref.startsWith("local:")) {
+    // Local Work Item retry: the ref IS the slug (workflow start already enforces the pairing).
+    const localId = ref.slice("local:".length);
+    if (explicit && explicit !== localId) {
+      die(`ensure-session refused: --task-slug ${JSON.stringify(explicit)} does not match local Work Item ${JSON.stringify(ref)}; pass --task-slug ${localId} or omit it`);
+    }
+    return explicit || localId;
+  }
+  const canonical = workItemSlug(ref);
+  if (!explicit || explicit === canonical) return canonical;
+  // Grandfathered legacy session: it already exists under this name, so refusing here would break
+  // resume for the 95 subjects created before the rule existed. Bind to it, and say why once.
+  if (fs.existsSync(path.join(sessionDirFor(root, explicit), "state.json"))) {
+    process.stderr.write(`[ensure-session] NOTICE: session ${JSON.stringify(explicit)} predates deterministic subject identity; the canonical subject id for ${JSON.stringify(ref)} is ${JSON.stringify(canonical)}. The existing session is used unchanged and still collide-detects through its recorded Work Item binding; NEW sessions for this item must use the canonical id.\n`);
+    return explicit;
+  }
+  return die(`ensure-session refused: --task-slug ${JSON.stringify(explicit)} does not match the canonical subject id for Work Item ${JSON.stringify(ref)}. The subject id is derived from the backlog item, never chosen, so that two lanes on one item produce the same liveness collision key. Fix: pass --task-slug ${canonical}, or omit --task-slug and let it be derived.`);
+}
+
 function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
-  const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
+  const slug = resolveEnsureSessionSlug(p, root);
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
@@ -2733,7 +2781,7 @@ function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
 
 async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlowMutation: boolean): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
-  const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
+  const slug = resolveEnsureSessionSlug(p, root);
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
@@ -7841,6 +7889,37 @@ function livenessLabel(status: string): string {
  * already loads this same module inline for its own narrower need (just the events reader); this
  * loader additionally exposes `freshHolders` for the guard's `computeEffectiveState` call.
  */
+/**
+ * Delegate to the shared pure-CJS subject-identity helper (scripts/hooks/lib/subject-identity.js),
+ * the ONE definition of the backlog-derived canonical subject key (#1099). Same loader shape
+ * as loadLivenessReadHelper below; kept separate so a failure to load it degrades the liveness
+ * WRITE path (no `subjectKey` stamped) without touching the read path.
+ */
+function loadSubjectIdentityHelper(): {
+  canonicalSubjectKey: (artifactRoot: string, slug: string) => string | null;
+  canonicalSubjectKeyFromRefs: (refs: unknown) => string | null;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/subject-identity.js");
+  return _req(helperPath) as {
+    canonicalSubjectKey: (artifactRoot: string, slug: string) => string | null;
+    canonicalSubjectKeyFromRefs: (refs: unknown) => string | null;
+  };
+}
+
+/**
+ * Best-effort canonical subject key for a liveness event. Fail-open by contract: liveness is
+ * advisory, so a helper-load or FS failure omits the alias field rather than failing the write —
+ * degrading to exactly today's subjectId-only join, never to a broken command.
+ */
+function livenessSubjectKey(artifactRoot: string, slug: string): string | null {
+  try {
+    return loadSubjectIdentityHelper().canonicalSubjectKey(artifactRoot, slug);
+  } catch {
+    return null;
+  }
+}
+
 function loadLivenessReadHelper(): {
   readLivenessEvents: (streamPath: string) => AnyObj[];
   freshHolders: (events: AnyObj[], slug: string, selfActor: string, nowMs: number) => FreshHolder[];
@@ -7993,6 +8072,10 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
     }
     const root = livenessStreamRootFor(taskDir);
     const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
+    // #1099: stamp the backlog-derived collision key so a session named under any legacy
+    // scheme still joins against every other lane on the same Work Item (see freshHolders' options.subjectKey).
+    const subjectKey = livenessSubjectKey(root, slug);
+    if (subjectKey) evt.subjectKey = subjectKey;
     if (kind === "claim") evt.ttlSeconds = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
     appendLivenessEvent(root, evt);
   } catch (err) {
@@ -8074,6 +8157,9 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
       }
     }
     const evt: AnyObj = { type: action, subjectId, actor, at: opt(p, "at") || nowIso };
+    // #1099: same backlog-derived collision key the lifecycle auto-emit stamps.
+    const subjectKey = livenessSubjectKey(root, subjectId);
+    if (subjectKey) evt.subjectKey = subjectKey;
     if (action === "claim") {
       const defaultTtl = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
       evt.ttlSeconds = Number.parseInt(opt(p, "ttl", String(defaultTtl)), 10) || defaultTtl;

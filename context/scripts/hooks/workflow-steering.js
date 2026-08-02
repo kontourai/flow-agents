@@ -20,10 +20,10 @@ const crypto = require('crypto');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
 const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
-const { readOwnCurrentPointer } = require('./lib/current-pointer');
 const { readKitManifests, workflowTriggersFor } = require('./lib/kit-catalog');
 const { canonicalFlowState } = require('./stop-goal-fit');
 const { withFlowRecoveryFenceRead } = require('./lib/flow-recovery-fence');
+const { ACTIVE_STATE_STATUSES, boundSubject, boundSubjectKey } = require('./lib/subject-binding');
 
 const STEERING = {
   'tool-planner': [
@@ -59,21 +59,6 @@ const STEERING = {
     'Loop exits ONLY when review + verify are BOTH clean in the same iteration.',
   ].join(' '),
 };
-
-const ACTIVE_STATE_STATUSES = new Set([
-  'new',
-  'planning',
-  'planned',
-  'in_progress',
-  'blocked',
-  'verifying',
-  'verified',
-  'needs_decision',
-  'not_verified',
-  'failed',
-  'delivered',
-  'canceled',
-]);
 
 function findRepoRoot(startDir) {
   const resolvedStartDir = path.resolve(startDir || process.cwd());
@@ -148,27 +133,17 @@ function readJson(file) {
  * `actorKey` does `readOwnCurrentPointer` delegate to `readCurrentPointer`, which DOES fall back
  * to the legacy global file — that compat-shim degrade (D3) is unchanged from before #291/#440.
  *
+ * #1099: the resolution itself now lives in scripts/hooks/lib/subject-binding.js's
+ * `boundSubject` — the SAME function the PreToolUse first-write gate asks "is a subject bound?",
+ * so the gate and this steering can never disagree about whether one exists. This wrapper is kept
+ * for the name every call site in this file already uses.
+ *
  * @param {string} root
  * @param {string} actorKey
  * @returns {{file: string, payload: object, mtimeMs: number}|null}
  */
 function actorScopedWorkflowState(root, actorKey) {
-  for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
-    const { payload: current } = readOwnCurrentPointer(flowAgentsDir, actorKey);
-    if (!current) continue;
-    const slug = current.artifact_dir || current.active_slug;
-    if (typeof slug !== 'string' || !slug.trim()) continue;
-    const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
-    const dir = path.join(flowAgentsDir, safe);
-    if (!dir.startsWith(flowAgentsDir + path.sep) || !fs.existsSync(dir)) continue;
-    const file = path.join(dir, 'state.json');
-    let stat;
-    try { stat = fs.statSync(file); } catch { continue; }
-    const payload = readJson(file);
-    if (!payload || !ACTIVE_STATE_STATUSES.has(payload.status)) continue;
-    return { file, payload, mtimeMs: stat.mtimeMs };
-  }
-  return null;
+  return boundSubject(root, actorKey);
 }
 
 function latestWorkflowState(root) {
@@ -641,7 +616,7 @@ function resumeSteering(root, current, resolvedGuidance = null) {
         // selfActor (for exclusion matching) stays raw here; only the display strings pushed
         // into `lines` are sanitized below, since holders come from the shared multi-writer
         // liveness stream and must be treated as untrusted display input (#287 fix iteration 1).
-        const holders = freshHolders(events, slug, selfActor, Date.now());
+        const holders = freshHolders(events, slug, selfActor, Date.now(), { subjectKey: boundSubjectKey(state) });
         for (const h of holders) {
           lines.push(`[LIVENESS WARNING: another agent appears live on this work: actor ${safeStateText(h.actor)}, last seen ${h.lastAt}]`);
         }
@@ -692,7 +667,11 @@ function supersessionSteering(root, current) {
       .flatMap(artifactRoot => readLivenessEvents(path.join(artifactRoot, 'liveness', 'events.jsonl')));
     if (events.length === 0) return '';
 
-    const holders = freshHolders(events, slug, selfActor, Date.now());
+    // #1099: also match another lane whose session directory is named under one of the
+    // legacy schemes but is bound to the SAME backlog item. Without this alias the join is a
+    // string compare on a name each lane picked independently, so `s1254-tokens` and
+    // `octo-demo-1254` are the same issue and never see each other.
+    const holders = freshHolders(events, slug, selfActor, Date.now(), { subjectKey: boundSubjectKey(state) });
     if (holders.length === 0) return '';
 
     const holder = holders[0];
