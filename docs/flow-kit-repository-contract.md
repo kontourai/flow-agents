@@ -57,7 +57,7 @@ Each registry entry records:
 - `version`: optional manifest version when a future contract permits one.
 - `installed_at`: UTC ISO timestamp.
 - `installed_path`: copied kit path under the destination.
-- `state`: install state reported by status commands.
+- `state`: install state recorded at install time. Read-only status observation reports the current state separately and never rewrites this registry field.
 
 Reinstalling the same kit id from the same source with the same content is idempotent and leaves the registry unchanged. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--update` replaces the copied kit and registry entry after the new source validates. `--force` re-copies an existing same-source install after validation.
 
@@ -67,7 +67,14 @@ is not supported. Use a URL `#ref` fragment or `--ref <branch|tag|sha>` to pin t
 records the normalized URL/ref and content hash, and never executes scripts from the cloned
 repository.
 
-`list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance and reports copied kit state as `installed` or `missing`.
+`list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance plus `recorded_hash` and `observed_hash`, and reports copied-kit state as one of:
+
+- `installed`: the safely observed tree exactly matches the recorded hash.
+- `drifted`: the safely observed tree is present but its canonical content hash differs from the recorded hash.
+- `missing`: the registered copied tree is absent.
+- `invalid`: the registry entry or copied tree cannot be safely observed (including symlinks, special files, unreadable paths, and paths replaced during observation).
+
+The canonical tree hash sorts relative paths and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation never follows symlinks. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
 
 ## Runtime Activation
 
@@ -85,7 +92,7 @@ The `codex-local` adapter supports assets declared in `flows`, `skills`, and `do
 <dest>/kits/local/repositories/<kit-id>/
 ```
 
-Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`.
+Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`. It performs the same read-only integrity observation as `kit status`: missing and invalid local copies are skipped with a warning, and a drifted but safely readable copy emits a warning with both hashes and remains activatable for this warning-only rollout. Drift is therefore never represented as registry-matched, but it is not yet an activation blocker.
 
 Generated adapter projections are written under:
 

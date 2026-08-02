@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { atomicCopyFile, atomicWriteJson, ensureSafeDirectory, readJson, relPath } from "./lib/fs.js";
 import { flowAgentsArtifactRoot } from "./lib/local-artifact-root.js";
 import { parseKitDependencies, parseKitHookInfluenceExpectations, parseKitWorkflowTriggers } from "./flow-kit/validate.js";
+import { observeInstalledKitIntegrity } from "./flow-kit/content-hash.js";
 
 export type KitAsset = {
   kit_id: string;
@@ -209,8 +210,13 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
         const id = record.id;
         if (typeof id !== "string") return;
         const kitRoot = path.join(dest, "kits", "local", "repositories", id);
-        if (!fs.existsSync(kitRoot)) warnings.push(`${id}: installed kit copy missing at ${kitRoot}; skipping`);
-        else {
+        const integrity = observeInstalledKitIntegrity(record, dest);
+        if (integrity.state === "missing" || integrity.state === "invalid") {
+          warnings.push(`local kit '${id}' integrity is ${integrity.state} (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: ${integrity.observed_hash ?? "none"}): ${integrity.diagnostic}; activation is warning-only and skips this kit`);
+        } else {
+          if (integrity.state === "drifted") {
+            warnings.push(`local kit '${id}' integrity is drifted (recorded_hash: ${integrity.recorded_hash}; observed_hash: ${integrity.observed_hash}): ${integrity.diagnostic}; activation is warning-only and continues with the observed installed bytes`);
+          }
           const loaded = loadKitAssets(kitRoot, "local", warnings, errors);
           loadedKits.push(loaded);
           if (loaded.kit_id) presentKitIds.add(loaded.kit_id);

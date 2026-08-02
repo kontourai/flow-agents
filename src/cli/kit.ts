@@ -1,13 +1,13 @@
 import * as child_process from "node:child_process";
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
+import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
@@ -118,34 +118,6 @@ async function printKitValidationWarnings(kitDir: string): Promise<void> {
   for (const warning of (await validateKitRepositoryDiagnostics(kitDir)).warnings) console.log(`warning: ${warning}`);
 }
 
-function contentHash(root: string): string {
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const rel = path.relative(root, file).split(path.sep).join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
-/** Content hash that excludes .git and other VCS/cache directories (for install git clones). */
-function kitContentHash(root: string): string {
-  const EXCLUDE_DIRS = new Set([".git", "__pycache__", ".pytest_cache"]);
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const parts = path.relative(root, file).split(path.sep);
-    if (parts.some((p) => EXCLUDE_DIRS.has(p))) continue;
-    const rel = parts.join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
 /**
  * install <source> [--dest <path>] [--force] [--update] [--ref <branch|tag|sha>]
  *
@@ -203,7 +175,12 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 1;
   }
   warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
-  const hash = contentHash(source);
+  const hashObservation = observeKitContentHash(source);
+  if (hashObservation.state !== "observed") {
+    console.error(`install: cannot safely observe kit content: ${hashObservation.diagnostic}`);
+    return 1;
+  }
+  const hash = hashObservation.observed_hash;
   const registry = loadRegistry(dest);
   const existing = registry.kits.find((entry) => entry.id === kitId);
   const sourceText = source;
@@ -280,7 +257,12 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     // Delegate to the shared install logic (copy + registry update).
     const kitId = String(manifest.id);
     warnUninstalledDependencies(manifest, path.join(tmpBase, "kit.json"), dest);
-    const hash = kitContentHash(tmpBase);
+    const hashObservation = observeKitContentHash(tmpBase);
+    if (hashObservation.state !== "observed") {
+      console.error(`install: cannot safely observe cloned kit content: ${hashObservation.diagnostic}`);
+      return 1;
+    }
+    const hash = hashObservation.observed_hash;
     const registry = loadRegistry(dest);
     const existing = registry.kits.find((entry) => entry.id === kitId);
     const target = installedPath(dest, kitId);
@@ -356,7 +338,14 @@ function status(argv: string[]): number {
     return 0;
   }
   for (const entry of entries.sort((a, b) => String(a.id ?? "").localeCompare(String(b.id ?? "")))) {
-    console.log(JSON.stringify({ ...entry, state: fs.existsSync(String(entry.installed_path ?? "")) ? "installed" : "missing" }, null, 2));
+    const integrity = observeInstalledKitIntegrity(entry, dest);
+    console.log(JSON.stringify({
+      ...entry,
+      state: integrity.state,
+      recorded_hash: integrity.recorded_hash,
+      observed_hash: integrity.observed_hash,
+      ...(integrity.diagnostic ? { diagnostic: integrity.diagnostic } : {}),
+    }, null, 2));
   }
   return 0;
 }
