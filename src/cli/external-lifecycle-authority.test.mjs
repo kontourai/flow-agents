@@ -563,8 +563,9 @@ test("public sealed transport remains responsive and forwards parent cancellatio
     const before = process.listenerCount("SIGTERM");
     const pending = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
     process.emit("SIGTERM");
+    process.emit("SIGTERM");
     await assert.rejects(pending, /cancelled by parent/);
-    assert.deepEqual(kills, ["SIGTERM"]);
+    assert.deepEqual(kills, ["SIGTERM", "SIGTERM"], "repeated parent signals remain owned until child cleanup completes");
     assert.equal(process.listenerCount("SIGTERM"), before, "transport removes its parent signal handler after cleanup");
     kills.length = 0;
     const pipeFailure = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });

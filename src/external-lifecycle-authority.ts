@@ -522,7 +522,7 @@ export async function invokeExternalSealedLifecycleAuthority(request: ExternalLi
       if (escalation === null) escalation = setTimeout(() => child.kill("SIGKILL"), SEALED_TRANSPORT_CLEANUP_MS);
     };
     const handlers = new Map(signals.map((signal) => [signal, () => forward(signal)]));
-    for (const [signal, handler] of handlers) process.once(signal, handler);
+    for (const [signal, handler] of handlers) process.on(signal, handler);
     const cleanup = () => {
       finished = true;
       if (runtimeTimer !== null) clearTimeout(runtimeTimer);
