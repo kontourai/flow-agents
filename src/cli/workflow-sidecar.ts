@@ -17,6 +17,7 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
+import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
@@ -1386,7 +1387,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
       && Number.isSafeInteger(observation.test_count)
       && observation.test_count > 0
-      && observation.execution_proof?.kind === "local-process-exit",
+      && ["local-process-exit", "coordinated-command-receipt"].includes(String(observation.execution_proof?.kind)),
     );
     const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
       && criterionIdentityVersion === 2
@@ -3386,11 +3387,12 @@ function resolvesExplicitTestTarget(projectRoot: string, token: string): boolean
 }
 
 /** Validate test-evidence command shape without executing it. */
-type TestExecutionProof = {
+type LocalTestExecutionProof = {
   kind: "local-process-exit";
   runner: string;
   static_test_units: number;
 };
+type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
 
 function staticTestUnits(file: string, executable: string): number {
   try {
@@ -3436,6 +3438,18 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       const target = tokens.slice(2).find((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token));
       const units = target ? staticTestUnits(path.resolve(projectRoot, target), "bun") : 0;
       return units > 0 ? { kind: "local-process-exit", runner: "bun test", static_test_units: units } : null;
+    }
+    // A coordinator is admitted only when its exact public command is declared
+    // in the reconcile manifest and its observed receipt proves a complete,
+    // stable, committed test result. The resolver names no product or filename.
+    if (resolveCoordinatedCommandBinding(normalized, projectRoot)) {
+      return {
+        kind: "coordinated-command-receipt",
+        protocol: "flow-agents.coordinated-command-receipt/v1",
+        request_key: "pending-observation",
+        receipt_sha256: "pending-observation",
+        receipt_commit_sha256: "pending-observation",
+      };
     }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
     if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
@@ -3537,7 +3551,7 @@ export function observedExecutedTestCount(output: string): number {
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
-  if (!proof) return 0;
+  if (!proof || proof.kind !== "local-process-exit") return 0;
   const observed = observedExecutedTestCount(output);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
@@ -3564,6 +3578,11 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // attestations but can never stand in for locally observed test execution.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
+    const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
+    if (coordinated) {
+      const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
+      return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...receipt };
+    }
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
     return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
   };
@@ -3581,7 +3600,7 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
     if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
     if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
     if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
-    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
+    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || !["local-process-exit", "coordinated-command-receipt"].includes(String(entry.execution_proof.kind)))) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
     if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
