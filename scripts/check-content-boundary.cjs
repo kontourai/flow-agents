@@ -46,8 +46,14 @@ function isIgnoredPath(filePath) {
   return filePath === SELF || ignoredPathPatterns.some((pattern) => pattern.test(filePath));
 }
 
+function isCommittedFlowAgentsConfig(filePath) {
+  return filePath.startsWith(".flow-agents/config/")
+    && filePath.length > ".flow-agents/config/".length;
+}
+
 function isWorkflowRuntimeArtifact(filePath) {
-  return filePath.startsWith(".kontourai/flow-agents/") || filePath.startsWith(".flow-agents/");
+  return filePath.startsWith(".kontourai/flow-agents/")
+    || (filePath.startsWith(".flow-agents/") && !isCommittedFlowAgentsConfig(filePath));
 }
 
 function lineNumberFor(content, index) {
