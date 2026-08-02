@@ -32,6 +32,12 @@ export interface SealedExecutionSafeResult {
   stderr_sha256: string;
   projection: JsonRecord | null;
   projection_sha256: string | null;
+  /** Coordinator-owned, completion-signed sealed-stage provenance. */
+  execution_provenance?: SealedExecutionProvenance;
+}
+export interface SealedExecutionProvenance {
+  invocation_manifest_sha256: string | null;
+  controller_state_sha256: string | null;
 }
 
 const SEALED_SAFE_RESULT_FIELDS = ["status", "exit_code", "runtime_ms", "stdout_bytes", "stderr_bytes", "projection", "projection_sha256", "stdout_sha256", "stderr_sha256"];
@@ -68,7 +74,8 @@ function sealedPrivacySafeJson(value: unknown, depth = 0): void {
  */
 export function validateSealedExecutionSafeResult(value: unknown): SealedExecutionSafeResult {
   if (!record(value)) throw new Error("sealed execution result is invalid");
-  exact(value, SEALED_SAFE_RESULT_FIELDS, "sealed execution result");
+  const hasProvenance = Object.prototype.hasOwnProperty.call(value, "execution_provenance");
+  exact(value, hasProvenance ? [...SEALED_SAFE_RESULT_FIELDS, "execution_provenance"] : SEALED_SAFE_RESULT_FIELDS, "sealed execution result");
   if (![
     "ok", "exit_nonzero", "timeout", "output_limit", "spawn_error", "malformed_result", "interrupted",
   ].includes(String(value.status))
@@ -78,6 +85,14 @@ export function validateSealedExecutionSafeResult(value: unknown): SealedExecuti
       || Number(value.stdout_bytes) + Number(value.stderr_bytes) > SEALED_SAFE_MAX_OUTPUT_BYTES
       || !["stdout_sha256", "stderr_sha256"].every((key) => typeof value[key] === "string" && /^[a-f0-9]{64}$/.test(String(value[key])))) {
     throw new Error("sealed execution result is invalid");
+  }
+  if (hasProvenance) {
+    if (!record(value.execution_provenance)) throw new Error("sealed execution provenance is invalid");
+    exact(value.execution_provenance, ["invocation_manifest_sha256", "controller_state_sha256"], "sealed execution provenance");
+    for (const key of ["invocation_manifest_sha256", "controller_state_sha256"] as const) {
+      const digest = value.execution_provenance[key];
+      if (digest !== null && (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest))) throw new Error("sealed execution provenance is invalid");
+    }
   }
   if (value.projection === null) {
     if (value.projection_sha256 !== null) throw new Error("sealed execution result has an inconsistent absent projection");
@@ -131,6 +146,34 @@ export function validateSealedExecutionSafeResult(value: unknown): SealedExecuti
   }
   if (value.projection_sha256 !== lifecycleAuthorityResultDigest(projection)) throw new Error("sealed execution projection digest is invalid");
   return value as unknown as SealedExecutionSafeResult;
+}
+
+/** Read only the coordinator-signed provenance after validating the full receipt. */
+export function sealedExecutionProvenance(value: unknown): SealedExecutionProvenance {
+  const provenance = validateSealedExecutionSafeResult(value).execution_provenance;
+  if (!provenance) throw new Error("sealed execution provenance is unavailable");
+  return provenance;
+}
+
+/**
+ * Compute the exact canonical bytes digest for the sealed stage manifest.
+ * This is deliberately public so a sealed client can bind the controller's
+ * retained manifest reference to the coordinator-owned preimage.
+ */
+export function sealedInvocationManifestSha256(workload: JsonRecord, authorization: JsonRecord): string {
+  const runtime = record(workload.runtime) ? workload.runtime : null; const controller = record(workload.controller) ? workload.controller : null; const provider = record(workload.provider) ? workload.provider : null;
+  if (!record(workload) || !record(authorization) || !runtime || !controller || !provider || !Array.isArray(workload.inputs)
+      || typeof runtime.sha256 !== "string" || typeof controller.logical_path !== "string" || typeof controller.sha256 !== "string"
+      || typeof provider.sha256 !== "string" || typeof authorization.runner_entrypoint !== "string"
+      || !["max_runtime_ms", "max_output_bytes", "max_provider_calls", "max_cost_microusd", "max_tokens"].every((key) => Number.isSafeInteger(authorization[key]))) {
+    throw new Error("sealed invocation manifest preimage is invalid");
+  }
+  const inputs = workload.inputs.map((input) => {
+    if (!record(input) || typeof input.id !== "string" || !record(input.source) || typeof input.source.logical_path !== "string" || typeof input.source.sha256 !== "string") throw new Error("sealed invocation manifest preimage is invalid");
+    return { id: input.id, logical_path: input.source.logical_path, sha256: input.source.sha256 };
+  });
+  const manifest = { schema_version: "1.0", kind: "flow-agents.sealed-invocation.v1", authorization_sha256: lifecycleAuthorityResultDigest(authorization), runner: authorization.runner_entrypoint, budgets: { max_runtime_ms: authorization.max_runtime_ms, max_output_bytes: authorization.max_output_bytes, max_provider_calls: authorization.max_provider_calls, max_cost_microusd: authorization.max_cost_microusd, max_tokens: authorization.max_tokens }, runtime_sha256: runtime.sha256, controller: { logical_path: controller.logical_path, sha256: controller.sha256 }, provider_sha256: provider.sha256, inputs };
+  return createHash("sha256").update(Buffer.from(`${canonical(manifest)}\n`)).digest("hex");
 }
 
 /** Build the exact unsigned request; an external Ed25519 authority signs the separate authorization. */

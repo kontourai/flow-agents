@@ -2598,6 +2598,10 @@ export function sealedProjection(value) {
   if (artifactBytes > 128 * 1024) throw new Error("sealed execution projection artifact content exceeds its bounded limit");
   return value;
 }
+function controllerStateSha256(projection) {
+  const matches = Array.isArray(projection?.policy_chain) ? projection.policy_chain.filter((entry) => entry?.id === "controller_state") : [];
+  return matches.length === 1 && /^[a-f0-9]{64}$/.test(matches[0].sha256) ? matches[0].sha256 : null;
+}
 function sealedCancellationScope() {
   let cancelled = false; let terminate = null;
   const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
@@ -2693,7 +2697,7 @@ async function processSealedExecution(envelope) {
       // A power loss after prepare is terminal: never replay a provider call.
       // Remove the abandoned root stage and seal an indeterminate receipt.
       fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });
-      const safeResult = { status: "interrupted", exit_code: null, runtime_ms: 0, stdout_bytes: 0, stderr_bytes: 0, projection: null, projection_sha256: null, stdout_sha256: sha256(Buffer.alloc(0)), stderr_sha256: sha256(Buffer.alloc(0)) };
+      const safeResult = { status: "interrupted", exit_code: null, runtime_ms: 0, stdout_bytes: 0, stderr_bytes: 0, projection: null, projection_sha256: null, stdout_sha256: sha256(Buffer.alloc(0)), stderr_sha256: sha256(Buffer.alloc(0)), execution_provenance: { invocation_manifest_sha256: null, controller_state_sha256: null } };
       const resultCoreSha256 = sha256({ authorization_sha256: authorizationSha256, safe_result: safeResult });
       const completionRecord = completion(envelope, { runId: identity.runId }, "applied", resultCoreSha256);
       atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
@@ -2718,6 +2722,7 @@ async function processSealedExecution(envelope) {
       try { fs.writeFileSync(manifestFd, manifestBytes); fs.fsyncSync(manifestFd); } finally { fs.closeSync(manifestFd); }
       fs.chownSync(manifest, 0, caller.gid); fs.chmodSync(manifest, 0o440);
       safeResult = await runSealedStage(runtime, sealedArgv(workload.argv, controller, provider, inputs), { ...workload.environment, SEALED_PROVIDER_PATH: provider, SEALED_INVOCATION_MANIFEST: manifest }, caller, authorization, cancellation);
+      safeResult.execution_provenance = { invocation_manifest_sha256: sha256(manifestBytes), controller_state_sha256: controllerStateSha256(safeResult.projection) };
     } finally {
       // The stage is never evidence.  Completion and nonce state retain only
       // bounded metadata/digests, and cleanup runs for success, failure, and
