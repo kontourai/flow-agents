@@ -198,13 +198,25 @@ describe("Context Check: revision-bound recall and reconciliation (#1131)", () =
     remove(repo, proposalDir, external);
   });
 
-  test("uses the shared schemas to reject extras, traversal, and blank identities", () => {
+  test("uses the shared schemas to reject extras, traversal, blank identities, and unsupported result states", () => {
     const { revision, repo } = seededRepo();
     assert.match(validateContextCheckInput({ ...input(revision), extra: true }).join(" "), /unexpected property/);
     assert.match(validateContextCheckInput({ ...input(revision), workspace: " " }).join(" "), /pattern/);
     assert.match(validateContextCheckInput({ ...input(revision), changed_surfaces: ["../escape"] }).join(" "), /pattern/);
+    for (const invalidPath of ["src\\..\\escape", " src/context.js", "src/context.js ", "src/\u0000context.js"]) {
+      const invalid = { ...input(revision), changed_surfaces: [invalidPath] };
+      assert.ok(validateContextCheckInput(invalid).length > 0, `schema must reject ${JSON.stringify(invalidPath)}`);
+      assert.throws(() => runContextCheck({ repoRoot: repo, input: invalid, write: false }), (cause) => cause.code === "INVALID_CONTEXT_CHECK_INPUT");
+    }
     const result = runContextCheck({ repoRoot: repo, input: input(revision), write: false });
     assert.match(validateContextCheckResult({ ...result, extra: true }).join(" "), /unexpected property/);
+    const unsupportedContradiction = clone(result);
+    unsupportedContradiction.reconciliation[0].status = "contradicted";
+    delete unsupportedContradiction.reconciliation[0].evidence;
+    assert.match(validateContextCheckResult(unsupportedContradiction).join(" "), /exactly one/);
+    const partial = runContextCheck({ repoRoot: repo, input: input(revision, { claim_ids: ["current-context-contract", "absent-claim"] }), write: false });
+    partial.verdict = "pass";
+    assert.match(validateContextCheckResult(partial).join(" "), /pass is invalid/);
     remove(repo);
   });
 

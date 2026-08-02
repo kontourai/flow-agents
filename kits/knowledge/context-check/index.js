@@ -35,10 +35,11 @@ function isIdentity(value) {
 }
 
 function safeRelativePath(value, field) {
-  if (!isIdentity(value) || path.isAbsolute(value) || value.split(/[\\/]+/).includes("..")) {
+  const normalized = typeof value === "string" ? value.replace(/\\/g, "/") : value;
+  if (!isIdentity(value) || path.isAbsolute(value) || path.posix.isAbsolute(normalized) || value.split(/[\\/]+/).includes("..")) {
     throw error("INVALID_PATH", `${field} must be a non-empty repository-relative path without traversal`);
   }
-  return value.replace(/\\/g, "/");
+  return normalized;
 }
 
 function safeClaimId(value, field) {
@@ -78,7 +79,12 @@ export function validateContextCheckInput(input) {
 
 /** Validate the full Context Check result envelope through its shared JSON schema. */
 export function validateContextCheckResult(result) {
-  return validate(result, RESULT_SCHEMA).errors;
+  const errors = validate(result, RESULT_SCHEMA).errors;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return errors;
+  if (result.verdict === "pass" && Array.isArray(result.recalls) && result.recalls.some((recall) => recall?.status === "unverifiable")) {
+    errors.push("$/verdict: pass is invalid when any recall is unverifiable or no_answer");
+  }
+  return errors;
 }
 
 function resolveRevisionBoundRepository(repoRoot, requestedRevision) {

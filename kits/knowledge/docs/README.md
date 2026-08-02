@@ -232,6 +232,13 @@ The flow documents the Ops #121 `holds`/`broken`/`unverifiable` terms solely as 
 vocabulary. Ops #121 and Surface retain any claim-evidence-freshness or trust authority; Context
 Check does not derive or replace it. Product effectiveness remains an Evals responsibility.
 
+Both input and result are checked through the shared Knowledge JSON-schema validator. Result
+reconciliation uses status-specific variants: `contradicted` requires authoritative evidence,
+`clean` has no affected surface, and `affected`/`unverifiable` require at least one. The shared
+result validator also rejects `verdict: pass` whenever any recalled entry is `unverifiable`,
+including a no-answer. Path inputs reject traversal through either slash style, leading/trailing
+whitespace, and control characters before execution.
+
 Run the deterministic fixture suite:
 
 ```bash

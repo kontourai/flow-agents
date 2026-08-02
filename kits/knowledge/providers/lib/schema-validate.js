@@ -4,7 +4,7 @@
  * Supports exactly the draft-07 subset used by the Knowledge Kit graph schemas
  * (schemas/knowledge/*.schema.json): type, required, properties,
  * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
- * uniqueItems, anyOf, integer, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
+ * uniqueItems, anyOf, oneOf, integer, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
  * without pulling an external dependency (the same zero-dep discipline the
  * decision-registry validator follows).
@@ -59,6 +59,17 @@ function validateNode(value, schema, root, pathStr, errors) {
     }
   }
 
+  if (Array.isArray(schema.oneOf)) {
+    const candidateErrors = schema.oneOf.map((candidate) => {
+      const candidateResult = [];
+      validateNode(value, candidate, root, pathStr, candidateResult);
+      return candidateResult;
+    });
+    if (candidateErrors.filter((candidate) => candidate.length === 0).length !== 1) {
+      errors.push(`${pathStr}: must satisfy exactly one allowed schema`);
+    }
+  }
+
   if (schema.enum) {
     if (!schema.enum.includes(value)) {
       errors.push(`${pathStr}: value ${JSON.stringify(value)} not in enum ${JSON.stringify(schema.enum)}`);
@@ -85,6 +96,9 @@ function validateNode(value, schema, root, pathStr, errors) {
   if (Array.isArray(value)) {
     if (typeof schema.minItems === "number" && value.length < schema.minItems) {
       errors.push(`${pathStr}: array shorter than minItems ${schema.minItems}`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      errors.push(`${pathStr}: array longer than maxItems ${schema.maxItems}`);
     }
     if (schema.uniqueItems === true) {
       const seen = new Set();

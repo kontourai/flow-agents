@@ -18,7 +18,7 @@
   "$defs": {
     "identity": { "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$" },
     "claimId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!\\s)(?!.*\\s$)(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\u0000-\\u001F\\u007F]).+$" },
     "authority": {
       "type": "object",
       "additionalProperties": false,
@@ -66,7 +66,7 @@
       }
     },
     "recall": { "anyOf": [{ "$ref": "#/$defs/resolvedRecall" }, { "$ref": "#/$defs/noAnswerRecall" }] },
-    "reconciliation": {
+    "reconciliationBase": {
       "type": "object",
       "additionalProperties": false,
       "required": ["claim_id", "status", "affected_surfaces", "authority"],
@@ -83,6 +83,48 @@
         }
       }
     },
+    "cleanReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "clean" },
+        "affected_surfaces": { "type": "array", "maxItems": 0 }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "affectedReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "affected" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "unverifiableReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "unverifiable" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "contradictedReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority", "evidence"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "contradicted" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" },
+        "evidence": {
+          "type": "object", "additionalProperties": false, "required": ["authority"],
+          "properties": { "authority": { "$ref": "#/$defs/authority" } }
+        }
+      }
+    },
+    "reconciliation": { "oneOf": [
+      { "$ref": "#/$defs/cleanReconciliation" },
+      { "$ref": "#/$defs/affectedReconciliation" },
+      { "$ref": "#/$defs/unverifiableReconciliation" },
+      { "$ref": "#/$defs/contradictedReconciliation" }
+    ] },
     "proposal": {
       "type": "object",
       "additionalProperties": false,
