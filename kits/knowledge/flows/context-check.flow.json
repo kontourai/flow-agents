@@ -1,0 +1,36 @@
+{
+  "id": "knowledge.context-check",
+  "version": "1.0",
+  "description": "Standalone, proposals-only Living Context check: bind a workspace/repository to an exact Git revision and bounded changed surfaces; read selected Knowledge roots only at that revision; recall contextual claims with authority and retrieval provenance; reconcile only affected claims; and emit minimal owning-source update proposals. This is contextual recall/currentness, not a Surface trust derivation. It reuses Ops #121 holds/broken/unverifiable only as consumer vocabulary and does not create a trust authority.",
+  "steps": [
+    { "id": "read-revision", "next": "recall" },
+    { "id": "recall", "next": "reconcile" },
+    { "id": "reconcile", "next": "propose" },
+    { "id": "propose", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": [
+    "knowledge.context-check.revision-bound",
+    "knowledge.context-check.recall",
+    "knowledge.context-check.reconciliation",
+    "knowledge.context-check.proposals"
+  ],
+  "gates": {
+    "revision-bound-gate": {
+      "step": "read-revision",
+      "expects": [{ "id": "revision-bound-input", "kind": "trust.bundle", "required": true, "description": "The input binds workspace, repository, exact Git commit SHA, changed surfaces or diff, target audience, and selected Knowledge roots/providers. The adapter reads only git-show <sha>:<path>; it never falls through to the working tree.", "bundle_claim": { "claimType": "knowledge.context-check.revision-bound", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] } }]
+    },
+    "recall-gate": {
+      "step": "recall",
+      "expects": [{ "id": "revision-bound-recall", "kind": "trust.bundle", "required": true, "description": "Each recalled claim carries current, superseded, or unverifiable contextual status, its authoritative citation, and retrieval provenance. A superseded claim is never returned as current; no answer remains explicit and not_verified.", "bundle_claim": { "claimType": "knowledge.context-check.recall", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] } }]
+    },
+    "reconciliation-gate": {
+      "step": "reconcile",
+      "expects": [{ "id": "bounded-reconciliation", "kind": "trust.bundle", "required": true, "description": "Only claims whose declared affected surfaces intersect the bounded change are reconciled. Clean controls remain clean. Holds, broken, and unverifiable are documented consumer vocabulary from Ops #121, not a new trust derivation.", "bundle_claim": { "claimType": "knowledge.context-check.reconciliation", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] } }]
+    },
+    "proposals-gate": {
+      "step": "propose",
+      "expects": [{ "id": "owning-source-proposals-only", "kind": "trust.bundle", "required": true, "description": "The adapter emits only minimal proposed updates routed to each claim's owning source and writes only under an explicit run/proposal directory. It never edits documentation, decisions, or Knowledge records.", "bundle_claim": { "claimType": "knowledge.context-check.proposals", "subjectType": "artifact", "accepted_statuses": ["trusted", "accepted"] } }]
+    }
+  }
+}

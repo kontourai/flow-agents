@@ -163,12 +163,69 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 
 ## Flow
 
-The kit ships one flow:
+The kit ships these flows:
 
 **`knowledge.store-contract`** — gates on three evidence claims before a store implementation
 is accepted: contract-suite pass, provenance-enforcement pass, and round-trip integrity pass.
 S2 will add pipeline flows for raw ingestion, compilation, and concept management; this flow
 and adapter infrastructure remain the foundation.
+
+### Living Context: standalone Context Check
+
+**`knowledge.context-check`** is a deterministic, proposals-only flow for checking whether
+saved context can be recalled at a particular repository revision and whether a bounded change
+requires a source-owned update. It is deliberately separate from the large store flow-runner and
+from Builder composition.
+
+The input follows
+[`schemas/knowledge/context-check-input.schema.json`](../../../schemas/knowledge/context-check-input.schema.json):
+it binds a workspace, repository, exact 40-character Git commit SHA, target audience, changed
+surfaces (or diff paths), and one or more selected `git-repo` Knowledge roots. The result follows
+[`schemas/knowledge/context-check-result.schema.json`](../../../schemas/knowledge/context-check-result.schema.json).
+
+```js
+import { runContextCheck } from "./context-check/index.js";
+
+const result = runContextCheck({
+  repoRoot: "/work/repository",
+  proposalDir: "/work/run/proposals", // explicit; the only writable location
+  input: {
+    schema_version: "1.0",
+    workspace: "platform",
+    repository: "example/repository",
+    revision: "0123456789abcdef0123456789abcdef01234567",
+    target_audience: "maintainer",
+    changed_surfaces: ["src/context-adapter.js"],
+    knowledge_roots: [{
+      id: "repository-decisions",
+      provider: "git-repo",
+      manifest_path: "knowledge/claims.json"
+    }]
+  }
+});
+```
+
+Each selected manifest is read only by `git show <resolved-sha>:<manifest-path>`; an unreadable
+revision or manifest fails closed. The adapter never falls through to a dirty working tree.
+Recall results use contextual statuses `current`, `superseded`, and `unverifiable`; a no-answer
+is explicit (`unverifiable` with reason `no_answer`) and makes the result `not_verified`.
+Those are recall/currentness statements, not trust decisions.
+
+Reconciliation compares exact declared affected surfaces with the bounded input and leaves clean
+controls clean. Affected current or superseded claims yield only a minimal `context-update`
+proposal routed to the claim's declared owning source. The adapter never edits docs, decisions,
+or Knowledge records. With `write: true` (the default), `proposalDir` is required and all output
+is contained beneath it; use `write: false` for a fully read-only check.
+
+The flow documents the Ops #121 `holds`/`broken`/`unverifiable` terms solely as consumer
+vocabulary. Ops #121 and Surface retain any claim-evidence-freshness or trust authority; Context
+Check does not derive or replace it. Product effectiveness remains an Evals responsibility.
+
+Run the deterministic fixture suite:
+
+```bash
+node --test kits/knowledge/context-check/context-check.test.js
+```
 
 ---
 

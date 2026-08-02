@@ -1,0 +1,29 @@
+{
+  "claims": [
+    {
+      "id": "current-context-contract",
+      "claim": "The context adapter reads from the revision-bound manifest.",
+      "status": "current",
+      "authority": { "path": "docs/decisions/context-contract.md", "citation": "Context contract decision" },
+      "owning_source": { "owner": "documentation", "path": "docs/decisions/context-contract.md" },
+      "affected_surfaces": ["src/context-adapter.js"]
+    },
+    {
+      "id": "superseded-context-contract",
+      "claim": "The context adapter may read an uncommitted working tree.",
+      "status": "superseded",
+      "superseded_by": "current-context-contract",
+      "authority": { "path": "docs/decisions/context-contract.md", "citation": "Context contract decision" },
+      "owning_source": { "owner": "documentation", "path": "docs/decisions/context-contract.md" },
+      "affected_surfaces": ["src/context-adapter.js"]
+    },
+    {
+      "id": "clean-control",
+      "claim": "The unrelated CLI command preserves its documented output.",
+      "status": "current",
+      "authority": { "path": "docs/decisions/cli.md", "citation": "CLI decision" },
+      "owning_source": { "owner": "documentation", "path": "docs/decisions/cli.md" },
+      "affected_surfaces": ["src/cli.js"]
+    }
+  ]
+}

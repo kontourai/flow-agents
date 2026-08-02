@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/knowledge/context-check-result/1.0.json",
+  "title": "Knowledge Kit Context Check result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "flow", "input", "recalls", "reconciliation", "proposals", "verdict"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "flow": { "const": "knowledge.context-check" },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace", "repository", "revision", "target_audience", "changed_surfaces", "knowledge_roots"],
+      "properties": {
+        "workspace": { "type": "string" },
+        "repository": { "type": "string" },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "target_audience": { "type": "string" },
+        "changed_surfaces": { "type": "array", "items": { "type": "string" } },
+        "knowledge_roots": { "type": "array" }
+      }
+    },
+    "recalls": { "type": "array" },
+    "reconciliation": { "type": "array" },
+    "proposals": { "type": "array" },
+    "verdict": { "enum": ["pass", "not_verified"] },
+    "written": { "type": "array", "items": { "type": "string" } }
+  }
+}
