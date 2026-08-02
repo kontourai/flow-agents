@@ -2870,6 +2870,17 @@ async function run(rawInput) {
   // to warn about this turn is untouched here. blocking stays false: this advisory must never
   // gain teeth by accident, and whether it ever arms is a later decision informed by whether it
   // catches anything real. See scripts/hooks/lib/unstarted-delivery.js for the four conditions.
+  //
+  // DISCLOSED GAP: `!result.latestArtifactDir` is not independently test-covered, because no
+  // reachable fixture separates it from `warnings.length === 0`. Measured, not assumed: a real
+  // `ensure-session --flow-id builder.build` session emits 6 warnings at its very first step, and
+  // hand-built terminal sidecars still emit 3 — a session that exists effectively always warns, so
+  // the emptiness check already implies "no session" today. Fault injection confirms it: deleting
+  // this clause changes no test outcome. It stays anyway, and deliberately: relying on "sessions
+  // always produce a warning" would make correctness depend on an unstated empirical property of
+  // an unrelated code path, which is exactly the coupling that breaks silently later. The clause
+  // states the actual intent — advise only when there is no session to scope to.
+
   if (result.warnings.length === 0 && !result.latestArtifactDir) {
     const advisory = unstartedDeliveryWarning({ root, cwd: input.cwd || process.cwd(), env: process.env });
     if (advisory) {

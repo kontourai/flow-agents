@@ -338,6 +338,24 @@ Shape:
 
 The retired `hint` field is invalid. `display_name` is not a workflow trigger field; keep human-readable names in catalog/listing metadata such as top-level `name` or `product_name`. Do not put natural-language steering instructions in kit metadata; express routing needs through the structured identifier fields above.
 
+#### A manifest alone is not discoverable — declare it in a registry too
+
+`workflow_triggers` are read by `workflowTriggersFor()` (`scripts/hooks/lib/kit-catalog.js`), which enumerates kits through `readKitManifests(root)`. That function finds a `kit.json` **only** through one of two registries under the repository root:
+
+- `kits/catalog.json` — a `{ "schema_version": "1.0", "kits": [{ "id", "name", "path", "description" }] }` list whose `path` points at the kit directory (`kits/<kit-id>`); or
+- `kits/local/installed-kits.json` — the local install registry written by `flow-agents kit install`, which reads copies under `kits/local/repositories/<kit-id>/`.
+
+**A `kits/<kit-id>/kit.json` with no entry in either registry is invisible.** Nothing reads it, nothing warns about it, and the steering hook renders an empty string — indistinguishable from a repository that declares no triggers at all. This is the failure mode to check first when configured triggers produce no steering: confirm the registry entry exists, not just the manifest.
+
+Which registry to use:
+
+- Committing durable, repo-owned routing policy (the common case for a product repository that wants its own delivery routing): add `kits/catalog.json` **and** `kits/<kit-id>/kit.json`, and commit both. Both files are required.
+- Installing a kit as runtime overlay state: use `flow-agents kit install`, which owns `kits/local/**`. Install state is regenerable and is not the place for committed policy.
+
+A repository-root kit that declares `workflow_triggers` without a `flows` list is valid for routing purposes: Flow Definitions resolve through the installed package's packaged-flow fallback (`src/lib/flow-resolver.ts`) when the repository does not vendor its own under `kits/<kit-id>/flows/`. Vendor the flow files only when the repository needs to pin them.
+
+Note that the hook resolves the repository root through git's **shared** common-dir root, so a manifest added on a branch in a linked worktree does not take effect for sessions elsewhere until it reaches the branch the primary checkout has open.
+
 ### When a kit "is" a Flow Agents Kit
 
 A kit is a **Flow Agents Kit** when it satisfies both layers:

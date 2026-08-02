@@ -137,7 +137,10 @@ test("stays silent on a read-only turn (nothing changed)", async () => {
 });
 
 // ── Case 3: SILENT when a workflow session is active ────────────────────────────────────────
-test("stays silent when an active workflow session exists", async () => {
+// NOT "stays silent": a session that exists effectively always produces ordinary gate warnings
+// (measured — a real ensure-session emits 6 at its first step). The contract this asserts is that
+// the stop belongs to the ADHERENCE gate and the unstarted-delivery advisory does not appear.
+test("does not add the advisory when an active workflow session exists", async () => {
   const root = mkRepo();
   mkSession(root, "test-actor");
   touchTracked(root, "src/index.ts", "export const a = 2;\n");
