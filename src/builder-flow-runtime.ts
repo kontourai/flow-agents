@@ -1236,16 +1236,7 @@ async function bundleGateEvidence(
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     return gateClaim !== null || metadata?.origin === "check";
   });
-  const recordedRunHeads = headBoundGateClaims.map((claim) => {
-    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
-    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
-    return gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
-  });
-  if (headBoundGateClaims.length > 0 && (recordedRunHeads.some((head) => head === null)
-    || new Set(recordedRunHeads).size !== 1
-    || recordedRunHeads[0] !== flowRunHead(state))) {
-    throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state authorized when the gate claim was recorded");
-  }
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
@@ -1283,6 +1274,131 @@ async function bundleGateEvidence(
     await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+const GATE_CLAIM_HEAD_FIELD = "evidence.claims.metadata.gate_claim.flow_run_head";
+const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized when the gate claim was recorded";
+
+/**
+ * #1170 (PR1): freshness for current-gate claims whose subject is repository content.
+ *
+ * `flow_run_head` is `sha256(canonicalJson(run.state))` — a hash of workflow *position*, not of
+ * the code the claim is about. Requiring every current-gate claim to carry the head that is
+ * canonical *right now* made any intervening state mutation terminal, which is the mechanism
+ * behind #1164 (a sidecar `record-evidence` write at `verify` permanently rejects every later
+ * public `workflow evidence` write).
+ *
+ * The predicate is now per-claim rather than cross-claim:
+ *
+ * - Recorded head equals the current head → current (unchanged fast path; healthy runs never
+ *   capture a workspace snapshot and see zero behavior change).
+ * - Otherwise the claim may re-establish freshness with the binding that actually describes its
+ *   subject: a Git workspace snapshot (HEAD sha + tracked diff + untracked bytes) that still
+ *   deep-equals a freshly captured snapshot of the current tree. A stamped
+ *   `gate_claim.step_id` must additionally name the step the run is on now.
+ * - Head mismatch and snapshot mismatch → hard stale, naming the claim, its recorded head and
+ *   the current head (#1164 ask 1).
+ * - No head and no snapshot → hard stale with a re-record remedy. This deliberately does not
+ *   loosen anything for unstamped, snapshot-less checks (#270 anti-smuggling posture).
+ *
+ * Cross-visit replay of an old pass claim over a byte-identical tree is blocked upstream, not
+ * here: every claim reaching this function already passed `claimIsCurrent`, which requires a
+ * claim/evidence timestamp inside the *current* visit window of this gate's step and excludes
+ * every claim id already shipped in a prior visit's manifest entry. That is why a plain
+ * `record-evidence` check — which carries no `gate_claim` at all, and therefore no `step_id`
+ * (workflow-sidecar.ts stamps `gate_claim` only when an expectation id is supplied) — is still
+ * step-bound: the visit window is the binding. Where a `step_id` *is* stamped it is checked, as
+ * a consistency assertion over the frozen typing.
+ *
+ * Only `kind: "git-worktree"` snapshots are accepted. A `reviewed-files` snapshot digests a
+ * writer-declared file list, so honoring it here would let a claim carry an empty list and
+ * declare itself permanently current.
+ */
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
+  if (headBoundGateClaims.length === 0) return;
+  const currentHead = flowRunHead(state);
+  const currentStep = state.current_step;
+  let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
+  for (const claim of headBoundGateClaims) {
+    const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
+    if (recordedHead === currentHead) continue;
+    const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
+    const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
+    if (recordedSnapshot === null) {
+      throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
+    }
+    currentWorkspace ??= captureCurrentGitWorkspaceSnapshot(projectRoot);
+    const recordedStep = gateClaim && typeof gateClaim.step_id === "string" ? gateClaim.step_id : null;
+    const treeUnchanged = currentWorkspace.snapshot !== null && isDeepStrictEqual(recordedSnapshot, currentWorkspace.snapshot);
+    const stepMatches = recordedStep === null || recordedStep === currentStep;
+    if (treeUnchanged && stepMatches) continue;
+    const detail = treeUnchanged
+      ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
+      : currentWorkspace.error !== null
+        ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
+        : "its recorded Git workspace snapshot no longer matches the current tree";
+    throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText}, the current head is ${currentHead}, and ${detail}. Re-record this check at the current head.`);
+  }
+}
+
+/**
+ * The snapshot a claim may re-establish freshness against.
+ *
+ * `metadata.verification_workspace_snapshot` is the general channel. `review_target.
+ * workspace_snapshot` is accepted ONLY for a genuinely critique-origin claim: that field is a
+ * critique's own review binding (`workflow-sidecar.ts` recordCritique), and honoring it on any
+ * claim that merely carries a `review_target`-shaped blob would let a non-critique producer
+ * supply its own freshness anchor under a field nothing else on this path validates.
+ *
+ * The discriminator is the (origin, claimType, subjectType) tuple rather than `origin` alone.
+ * `origin` on its own is a writer-supplied string; the tuple is not, because `bundleGateEvidence`
+ * has already rejected any relevant claim whose `origin: "critique"` is not backed by
+ * `claimType: "workflow.critique.review"` + `subjectType: "workflow-critique"` (the producer-type
+ * validation above, covered by the existing "cannot bypass head binding by impersonating exempt
+ * producer origins" test). Re-asserting the tuple here keeps this helper correct on its own terms
+ * rather than dependent on caller ordering. It is the narrowest signal available at this layer:
+ * the critique hash chain (`critique_record_hash`) is equally writer-computed and is validated
+ * downstream by `validateCritiqueResolutionGraph`, not here.
+ *
+ * Note on reachability: the sidecar never stamps `metadata.gate_claim` onto a critique claim
+ * (`workflow-sidecar.ts` critMeta), so a critique-origin claim is not head-bound today and this
+ * branch is currently unreachable in production. It is retained deliberately — #1170's PR2
+ * broadens gate-claim capture, at which point critiques become head-bound and this is the only
+ * snapshot they carry. Gated now so it cannot arrive ungated later.
+ */
+function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+  if (!metadata) return null;
+  if (isGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (!isCritiqueOriginClaim(claim, metadata)) return null;
+  const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
+  if (reviewTarget && isGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
+  return null;
+}
+
+function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
+  return metadata.origin === "critique"
+    && claim.claimType === "workflow.critique.review"
+    && claim.subjectType === "workflow-critique";
+}
+
+function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
+  return isRecord(value)
+    && value.kind === "git-worktree"
+    && typeof value.digest === "string"
+    && typeof value.head_sha === "string";
+}
+
+function captureCurrentGitWorkspaceSnapshot(projectRoot: string): { snapshot: AnyRecord | null; error: string | null } {
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return { snapshot: isGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
+  } catch (error) {
+    return { snapshot: null, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export function mergeGateClaimsWithCritiqueHistory(
