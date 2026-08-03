@@ -1317,7 +1317,7 @@ const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized 
 function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
   if (headBoundGateClaims.length === 0) return;
   const currentHead = flowRunHead(state);
-  const currentStep = typeof (state as AnyRecord).current_step === "string" ? String((state as AnyRecord).current_step) : null;
+  const currentStep = state.current_step;
   let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
   for (const claim of headBoundGateClaims) {
     const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
@@ -1326,7 +1326,7 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
     const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
     if (recordedHead === currentHead) continue;
     const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
-    const recordedSnapshot = gateClaimWorkspaceSnapshot(metadata);
+    const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
     if (recordedSnapshot === null) {
       throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
     }
@@ -1336,7 +1336,7 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
     const stepMatches = recordedStep === null || recordedStep === currentStep;
     if (treeUnchanged && stepMatches) continue;
     const detail = treeUnchanged
-      ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep ?? "<none>"}'`
+      ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
       : currentWorkspace.error !== null
         ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
         : "its recorded Git workspace snapshot no longer matches the current tree";
@@ -1344,12 +1344,45 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
   }
 }
 
-function gateClaimWorkspaceSnapshot(metadata: AnyRecord | null): AnyRecord | null {
+/**
+ * The snapshot a claim may re-establish freshness against.
+ *
+ * `metadata.verification_workspace_snapshot` is the general channel. `review_target.
+ * workspace_snapshot` is accepted ONLY for a genuinely critique-origin claim: that field is a
+ * critique's own review binding (`workflow-sidecar.ts` recordCritique), and honoring it on any
+ * claim that merely carries a `review_target`-shaped blob would let a non-critique producer
+ * supply its own freshness anchor under a field nothing else on this path validates.
+ *
+ * The discriminator is the (origin, claimType, subjectType) tuple rather than `origin` alone.
+ * `origin` on its own is a writer-supplied string; the tuple is not, because `bundleGateEvidence`
+ * has already rejected any relevant claim whose `origin: "critique"` is not backed by
+ * `claimType: "workflow.critique.review"` + `subjectType: "workflow-critique"` (the producer-type
+ * validation above, covered by the existing "cannot bypass head binding by impersonating exempt
+ * producer origins" test). Re-asserting the tuple here keeps this helper correct on its own terms
+ * rather than dependent on caller ordering. It is the narrowest signal available at this layer:
+ * the critique hash chain (`critique_record_hash`) is equally writer-computed and is validated
+ * downstream by `validateCritiqueResolutionGraph`, not here.
+ *
+ * Note on reachability: the sidecar never stamps `metadata.gate_claim` onto a critique claim
+ * (`workflow-sidecar.ts` critMeta), so a critique-origin claim is not head-bound today and this
+ * branch is currently unreachable in production. It is retained deliberately — #1170's PR2
+ * broadens gate-claim capture, at which point critiques become head-bound and this is the only
+ * snapshot they carry. Gated now so it cannot arrive ungated later.
+ */
+function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : null;
   if (!metadata) return null;
   if (isGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (!isCritiqueOriginClaim(claim, metadata)) return null;
   const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
   if (reviewTarget && isGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
   return null;
+}
+
+function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
+  return metadata.origin === "critique"
+    && claim.claimType === "workflow.critique.review"
+    && claim.subjectType === "workflow-critique";
 }
 
 function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {

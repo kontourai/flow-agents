@@ -4277,6 +4277,124 @@ test("a reviewed-files workspace snapshot cannot stand in for a Git worktree sna
   );
 });
 
+async function advanceSessionToVerify(session) {
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const steps = [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+  ];
+  let latest = null;
+  for (const entries of steps) latest = await writeAndSync(session, entries());
+  assert.equal(latest.run.state.current_step, "verify");
+  return latest;
+}
+
+// A critique's own review binding lives at review_target.workspace_snapshot rather than
+// metadata.verification_workspace_snapshot. It is honored only for a genuinely critique-origin
+// claim — the (origin, claimType, subjectType) tuple — so no other producer can supply its own
+// freshness anchor through a field nothing else on this path validates.
+function headBoundCritiqueClaim(session, staleHead) {
+  const critique = verifiedTestsPrerequisites(session)[0];
+  assert.equal(critique.claim.metadata.origin, "critique");
+  assert.equal(critique.claim.claimType, "workflow.critique.review");
+  assert.equal(critique.claim.metadata.review_target.workspace_snapshot.kind, "git-worktree");
+  critique.claim.metadata.gate_claim = {
+    expectation_id: "clean-critique",
+    claim_type: "workflow.critique.review",
+    subject_type: "workflow-critique",
+    step_id: "verify",
+    identity_version: 2,
+    recorded_at: new Date().toISOString(),
+    flow_run_head: staleHead,
+  };
+  return critique;
+}
+
+test("a head-bound critique claim re-establishes freshness from its review_target snapshot", async () => {
+  const session = makeGitBackedSession("critique-review-target-snapshot");
+  await advanceSessionToVerify(session);
+  const { before: staleHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+
+  // The verify gate still lacks tests-evidence/acceptance-criteria, so this resolves without
+  // attaching. What matters is that it resolves at all: the freshness predicate did not reject.
+  const synchronized = await writeAndSync(session, [headBoundCritiqueClaim(session, staleHead)]);
+  assert.equal(synchronized.attached, false, "an incomplete verify gate does not attach");
+});
+
+test("a head-bound critique claim whose review_target snapshot went stale is rejected", async () => {
+  const session = makeGitBackedSession("critique-review-target-stale");
+  await advanceSessionToVerify(session);
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  const critique = headBoundCritiqueClaim(session, staleHead);
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "edited after review\n");
+
+  await assert.rejects(writeAndSync(session, [critique]), (error) => {
+    assert.match(error.message, /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/);
+    assert.match(error.message, /claim 'claim\.clean-critique'/);
+    assert.ok(error.message.includes(staleHead) && error.message.includes(currentHead));
+    assert.match(error.message, /no longer matches the current tree/);
+    return true;
+  });
+});
+
+test("a non-critique claim cannot smuggle a review_target snapshot as its freshness anchor", async () => {
+  const session = makeGitBackedSession("review-target-smuggling");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const { before: staleHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  entry.claim.metadata.gate_claim.flow_run_head = staleHead;
+  // A byte-accurate snapshot of the current tree, offered by an origin:"check" claim under the
+  // critique-only field. It must not be honored, even though the tree really is unchanged.
+  entry.claim.metadata.review_target = { artifacts: [], workspace_snapshot: captureReviewWorkspaceSnapshot(session.projectRoot, []) };
+  assert.equal(entry.claim.metadata.review_target.workspace_snapshot.kind, "git-worktree");
+
+  await assert.rejects(
+    writeAndSync(session, [entry]),
+    /claim 'claim\.selected-work' carries recorded head [a-f0-9]{64} and no Git workspace snapshot/,
+  );
+});
+
+test("a gate claim recorded at another step is rejected even when the workspace is unchanged", async () => {
+  const session = makeGitBackedSession("snapshot-current-step-mismatch");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  entry.claim.metadata.gate_claim.flow_run_head = staleHead;
+  entry.claim.metadata.gate_claim.step_id = "plan";
+  entry.claim.metadata.verification_workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+
+  await assert.rejects(writeAndSync(session, [entry]), (error) => {
+    assert.match(error.message, /claim 'claim\.selected-work'/);
+    assert.ok(error.message.includes(staleHead) && error.message.includes(currentHead));
+    assert.match(error.message, /still matches the current tree, but it was recorded at step 'plan' rather than the current step 'pull-work'/);
+    return true;
+  });
+});
+
+test("a workspace capture failure is terminal rather than tolerated", async () => {
+  const session = makeSession("snapshot-capture-failure");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const { before: staleHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  entry.claim.metadata.gate_claim.flow_run_head = staleHead;
+  // Well-formed enough to reach the comparison, so the rejection can only come from the capture.
+  entry.claim.metadata.verification_workspace_snapshot = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "b".repeat(40) };
+  // A .git marker that Git cannot resolve: capture raises instead of returning a snapshot.
+  fs.writeFileSync(path.join(session.projectRoot, ".git"), "gitdir: /nonexistent/flow-agents-capture-failure\n");
+
+  await assert.rejects(writeAndSync(session, [entry]), (error) => {
+    assert.match(error.message, /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/);
+    assert.match(error.message, /claim 'claim\.selected-work'/);
+    assert.match(error.message, /could not be captured \(could not inspect the Git worktree/, "the underlying capture failure is quoted, not swallowed");
+    return true;
+  });
+});
+
 test("a sidecar-recorded check at the current step no longer blocks later public evidence writes", async () => {
   // #1164 repro shape: a sidecar `record-evidence` check lands a null-head current-gate claim;
   // every subsequent public `workflow evidence` write then failed against the moved head forever.
