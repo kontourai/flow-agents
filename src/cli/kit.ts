@@ -16,7 +16,9 @@ const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 const REPOSITORIES_REL_POSIX = "kits/local/repositories";
 const MAX_RECORD_SOURCE_LENGTH = 1024;
-const CONTROL_CHARACTER_RE = /[\u0000-\u001f\u007f]/;
+// Keep this explicit rather than relying on a runtime Unicode-property table:
+// locator metadata must be portable and safe to display across supported runtimes.
+const CONTROL_CHARACTER_RE = /[\u0000-\u001f\u007f-\u009f]/;
 
 export type KitCliTestHooks = {
   beforeCopy?: (source: string, target: string) => void;

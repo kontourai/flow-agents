@@ -113,7 +113,7 @@ test("record-source is bounded caller-declared local metadata and Git rejects it
   const root = tempRoot("flow-kit-record-source-");
   const source = path.join(root, "source");
   copyFixture(source);
-  for (const invalidSource of ["", "   ", " leading", "trailing ", "line\nbreak", "x".repeat(1025)]) {
+  for (const invalidSource of ["", "   ", " leading", "trailing ", "line\nbreak", "c1\u0085break", "c1\u009Bbreak", "x".repeat(1025)]) {
     const result = await captureMain([
       "install", source, "--dest", path.join(root, `dest-${invalidSource.length}`), "--record-source", invalidSource,
     ]);
