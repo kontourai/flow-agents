@@ -202,16 +202,12 @@ export function observeInstalledKitIntegrity(
   );
   const expectedRelativePath = `kits/local/repositories/${id}`;
   const recordedPath = entry.installed_path;
-  const isCanonicalRelativePath = recordedPath === expectedRelativePath;
-  // Pre-portability registries recorded an absolute target. Preserve only the
-  // exact path for this destination; never resolve a registry-supplied target.
-  const isLegacyCurrentDestinationPath = recordedPath === expectedPath;
-  if (!isCanonicalRelativePath && !isLegacyCurrentDestinationPath) {
+  if (recordedPath !== expectedRelativePath) {
     return {
       state: "invalid",
       recorded_hash,
       observed_hash: null,
-      diagnostic: `registry installed_path must be the canonical relative path ${expectedRelativePath}; a legacy absolute path is accepted only when it exactly matches this destination`,
+      diagnostic: `registry migration required: installed_path must be the canonical relative path ${expectedRelativePath}; reinstall with 'flow-agents kit install <source> --dest <dest> --update'`,
     };
   }
   const observation = observeKitContentHash(expectedPath, { trustedRoot: resolvedDest });

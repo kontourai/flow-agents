@@ -69,7 +69,7 @@ test("local installs record portable paths and remain installed after the destin
   assert.match(idempotent.output, /already installed/);
 });
 
-test("integrity accepts only an exact legacy target for the current destination", async () => {
+test("integrity rejects legacy absolute targets with a supported migration command", async () => {
   const root = tempRoot("flow-kit-registry-legacy-");
   const source = path.join(root, "source");
   const dest = path.join(root, "dest");
@@ -81,12 +81,15 @@ test("integrity accepts only an exact legacy target for the current destination"
     ...entry,
     installed_path: path.join(dest, "kits", "local", "repositories", "example-kit"),
   };
-  assert.equal(observeInstalledKitIntegrity(legacyEntry, dest).state, "installed");
+  const exactCurrentDestination = observeInstalledKitIntegrity(legacyEntry, dest);
+  assert.equal(exactCurrentDestination.state, "invalid");
+  assert.match(exactCurrentDestination.diagnostic, /registry migration required/);
+  assert.match(exactCurrentDestination.diagnostic, /flow-agents kit install <source> --dest <dest> --update/);
 
   fs.cpSync(dest, copiedDest, { recursive: true });
   const crossCheckout = observeInstalledKitIntegrity(legacyEntry, copiedDest);
   assert.equal(crossCheckout.state, "invalid");
-  assert.match(crossCheckout.diagnostic, /canonical relative path/);
+  assert.match(crossCheckout.diagnostic, /registry migration required/);
 });
 
 test("integrity rejects alternate paths without resolving registry-supplied targets", async () => {
