@@ -15,6 +15,16 @@
  * Code at L2) set block so the installed product enforces while the engine
  * default and conformance contract stay warn.
  *
+ * FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE (#1171) controls the tests-evidence scope check —
+ * a claimed-pass command that NARROWS the repo's declared test suite (e.g.
+ * `npx vitest run test/one.test.ts` where the repo declares `npm run test`):
+ *   - warn (default): emit a visible, non-blocking divergence line.
+ *   - block:          escalate the same finding to a hard block.
+ * Tighten-only by construction (there is no `off`). A claim may declare the narrowing via
+ * `metadata.evidence_scope = {narrowed: true, reason: "<why>"}` on the trust.bundle claim (or
+ * an `evidence_scope` field on the evidence.json check); a disclosed narrowing is clean in
+ * both modes. See the testScopeDivergence() block below for the full rationale.
+ *
  * Scope: the gate evaluates the session's current task (.kontourai/flow-agents/current.json)
  * when set, so an unrelated active workflow elsewhere in the repo does not gate
  * this stop. A pre-execution sidecar remains warning-only unless it has an active
@@ -545,7 +555,7 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     seen.add(cmd);
     const id = claimCheckId(claim.subjectId);
     // Use 'pass' as the nominal claimed status; cross-reference catches contradictions.
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+    checks.push({ id, kind: 'command', status: 'pass', command: cmd, evidenceScope: claimEvidenceScope(claim) });
   }
 
   // (B) Workflow.check.command claims with effective value "pass" but no capture
@@ -572,10 +582,23 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     }
     if (seen.has(cmd)) continue;
     seen.add(cmd);
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+    checks.push({ id, kind: 'command', status: 'pass', command: cmd, evidenceScope: claimEvidenceScope(c) });
   }
 
   return checks;
+}
+
+/**
+ * #1171: the claim's explicit narrowing disclosure, if any
+ * (`claim.metadata.evidence_scope = {narrowed: true, reason: "<why>"}`). Carried onto the
+ * synthesized check object so captureCrossReference's scope check sees it the same way it sees
+ * an `evidence_scope` field on an evidence.json check. Shape validation lives in
+ * disclosedNarrowing() — this only extracts.
+ */
+function claimEvidenceScope(claim) {
+  const md = claim && typeof claim.metadata === 'object' && claim.metadata ? claim.metadata : null;
+  const scope = md ? md.evidence_scope : null;
+  return scope && typeof scope === 'object' ? scope : undefined;
 }
 
 /**
@@ -1148,6 +1171,19 @@ function acceptanceCommandFor(check, acceptance) {
 }
 
 /**
+ * WHICH declared target kind (test|build|lint) a claimed-pass command check maps to, or null.
+ * Extracted from declaredManifestTarget so the #1171 scope check can ask "is this claim
+ * tests-shaped?" without duplicating (and drifting from) this classification.
+ */
+function manifestTargetKind(check) {
+  const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
+  if (/\btest|spec|jest|vitest|pytest\b/.test(haystack)) return 'test';
+  if (/\bbuild|compile|bundle\b/.test(haystack)) return 'build';
+  if (/\blint|format|style|typecheck\b/.test(haystack)) return 'lint';
+  return null;
+}
+
+/**
  * Map a claimed-pass command check to a project-declared, NAMED manifest target.
  * Never allowlists arbitrary strings: we only run a target the project itself
  * declared (npm script, Makefile target, cargo/tox/just/task). The check's
@@ -1156,11 +1192,7 @@ function acceptanceCommandFor(check, acceptance) {
  * special-casing.
  */
 function declaredManifestTarget(root, check) {
-  const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
-  let want = null;
-  if (/\btest|spec|jest|vitest|pytest\b/.test(haystack)) want = 'test';
-  else if (/\bbuild|compile|bundle\b/.test(haystack)) want = 'build';
-  else if (/\blint|format|style|typecheck\b/.test(haystack)) want = 'lint';
+  const want = manifestTargetKind(check);
   if (!want) return null;
 
   // package.json scripts.{test,build,lint}
@@ -1190,6 +1222,174 @@ function declaredManifestTarget(root, check) {
     if (fs.existsSync(path.join(root, runner[1]))) return { argv: [runner[0], want], cwd: root };
   }
   return null;
+}
+
+// ─── #1171: tests-evidence scope divergence (narrowed command vs declared suite) ──────────
+//
+// THE HOLE. Every check below this backstop verifies that the command a claim NAMES really
+// passed. None of them verified that the named command is the command the repo DECLARES for
+// a tests-shaped claim. So `npx vitest run test/one-trivial.test.ts` — captured, exit 0, and
+// re-runnable — satisfies the capture cross-reference AND the trusted backstop re-run, while
+// the declared suite is never re-checked. The claim is fresh, bound to the tree, and
+// materially misleading about what was verified.
+//
+// WHY THIS LAYER ONLY (deliberate, see the issue's "may be right to implement in only one
+// layer"): the CI reconciler (scripts/ci/trust-reconcile.js, via
+// scripts/lib/reconcile-shape.js's reconcilableManifestIssues) ALREADY refuses a tests-shaped
+// claim whose command is not a member of the reconcile manifest — narrowing there is a hard
+// `not-run` divergence today, and the local pre-push reconcile-preflight shares that exact
+// shape check. The unguarded surface was this Stop backstop, which re-runs the claimed text
+// and reports it confirmed. Adding a second, weaker narrowing rule to CI would be redundant
+// machinery over an already-closed path.
+//
+// WHY WARN, NOT FAIL, BY DEFAULT: the #1048 workaround INSTITUTIONALIZED recording narrowed
+// direct `npx vitest run <paths>` commands (the evidence validator rejects the npm-script
+// manifest commands those repos actually declare). Live consumers are recording exactly this
+// shape right now; a hard fail here would brick them at their Stop hook. Default is a visible
+// divergence line; `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block` escalates it to a hard block
+// for operators who have finished migrating. The env var can only TIGHTEN (there is no `off`),
+// so it needs none of the production-downgrade guarding resolveGoalFitConfig applies.
+//
+// THE DISCLOSURE PATH: narrowing is legitimate — focused evidence lanes exist by design. What
+// must never happen is narrowing being INFERRED as full coverage. A claim may declare it, via
+// `claim.metadata.evidence_scope = {narrowed: true, reason: "<why>"}` in trust.bundle (or
+// `evidence_scope` on an evidence.json check). A disclosed narrowing reconciles clean here —
+// the narrowing is then recorded in the bundle a reviewer/CI reads, which is the point.
+
+/** Dedicated test runners whose invocation is unambiguous from the command text alone. */
+const TEST_RUNNER_BASENAMES = new Set([
+  'vitest', 'jest', 'mocha', 'ava', 'pytest', 'py.test', 'phpunit', 'rspec',
+  'jasmine', 'karma', 'tap', 'playwright', 'cypress', 'nose2', 'ginkgo', 'testem',
+]);
+
+/** Flags that select a SUBSET of a suite (name filters, path filters, shards). */
+const TEST_SELECTION_FLAGS = new Set([
+  '-t', '--testnamepattern', '--test-name-pattern', '--grep', '-g', '-k',
+  '--testpathpattern', '--testpathpatterns', '--spec', '--filter', '--only',
+  '--shard', '-run', '--file', '--tests', '--test-name',
+]);
+
+function commandBasename(token) {
+  return String(token || '').split(/[/\\]/).pop().toLowerCase();
+}
+
+/**
+ * Does this token select a specific test file/directory? Any path-ish positional, or a
+ * conventional test-file name (`a.test.ts`, `a_spec.rb`, `test_a.py`). Flags are excluded —
+ * they are handled by TEST_SELECTION_FLAGS, so `--config vitest.config.ts` never counts.
+ */
+function looksLikeTestSelector(token) {
+  const t = String(token || '');
+  if (!t || t.startsWith('-')) return false;
+  if (/[/\\]/.test(t)) return true;
+  return /[._-](?:test|spec)\.[A-Za-z0-9]+$/.test(t) || /^test_[^\s]*\.py$/.test(t);
+}
+
+/** Does this command segment invoke a test runner (directly, via `node --test`, or via an npm test script)? */
+function invokesTestRunner(tokens) {
+  if (tokens.some(t => TEST_RUNNER_BASENAMES.has(commandBasename(t)))) return true;
+  const head = commandBasename(tokens[0]);
+  if (/^(?:node|deno|bun)$/.test(head) && tokens.includes('--test')) return true;
+  if (/^(?:npm|pnpm|yarn|bun)$/.test(head)) {
+    return tokens.slice(1).some(t => /^test(?:[:_-][A-Za-z0-9:._-]+)?$/i.test(t));
+  }
+  return false;
+}
+
+/**
+ * Is the claimed command a NARROWED test invocation — a recognized test runner carrying an
+ * explicit subset selector? Deliberately conservative: an unrecognized runner, or a runner
+ * invoked with no selector (`npx vitest run`, `npm run test:unit`), is never called narrowed.
+ * Speaking only when the shape is unmistakable is what keeps this from becoming noise.
+ */
+function isNarrowedTestInvocation(cmd) {
+  for (const segment of String(cmd || '').split(/&&|\|\||[;|]/)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0 || !invokesTestRunner(tokens)) continue;
+    for (let i = 1; i < tokens.length; i++) {
+      if (TEST_SELECTION_FLAGS.has(tokens[i].toLowerCase().split('=')[0])) return true;
+      if (looksLikeTestSelector(tokens[i])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The declared test suite for a tests-shaped check: the SAME project-declared target the
+ * trusted backstop would re-run (declaredManifestTarget), plus the equivalent spellings a
+ * claim may legitimately record for it (`npm test`, `npm run test`, the script body itself).
+ * Returns null when the check is not tests-shaped or the repo declares no test target — we
+ * never invent a suite to diverge from.
+ */
+function declaredTestSuite(root, check) {
+  if (manifestTargetKind(check) !== 'test') return null;
+  const declared = declaredManifestTarget(root, check);
+  if (!declared) return null;
+  const label = declared.argv.join(' ');
+  const texts = new Set([normalizeCommand(label)]);
+  if (declared.argv[0] === 'npm' && declared.argv[1] === 'run') {
+    const name = declared.argv[2];
+    texts.add(normalizeCommand(`npm run ${name}`));
+    if (name === 'test') texts.add('npm test');
+    const pkg = readJsonFile(path.join(root, 'package.json'));
+    const body = pkg && pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts[name] : null;
+    if (typeof body === 'string' && body.trim()) texts.add(normalizeCommand(body));
+  }
+  return { label, texts };
+}
+
+/**
+ * False-positive guard: the repo itself declares this exact command as one of its scripts. A
+ * narrow-LOOKING command the project declared is the project's own scope decision, not an
+ * agent narrowing a suite at claim time.
+ */
+function repoDeclaresCommand(root, cmd) {
+  const pkg = readJsonFile(path.join(root, 'package.json'));
+  if (!pkg || !pkg.scripts || typeof pkg.scripts !== 'object') return false;
+  return Object.values(pkg.scripts).some(body => typeof body === 'string' && normalizeCommand(body) === cmd);
+}
+
+/** An explicit, non-empty narrowing disclosure on the claim (bundle) or check (evidence.json). */
+function disclosedNarrowing(check) {
+  const scope = check && (check.evidenceScope || check.evidence_scope);
+  if (!scope || typeof scope !== 'object') return false;
+  return scope.narrowed === true && typeof scope.reason === 'string' && scope.reason.trim() !== '';
+}
+
+/** warn (default, visible-but-non-blocking) | block (opt-in escalation). Tighten-only. */
+function resolveScopeDivergenceMode() {
+  return String(process.env.FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE || '').trim().toLowerCase() === 'block'
+    ? 'block'
+    : 'warn';
+}
+
+/**
+ * Build the scope-divergence line for an OTHERWISE-ACCEPTED claimed-pass command check, or
+ * null when there is nothing to report. Called only on the paths where the claim was let
+ * through (capture log says pass / backstop re-run says pass) — a claim that already failed or
+ * is already NOT_VERIFIED is blocked on stronger grounds and does not need this line too.
+ */
+function testScopeDivergence(root, base, check, cmd) {
+  const claimed = normalizeCommand(cmd);
+  if (!claimed) return null;
+  const suite = declaredTestSuite(root, check);
+  if (!suite) return null;
+  if (suite.texts.has(claimed)) return null;
+  if (!isNarrowedTestInvocation(claimed)) return null;
+  if (repoDeclaresCommand(root, claimed)) return null;
+  if (disclosedNarrowing(check)) return null;
+
+  const id = safeOneLine((check && check.id) || claimed, 80);
+  const blocking = resolveScopeDivergenceMode() === 'block';
+  // The default lead deliberately matches NEITHER HARD_BLOCK nor FULL_BLOCK; the escalated
+  // lead carries the `tests-evidence scope divergence (blocking)` marker both patterns list.
+  const lead = blocking
+    ? 'tests-evidence scope divergence (blocking):'
+    : 'tests-evidence scope divergence —';
+  const escalationHint = blocking
+    ? ''
+    : ' Set FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block to make this a hard block.';
+  return `${base} ${lead} claim ${id} names a narrowed test command "${safeOneLine(claimed, 120)}" while this repo declares "${safeOneLine(suite.label, 120)}" as its test suite; the declared suite was not re-run, so this pass covers only the named subset. Record the declared-suite command, or disclose the narrowing (trust.bundle claim metadata.evidence_scope {"narrowed":true,"reason":"..."}, or an evidence_scope field on the evidence.json check).${escalationHint}`;
 }
 
 function resolveBackstopTimeout(root) {
@@ -1387,6 +1587,9 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     if (!cmd) continue;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
+    // #1171: computed once, emitted ONLY on the two paths that accept the claimed pass —
+    // a narrowed-but-passing claim is the misleading-green case this closes.
+    const scopeNote = testScopeDivergence(root, base, check, cmd);
 
     if (!chainBroken && logged && logged.ran) {
       // (1) Cross-reference the capture log first (only when chain is intact).
@@ -1416,6 +1619,11 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
         // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
         warnings.push(`${base} evidence check ${id}: claimed pass relies on an exit-code-laundered command "${safeOneLine(cmd, 120)}" — the exit code is not a trustworthy signal (laundering operators mask the real exit code).`);
+      } else if (scopeNote) {
+        // #1171: the log shows it ran and passed — but the command it ran is a narrowing of
+        // the repo's declared suite, so the pass is real and the coverage is not what it looks
+        // like. Surfaced here rather than swallowed by the "satisfied deterministically" path.
+        warnings.push(scopeNote);
       }
       // else: log shows it ran and passed with no laundering → satisfied deterministically.
       continue;
@@ -1463,6 +1671,11 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
+    } else if (scopeNote) {
+      // #1171: the re-run confirmed the claimed command — but the claimed command is a
+      // narrowing of the declared suite, so re-running it re-confirms only the subset. This
+      // is the exact path the issue names: the backstop reconciles the CLAIMED command text.
+      warnings.push(scopeNote);
     }
     // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
@@ -2098,9 +2311,17 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
+//
+// #1171: `tests-evidence scope divergence (blocking)` is the ESCALATED form of the
+// narrowed-test-command divergence, emitted only under FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block.
+// It is listed in HARD_BLOCK because the misleading-green it names is at its worst on a
+// terminal/delivered session (that is when a narrowed pass gets published as coverage). The
+// DEFAULT (warn) wording — `tests-evidence scope divergence —` — deliberately matches NEITHER
+// pattern: the #1048 recipe institutionalized narrowed commands, so existing green flows must
+// stay green until an operator opts in. Do not fold the default lead into either constant.
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)/;
 
 // #793: deliberately NOT folded into HARD_BLOCK/FULL_BLOCK above. Those two constants are
 // reused by isHardStopWarning() to decide whether the AC2 MAX_BLOCKS escape valve is allowed
@@ -3000,4 +3221,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning };

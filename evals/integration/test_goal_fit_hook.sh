@@ -2255,12 +2255,12 @@ node - "$ROOT/scripts/hooks/stop-goal-fit.js" <<'NODEEOF' 2>"$TMPDIR_EVAL/hardbl
 const fs = require('fs');
 const file = process.argv[2];
 let src = fs.readFileSync(file, 'utf8');
-const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
+const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)|tests-evidence scope divergence \\(blocking\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 if (!src.includes(needle)) {
   process.stderr.write('mutation: HARD_BLOCK NOT_VERIFIED (ambiguous) pattern not found — source pattern drifted, cannot mutation-test\n');
   process.exit(1);
 }
-const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
+const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|tests-evidence scope divergence \\(blocking\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 src = src.split(needle).join(mutated);
 fs.writeFileSync(file, src);
 NODEEOF
@@ -3124,6 +3124,311 @@ elif [[ "$?" -eq 2 ]] && grep -q 'max-blocks reached but the block' "$TMPDIR_EVA
   _pass "nonordinary FULL_BLOCK cannot burn through max-block release"
 else
   _fail "nonordinary FULL_BLOCK did not remain hard after max blocks: $(cat "$TMPDIR_EVAL/authority-hard-block-repeat.err")"
+fi
+
+# --- #1171: tests-evidence scope divergence (narrowed command vs declared suite) -------------
+#
+# The deterministic narrowing hole: a tests-shaped claim naming `npx vitest run <one file>`
+# satisfies every predicate that guards publish (captured, exit 0, re-runnable) while the
+# repo's DECLARED suite is never re-checked. Both emission sites are covered here — the
+# capture-log cross-reference shortcut (the claimed command WAS captured, passing) and the
+# trusted-backstop live re-run (never captured, re-run passes).
+#
+# Contract under test:
+#   1. narrowed + undisclosed         -> visible divergence line
+#   2. default severity is warn       -> the line matches NEITHER HARD_BLOCK nor FULL_BLOCK
+#   3. FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block -> same finding hard-blocks (exit 2)
+#   4. disclosed narrowing            -> clean, even under the escalation opt-in
+#   5. declared-suite command         -> clean (no false positive on honest full-suite claims)
+echo ""
+echo "--- #1171: tests-evidence scope divergence (narrowed test command vs declared suite) ---"
+
+SCOPE_REPO="$TMPDIR_EVAL/scope-divergence/repo"
+SCOPE_DIR="$SCOPE_REPO/.kontourai/flow-agents/narrowed-tests-task"
+mkdir -p "$SCOPE_DIR"
+printf '# Test Repo\n' > "$SCOPE_REPO/AGENTS.md"
+# The repo DECLARES a full test suite -- this is what the narrowed claim is measured against.
+# Without a declared target the check stays silent (we never invent a suite to diverge from).
+printf '%s\n' '{ "name": "scope-fixture", "version": "1.0.0", "scripts": { "test": "vitest run" } }' > "$SCOPE_REPO/package.json"
+
+cat > "$SCOPE_DIR/narrowed-tests-task--deliver.md" <<'MARKDOWN'
+# Narrowed tests task
+
+branch: main
+worktree: main
+created: 2026-08-02
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Goal Fit Gate
+- [x] acceptance verified
+
+## Verification Report
+
+Build: PASS
+
+### Verdict: PASS
+MARKDOWN
+
+# Terminal (delivered) session: only HARD_BLOCK signals block here, so a default-severity
+# divergence line provably does not block, and the escalated one provably does.
+write_json_file "$SCOPE_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "narrowed-tests-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-02T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+write_json_file "$SCOPE_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "narrowed-tests-task.tests-evidence",
+      "subjectId": "narrowed-tests-task/tests-evidence",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-02T00:00:00Z",
+      "updatedAt": "2026-08-02T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:narrowed-tests-task.tests-evidence",
+      "claimId": "narrowed-tests-task.tests-evidence",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-02T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+# The narrowed command WAS captured and genuinely passed -- this is the capture-log shortcut
+# site, where the claim is otherwise accepted as "satisfied deterministically".
+write_json_file "$SCOPE_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npx vitest run test/one-trivial.test.ts","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-02T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-narrowed.out" 2>"$TMPDIR_EVAL/scope-narrowed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_narrowed_status=0
+else
+  scope_narrowed_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-narrowed.err"; then
+  _pass "#1171: a narrowed, undisclosed tests-evidence claim produces a visible scope-divergence finding"
+else
+  _fail "#1171: no scope-divergence finding for a narrowed tests-evidence claim: exit=$scope_narrowed_status $(cat "$TMPDIR_EVAL/scope-narrowed.out" "$TMPDIR_EVAL/scope-narrowed.err")"
+fi
+
+# Default severity is warn: the finding is visible but blocks nothing (the #1048 recipe
+# institutionalized narrowed commands -- existing green flows must stay green).
+if [[ "$scope_narrowed_status" -eq 0 ]] && ! grep -q 'scope divergence (blocking)' "$TMPDIR_EVAL/scope-narrowed.err"; then
+  _pass "#1171: the default scope-divergence severity is warn -- visible, non-blocking (exit 0)"
+else
+  _fail "#1171: the default scope-divergence severity blocked the stop: exit=$scope_narrowed_status $(cat "$TMPDIR_EVAL/scope-narrowed.err")"
+fi
+
+# Escalation opt-in: the SAME finding becomes a hard block.
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-escalated.out" 2>"$TMPDIR_EVAL/scope-escalated.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_escalated_status=0
+else
+  scope_escalated_status=$?
+fi
+
+if [[ "$scope_escalated_status" -eq 2 ]] && grep -q 'tests-evidence scope divergence (blocking)' "$TMPDIR_EVAL/scope-escalated.err"; then
+  _pass "#1171: FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block escalates the same finding to a hard block (exit 2)"
+else
+  _fail "#1171: the escalation opt-in did not hard-block a narrowed claim: exit=$scope_escalated_status $(cat "$TMPDIR_EVAL/scope-escalated.out" "$TMPDIR_EVAL/scope-escalated.err")"
+fi
+
+# Disclosed narrowing reconciles clean -- narrowing is legitimate when it is DECLARED in the
+# bundle rather than inferred as full coverage. Asserted under the escalation opt-in, so this
+# proves the disclosure clears the finding rather than the mode merely being off.
+python3 - "$SCOPE_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+bundle["claims"][0]["metadata"]["evidence_scope"] = {
+    "narrowed": True,
+    "reason": "focused evidence lane: only the touched suite is in scope for this slice",
+}
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-disclosed.out" 2>"$TMPDIR_EVAL/scope-disclosed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_disclosed_status=0
+else
+  scope_disclosed_status=$?
+fi
+
+if [[ "$scope_disclosed_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-disclosed.err"; then
+  _pass "#1171: a DISCLOSED narrowing (claim metadata.evidence_scope) reconciles clean even under the escalation opt-in"
+else
+  _fail "#1171: a disclosed narrowing was still flagged: exit=$scope_disclosed_status $(cat "$TMPDIR_EVAL/scope-disclosed.out" "$TMPDIR_EVAL/scope-disclosed.err")"
+fi
+
+# Regression guard: an honest full-suite claim (the declared command itself) is never flagged.
+python3 - "$SCOPE_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+del bundle["claims"][0]["metadata"]["evidence_scope"]
+bundle["claims"][0]["fieldOrBehavior"] = "npm run test"
+bundle["evidence"][0]["excerptOrSummary"] = "npm run test"
+bundle["evidence"][0]["execution"]["label"] = "npm run test"
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+write_json_file "$SCOPE_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npm run test","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-02T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-fullsuite.out" 2>"$TMPDIR_EVAL/scope-fullsuite.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_fullsuite_status=0
+else
+  scope_fullsuite_status=$?
+fi
+
+if [[ "$scope_fullsuite_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-fullsuite.err"; then
+  _pass "#1171: a claim naming the DECLARED suite is never flagged (no false positive on honest full-suite evidence)"
+else
+  _fail "#1171: a declared-suite claim was flagged as narrowed: exit=$scope_fullsuite_status $(cat "$TMPDIR_EVAL/scope-fullsuite.out" "$TMPDIR_EVAL/scope-fullsuite.err")"
+fi
+
+# Second emission site: the TRUSTED BACKSTOP live re-run. The claimed command was never
+# captured, so the backstop re-runs it -- and re-running a narrowed command re-confirms only
+# the subset. This is the exact path the issue names ("both backstops re-run the narrowed
+# command, which re-passes"). `node --test <file>` is a real, fast, hermetic narrowed run.
+SCOPE_BS_REPO="$TMPDIR_EVAL/scope-divergence-backstop/repo"
+SCOPE_BS_DIR="$SCOPE_BS_REPO/.kontourai/flow-agents/backstop-narrow-task"
+mkdir -p "$SCOPE_BS_DIR" "$SCOPE_BS_REPO/tests"
+printf '# Test Repo\n' > "$SCOPE_BS_REPO/AGENTS.md"
+printf '%s\n' '{ "name": "scope-backstop-fixture", "version": "1.0.0", "scripts": { "test": "node --test tests/" } }' > "$SCOPE_BS_REPO/package.json"
+printf "import { test } from 'node:test';\ntest('trivial', () => {});\n" > "$SCOPE_BS_REPO/tests/one.test.mjs"
+
+cat > "$SCOPE_BS_DIR/backstop-narrow-task--deliver.md" <<'MARKDOWN'
+# Backstop narrowed task
+
+branch: main
+worktree: main
+created: 2026-08-02
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_BS_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-02T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+write_json_file "$SCOPE_BS_DIR/acceptance.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "criteria": [
+    {
+      "id": "tests-evidence",
+      "description": "Tests pass.",
+      "status": "pass",
+      "evidence_refs": [
+        { "kind": "command", "excerpt": "node --test $SCOPE_BS_REPO/tests/one.test.mjs", "summary": "Focused single-file run." }
+      ]
+    }
+  ],
+  "goal_fit": {"status": "pass", "summary": "Focused suite verified."}
+}
+JSON
+
+write_json_file "$SCOPE_BS_DIR/evidence.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-evidence",
+      "kind": "command",
+      "status": "pass",
+      "command": "node --test $SCOPE_BS_REPO/tests/one.test.mjs",
+      "summary": "Focused single-file run."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+# No command-log.jsonl -- forces the trusted-backstop re-run path.
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-backstop.out" 2>"$TMPDIR_EVAL/scope-backstop.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_BS_REPO"}
+JSON
+then
+  scope_backstop_status=0
+else
+  scope_backstop_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-backstop.err" \
+  && ! grep -q 'caught false-completion' "$TMPDIR_EVAL/scope-backstop.err"; then
+  _pass "#1171: the trusted-backstop re-run site also reports narrowing -- a re-passing narrowed command is not silent coverage"
+else
+  _fail "#1171: the backstop re-run site did not report narrowing: exit=$scope_backstop_status $(cat "$TMPDIR_EVAL/scope-backstop.out" "$TMPDIR_EVAL/scope-backstop.err")"
 fi
 
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then
