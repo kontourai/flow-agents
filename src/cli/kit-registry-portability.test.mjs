@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import childProcess from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import { main as kitMain } from "../../build/src/cli/kit.js";
 import { observeInstalledKitIntegrity } from "../../build/src/flow-kit/content-hash.js";
@@ -18,9 +20,29 @@ function copyFixture(destination) {
   fs.cpSync(FIXTURE, destination, { recursive: true });
 }
 
+function createGitFixture(destination) {
+  copyFixture(destination);
+  childProcess.execFileSync("git", ["init", "-q", destination]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.email", "tests@example.invalid"]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.name", "Flow Agents tests"]);
+  childProcess.execFileSync("git", ["-C", destination, "add", "."]);
+  childProcess.execFileSync("git", ["-C", destination, "commit", "-qm", "fixture"]);
+}
+
 function readEntry(dest) {
   const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
   return JSON.parse(fs.readFileSync(registryPath, "utf8")).kits[0];
+}
+
+function writeLegacyAbsoluteEntry(dest) {
+  const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
+  const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  registry.kits[0] = {
+    ...registry.kits[0],
+    installed_at: "2000-01-01T00:00:00.000Z",
+    installed_path: path.join(dest, "kits", "local", "repositories", "example-kit"),
+  };
+  fs.writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
 
 async function captureMain(argv) {
@@ -90,6 +112,44 @@ test("integrity rejects legacy absolute targets with a supported migration comma
   const crossCheckout = observeInstalledKitIntegrity(legacyEntry, copiedDest);
   assert.equal(crossCheckout.state, "invalid");
   assert.match(crossCheckout.diagnostic, /registry migration required/);
+});
+
+async function assertLegacyRegistryMigratesWithUpdate(installSource) {
+  const root = tempRoot("flow-kit-registry-migrate-");
+  const dest = path.join(root, "dest");
+  assert.equal(await kitMain(["install", installSource, "--dest", dest]), 0);
+  writeLegacyAbsoluteEntry(dest);
+
+  const invalidStatus = await captureMain(["status", "example-kit", "--dest", dest]);
+  assert.equal(invalidStatus.status, 0, invalidStatus.output);
+  assert.match(invalidStatus.output, /"state": "invalid"/);
+  assert.match(invalidStatus.output, /registry migration required/);
+
+  const update = await captureMain(["install", installSource, "--dest", dest, "--update"]);
+  assert.equal(update.status, 0, update.output);
+  assert.match(update.output, /updated/);
+  const migrated = readEntry(dest);
+  assert.equal(migrated.installed_path, CANONICAL_PATH);
+  assert.notEqual(migrated.installed_at, "2000-01-01T00:00:00.000Z");
+  assert.equal(Number.isNaN(Date.parse(migrated.installed_at)), false);
+  assert.equal(observeInstalledKitIntegrity(migrated, dest).state, "installed");
+  const status = await captureMain(["status", "example-kit", "--dest", dest]);
+  assert.equal(status.status, 0, status.output);
+  assert.match(status.output, /"state": "installed"/);
+}
+
+test("local --update migrates a same-source legacy registry entry", async () => {
+  const root = tempRoot("flow-kit-local-registry-migrate-");
+  const source = path.join(root, "source");
+  copyFixture(source);
+  await assertLegacyRegistryMigratesWithUpdate(source);
+});
+
+test("Git --update migrates a same-source legacy registry entry", async () => {
+  const root = tempRoot("flow-kit-git-registry-migrate-");
+  const source = path.join(root, "source");
+  createGitFixture(source);
+  await assertLegacyRegistryMigratesWithUpdate(pathToFileURL(source).href);
 });
 
 test("integrity rejects alternate paths without resolving registry-supplied targets", async () => {

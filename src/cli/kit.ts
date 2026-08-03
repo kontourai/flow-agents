@@ -242,7 +242,7 @@ function installWithRegistryTransaction(options: {
     const existing = registry.kits.find((entry) => entry.id === kitId);
     cleanStaleInstallArtifacts(dest, target, existing);
     if (existing && existing.source !== sourceText && !update) return { status: "conflict", source: existing.source };
-    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) return { status: "idempotent" };
+    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force && !update) return { status: "idempotent" };
     testHooks?.beforeCopy?.(source, target);
     installCopiedKit({ source, dest, target, manifest, registry, existing, sourceText, update });
     return { status: "installed", existing: Boolean(existing) };
