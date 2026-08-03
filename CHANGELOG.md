@@ -1,5 +1,26 @@
 # Changelog
 
+## [5.8.0](https://github.com/kontourai/flow-agents/compare/v5.7.0...v5.8.0) (2026-08-03)
+
+
+### Features
+
+* attest sealed execution provenance ([3dc29bf](https://github.com/kontourai/flow-agents/commit/3dc29bf2efad7cce15ece776da10ef37d5b41e87))
+* **hooks:** advise on a Stop that changed tracked source without ever starting a session ([#1153](https://github.com/kontourai/flow-agents/issues/1153)) ([1d2d52e](https://github.com/kontourai/flow-agents/commit/1d2d52ecf34615c6d7bb486d8cce24505c011e2f))
+* **knowledge:** standalone revision-bound Context Check ([#1158](https://github.com/kontourai/flow-agents/issues/1158)) ([d16e841](https://github.com/kontourai/flow-agents/commit/d16e841f78a3a349a259000a8e11658dd35cea98))
+
+
+### Fixes
+
+* **builder:** tolerate head-desynced gate claims backed by a current workspace snapshot ([#1170](https://github.com/kontourai/flow-agents/issues/1170) PR1) ([#1173](https://github.com/kontourai/flow-agents/issues/1173)) ([08714b6](https://github.com/kontourai/flow-agents/commit/08714b6d41eaead29cf4fafe0dfc2f4bd25401bd))
+* **hooks:** deliver blocking Stop guidance to the model; graduated escalation by block class ([#1172](https://github.com/kontourai/flow-agents/issues/1172)) ([#1178](https://github.com/kontourai/flow-agents/issues/1178)) ([ac1edf4](https://github.com/kontourai/flow-agents/commit/ac1edf412092ee61bc09ee8fb7904e063899076a))
+* **hooks:** surface tests-evidence scope divergence in the Stop backstop ([#1171](https://github.com/kontourai/flow-agents/issues/1171)) ([#1174](https://github.com/kontourai/flow-agents/issues/1174)) ([cdc7137](https://github.com/kontourai/flow-agents/commit/cdc7137f62e4ee1d13e382963c5955d0f3956737))
+* **kit:** detect installed content drift ([#1159](https://github.com/kontourai/flow-agents/issues/1159)) ([4cc2fe3](https://github.com/kontourai/flow-agents/commit/4cc2fe3445791dbd71b3ec039affef138b2555d2))
+* **kit:** make install registry portable ([#1163](https://github.com/kontourai/flow-agents/issues/1163)) ([0f8d4ff](https://github.com/kontourai/flow-agents/commit/0f8d4ffa7784d32c28f581a2156c3e16572a7ad5))
+* **knowledge:** make installed evals and promote output portable ([#1166](https://github.com/kontourai/flow-agents/issues/1166)) ([4fab651](https://github.com/kontourai/flow-agents/commit/4fab651a6f74adf333a52f323d443f5a3bcfba41))
+* **knowledge:** make vendored kit schemas self-contained ([#1165](https://github.com/kontourai/flow-agents/issues/1165)) ([e6dee8c](https://github.com/kontourai/flow-agents/commit/e6dee8c7ff4d36f781e5e13d2f85400e37412418))
+* **sidecar:** stamp workspace snapshots at the producer for all gate claims ([#1170](https://github.com/kontourai/flow-agents/issues/1170) PR2) ([#1175](https://github.com/kontourai/flow-agents/issues/1175)) ([07bc688](https://github.com/kontourai/flow-agents/commit/07bc688fcf2d6901b7797ffdac801aa2813a996f))
+
 ## [5.7.0](https://github.com/kontourai/flow-agents/compare/v5.6.0...v5.7.0) (2026-08-02)
 
 
