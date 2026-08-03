@@ -113,12 +113,12 @@ test("record-source is bounded caller-declared local metadata and Git rejects it
   const root = tempRoot("flow-kit-record-source-");
   const source = path.join(root, "source");
   copyFixture(source);
-  for (const invalidSource of ["", "   ", " leading", "trailing ", "line\nbreak", "c1\u0085break", "c1\u009Bbreak", "x".repeat(1025)]) {
+  for (const invalidSource of ["", "   ", " leading", "trailing ", "line\nbreak", "c1\u0085break", "c1\u009Bbreak", "line\u2028separator", "paragraph\u2029separator", "bidi\u202Eoverride", "x".repeat(1025)]) {
     const result = await captureMain([
       "install", source, "--dest", path.join(root, `dest-${invalidSource.length}`), "--record-source", invalidSource,
     ]);
     assert.equal(result.status, 2, invalidSource || "empty");
-    assert.match(result.output, /--record-source must be a trimmed non-blank locator/);
+    assert.match(result.output, /--record-source must be a trimmed non-blank locator.*unsafe Unicode control, format, or separator characters/);
   }
   const gitResult = await captureMain([
     "install", "https://example.invalid/example-kit.git", "--record-source", "logical:example-kit",

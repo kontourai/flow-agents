@@ -16,9 +16,10 @@ const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 const REPOSITORIES_REL_POSIX = "kits/local/repositories";
 const MAX_RECORD_SOURCE_LENGTH = 1024;
-// Keep this explicit rather than relying on a runtime Unicode-property table:
-// locator metadata must be portable and safe to display across supported runtimes.
-const CONTROL_CHARACTER_RE = /[\u0000-\u001f\u007f-\u009f]/;
+// These Unicode categories can alter terminal/log rendering or provenance display.
+// Property escapes are standardized in supported Node runtimes, so this remains
+// deterministic without maintaining a partial hand-written Unicode range table.
+const UNSAFE_RECORD_SOURCE_CHARACTER_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 export type KitCliTestHooks = {
   beforeCopy?: (source: string, target: string) => void;
@@ -317,9 +318,9 @@ function resolveLocalRecordSource(flags: ReturnType<typeof parseArgs>["flags"], 
     || !recordSource.trim()
     || recordSource !== recordSource.trim()
     || recordSource.length > MAX_RECORD_SOURCE_LENGTH
-    || CONTROL_CHARACTER_RE.test(recordSource)
+    || UNSAFE_RECORD_SOURCE_CHARACTER_RE.test(recordSource)
   ) {
-    console.error(`install: --record-source must be a trimmed non-blank locator no longer than ${MAX_RECORD_SOURCE_LENGTH} characters and must not contain control characters`);
+    console.error(`install: --record-source must be a trimmed non-blank locator no longer than ${MAX_RECORD_SOURCE_LENGTH} characters and must not contain unsafe Unicode control, format, or separator characters`);
     return null;
   }
   return recordSource;
