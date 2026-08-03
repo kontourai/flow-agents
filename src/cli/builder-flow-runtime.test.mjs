@@ -4428,6 +4428,128 @@ test("a sidecar-recorded check at the current step no longer blocks later public
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "design-probe");
 });
 
+// #1170 (PR2): producer completeness. PR1 taught the consumer to re-establish freshness from a
+// Git workspace snapshot, but only a passing PUBLIC tests-evidence claim ever produced one — so
+// the tolerance was unreachable for the claims that actually strand a run. These tests pin that
+// every gate claim recorded in a Git worktree now carries a snapshot, that a non-Git session
+// still records exactly as before, and that the snapshot binds the tree at RECORD time rather
+// than being renewed by later unrelated writes.
+
+function gateClaimFor(session, expectationId) {
+  return readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .find((claim) => claim.metadata?.gate_claim?.expectation_id === expectationId);
+}
+
+function checkClaimFor(session, checkId) {
+  return readJson(path.join(session.sessionDir, "trust.bundle")).claims
+    .find((claim) => String(claim.subjectId ?? "").endsWith(`/${checkId}`));
+}
+
+test("a non-tests gate claim recorded in a Git worktree carries a workspace snapshot", async () => {
+  const session = makeGitBackedSession("gate-claim-snapshot-capture");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified", "--summary", "producer completeness fixture",
+  ]);
+
+  const snapshot = gateClaimFor(session, "selected-work").metadata.verification_workspace_snapshot;
+  assert.equal(snapshot.kind, "git-worktree", "every gate claim in a Git worktree now carries the binding PR1 reconciles against");
+  // The stamped snapshot must be a real capture of THIS tree, not a placeholder: it has to
+  // deep-equal what the consumer computes at read time, or the tolerance never fires.
+  assert.deepEqual(snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+});
+
+test("a gate claim recorded outside a Git worktree records without a snapshot and without dying", async () => {
+  // makeSession's project root is a bare tmpdir — canonical session layout, no Git worktree.
+  const session = makeSession("gate-claim-snapshot-non-git");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified", "--summary", "non-git legacy semantics fixture",
+  ]), 0, "a non-Git session must keep recording claims exactly as it did before");
+
+  const claim = gateClaimFor(session, "selected-work");
+  assert.equal(claim.metadata.verification_workspace_snapshot, undefined, "no Git worktree, no snapshot — never a reviewed-files digest, which would be permanently self-current");
+  assert.equal(claim.metadata.gate_claim.expectation_id, "selected-work");
+});
+
+test("a sidecar record-evidence check resolving to a kit-typed gate claim is stamped with a workspace snapshot", async () => {
+  const session = makeGitBackedSession("declared-check-snapshot-stamp");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({ id: "verifier-ac-1", kind: "external", status: "pass", summary: "Independent verifier recorded AC-1 via the sidecar." }),
+  ]);
+
+  const claim = checkClaimFor(session, "verifier-ac-1");
+  assert.equal(claim.metadata.origin, "check", "an origin:'check' claim is head-bound by builder-flow-runtime");
+  assert.equal(claim.metadata.gate_claim?.flow_run_head, undefined, "record-evidence still mints no head — that stamp belongs to record-gate-claim (the #1164 mechanism)");
+  assert.equal(claim.metadata.verification_workspace_snapshot.kind, "git-worktree", "the producer now supplies the binding the null head cannot");
+  assert.deepEqual(claim.metadata.verification_workspace_snapshot, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+});
+
+test("a later bundle rebuild never re-anchors an already-recorded check to a newer tree", async () => {
+  // The laundering guard. Every writer rebuilds the whole bundle from checksFromBundle plus its
+  // own new checks; stamping unconditionally would silently refresh a check recorded against an
+  // OLD tree on every unrelated later write.
+  const session = makeGitBackedSession("declared-check-snapshot-no-relaunder");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({ id: "verifier-ac-1", kind: "external", status: "pass", summary: "Recorded against the original tree." }),
+  ]);
+  const originalSnapshot = checkClaimFor(session, "verifier-ac-1").metadata.verification_workspace_snapshot;
+
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "edited after AC-1 was recorded\n");
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({ id: "verifier-ac-2", kind: "external", status: "pass", summary: "Recorded against the edited tree." }),
+  ]);
+
+  const rebuiltFirst = checkClaimFor(session, "verifier-ac-1").metadata.verification_workspace_snapshot;
+  const second = checkClaimFor(session, "verifier-ac-2").metadata.verification_workspace_snapshot;
+  assert.deepEqual(rebuiltFirst, originalSnapshot, "the earlier check keeps the tree it was actually recorded against");
+  assert.notDeepEqual(second, originalSnapshot, "the fixture must genuinely change the tree between the two writes");
+  assert.deepEqual(second, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+});
+
+test("a sidecar-recorded check recovers a later public evidence write with no caller-supplied snapshot", async () => {
+  // The point of this slice. Identical to the PR1 #1164 repro above EXCEPT that the check does
+  // not carry `_verification_workspace_snapshot` — the producer stamps it. A live #1164-shaped
+  // run therefore recovers in the field on an unchanged tree, with no operator intervention and
+  // no synthetic fixture help.
+  const session = makeGitBackedSession("sidecar-check-producer-stamped-recovery");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected #1164 producer-stamped fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({
+      id: "verifier-ac-1",
+      kind: "external",
+      status: "pass",
+      summary: "Independent verifier recorded AC-1 via the sidecar.",
+    }),
+  ]);
+  const recovered = checkClaimFor(session, "verifier-ac-1");
+  assert.equal(recovered.metadata.origin, "check");
+  assert.equal(recovered.metadata.gate_claim?.flow_run_head, undefined, "still no head — recovery comes from the snapshot, not from minting a head");
+  assert.equal(recovered.metadata.verification_workspace_snapshot.kind, "git-worktree", "PR2 producer stamping, not the caller");
+
+  assert.equal(await workflowMain([
+    "evidence", "--session-dir", session.sessionDir,
+    "--expectation", "selected-work", "--status", "pass", "--summary", "public evidence after a sidecar check",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, summary: "selected work" }),
+  ]), 0);
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "design-probe");
+});
+
 test("post-plan acceptance shrinking is rejected before a later bundle write", async () => {
   const session = makeSession("acceptance-contract-integrity");
   await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });

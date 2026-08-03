@@ -1172,6 +1172,32 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * #1170 (PR2): the workspace snapshot stamped onto a FRESHLY-recorded kit-typed gate claim.
+   *
+   * Captured at most once per bundle write (the Git diff is whole-tree) and only if some check
+   * actually needs it.
+   *
+   * ONLY fresh writes are stamped — see `_fresh_record_write`, set by the recording verb on the
+   * checks supplied in THIS invocation. Every writer in this file rebuilds the whole bundle from
+   * `checksFromBundle` + its own new checks, so stamping unconditionally would re-anchor a check
+   * recorded against an OLD tree to the CURRENT one on every unrelated later write (a
+   * record-critique or record-learning call would silently refresh a stale verifier check).
+   * That is precisely the evidence laundering PR1's read-time predicate is built to prevent:
+   * "no path re-stamps a snapshot". A previously-recorded snapshot round-trips untouched through
+   * `checksFromBundle`'s `_verification_workspace_snapshot` restoration, so a rebuild preserves
+   * the original binding rather than renewing it.
+   */
+  let capturedFreshWorkspaceSnapshot: AnyObj | null | undefined;
+  const freshWorkspaceSnapshot = (): AnyObj | null => {
+    if (capturedFreshWorkspaceSnapshot === undefined) {
+      capturedFreshWorkspaceSnapshot = flowAgentsDir
+        ? tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(path.join(flowAgentsDir, slug)))
+        : null;
+    }
+    return capturedFreshWorkspaceSnapshot;
+  };
+
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
   for (const check of Array.isArray(checks) ? checks : []) {
     if (!check.id) continue;
@@ -1351,9 +1377,31 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
-      const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+      // #1170 (PR2) producer completeness: a check that resolves to a kit-typed gate claim is a
+      // CURRENT-GATE claim — `builder-flow-runtime.ts` classifies every `origin: "check"` claim as
+      // head-bound. A sidecar `record-evidence` check carries no `metadata.gate_claim` (that stamp
+      // is minted only by record-gate-claim), so it contributes a NULL head and, before PR1, made
+      // every later public `workflow evidence` write fail forever — #1164.
+      //
+      // PR1 lets such a claim re-establish freshness from a Git workspace snapshot instead. This is
+      // the producer half: stamp that snapshot at record time, so a live #1164-shaped run recovers
+      // in the field on an unchanged tree with no operator intervention.
+      //
+      // Only the snapshot is stamped here, deliberately NOT a `flow_run_head`. A fresh
+      // record-evidence check has no `gate_claim` object to carry a head (`_gate_claim_expectation_id`
+      // is minted only by record-gate-claim and restored only from a prior write), and synthesizing
+      // one from `matchExpectsEntry`'s heuristic would freeze a guessed expectation binding into
+      // the #270 anti-smuggling surface. Stamping a head onto a RESTORED claim would be worse
+      // still: it would let a stale claim pass the head fast path without any tree comparison at
+      // all. The snapshot is the whole producer gap, and it is the binding that actually describes
+      // a claim whose subject is repository content.
+      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta ?? (check._fresh_record_write === true ? freshWorkspaceSnapshot() : null);
+      const declaredBaseMetadata: AnyObj = declaredWorkspaceSnapshot
+        ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
+      const declaredMetadata: AnyObj = gateClaimExpectationId
+        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+        : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
@@ -3146,6 +3194,47 @@ function canonicalProjectRootForSession(dir: string): string {
   return projectRoot;
 }
 
+/**
+ * #1170 (PR2): the canonical project root for a session, or null when the session is not a
+ * canonical `.kontourai/flow-agents/<slug>` layout.
+ *
+ * `canonicalProjectRootForSession` dies on a non-canonical layout, which is correct where a
+ * canonical root is a precondition (observed commands, passing public tests evidence). The
+ * broadened workspace-snapshot capture below is *additive provenance* — a legacy or tmp session
+ * layout must keep recording claims exactly as it does today rather than becoming unrecordable.
+ */
+function tryCanonicalProjectRootForSession(dir: string): string | null {
+  try {
+    return canonicalProjectRootForSession(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #1170 (PR2): best-effort Git worktree snapshot for gate-claim provenance.
+ *
+ * Returns a snapshot ONLY when a canonical Git worktree resolves. Two deliberate exclusions:
+ *
+ * - `null` root / capture failure / non-Git tree → null. The claim degrades to today's legacy
+ *   semantics (no snapshot recorded, nothing rejected at record time). Snapshot capture is a
+ *   freshness *affordance*; failing to obtain one must never make a recordable claim unrecordable.
+ * - A `reviewed-files` snapshot → null, never stamped. `captureReviewWorkspaceSnapshot` falls back
+ *   to digesting the supplied reviewed-file list when the tree is not Git-backed; with the empty
+ *   list passed here that digest is a constant, so stamping it would mint a claim that is
+ *   permanently self-current. The consumer (`builder-flow-runtime.ts` `isGitWorktreeSnapshot`)
+ *   already refuses to honor that shape — this keeps the producer from writing it at all.
+ */
+function tryCaptureGitWorktreeSnapshot(projectRoot: string | null): AnyObj | null {
+  if (!projectRoot) return null;
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return snapshot.kind === "git-worktree" && typeof snapshot.head_sha === "string" ? snapshot as AnyObj : null;
+  } catch {
+    return null;
+  }
+}
+
 // #619: the narrative isolation guard must run for EVERY session layout (canonical,
 // tmp, or legacy .flow-agents/) without imposing the canonical-session requirement that
 // canonicalProjectRootForSession enforces. It only needs a best-effort project root to
@@ -4686,9 +4775,16 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   const projectRoot = narrativeGuardRoot(dir);
+  // #1170 (PR2): `_fresh_record_write` marks the checks supplied in THIS invocation, so
+  // buildTrustBundle stamps a workspace snapshot onto them and onto nothing else. Every check
+  // restored from the existing bundle by the mergeChecksById call below keeps whatever snapshot
+  // it was originally recorded with; only a genuinely new (or re-recorded, same-id superseding)
+  // check gets bound to the tree as it is right now. The marker is transient — buildTrustBundle
+  // projects an explicit allowlist of `_`-prefixed fields into claim metadata and this is not one
+  // of them, so it never reaches the bundle and never round-trips through checksFromBundle.
   const _checksRaw = [
-    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
-    ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
+    ...opts(p, "check-json").map((v) => ({ ...normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot), _fresh_record_write: true })),
+    ...opts(p, "surface-trust-json").map((file, index) => ({ ...surfaceCheckFromArtifact(file, index, projectRoot), _fresh_record_write: true })),
   ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
@@ -5058,11 +5154,29 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
+    // Unchanged strict path: a passing public tests-evidence claim REQUIRES a Git-backed
+    // snapshot and dies without one. `canonicalRoot` is non-null here because mustRunTests
+    // already required at least one --command above.
     const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
     if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
       die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
     }
     checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  } else {
+    // #1170 (PR2) producer completeness: capture the workspace snapshot for EVERY gate claim
+    // recorded while a canonical Git root resolves, not only the passing-public-tests case.
+    //
+    // `flow_run_head` hashes workflow POSITION, so a claim recorded before any state movement is
+    // stranded by the head predicate even though the code it attests to never changed (#1164).
+    // PR1 taught the consumer to re-establish freshness from a Git workspace snapshot; without
+    // this capture that tolerance is unreachable for the claims that actually need it, because
+    // nothing but the tests-evidence path ever produced a snapshot to reconcile against.
+    //
+    // Strictly additive: absent a Git root this records exactly what it recorded before (no
+    // snapshot, no failure — legacy semantics), and a claim whose head still matches never
+    // consults the snapshot at all.
+    const snapshot = tryCaptureGitWorktreeSnapshot(canonicalRoot ?? tryCanonicalProjectRootForSession(dir));
+    if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
   }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
