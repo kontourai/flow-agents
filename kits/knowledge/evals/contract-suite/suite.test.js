@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 // ---------------------------------------------------------------------------
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const KIT_ROOT = path.resolve(__dirname, "../../../..");
+const KIT_ROOT = path.resolve(__dirname, "../..");
 
 function resolveAdapterPath() {
   // 1. CLI flag: --adapter=<path>
@@ -35,7 +35,7 @@ function resolveAdapterPath() {
   if (process.env.KNOWLEDGE_ADAPTER) return path.resolve(process.env.KNOWLEDGE_ADAPTER);
 
   // 3. Default: bundled adapter
-  return path.join(KIT_ROOT, "kits/knowledge/adapters/default-store/index.js");
+  return path.join(KIT_ROOT, "adapters/default-store/index.js");
 }
 
 const adapterPath = resolveAdapterPath();

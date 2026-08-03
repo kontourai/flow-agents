@@ -31,7 +31,7 @@ function tempRoot(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-test("supported install keeps Knowledge Kit schemas self-contained", async () => {
+test("supported install keeps Knowledge Kit schemas self-contained and every declared eval runnable", async () => {
   const dest = tempRoot("flow-kit-knowledge-vendored-");
   const source = path.resolve("kits/knowledge");
   assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
@@ -40,9 +40,11 @@ test("supported install keeps Knowledge Kit schemas self-contained", async () =>
   const { loadSchemas } = await import(pathToFileURL(path.join(installed, "providers", "lib", "model.js")).href);
   assert.deepEqual(Object.keys(loadSchemas()).sort(), ["edge", "healthReport", "node", "proposal"]);
 
-  const contextCheck = childProcess.spawnSync(process.execPath, ["--test", path.join(installed, "context-check", "context-check.test.js")], {
+  const manifest = JSON.parse(fs.readFileSync(path.join(installed, "kit.json"), "utf8"));
+  const declaredEvalPaths = manifest.evals.map((entry) => path.join(installed, entry.path));
+  const declaredEvals = childProcess.spawnSync(process.execPath, ["--test", ...declaredEvalPaths], {
     cwd: dest,
     encoding: "utf8",
   });
-  assert.equal(contextCheck.status, 0, `${contextCheck.stdout}\n${contextCheck.stderr}`);
+  assert.equal(declaredEvals.status, 0, `${declaredEvals.stdout}\n${declaredEvals.stderr}`);
 });
