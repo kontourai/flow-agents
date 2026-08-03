@@ -3431,6 +3431,283 @@ else
   _fail "#1171: the backstop re-run site did not report narrowing: exit=$scope_backstop_status $(cat "$TMPDIR_EVAL/scope-backstop.out" "$TMPDIR_EVAL/scope-backstop.err")"
 fi
 
+# --- #1171 review finding 1: the backstop actually re-ran the FULL declared suite ----------
+#
+# resolveTrustedCommand source (b) — the declared manifest target — runs the repo's WHOLE
+# suite. Reporting "the declared suite was not re-run" there is simply false, and under the
+# escalation opt-in it hard-blocked a session the backstop itself had just fully verified.
+# The finding must be bound to what was ACTUALLY EXECUTED, not to the claimed command text.
+#
+# Fixture shape (from the review's live repro): package.json scripts.test = "node --test .",
+# an uncaptured narrow `node --test <file>` claim, and NO acceptance.json — so
+# resolveTrustedCommand falls past (a) to (b) and executes the declared suite. The shipped
+# cases above only exercise trusted.source === 'acceptance'.
+echo ""
+echo "--- #1171 (review finding 1): no divergence when the backstop re-ran the DECLARED suite ---"
+
+SCOPE_MF_REPO="$TMPDIR_EVAL/scope-divergence-manifest/repo"
+SCOPE_MF_DIR="$SCOPE_MF_REPO/.kontourai/flow-agents/manifest-backstop-task"
+mkdir -p "$SCOPE_MF_DIR" "$SCOPE_MF_REPO/tests"
+printf '# Test Repo\n' > "$SCOPE_MF_REPO/AGENTS.md"
+# Declared suite is bare `node --test` (auto-discovery = the WHOLE suite, unmistakably not a
+# narrowed invocation). It must genuinely PASS, so that a non-zero exit below can only mean
+# the false-narrowing block, never an incidentally red fixture suite.
+printf '%s\n' '{ "name": "scope-manifest-fixture", "version": "1.0.0", "scripts": { "test": "node --test" } }' > "$SCOPE_MF_REPO/package.json"
+printf "import { test } from 'node:test';\ntest('trivial', () => {});\n" > "$SCOPE_MF_REPO/tests/one.test.mjs"
+
+cat > "$SCOPE_MF_DIR/manifest-backstop-task--deliver.md" <<'MARKDOWN'
+# Manifest backstop task
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_MF_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "manifest-backstop-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+# NO acceptance.json on purpose: source (a) must not resolve, so the backstop falls through
+# to (b) and runs the repo's declared `npm run test --silent`.
+write_json_file "$SCOPE_MF_DIR/evidence.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "manifest-backstop-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-evidence",
+      "kind": "command",
+      "status": "pass",
+      "command": "node --test $SCOPE_MF_REPO/tests/one.test.mjs",
+      "summary": "Focused single-file run claimed; the backstop re-runs the declared suite."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+# No command-log.jsonl -- forces the trusted-backstop path. Escalation opt-in ON: if the
+# false positive were still present this would hard-block (exit 2).
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-manifest.out" 2>"$TMPDIR_EVAL/scope-manifest.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_MF_REPO"}
+JSON
+then
+  scope_manifest_status=0
+else
+  scope_manifest_status=$?
+fi
+
+if [[ "$scope_manifest_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-manifest.err"; then
+  _pass "#1171 finding 1: a backstop re-run of the DECLARED manifest target reports no narrowing (it really did run the full suite)"
+else
+  _fail "#1171 finding 1 REGRESSION: the manifest-target backstop path reported a false narrowing: exit=$scope_manifest_status $(cat "$TMPDIR_EVAL/scope-manifest.out" "$TMPDIR_EVAL/scope-manifest.err")"
+fi
+
+# Proof the fixture actually reaches the backstop (and not a silent no-op): the same fixture
+# with the declared script REMOVED has no declared suite to compare against, which is also
+# clean -- so instead assert the backstop genuinely executed by pointing the declared script
+# at a command that fails, which must surface as a caught false-completion.
+printf '%s\n' '{ "name": "scope-manifest-fixture", "version": "1.0.0", "scripts": { "test": "node --test tests/does-not-exist.mjs" } }' > "$SCOPE_MF_REPO/package.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-manifest-ran.out" 2>"$TMPDIR_EVAL/scope-manifest-ran.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_MF_REPO"}
+JSON
+then
+  scope_manifest_ran_status=0
+else
+  scope_manifest_ran_status=$?
+fi
+if grep -q 'trusted backstop (manifest)' "$TMPDIR_EVAL/scope-manifest-ran.err"; then
+  _pass "#1171 finding 1 (fixture power): the clean case above really did traverse the manifest backstop, not a silent skip"
+else
+  _fail "#1171 finding 1 (fixture power): the fixture never reached the manifest backstop -- the clean result above proves nothing: exit=$scope_manifest_ran_status $(cat "$TMPDIR_EVAL/scope-manifest-ran.out" "$TMPDIR_EVAL/scope-manifest-ran.err")"
+fi
+
+# --- #1171 review finding 2: cross-claim disclosure laundering -----------------------------
+#
+# Bundle-sourced checks dedup by normalized COMMAND TEXT while a disclosure is a property of a
+# CLAIM. A single disclosed claim must not silence sibling claims naming the identical command.
+echo ""
+echo "--- #1171 (review finding 2): a disclosed claim cannot launder an undisclosed sibling ---"
+
+SCOPE_TWO_REPO="$TMPDIR_EVAL/scope-divergence-two-claims/repo"
+SCOPE_TWO_DIR="$SCOPE_TWO_REPO/.kontourai/flow-agents/two-claim-task"
+mkdir -p "$SCOPE_TWO_DIR"
+printf '# Test Repo\n' > "$SCOPE_TWO_REPO/AGENTS.md"
+printf '%s\n' '{ "name": "scope-two-claim-fixture", "version": "1.0.0", "scripts": { "test": "vitest run" } }' > "$SCOPE_TWO_REPO/package.json"
+
+cat > "$SCOPE_TWO_DIR/two-claim-task--deliver.md" <<'MARKDOWN'
+# Two claim task
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_TWO_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "two-claim-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+# TWO claims naming the IDENTICAL narrowed command. The DISCLOSED one is written first so it
+# is the claim that survives dedup -- the exact ordering that let it launder its sibling.
+write_json_file "$SCOPE_TWO_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "two-claim-task.disclosed-lane",
+      "subjectId": "two-claim-task/disclosed-lane",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-03T00:00:00Z",
+      "updatedAt": "2026-08-03T00:00:00Z",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "evidence_scope": { "narrowed": true, "reason": "focused evidence lane for the touched suite" }
+      }
+    },
+    {
+      "id": "two-claim-task.undisclosed-lane",
+      "subjectId": "two-claim-task/undisclosed-lane",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-03T00:00:00Z",
+      "updatedAt": "2026-08-03T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:two-claim-task.disclosed-lane",
+      "claimId": "two-claim-task.disclosed-lane",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-03T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    },
+    {
+      "id": "ev:two-claim-task.undisclosed-lane",
+      "claimId": "two-claim-task.undisclosed-lane",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-03T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+write_json_file "$SCOPE_TWO_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npx vitest run test/one-trivial.test.ts","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-03T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-two-mixed.out" 2>"$TMPDIR_EVAL/scope-two-mixed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_TWO_REPO"}
+JSON
+then
+  scope_two_mixed_status=0
+else
+  scope_two_mixed_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-two-mixed.err"; then
+  _pass "#1171 finding 2: an undisclosed claim still reports divergence when a disclosed sibling names the identical command"
+else
+  _fail "#1171 finding 2 REGRESSION: a disclosed claim laundered its undisclosed sibling: exit=$scope_two_mixed_status $(cat "$TMPDIR_EVAL/scope-two-mixed.out" "$TMPDIR_EVAL/scope-two-mixed.err")"
+fi
+
+if grep -q 'undisclosed-lane' "$TMPDIR_EVAL/scope-two-mixed.err"; then
+  _pass "#1171 finding 2: the warning names the UNDISCLOSED claim, not the disclosed sibling that won dedup"
+else
+  _fail "#1171 finding 2: the warning did not name the undisclosed claim: $(cat "$TMPDIR_EVAL/scope-two-mixed.err")"
+fi
+
+# Both claims disclosed -> clean (the disclosure path still works when it is honest).
+python3 - "$SCOPE_TWO_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+for claim in bundle["claims"]:
+    claim["metadata"]["evidence_scope"] = {
+        "narrowed": True,
+        "reason": "focused evidence lane for the touched suite",
+    }
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-two-all.out" 2>"$TMPDIR_EVAL/scope-two-all.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_TWO_REPO"}
+JSON
+then
+  scope_two_all_status=0
+else
+  scope_two_all_status=$?
+fi
+
+if [[ "$scope_two_all_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-two-all.err"; then
+  _pass "#1171 finding 2: when EVERY claim naming the command is disclosed, the check is clean even under the escalation opt-in"
+else
+  _fail "#1171 finding 2: fully-disclosed sibling claims were still flagged: exit=$scope_two_all_status $(cat "$TMPDIR_EVAL/scope-two-all.out" "$TMPDIR_EVAL/scope-two-all.err")"
+fi
+
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then
   _pass "canonical Stop hook source and shipped context mirror remain byte-identical"
 else

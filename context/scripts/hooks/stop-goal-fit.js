@@ -537,7 +537,14 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
   }
 
   const checks = [];
-  const seen = new Set();
+  // #1171 (review finding 2): dedup is by normalized COMMAND TEXT, but a narrowing
+  // disclosure is a property of a CLAIM. Keying both on the command let the FIRST claim's
+  // disclosure silence every later claim naming the identical command — a disclosed claim
+  // laundering an undisclosed sibling. Dedup is retained (one re-run per command is the
+  // whole point of the economy), but every claim naming a deduped command is still
+  // recorded against the surviving check via recordScopeClaim(), so an undisclosed sibling
+  // keeps the divergence alive and is named in the warning.
+  const byCmd = new Map();
 
   // (A) Evidence items with execution.label (command captures).
   // These represent commands that actually ran — include them regardless of
@@ -550,12 +557,19 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     if (!claim) continue;
     const claimTypeStr = String(claim.claimType || '');
     if (!claimTypeStr.startsWith('workflow.check.') && !(declaredClaimTypes != null && declaredClaimTypes.has(claimTypeStr))) continue;
-    // Deduplicate by command
-    if (seen.has(cmd)) continue;
-    seen.add(cmd);
     const id = claimCheckId(claim.subjectId);
+    const scope = claimEvidenceScope(claim);
+    // Deduplicate by command — but keep this claim's disclosure state on the surviving check.
+    const existing = byCmd.get(cmd);
+    if (existing) {
+      recordScopeClaim(existing, id, scope);
+      continue;
+    }
     // Use 'pass' as the nominal claimed status; cross-reference catches contradictions.
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd, evidenceScope: claimEvidenceScope(claim) });
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [] };
+    recordScopeClaim(check, id, scope);
+    byCmd.set(cmd, check);
+    checks.push(check);
   }
 
   // (B) Workflow.check.command claims with effective value "pass" but no capture
@@ -580,12 +594,31 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
       checks.push({ id, kind: 'command', status: 'pass', command: '' });
       continue;
     }
-    if (seen.has(cmd)) continue;
-    seen.add(cmd);
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd, evidenceScope: claimEvidenceScope(c) });
+    const scope = claimEvidenceScope(c);
+    const existing = byCmd.get(cmd);
+    if (existing) {
+      recordScopeClaim(existing, id, scope);
+      continue;
+    }
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [] };
+    recordScopeClaim(check, id, scope);
+    byCmd.set(cmd, check);
+    checks.push(check);
   }
 
   return checks;
+}
+
+/**
+ * #1171 (review finding 2): record one claim's narrowing-disclosure state against the
+ * (possibly deduplicated) check that will carry it. Only UNDISCLOSED claim ids are
+ * accumulated — the divergence must survive unless EVERY claim naming that command text
+ * carries a valid disclosure, and the warning names an undisclosed one so the operator knows
+ * which claim to fix rather than being pointed at a disclosed sibling.
+ */
+function recordScopeClaim(check, claimId, scope) {
+  if (!Array.isArray(check.undisclosedClaimIds)) check.undisclosedClaimIds = [];
+  if (!isValidNarrowingDisclosure(scope)) check.undisclosedClaimIds.push(claimId);
 }
 
 /**
@@ -1177,7 +1210,30 @@ function acceptanceCommandFor(check, acceptance) {
  */
 function manifestTargetKind(check) {
   const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
-  if (/\btest|spec|jest|vitest|pytest\b/.test(haystack)) return 'test';
+  // Alternation binds looser than the `\b` anchor, so the original
+  // `/\btest|spec|jest|vitest|pytest\b/` meant `\btest` OR bare `spec` OR bare `jest` OR bare
+  // `vitest` OR `pytest\b` — every middle branch matched UNANCHORED, so "inspect-artifacts"
+  // and "majestic-ui" classified as tests-shaped. Tolerable when this only picked a backstop
+  // re-run target; now that it also gates the #1171 warn/block scope check, that
+  // misclassification would put a divergence line (and, under the escalation opt-in, a hard
+  // block) on unrelated checks.
+  //
+  // The fix groups the alternation under ONE LEADING `\b` and deliberately does NOT add a
+  // trailing `\b`. A trailing anchor looks tidier but is wrong here: the original first
+  // branch was `\btest` (prefix match, no trailing boundary), so `tests-evidence` — the
+  // canonical tests claim id in this repo — plus `run tests`, `unit tests`, and
+  // `testing suite` all classified as tests-shaped. Requiring a trailing boundary silently
+  // drops every one of them, which would both change backstop target resolution AND disable
+  // the #1171 check for the most idiomatic naming. Leading-anchor-only fixes exactly the
+  // reported defect and leaves every other classification byte-identical to before:
+  //   inspect-artifacts / majestic-ui  true -> false   (the defect, now fixed)
+  //   tests-evidence / run tests / unit tests / testing suite / spec coverage / pytest suite
+  //   / npx vitest run a.test.ts / node --test x.test.mjs   true -> true (unchanged)
+  //
+  // The `build` and `lint` lines below carry the identical precedence defect. They are left
+  // untouched deliberately: changing them shifts backstop target selection on paths outside
+  // this issue's reviewed scope. Disclosed as a follow-up, not silently fixed here.
+  if (/\b(?:test|spec|jest|vitest|pytest)/.test(haystack)) return 'test';
   if (/\bbuild|compile|bundle\b/.test(haystack)) return 'build';
   if (/\blint|format|style|typecheck\b/.test(haystack)) return 'lint';
   return null;
@@ -1255,6 +1311,28 @@ function declaredManifestTarget(root, check) {
 // `claim.metadata.evidence_scope = {narrowed: true, reason: "<why>"}` in trust.bundle (or
 // `evidence_scope` on an evidence.json check). A disclosed narrowing reconciles clean here —
 // the narrowing is then recorded in the bundle a reviewer/CI reads, which is the point.
+// Disclosure is per CLAIM, not per command string: see recordScopeClaim().
+//
+// OPERATIONAL CAVEAT on the one-layer argument (review finding 6): "CI already closes this"
+// is a LOGICAL argument, not an operational one. During a CI outage — and this workspace has
+// had several multi-day ones — the Stop hook is the only layer a session actually experiences,
+// and its default here is warn. A repo that wants the hole genuinely closed while CI is down
+// must set FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block; the default trades that for not
+// bricking the #1048 recipe.
+//
+// ACCEPTED GAPS — named, not silently absent (review finding 4). This detector reads COMMAND
+// TEXT. Narrowing that lives anywhere else is out of reach and is NOT attempted:
+//   - config-file scoping: `vitest.config.ts` / `jest.config.js` `include`/`testMatch`
+//     restricted to a subset, so a full-suite command text runs a narrowed suite;
+//   - source-level scoping: `.only` / `test.only` / `fdescribe` / skipped suites;
+//   - runner flags that narrow by STATE rather than selection, e.g. `--onlyChanged`,
+//     `--changedSince`, `--bail`;
+//   - wrapper scripts: a declared `scripts.test` whose body itself narrows, or any shell/Make
+//     wrapper whose real command is invisible to text inspection.
+// Detecting these needs config parsing, source analysis, or per-run test-count accounting —
+// a materially different mechanism, and one whose false-positive surface would be far larger
+// than this check's. Treat a clean result here as "the command text does not admit narrowing",
+// never as "the full declared suite demonstrably ran".
 
 /** Dedicated test runners whose invocation is unambiguous from the command text alone. */
 const TEST_RUNNER_BASENAMES = new Set([
@@ -1349,11 +1427,21 @@ function repoDeclaresCommand(root, cmd) {
   return Object.values(pkg.scripts).some(body => typeof body === 'string' && normalizeCommand(body) === cmd);
 }
 
-/** An explicit, non-empty narrowing disclosure on the claim (bundle) or check (evidence.json). */
-function disclosedNarrowing(check) {
-  const scope = check && (check.evidenceScope || check.evidence_scope);
+/** Shape check for a single disclosure value: explicitly narrowed, with a non-empty reason. */
+function isValidNarrowingDisclosure(scope) {
   if (!scope || typeof scope !== 'object') return false;
   return scope.narrowed === true && typeof scope.reason === 'string' && scope.reason.trim() !== '';
+}
+
+/**
+ * Is this check's narrowing fully disclosed? For a bundle-sourced check that deduplicated
+ * several claims naming the same command, EVERY one of those claims must carry a valid
+ * disclosure (review finding 2) — one disclosed claim may not launder an undisclosed sibling.
+ * An evidence.json check carries no sibling list and is judged on its own `evidence_scope`.
+ */
+function disclosedNarrowing(check) {
+  if (check && Array.isArray(check.undisclosedClaimIds)) return check.undisclosedClaimIds.length === 0;
+  return isValidNarrowingDisclosure(check && (check.evidenceScope || check.evidence_scope));
 }
 
 /** warn (default, visible-but-non-blocking) | block (opt-in escalation). Tighten-only. */
@@ -1369,17 +1457,26 @@ function resolveScopeDivergenceMode() {
  * through (capture log says pass / backstop re-run says pass) — a claim that already failed or
  * is already NOT_VERIFIED is blocked on stronger grounds and does not need this line too.
  */
-function testScopeDivergence(root, base, check, cmd) {
+function testScopeDivergence(root, base, check, cmd, executedCommandText) {
   const claimed = normalizeCommand(cmd);
   if (!claimed) return null;
   const suite = declaredTestSuite(root, check);
   if (!suite) return null;
   if (suite.texts.has(claimed)) return null;
+  // Review finding 1: the divergence is about what was ACTUALLY EXECUTED, not about the
+  // command text the claim happens to name. When the backstop resolved the DECLARED manifest
+  // target (resolveTrustedCommand source (b)), the full suite genuinely just ran — asserting
+  // "the declared suite was not re-run" would be false, and under the escalation opt-in it
+  // would hard-block a session the backstop itself had fully verified.
+  if (executedCommandText && suite.texts.has(normalizeCommand(executedCommandText))) return null;
   if (!isNarrowedTestInvocation(claimed)) return null;
   if (repoDeclaresCommand(root, claimed)) return null;
   if (disclosedNarrowing(check)) return null;
 
-  const id = safeOneLine((check && check.id) || claimed, 80);
+  // Name an UNDISCLOSED claim (finding 2) rather than the deduped check's first claim, which
+  // may be a disclosed sibling — the operator needs the id that actually needs fixing.
+  const undisclosed = check && Array.isArray(check.undisclosedClaimIds) ? check.undisclosedClaimIds : [];
+  const id = safeOneLine(undisclosed[0] || (check && check.id) || claimed, 80);
   const blocking = resolveScopeDivergenceMode() === 'block';
   // The default lead deliberately matches NEITHER HARD_BLOCK nor FULL_BLOCK; the escalated
   // lead carries the `tests-evidence scope divergence (blocking)` marker both patterns list.
@@ -1587,8 +1684,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     if (!cmd) continue;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
-    // #1171: computed once, emitted ONLY on the two paths that accept the claimed pass —
-    // a narrowed-but-passing claim is the misleading-green case this closes.
+    // #1171: emitted ONLY on the two paths that accept the claimed pass — a narrowed-but-
+    // passing claim is the misleading-green case this closes. The capture-log path executed
+    // nothing beyond the claimed command itself, so it passes no executed-command override;
+    // the backstop path below recomputes with what it ACTUALLY ran (review finding 1).
     const scopeNote = testScopeDivergence(root, base, check, cmd);
 
     if (!chainBroken && logged && logged.ran) {
@@ -1671,11 +1770,18 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
-    } else if (scopeNote) {
-      // #1171: the re-run confirmed the claimed command — but the claimed command is a
-      // narrowing of the declared suite, so re-running it re-confirms only the subset. This
-      // is the exact path the issue names: the backstop reconciles the CLAIMED command text.
-      warnings.push(scopeNote);
+    } else {
+      // #1171: the re-run confirmed something — but WHAT it re-ran decides whether this is a
+      // narrowing (review finding 1). Recompute against the command the backstop actually
+      // executed: when that is the declared suite (resolveTrustedCommand source (b), the
+      // manifest fallback), the full suite genuinely just ran and there is no divergence to
+      // report. Only when the executed command is itself the narrowed claim does re-running
+      // it re-confirm merely the subset — the path the issue names.
+      const executed = (trusted.argv.length === 3 && trusted.argv[0] === 'bash' && trusted.argv[1] === '-lc')
+        ? trusted.argv[2]
+        : trusted.argv.join(' ');
+      const backstopScopeNote = testScopeDivergence(root, base, check, cmd, executed);
+      if (backstopScopeNote) warnings.push(backstopScopeNote);
     }
     // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
