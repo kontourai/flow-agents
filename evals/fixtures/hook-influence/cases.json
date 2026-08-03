@@ -108,39 +108,6 @@
       }
     },
     {
-      "id": "kit:builder:dev-builder-review-before-verify-after-execute",
-      "description": "After execute-plan completes in the Builder Kit build flow, the next gate is review-work critique before verify-work evidence. Review is report-only and cannot be treated as verification evidence. Open critique findings route back through execution before re-review and re-verify.",
-      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
-      "hook": "workflow-steering",
-      "event": "PostToolUse",
-      "fixture_state": {
-        "task_slug": "dev-review-before-verify-demo",
-        "status": "in_progress",
-        "current_step": "execute",
-        "completed_step": "execute-plan",
-        "next_step": "review-work",
-        "flow_ref": "kits/builder/flows/build.flow.json",
-        "critique_status": "pending",
-        "evidence_status": "pending"
-      },
-      "guidance_must_include": [
-        "EXECUTION COMPLETE",
-        "Next: review",
-        "then verify",
-        "report only"
-      ],
-      "agent_must_do": [
-        "delegate to review-work for report-only critique before verify-work",
-        "not count report-only critique as verification evidence",
-        "route open critique findings back through execute-plan, then re-review and re-verify"
-      ],
-      "evidence": {
-        "tier": "adapter",
-        "command": "bash evals/integration/test_workflow_steering_hook.sh",
-        "status": "always-run-in-integration"
-      }
-    },
-    {
       "id": "kit:builder:dev-builder-route-fresh-coding-prompt",
       "description": "A fresh coding/build prompt with no active sidecar should still steer into the builder kit's builder.build workflow before source edits. Claude Code must receive this as prompt-submit additional context through the hook adapter.",
       "runtime_scope": ["claude-code", "codex", "kiro-cli"],

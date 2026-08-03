@@ -537,7 +537,7 @@ echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
 if grep -qF 'Canonical Flow: builder.build@1.0/canonical-guidance-616 status:active current_step:design-probe.' "$TMPDIR_EVAL/canonical-start.out" \
   && grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-start.out" \
   && grep -qF 'Implementation allowed: no.' "$TMPDIR_EVAL/canonical-start.out" \
-  && [[ "$(grep -c 'Canonical guidance identity: sha256:' "$TMPDIR_EVAL/canonical-start.out" || true)" -eq 1 ]]; then
+  && ! grep -q 'Canonical guidance identity: sha256:' "$TMPDIR_EVAL/canonical-start.out"; then
   _pass "active Flow SessionStart guidance binds canonical state to installed gate action"
 else
   _fail "active Flow SessionStart guidance missed canonical state/action identity: $(cat "$TMPDIR_EVAL/canonical-start.out")"
@@ -563,15 +563,19 @@ else
   _fail "active Flow prompt guidance competed with generic kit routing: $(cat "$TMPDIR_EVAL/canonical-prompt.out")"
 fi
 
+# #1172: this PostToolUse/InvokeSubagents path is gone. No runtime wires workflow-steering to
+# PostToolUse and no runtime emits an `InvokeSubagents` tool call, so the path could only ever be
+# reached by a synthetic payload. The canonical gate is re-grounded on the SessionStart and
+# UserPromptSubmit paths asserted above; this now asserts silence rather than competing guidance.
 echo "{\"hook_event_name\":\"PostToolUse\",\"cwd\":\"$REPO5\",\"tool_input\":{\"command\":\"InvokeSubagents\",\"content\":{\"subagents\":[{\"agent_name\":\"tool-planner\"}]}}}" | \
   FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-subagent.out" 2>&1
-if grep -qF 'current_step:design-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
-  && grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
+if ! grep -qF 'current_step:design-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
+  && ! grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
   && ! grep -qF 'PLAN COMPLETE' "$TMPDIR_EVAL/canonical-subagent.out" \
   && ! grep -qF 'Next: execute-plan' "$TMPDIR_EVAL/canonical-subagent.out"; then
-  _pass "active Flow subagent completion re-grounds to the canonical gate"
+  _pass "#1172: the retired InvokeSubagents path emits nothing under an active canonical Flow"
 else
-  _fail "subagent completion competed with canonical gate guidance: $(cat "$TMPDIR_EVAL/canonical-subagent.out")"
+  _fail "retired InvokeSubagents path still emits guidance: $(cat "$TMPDIR_EVAL/canonical-subagent.out")"
 fi
 
 # A stale Flow Agents projection must fail closed instead of falling back to either handoff

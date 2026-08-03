@@ -223,21 +223,6 @@
       ]
     },
     {
-      "id": "dev-builder-review-before-verify-after-execute",
-      "description": "review-before-verify after execute",
-      "tier": "adapter",
-      "event": "PostToolUse",
-      "must_include_guidance": [
-        "Next: review",
-        "then verify",
-        "report only"
-      ],
-      "must_include_actions": [
-        "review-work for report-only critique before verify-work",
-        "not count report-only critique as verification evidence"
-      ]
-    },
-    {
       "id": "dev-builder-route-fresh-coding-prompt",
       "description": "fresh coding prompt routes into Builder workflow",
       "tier": "adapter",

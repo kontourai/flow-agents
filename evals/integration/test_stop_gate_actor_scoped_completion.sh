@@ -34,8 +34,12 @@
 #   2. SAME shared session, next_action:"continue" (genuinely unfinished) -> Stop MUST
 #      still block (AC3: the owning session's real unfinished obligation is not
 #      silently waved through), verified the same two ways (exit 2; adapter emits
-#      decision:"block", continue:false, matching exactly what a real subagent
-#      receives from Claude Code's Stop hook contract).
+#      decision:"block" + reason, matching exactly what a real subagent receives from
+#      Claude Code's Stop hook contract). #1172: `continue:false` is deliberately omitted so
+#      the reason reaches the MODEL — `continue` preempts `decision` and routes the text to
+#      the user instead. This fixture is a SOFT block, so the adapter never ends its turn at
+#      all (case 2d): goal-fit's own max-blocks release valve owns termination for that class,
+#      and an adapter fence would truncate it below the count the gate advertises.
 #   3. Regression guard: a resolved actor with NO own per-actor pointer at all (the
 #      #440 case) remains unblocked regardless of another actor's active session —
 #      unchanged by this fix.
@@ -183,13 +187,16 @@ STOPJSON
 # invokes: claude-hook-adapter.js Stop stop-goal-fit stop-goal-fit.js default, which
 # is exactly what the bundled .claude/settings.json Stop entry runs (verified against
 # dist/claude-code/.claude/settings.json). Prints the adapter's JSON stdout only.
+# #1172: the third argument is Claude Code's `stop_hook_active`, false on first contact and true
+# on the Stop that fires because a previous Stop blocked. First contact returns the remediation to
+# the MODEL (decision:block + reason, no `continue`); the continuation ends the turn.
 call_stop_hook_adapter() {
-  local repo="$1" actor_key="$2"
+  local repo="$1" actor_key="$2" stop_hook_active="${3:-false}"
   (
     unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS
     export FLOW_AGENTS_GOAL_FIT_MODE="block"
     export FLOW_AGENTS_ACTOR="$actor_key"
-    printf '{"hook_event_name":"Stop","cwd":"%s"}' "$repo" \
+    printf '{"hook_event_name":"Stop","stop_hook_active":%s,"cwd":"%s"}' "$stop_hook_active" "$repo" \
       | node "$ADAPTER" Stop stop-goal-fit stop-goal-fit.js default
   )
 }
@@ -304,10 +311,29 @@ fi
 CONT_ADAPTER_JSON="$(call_stop_hook_adapter "$CONT_REPO" "delegate-actor-done")"
 CONT_CONTINUE="$(json_field "$CONT_ADAPTER_JSON" "continue")"
 CONT_DECISION="$(json_field "$CONT_ADAPTER_JSON" "decision")"
-if [[ "$CONT_DECISION" == "block" && "$CONT_CONTINUE" == "false" ]]; then
-  _pass "2c: real hook path returns decision:block, continue:false for genuinely unfinished work — same shape a real subagent receives"
+CONT_REASON="$(json_field "$CONT_ADAPTER_JSON" "reason")"
+if [[ "$CONT_DECISION" == "block" && "$CONT_CONTINUE" == "undefined" && "$CONT_REASON" != "undefined" ]]; then
+  _pass "2c: real hook path returns decision:block + reason (model-facing) for genuinely unfinished work, without ending the turn (#1172)"
 else
-  _fail "2c: real hook path did not block genuinely unfinished work: $CONT_ADAPTER_JSON"
+  _fail "2c: real hook path did not block genuinely unfinished work in the model-facing shape: $CONT_ADAPTER_JSON"
+fi
+
+# #1172 (review HIGH-2): this fixture is a SOFT block — its warnings are ordinary
+# artifact-status/workflow-state lines, nothing HARD_BLOCK matches — so goal-fit owns its
+# termination via the max-blocks release valve. The adapter must therefore NOT end the turn even
+# on the continuation firing; doing so truncated the valve below the count the gate advertises.
+# Own repo so the streak starts clean (the calls above already blocked twice against $CONT_REPO).
+CONT2_REPO="$(new_repo repo-continue-continuation)"
+seed_shared_session "$CONT2_REPO" "$SLUG" "continue" >/dev/null
+seed_current_pointer "$CONT2_REPO" "$SLUG" "delegate-actor-done"
+
+CONT_CONTINUATION_JSON="$(call_stop_hook_adapter "$CONT2_REPO" "delegate-actor-done" true)"
+CONT_CONTINUATION_CONTINUE="$(json_field "$CONT_CONTINUATION_JSON" "continue")"
+CONT_CONTINUATION_DECISION="$(json_field "$CONT_CONTINUATION_JSON" "decision")"
+if [[ "$CONT_CONTINUATION_DECISION" == "block" && "$CONT_CONTINUATION_CONTINUE" == "undefined" ]]; then
+  _pass "2d: a SOFT block's continuation Stop still refuses WITHOUT ending the turn — goal-fit's own release valve is left intact (#1172)"
+else
+  _fail "2d: soft-block continuation Stop was fenced by the adapter, truncating the gate's own valve: $CONT_CONTINUATION_JSON"
 fi
 
 # ─── 3. Regression guard: resolved actor with NO own pointer stays unblocked (#440) ─
@@ -346,8 +372,8 @@ fi
 ISO_ADAPTER_JSON="$(call_stop_hook_adapter "$ISO_REPO" "isolate-actor")"
 ISO_DECISION="$(json_field "$ISO_ADAPTER_JSON" "decision")"
 ISO_CONTINUE="$(json_field "$ISO_ADAPTER_JSON" "continue")"
-if [[ "$ISO_DECISION" == "block" && "$ISO_CONTINUE" == "false" ]]; then
-  _pass "4b: real hook path blocks the isolated fixture (decision:block, continue:false) via the artifact-status line alone"
+if [[ "$ISO_DECISION" == "block" && "$ISO_CONTINUE" == "undefined" ]]; then
+  _pass "4b: real hook path blocks the isolated fixture (decision:block, model-facing reason) via the artifact-status line alone"
 else
   _fail "4b: real hook path did not block the isolated fixture: $ISO_ADAPTER_JSON"
 fi
