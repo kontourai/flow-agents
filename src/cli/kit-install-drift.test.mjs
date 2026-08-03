@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { main as kitMain, setKitCliTestHooksForTests } from "../../build/src/cli/kit.js";
 import { observeKitContentHash } from "../../build/src/flow-kit/content-hash.js";
 import { activateCodexLocal } from "../../build/src/runtime-adapters.js";
-import { cleanupDirectoryCopyBackups, copyDirAtomicTransaction } from "../../build/src/lib/fs.js";
+import { atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction } from "../../build/src/lib/fs.js";
 
 const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
 
@@ -19,6 +19,23 @@ function tempRoot(prefix) {
 
 function copyFixture(destination) {
   fs.cpSync(FIXTURE, destination, { recursive: true });
+}
+
+function copyFixtureWithId(destination, id) {
+  copyFixture(destination);
+  const manifestPath = path.join(destination, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifest.id = id;
+  manifest.name = id;
+  manifest.product_name = id;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function spawnInstall(source, dest, ...flags) {
+  return childProcess.spawnSync(process.execPath, [path.resolve("build/src/cli.js"), "kit", "install", source, "--dest", dest, ...flags], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
 }
 
 function createGitFixture(destination) {
@@ -196,6 +213,65 @@ test("cleanup cannot remove a live transaction backup before rollback restores t
   transaction.rollback();
   assert.equal(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8"), previousReadme, "rollback restores the prior target");
   assert.deepEqual(transactionArtifacts(target), [], "rollback removes the live backup");
+});
+
+test("destination registry lock prevents a concurrent different-kit lost update", async () => {
+  const root = tempRoot("flow-kit-registry-lock-different-");
+  const first = path.join(root, "first");
+  const second = path.join(root, "second");
+  const dest = path.join(root, "dest");
+  copyFixture(first);
+  copyFixtureWithId(second, "other-kit");
+  let concurrent;
+  setKitCliTestHooksForTests({
+    writeRegistry(rootPath, registryFile, registry) {
+      concurrent = spawnInstall(second, dest);
+      assert.equal(concurrent.status, 1);
+      assert.match(`${concurrent.stdout}\n${concurrent.stderr}`, /destination install\/registry transaction is active or requires recovery/);
+      atomicWriteJson(rootPath, registryFile, registry);
+    },
+  });
+  try {
+    assert.equal(await kitMain(["install", first, "--dest", dest]), 0);
+  } finally {
+    setKitCliTestHooksForTests(undefined);
+  }
+  let registry = JSON.parse(fs.readFileSync(path.join(dest, "kits", "local", "installed-kits.json"), "utf8"));
+  assert.deepEqual(registry.kits.map((entry) => entry.id), ["example-kit"]);
+  assert.equal(fs.existsSync(path.join(dest, "kits", "local", "repositories", "other-kit")), false);
+  assert.equal(await kitMain(["install", second, "--dest", dest]), 0, "a retry after the first transaction commits is safe");
+  registry = JSON.parse(fs.readFileSync(path.join(dest, "kits", "local", "installed-kits.json"), "utf8"));
+  assert.deepEqual(registry.kits.map((entry) => entry.id).sort(), ["example-kit", "other-kit"]);
+});
+
+test("destination registry lock prevents a concurrent stale same-kit force decision", async () => {
+  const root = tempRoot("flow-kit-registry-lock-same-");
+  const original = path.join(root, "original");
+  const replacement = path.join(root, "replacement");
+  const dest = path.join(root, "dest");
+  copyFixture(original);
+  copyFixture(replacement);
+  fs.appendFileSync(path.join(replacement, "docs", "README.md"), "authorized replacement\n");
+  assert.equal(await kitMain(["install", original, "--dest", dest]), 0);
+  let concurrent;
+  setKitCliTestHooksForTests({
+    writeRegistry(rootPath, registryFile, registry) {
+      concurrent = spawnInstall(original, dest, "--force");
+      assert.equal(concurrent.status, 1);
+      assert.match(`${concurrent.stdout}\n${concurrent.stderr}`, /destination install\/registry transaction is active or requires recovery/);
+      atomicWriteJson(rootPath, registryFile, registry);
+    },
+  });
+  try {
+    assert.equal(await kitMain(["install", replacement, "--dest", dest, "--update"]), 0);
+  } finally {
+    setKitCliTestHooksForTests(undefined);
+  }
+  const target = path.join(dest, "kits", "local", "repositories", "example-kit");
+  const registry = JSON.parse(fs.readFileSync(path.join(dest, "kits", "local", "installed-kits.json"), "utf8"));
+  assert.equal(registry.kits[0].source, replacement, "only the authorized update commits its registry decision");
+  assert.match(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8"), /authorized replacement/);
+  assert.equal(await kitMain(["install", original, "--dest", dest, "--force"]), 2, "stale source cannot bypass the update requirement after the lock is released");
 });
 
 for (const git of [false, true]) {

@@ -166,6 +166,78 @@ function cleanStaleInstallArtifacts(dest: string, target: string, existing: Reco
   }
 }
 
+function acquireInstallRegistryLock(dest: string): () => Error | undefined {
+  const lock = path.join(ensureSafeDirectory(dest, path.dirname(registryPath(dest))), ".installed-kits.flow-agents.lock");
+  try {
+    fs.mkdirSync(lock, { mode: 0o700 });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+      const error = new Error(`destination install/registry transaction is active or requires recovery: ${lock}`) as Error & { code?: string };
+      error.code = "INSTALL_REGISTRY_LOCKED";
+      throw error;
+    }
+    throw cause;
+  }
+  return () => {
+    try {
+      fs.rmdirSync(lock);
+      return undefined;
+    } catch (cause) {
+      return cause instanceof Error ? cause : new Error(String(cause));
+    }
+  };
+}
+
+function withInstallRegistryLock<T>(dest: string, action: () => T): T {
+  const release = acquireInstallRegistryLock(dest);
+  let completed = false;
+  try {
+    const result = action();
+    completed = true;
+    return result;
+  } finally {
+    const releaseError = release();
+    if (releaseError) {
+      console.warn(`warning: destination install/registry lock cleanup failed${completed ? " after the install transaction completed" : " while preserving the primary transaction outcome"}: ${releaseError.message}; later installs will fail closed until recovery`);
+    }
+  }
+}
+
+type RegistryInstallOutcome =
+  | { status: "installed"; existing: boolean }
+  | { status: "idempotent" }
+  | { status: "conflict"; source: unknown };
+
+/**
+ * Serialize every registry-dependent install decision before taking the
+ * narrower target-copy lock. The ordering is always registry then target.
+ */
+function installWithRegistryTransaction(options: {
+  source: string;
+  manifestPath: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  sourceText: string;
+  hash: string;
+  update: boolean;
+  force: boolean;
+}): RegistryInstallOutcome {
+  const { source, manifestPath, dest, target, manifest, sourceText, hash, update, force } = options;
+  return withInstallRegistryLock(dest, () => {
+    warnUninstalledDependencies(manifest, manifestPath, dest);
+    const registry = loadRegistry(dest);
+    const kitId = String(manifest.id);
+    const existing = registry.kits.find((entry) => entry.id === kitId);
+    cleanStaleInstallArtifacts(dest, target, existing);
+    if (existing && existing.source !== sourceText && !update) return { status: "conflict", source: existing.source };
+    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) return { status: "idempotent" };
+    testHooks?.beforeCopy?.(source, target);
+    installCopiedKit({ source, dest, target, manifest, registry, existing, sourceText, update });
+    return { status: "installed", existing: Boolean(existing) };
+  });
+}
+
 /**
  * Emit a non-blocking warning for each declared kit dependency that is not present
  * in the destination's LOCAL registry.
@@ -255,42 +327,39 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.error(`install: unsafe source or destination: ${(error as Error).message}`);
     return 1;
   }
-  warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
   const hashObservation = observeKitContentHash(source);
   if (hashObservation.state !== "observed") {
     console.error(`install: cannot safely observe kit content: ${hashObservation.diagnostic}`);
     return 1;
   }
   const hash = hashObservation.observed_hash;
-  const registry = loadRegistry(dest);
-  const existing = registry.kits.find((entry) => entry.id === kitId);
-  cleanStaleInstallArtifacts(dest, target, existing);
   const sourceText = source;
-  if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
-    console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
-    return 2;
-  }
-  if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !flagBool(args.flags, "force")) {
-    console.log(`kit '${kitId}' is already installed from ${sourceText}`);
-    return 0;
-  }
-  testHooks?.beforeCopy?.(source, target);
+  let outcome: RegistryInstallOutcome;
   try {
-    installCopiedKit({
+    outcome = installWithRegistryTransaction({
       source,
+      manifestPath: path.join(source, "kit.json"),
       dest,
       target,
       manifest,
-      registry,
-      existing,
       sourceText,
+      hash,
       update: flagBool(args.flags, "update") ?? false,
+      force: flagBool(args.flags, "force") ?? false,
     });
   } catch (error) {
     console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
     return 1;
   }
-  console.log(`${existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
+  if (outcome.status === "conflict") {
+    console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
+    return 2;
+  }
+  if (outcome.status === "idempotent") {
+    console.log(`kit '${kitId}' is already installed from ${sourceText}`);
+    return 0;
+  }
+  console.log(`${outcome.existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
   return 0;
 }
 
@@ -342,7 +411,6 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
 
     // Delegate to the shared install logic (copy + registry update).
     const kitId = String(manifest.id);
-    warnUninstalledDependencies(manifest, path.join(tmpBase, "kit.json"), dest);
     const hashObservation = observeKitContentHash(tmpBase);
     if (hashObservation.state !== "observed") {
       console.error(`install: cannot safely observe cloned kit content: ${hashObservation.diagnostic}`);
@@ -363,34 +431,33 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       console.error(`install: unsafe destination: ${(error as Error).message}`);
       return 1;
     }
-    const registry = loadRegistry(dest);
-    const existing = registry.kits.find((entry) => entry.id === kitId);
-    cleanStaleInstallArtifacts(dest, target, existing);
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
-    if (existing && existing.source !== sourceText && !update) {
-      console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
-      return 2;
-    }
-    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) {
-      console.log(`kit '${kitId}' is already installed from ${sourceText}`);
-      return 0;
-    }
+    let outcome: RegistryInstallOutcome;
     try {
-      installCopiedKit({
+      outcome = installWithRegistryTransaction({
         source: tmpBase,
+        manifestPath: path.join(tmpBase, "kit.json"),
         dest,
         target,
         manifest,
-        registry,
-        existing,
         sourceText,
+        hash,
         update,
+        force,
       });
     } catch (error) {
       console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
       return 1;
     }
-    console.log(`${existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
+    if (outcome.status === "conflict") {
+      console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
+      return 2;
+    }
+    if (outcome.status === "idempotent") {
+      console.log(`kit '${kitId}' is already installed from ${sourceText}`);
+      return 0;
+    }
+    console.log(`${outcome.existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
     return 0;
   } finally {
     fs.rmSync(tmpBase, { recursive: true, force: true });
