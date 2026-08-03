@@ -28,9 +28,36 @@
  * then the agent has been told the same thing three times inside one step, so the stall
  * is informative rather than noise and a human should see it.
  *
- * Stop keeps its existing contract untouched: it is the one gate the policy permits to be
- * inherently turn-ending, and its own block-streak release (goal-fit's max-blocks hand-off)
- * is what ends a run that cannot make progress.
+ * ── Stop gets the same fix, with the loop fence Stop needs (issue #1172) ─────────────
+ *
+ * Stop was deliberately left on the old shape when #1005 landed, on the reasoning that it is
+ * the one gate the policy permits to be inherently turn-ending and that goal-fit's own
+ * block-streak release (the max-blocks hand-off) is what ends a run that cannot make
+ * progress. Issue #1172's step-0 experiment measured what that reasoning actually produced:
+ * because `continue: false` preempts `decision: "block"` (see the precedence note above), the
+ * entire goal-fit remediation block — 250-800 tokens, repeated up to the max-blocks limit —
+ * travelled in `stopReason`, which the contract shows to the USER and explicitly not to
+ * Claude. Two headless control sessions confirmed it: with `continue: false` the model never
+ * received the reason at all; without it, the model received the reason and acted on it. The
+ * one gate whose message is written as model-facing remediation was the one gate structurally
+ * unable to deliver it.
+ *
+ * A blocking Stop therefore now returns `decision: "block"` + `reason`, which IS fed back to
+ * the model, so the agent can close the evidence gap in-session instead of the turn simply
+ * ending. Turn-ending is preserved for exactly one case: the CONTINUATION firing. Claude Code
+ * sets `stop_hook_active: true` on the Stop that fires because a previous Stop blocked, so a
+ * hook that blocks AGAIN after the model has already been handed the reason once has
+ * exhausted in-session self-correction, and the refusal goes to a human.
+ *
+ * That fence is load-bearing, not ceremony. goal-fit's release valve is deliberately
+ * one-sided: an ordinary block auto-releases after FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS identical
+ * refusals (exit 0 — never reaches this branch at all), but a HARD block — caught
+ * false-completion, capture contradiction, tamper signal, integrity failure, or a canonical
+ * Flow run that is still active — never auto-releases by design (stop-goal-fit.js's
+ * `isHardBlock` branch keeps returning exit 2 forever). Dropping `continue: false`
+ * unconditionally would let precisely that class re-prompt the model without bound. With the
+ * fence, a hard block gets one self-correction attempt and then stops, which is what
+ * "requires a real fix or operator override" was always meant to mean.
  */
 
 'use strict';
@@ -61,12 +88,22 @@ function readStdinRaw() {
   });
 }
 
-function parseEvent(raw, fallback) {
+/**
+ * Parse the raw hook payload once. Returns `{}` on malformed input so every reader below
+ * degrades to "field absent" rather than throwing — a hook adapter must never fail closed on
+ * a payload it could not read.
+ */
+function parseInput(raw) {
   try {
-    return JSON.parse(raw || '{}').hook_event_name || fallback || '';
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
-    return fallback || '';
+    return {};
   }
+}
+
+function eventFrom(input, fallback) {
+  return input.hook_event_name || fallback || '';
 }
 
 /**
@@ -96,13 +133,17 @@ function guidanceFromStdout(rawInput, stdout) {
 
 function successOutput(event, additionalContext = '') {
   const context = String(additionalContext || '').trim();
-  if (event === 'SessionStart') {
+  if (event === 'SessionStart' && context) {
+    // #1172: no fallback banner. Announcing that hooks are active carries no decision value
+    // for the model — it cannot act on it, and the hooks announce themselves by acting. When
+    // a hook has real re-grounding context (workflow-steering's RESUME/STATE block) that
+    // context is the whole payload; when it has none, SessionStart injects nothing.
     return {
       continue: true,
-      suppressOutput: !context,
+      suppressOutput: false,
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: context || 'Flow Agents hooks are active for this Claude Code session.',
+        additionalContext: context,
       },
     };
   }
@@ -154,13 +195,19 @@ function blockedOutput(event, reason, escalate = false) {
     };
   }
   if (event === 'Stop') {
+    // #1172: `decision`+`reason` is the model-facing channel; `continue:false`+`stopReason` is
+    // the user-facing one, and `continue` wins when both are present. Emitting both meant the
+    // remediation text only ever reached the user. First contact now carries the reason to the
+    // model; only the continuation firing (`escalate`, see stopEndsTurn) ends the turn.
     return {
       decision: 'block',
       reason,
-      continue: false,
-      stopReason: reason,
+      ...(escalate ? { continue: false, stopReason: reason } : {}),
     };
   }
+  // Unknown/unmodelled events (SubagentStop and anything a future runtime adds) keep the
+  // conservative turn-ending shape: without an event-specific contract to reason about, the
+  // safe default is that a block stops work rather than silently continuing it.
   return {
     decision: 'block',
     reason,
@@ -169,10 +216,24 @@ function blockedOutput(event, reason, escalate = false) {
   };
 }
 
+/**
+ * True when a blocking Stop must end the turn rather than hand the reason back to the model.
+ *
+ * Claude Code sets `stop_hook_active: true` on a Stop that is firing because a previous Stop
+ * blocked. So this is exactly "the model was already given this remediation once in this turn
+ * and the gate still refuses" — in-session self-correction is exhausted, and the refusal
+ * belongs in front of a human. See the header for why the fence is required rather than
+ * optional (goal-fit's hard blocks never auto-release).
+ */
+function stopEndsTurn(input) {
+  return input.stop_hook_active === true;
+}
+
 async function main() {
   const [, , eventArg = 'unknown', hookId, relScriptPath, profilesCsv] = process.argv;
   const { raw, truncated } = await readStdinRaw();
-  const event = parseEvent(raw, eventArg);
+  const input = parseInput(raw);
+  const event = eventFrom(input, eventArg);
 
   if (!hookId || !relScriptPath) {
     process.stdout.write(`${JSON.stringify(successOutput(event))}\n`);
@@ -194,8 +255,11 @@ async function main() {
   });
 
   if (result.status === 2) {
-    // Stop keeps its own contract (see header): it is not routed through the graduated
-    // denial path, so its block message and turn-ending behaviour are unchanged.
+    // Stop is not routed through the graduated-denial path: that path counts denial IDENTITIES
+    // per flow step and reshapes the message as a refused TOOL CALL, neither of which fits a
+    // Stop gate whose own hook already owns both the streak accounting and the message. Stop
+    // keeps its hook's message verbatim and takes its turn-ending decision from the runtime's
+    // own continuation signal instead (see stopEndsTurn / the header).
     if (event === 'PreToolUse' || event === 'PostToolUse') {
       const denial = buildDenialResponse({
         hookId,
@@ -206,7 +270,7 @@ async function main() {
       process.stdout.write(`${JSON.stringify(blockedOutput(event, denial.message, denial.escalate))}\n`);
       return;
     }
-    process.stdout.write(`${JSON.stringify(blockedOutput(event, messageFrom(result)))}\n`);
+    process.stdout.write(`${JSON.stringify(blockedOutput(event, messageFrom(result), stopEndsTurn(input)))}\n`);
     return;
   }
 

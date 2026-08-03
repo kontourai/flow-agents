@@ -2,12 +2,29 @@
 /**
  * Workflow Steering Hook
  *
- * Injects phase-transition reminders after use_subagent calls complete and
- * re-grounds the active workflow state at the start of every user turn and on
- * SessionStart. SessionStart fires after context compaction and on resume, so
- * re-injecting the goal/phase/next-step there is what makes an in-flight goal
- * survive context loss instead of relying on the model voluntarily re-reading
- * the sidecar.
+ * Re-grounds the active workflow state at the start of a user turn and on SessionStart.
+ * SessionStart fires after context compaction and on resume, so re-injecting the
+ * goal/phase/next-step there is what makes an in-flight goal survive context loss instead of
+ * relying on the model voluntarily re-reading the sidecar.
+ *
+ * ── Placement rule (issue #1172) ─────────────────────────────────────────────────────
+ *
+ * Every line this hook emits is pushed into the model's context whether or not the model
+ * needs it, so placement is the design, not an implementation detail:
+ *
+ *   • BOUNDARIES (SessionStart — startup, resume, compact) get the full re-grounding push:
+ *     the RESUME block, the context-map pointer, the skill-drift advisory. These are the
+ *     moments where the model has just lost context, so repetition is the point.
+ *   • STATE CHANGES push the delta ONCE, hash-guarded (see stateBlockChanged). An unchanged
+ *     STATE block re-emitted every turn is pure overhead: the model already has it, verbatim,
+ *     earlier in the same context window. The guard is RESET at every SessionStart of any
+ *     source, because after a compaction the "unchanged" line may be the only surviving copy.
+ *   • STANDING HAZARDS (the supersession notice) stay every-turn on purpose. The hazard is
+ *     action-agnostic — any turn can be the one that publishes — and the hard fences that
+ *     would let it decay to on-change have known gaps today. It decays only when every
+ *     irreversible action path is hard-fenced.
+ *   • Nothing scoped to another actor is emitted at all (#440), and nothing is emitted that
+ *     the model can neither verify nor act on.
  *
  * Non-blocking — always exits 0.
  */
@@ -18,47 +35,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
-const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity');
-const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
+const { resolveActor, isUnresolvedActor, sanitizeSegment } = require('./lib/actor-identity');
+const { flowAgentsArtifactRoot, flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
 const { readOwnCurrentPointer } = require('./lib/current-pointer');
 const { readKitManifests, workflowTriggersFor } = require('./lib/kit-catalog');
 const { canonicalFlowState } = require('./stop-goal-fit');
 const { withFlowRecoveryFenceRead } = require('./lib/flow-recovery-fence');
 
-const STEERING = {
-  'tool-planner': [
-    '⚡ PLAN COMPLETE — Next: execute-plan (step 3).',
-    'Present plan to user. Get approval before executing.',
-  ].join(' '),
-
-  'tool-worker': [
-    '⚡ EXECUTION COMPLETE — Next: review (step 4) then verify (step 5).',
-    'Delegate to review-work for critique (report only — it cannot fix code).',
-    'Then delegate to verify-work for evidence (report only — it cannot fix code).',
-    'Do NOT deliver until review + verify are both clean.',
-    'If this was a VISUAL change (UI, CSS, HTML), you MUST delegate to tool-playwright for screenshot verification before delivering.',
-  ].join(' '),
-
-  'tool-code-reviewer': [
-    '⚡ REVIEW COMPLETE — Next: verify (step 5).',
-    'Reviewer reported findings only — it did NOT fix anything.',
-    'If CRITICAL/HIGH findings: route back to execute-plan, then re-review + re-verify.',
-    'If clean: proceed to verify-work. If findings exist, route back through execute-plan or a user decision.',
-  ].join(' '),
-
-  'tool-security-reviewer': [
-    '⚡ SECURITY REVIEW COMPLETE — Check findings.',
-    'If CRITICAL security findings: route back to execute-plan, then re-review + re-verify.',
-    'If clean: proceed to next step.',
-  ].join(' '),
-
-  'tool-verifier': [
-    '⚡ VERIFICATION COMPLETE — Route on verdict.',
-    'All PASS + no review issues → deliver.',
-    'Any FAIL or unfixed findings → route back to execute-plan, then re-review + re-verify.',
-    'Loop exits ONLY when review + verify are BOTH clean in the same iteration.',
-  ].join(' '),
-};
+// #1172: the `STEERING` phase-transition table (tool-planner/tool-worker/tool-code-reviewer/
+// tool-security-reviewer/tool-verifier -> "⚡ EXECUTION COMPLETE — Next: review …") lived here
+// and was dispatched from run() on `tool_input.command === 'InvokeSubagents'`. It was dead in
+// every shipped runtime, twice over: this hook is registered only for SessionStart and
+// UserPromptSubmit (see RUNTIME_POLICY_EVENTS in src/tools/build-universal-bundles.ts — no
+// runtime wires it to PostToolUse at all), and no runtime emits a tool call named
+// `InvokeSubagents` — Claude Code's delegation payload is the Task tool with
+// `tool_input.subagent_type`. The only thing exercising it was the eval suite's own synthetic
+// payload, so the table's guidance was proven "delivered" by a fixture and delivered to nobody.
+// Removed rather than re-pointed: the same review-before-verify sequencing is carried by the
+// kit-derived KIT WORKFLOW ROUTE hint (kits/builder/kit.json `workflow_triggers`, rendered via
+// lib/kit-catalog.js) on the prompt path that actually fires, and by the skills themselves.
 
 const ACTIVE_STATE_STATUSES = new Set([
   'new',
@@ -323,9 +318,15 @@ function canonicalGuidanceLines(guidance) {
     ];
   }
   const { state } = guidance;
+  // #1172: the `Canonical guidance identity: sha256:<64 hex>` line was dropped from this block.
+  // It is a debugging artifact in a model-facing channel: the model cannot recompute the digest
+  // (it never sees the identity payload) and cannot act on it, so it was ~20 tokens per emission
+  // of unverifiable, unactionable text. `guidance.identity` is still computed and returned by
+  // canonicalGuidance() (an exported function) — only the model-facing LINE is gone. The
+  // "has this changed since last turn?" job it looked like it was doing is now done, for real,
+  // by the last-emitted-hash guard below.
   const lines = [
     `Canonical Flow: ${safeStateText(state.definition_id, 120)}@${safeStateText(state.definition_version, 80)}/${safeStateText(state.run_id, 120)} status:${state.status} current_step:${safeStateText(state.current_step, 120)}.`,
-    `Canonical guidance identity: sha256:${guidance.identity}.`,
   ];
   if (guidance.kind === 'terminal') {
     lines.push('This canonical run is terminal; no gate action or implementation is authorized.');
@@ -406,6 +407,15 @@ function stateSteering(root, currentState = null, resolvedGuidance = null) {
   return parts.join(' ');
 }
 
+/**
+ * The context-map pointer.
+ *
+ * #1172: emitted at SessionStart ONLY. It is an index — "this repo has a map, here is how to
+ * pull it, here is how to refresh it" — and an index is boundary content: it is worth re-stating
+ * when the model has just lost its context, and worth nothing on the 40th turn of a session
+ * where the map has either already been read or already been declined. It previously fired from
+ * five call sites on every turn (two of which could emit it twice in a single turn).
+ */
 function contextMapSteering(root) {
   const mapPath = path.join(root, 'docs', 'context-map.md');
   if (!fs.existsSync(mapPath)) return '';
@@ -413,6 +423,63 @@ function contextMapSteering(root) {
     'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery.',
     'If structure, commands, schemas, skills, agents, or packs changed, run `npm run context-map -- --check`.',
   ].join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// Last-emitted-hash guard for the every-turn STATE / canonical-guidance block (#1172)
+// ---------------------------------------------------------------------------
+//
+// The STATE block is a state-CHANGE signal composed on every UserPromptSubmit, so an
+// unchanged workflow state re-pushed ~140-250 tokens of byte-identical text into the model's
+// context every single turn. The model already has that text, verbatim, earlier in the same
+// window; the repeat carries no delta.
+//
+// Storage follows the store this repo already uses for per-actor hook state — the artifact
+// root's per-actor sidecar files, keyed exactly the way lib/denial-escalation.js keys its
+// denial streak (sanitized actor segment + a digest of the raw actor, so two actors whose
+// names sanitize to the same segment do not share a file). No new store, no new location.
+//
+// Both directions fail OPEN toward emitting: an unreadable record emits (today's behaviour),
+// and an unwritable record emits again next turn. Suppression only ever happens on a positive
+// match of a record this hook itself wrote.
+function stateEmissionFile(root, actorKey) {
+  const artifactRoot = flowAgentsArtifactRoot(root);
+  const name = sanitizeSegment(String(actorKey || 'unresolved')).slice(0, 40) || 'unresolved';
+  const digest = crypto.createHash('sha256').update(String(actorKey || 'unresolved')).digest('hex').slice(0, 16);
+  return path.join(artifactRoot, '.steering-emission', `${name}-${digest}.json`);
+}
+
+/**
+ * Clear the last-emitted record so the next turn re-emits the STATE block unconditionally.
+ *
+ * Called on EVERY SessionStart regardless of `source` (startup, resume, AND compact). The
+ * compact case is the one that makes this mandatory rather than tidy: after a compaction the
+ * pre-compaction copy of the STATE block may be gone from the window entirely, so a hash
+ * persisted across that boundary would suppress the only surviving copy of the current-step
+ * directive. A hash-guard without a compaction reset is a context-loss bug, not an optimization.
+ */
+function resetStateEmission(root) {
+  try {
+    fs.rmSync(stateEmissionFile(root, resolveActor(process.env).actor), { force: true });
+  } catch { /* best effort: a stale record only costs one suppressed turn, never correctness */ }
+}
+
+/**
+ * True when `text` differs from the last STATE block this actor emitted in this repo (or when
+ * no record exists / could not be read). Records `text` as the new last emission when it does.
+ */
+function stateBlockChanged(root, text) {
+  const hash = crypto.createHash('sha256').update(String(text || '')).digest('hex');
+  const file = stateEmissionFile(root, resolveActor(process.env).actor);
+  try {
+    const prev = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (prev && typeof prev === 'object' && prev.hash === hash) return false;
+  } catch { /* no record, or unreadable -> emit */ }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ hash, updated_at: new Date().toISOString() }));
+  } catch { /* unwritable -> emit again next turn, which is the pre-#1172 behaviour */ }
+  return true;
 }
 
 /**
@@ -706,9 +773,11 @@ function run(rawInput, _options = {}, fencedRunId = null) {
   try {
     const input = JSON.parse(rawInput);
     const event = input.hook_event_name || '';
-    const toolOutput = input.tool_response || input.tool_output || '';
-    const toolInput = input.tool_input || {};
     const root = findRepoRoot(input.cwd || process.cwd());
+    // #1172: reset the STATE hash-guard at every SessionStart, whatever the `source`
+    // (startup/resume/compact) and whether or not an active session exists. Done before any
+    // steering is composed so a SessionStart that emits nothing still clears the record.
+    if (event === 'SessionStart') resetStateEmission(root);
     const current = latestWorkflowState(root);
     if (current && fencedRunId === null) {
       const selectedRunId = path.basename(path.dirname(current.file));
@@ -722,43 +791,26 @@ function run(rawInput, _options = {}, fencedRunId = null) {
     if (current && fencedRunId !== path.basename(path.dirname(current.file))) throw new Error("workflow session selection changed during fenced read");
     const guidance = current ? canonicalGuidance(root, current) : { kind: 'legacy' };
     const hints = [];
-    let shouldAppendWorkflowContext = false;
-
-    if (toolInput.command === 'InvokeSubagents') {
-      if (guidance.kind === 'legacy') {
-        const subagents = toolInput.content?.subagents || [];
-        hints.push(...subagents
-          .map(s => STEERING[s.agent_name])
-          .filter(Boolean));
-        shouldAppendWorkflowContext = hints.length > 0;
-      } else {
-        hints.push(canonicalGuidanceLines(guidance).join(' '));
-        const contextHint = contextMapSteering(root);
-        if (contextHint) hints.push(contextHint);
-      }
-    }
 
     if (event === 'UserPromptSubmit' && current) {
       const stateHint = stateSteering(root, current, guidance);
       if (stateHint) {
+        const stateBlock = [];
         if (guidance.kind === 'legacy') {
-          hints.push(stateNeedsAmbientSteering(current.payload)
+          stateBlock.push(stateNeedsAmbientSteering(current.payload)
             ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
             : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
         }
-        hints.push(stateHint);
-        const contextHint = contextMapSteering(root);
-        if (contextHint) hints.push(contextHint);
+        stateBlock.push(stateHint);
+        // #1172: push the state delta once. An identical block on the next turn is suppressed
+        // until the state actually changes or a SessionStart resets the guard.
+        if (stateBlockChanged(root, stateBlock.join('\n'))) hints.push(...stateBlock);
       }
     }
 
     if (event === 'UserPromptSubmit' && guidance.kind === 'legacy') {
       const kitHint = kitWorkflowSteering(input, root);
-      if (kitHint) {
-        hints.push(kitHint);
-        const contextHint = contextMapSteering(root);
-        if (contextHint) hints.push(contextHint);
-      }
+      if (kitHint) hints.push(kitHint);
     }
 
     // Every-turn supersession notice (#293): fires on UserPromptSubmit (every turn),
@@ -786,12 +838,6 @@ function run(rawInput, _options = {}, fencedRunId = null) {
       if (driftHint) hints.push(driftHint);
     }
 
-    if (shouldAppendWorkflowContext) {
-      const stateHint = stateSteering(root);
-      if (stateHint) hints.push(stateHint);
-      const contextHint = contextMapSteering(root);
-      if (contextHint) hints.push(contextHint);
-    }
     if (hints.length === 0) return rawInput;
 
     const steering = '\n\n---\n' + hints.join('\n') + '\n---';

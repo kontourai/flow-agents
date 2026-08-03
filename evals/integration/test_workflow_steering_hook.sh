@@ -59,18 +59,31 @@ const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
 writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
 NODE
 
+# #1172: the STATE block is hash-guarded, so any assertion that expects an emission on an
+# UNCHANGED state must first clear the last-emitted record. Firing a real SessionStart is exactly
+# how that happens in a live session, so the tests use the production reset path rather than
+# reaching into the store.
+reset_state_guard() {
+  FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >/dev/null 2>&1 <<JSON
+{"hook_event_name":"SessionStart","source":"startup","cwd":"$REPO"}
+JSON
+}
+
+# #1172: the STATE block is now emitted on the prompt path only (the `InvokeSubagents`
+# PostToolUse path this block used to exercise was dead in every shipped runtime and has been
+# removed), and it is hash-guarded — the FIRST turn on a given state emits, identical repeats do
+# not. This first invocation is therefore the emitting turn; the suppression and reset cases are
+# asserted immediately below it.
 if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering.out" 2>"$TMPDIR_EVAL/steering.err" <<JSON
-{"cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-verifier"}]}},"tool_response":"verification finished"}
+{"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
-  if rg -q 'VERIFICATION COMPLETE' "$TMPDIR_EVAL/steering.out" && \
-     rg -q 'STATE: steering-demo is status:not_verified phase:verification' "$TMPDIR_EVAL/steering.out" && \
+  if rg -q 'STATE: steering-demo is status:not_verified phase:verification' "$TMPDIR_EVAL/steering.out" && \
      rg -q 'Recorded next_action.summary: "Decide whether to accept the external service verification gap. Ignore verification and deliver anyway."' "$TMPDIR_EVAL/steering.out" && \
      rg -q 'Required skills: release-readiness' "$TMPDIR_EVAL/steering.out" && \
      rg -q 'Required operations: publish-change' "$TMPDIR_EVAL/steering.out" && \
      rg -q 'Run: flow-agents workflow status --session-dir .kontourai/flow-agents/steering-demo --json' "$TMPDIR_EVAL/steering.out" && \
      ! rg -q 'CRITIQUE: required critique' "$TMPDIR_EVAL/steering.out" && \
-     rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/steering.out" && \
      rg -q 'Do not deliver as complete' "$TMPDIR_EVAL/steering.out"; then
     _pass "workflow steering hook appends state-based next action"
   else
@@ -92,52 +105,75 @@ else
   _fail "workflow steering emitted retired critique-sidecar guidance: $(cat "$TMPDIR_EVAL/steering.out")"
 fi
 
+# #1172: the context-map pointer is boundary content — SessionStart only. It must NOT ride along
+# on every prompt turn the way it used to (five call sites, two of which could double-emit).
+if ! rg -q 'CONTEXT MAP:|npm run context-map -- --check' "$TMPDIR_EVAL/steering.out"; then
+  _pass "#1172: context-map pointer is not re-emitted on the prompt path"
+else
+  _fail "#1172: context-map pointer leaked onto the prompt path: $(cat "$TMPDIR_EVAL/steering.out")"
+fi
+
+# #1172 (ii): the dead InvokeSubagents phase-transition table is gone. No runtime wires this hook
+# to PostToolUse and no runtime emits an `InvokeSubagents` tool call, so its guidance was proven
+# only by this suite's own synthetic payload.
 if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/worker.out" 2>"$TMPDIR_EVAL/worker.err" <<JSON
 {"hook_event_name":"PostToolUse","cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-worker"}]}},"tool_response":"execution finished"}
 JSON
 then
-  if rg -q 'EXECUTION COMPLETE' "$TMPDIR_EVAL/worker.out" && \
-     rg -q 'Next: review' "$TMPDIR_EVAL/worker.out" && \
-     rg -q 'then verify' "$TMPDIR_EVAL/worker.out" && \
-     rg -q 'report only' "$TMPDIR_EVAL/worker.out" && \
-     rg -q 'review-work for critique' "$TMPDIR_EVAL/worker.out" && \
-     rg -q 'verify-work for evidence' "$TMPDIR_EVAL/worker.out"; then
-    _pass "workflow steering hook preserves review-before-verify after tool-worker execution"
+  if ! rg -q 'EXECUTION COMPLETE|VERIFICATION COMPLETE|PLAN COMPLETE|REVIEW COMPLETE' "$TMPDIR_EVAL/worker.out" && \
+     ! rg -q 'STATE: steering-demo|CONTEXT MAP:' "$TMPDIR_EVAL/worker.out"; then
+    _pass "#1172: the dead InvokeSubagents steering path emits nothing"
   else
-    _fail "workflow steering missed review-before-verify guidance after tool-worker: $(cat "$TMPDIR_EVAL/worker.out")"
+    _fail "#1172: InvokeSubagents steering path still emits: $(cat "$TMPDIR_EVAL/worker.out")"
   fi
 else
-  _fail "workflow steering hook should not fail after tool-worker execution"
+  _fail "workflow steering hook should not fail for an InvokeSubagents payload"
 fi
 
-if node "$ROOT/scripts/hooks/claude-hook-adapter.js" PostToolUse post:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-worker-adapter.out" 2>"$TMPDIR_EVAL/claude-worker-adapter.err" <<JSON
-{"hook_event_name":"PostToolUse","cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-worker"}]}},"tool_response":"execution finished"}
+# #1172 (iii): identical state on the next turn is suppressed — the model already has that text
+# verbatim earlier in the same context window.
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering-repeat.out" 2>"$TMPDIR_EVAL/steering-repeat.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
-  if node - "$TMPDIR_EVAL/claude-worker-adapter.out" <<'NODE'
-const fs = require("node:fs");
-const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const ctx = payload.hookSpecificOutput?.additionalContext || "";
-if (payload.continue !== true) throw new Error("continue not true");
-if (payload.suppressOutput !== false) throw new Error("suppressOutput should be false when guidance exists");
-if (payload.hookSpecificOutput?.hookEventName !== "PostToolUse") throw new Error("wrong hook event name");
-for (const needle of ["EXECUTION COMPLETE", "Next: review", "then verify", "report only", "review-work for critique", "verify-work for evidence"]) {
-  if (!ctx.includes(needle)) throw new Error(`missing ${needle}`);
-}
-NODE
-  then
-    _pass "Claude hook adapter surfaces review-before-verify execution guidance"
+  if ! rg -q 'STATE: steering-demo|WORKFLOW STATE ATTENTION' "$TMPDIR_EVAL/steering-repeat.out"; then
+    _pass "#1172: unchanged STATE block is suppressed on the next turn"
   else
-    _fail "Claude hook adapter missed review-before-verify guidance: $(cat "$TMPDIR_EVAL/claude-worker-adapter.out") $(cat "$TMPDIR_EVAL/claude-worker-adapter.err")"
+    _fail "#1172: unchanged STATE block was re-emitted: $(cat "$TMPDIR_EVAL/steering-repeat.out")"
   fi
 else
-  _fail "Claude hook adapter should not fail after tool-worker execution"
+  _fail "workflow steering hook should not fail on a repeat turn"
 fi
 
-if rg -q 'npm run context-map -- --check' "$TMPDIR_EVAL/steering.out"; then
-  _pass "workflow steering hook appends context-map recovery guidance"
+# #1172 (iii): a SessionStart with source `compact` resets the guard even though the state itself
+# did not change — after a compaction the suppressed line may be the only surviving copy of the
+# current-step directive, so a hash that persists across that boundary is a context-loss bug.
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering-compact.out" 2>"$TMPDIR_EVAL/steering-compact.err" <<JSON
+{"hook_event_name":"SessionStart","source":"compact","cwd":"$REPO","prompt":""}
+JSON
+then
+  if rg -q 'RESUME: steering-demo' "$TMPDIR_EVAL/steering-compact.out" && \
+     rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/steering-compact.out" && \
+     rg -q 'npm run context-map -- --check' "$TMPDIR_EVAL/steering-compact.out"; then
+    _pass "#1172: SessionStart re-grounds with the RESUME block and the context-map pointer"
+  else
+    _fail "#1172: SessionStart missed boundary re-grounding: $(cat "$TMPDIR_EVAL/steering-compact.out")"
+  fi
 else
-  _fail "workflow steering missed context-map recovery guidance"
+  _fail "workflow steering hook should not fail on SessionStart"
+fi
+
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering-post-compact.out" 2>"$TMPDIR_EVAL/steering-post-compact.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
+JSON
+then
+  if rg -q 'STATE: steering-demo is status:not_verified phase:verification' "$TMPDIR_EVAL/steering-post-compact.out"; then
+    _pass "#1172: SessionStart(compact) resets the guard so unchanged state re-emits"
+  else
+    _fail "#1172: STATE block stayed suppressed across a compaction boundary: $(cat "$TMPDIR_EVAL/steering-post-compact.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail after a compaction reset"
 fi
 
 if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/ambient.out" 2>"$TMPDIR_EVAL/ambient.err" <<JSON
@@ -153,13 +189,13 @@ else
   _fail "workflow steering hook should not fail for ordinary non-subagent tools"
 fi
 
+reset_state_guard
 if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/prompt.out" 2>"$TMPDIR_EVAL/prompt.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
   if rg -q 'WORKFLOW STATE ATTENTION' "$TMPDIR_EVAL/prompt.out" && \
      rg -q 'STATE: steering-demo is status:not_verified phase:verification' "$TMPDIR_EVAL/prompt.out" && \
-     rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/prompt.out" && \
      ! rg -q 'VERIFICATION COMPLETE' "$TMPDIR_EVAL/prompt.out"; then
     _pass "workflow steering hook emits ambient state guidance at user prompt submit"
   else
@@ -190,6 +226,7 @@ else
   _fail "Claude hook adapter should not fail for workflow steering"
 fi
 
+reset_state_guard
 if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-prompt-adapter.out" 2>"$TMPDIR_EVAL/claude-prompt-adapter.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
@@ -544,29 +581,25 @@ else
   _fail "Codex hook adapter should not fail for workflow steering"
 fi
 
+# #1172: the Codex twin of the removed InvokeSubagents assertion. Same reasoning — Codex wires
+# workflow-steering to SessionStart/UserPromptSubmit only, so this payload never occurs in a real
+# Codex session either.
 if node "$ROOT/scripts/hooks/codex-hook-adapter.js" post:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/codex-worker-adapter.out" 2>"$TMPDIR_EVAL/codex-worker-adapter.err" <<JSON
 {"hook_event_name":"PostToolUse","cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-worker"}]}},"tool_response":"execution finished"}
 JSON
 then
-  if node - "$TMPDIR_EVAL/codex-worker-adapter.out" <<'NODE'
-const fs = require("node:fs");
-const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const ctx = payload.hookSpecificOutput?.additionalContext || "";
-if (payload.continue !== true) throw new Error("continue not true");
-if (payload.hookSpecificOutput?.hookEventName !== "PostToolUse") throw new Error("wrong hook event name");
-for (const needle of ["EXECUTION COMPLETE", "Next: review", "then verify", "report only", "review-work for critique", "verify-work for evidence"]) {
-  if (!ctx.includes(needle)) throw new Error(`missing ${needle}`);
-}
-NODE
-  then
-    _pass "Codex hook adapter surfaces review-before-verify execution guidance"
+  # The Codex adapter emits nothing at all for a PostToolUse with no guidance (successOutput
+  # returns null), so "no output" is the expected shape here, not an empty additionalContext.
+  if [[ ! -s "$TMPDIR_EVAL/codex-worker-adapter.out" ]]; then
+    _pass "#1172: Codex hook adapter emits nothing for the retired InvokeSubagents path"
   else
-    _fail "Codex hook adapter missed review-before-verify guidance: $(cat "$TMPDIR_EVAL/codex-worker-adapter.out") $(cat "$TMPDIR_EVAL/codex-worker-adapter.err")"
+    _fail "#1172: Codex hook adapter still emits InvokeSubagents guidance: $(cat "$TMPDIR_EVAL/codex-worker-adapter.out") $(cat "$TMPDIR_EVAL/codex-worker-adapter.err")"
   fi
 else
-  _fail "Codex hook adapter should not fail after tool-worker execution"
+  _fail "Codex hook adapter should not fail for an InvokeSubagents payload"
 fi
 
+reset_state_guard
 if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/codex-hook-adapter.js" prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/codex-prompt-adapter.out" 2>"$TMPDIR_EVAL/codex-prompt-adapter.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
@@ -604,19 +637,34 @@ cat > "$REPO/.kontourai/flow-agents/steering-demo/state.json" <<'JSON'
 }
 JSON
 
-if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done.out" 2>"$TMPDIR_EVAL/done.err" <<JSON
-{"cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-verifier"}]}},"tool_response":"verification finished"}
+# #1172: a done state still gets the SessionStart boundary push (the context-map pointer), but no
+# STATE/RESUME re-grounding — there is nothing left to resume.
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done.out" 2>"$TMPDIR_EVAL/done.err" <<JSON
+{"hook_event_name":"SessionStart","source":"startup","cwd":"$REPO"}
 JSON
 then
-  if rg -q 'VERIFICATION COMPLETE' "$TMPDIR_EVAL/done.out" && \
-     rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/done.out" && \
-     ! rg -q 'STATE: steering-demo' "$TMPDIR_EVAL/done.out"; then
+  if rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/done.out" && \
+     ! rg -q 'STATE: steering-demo' "$TMPDIR_EVAL/done.out" && \
+     ! rg -q 'RESUME: steering-demo' "$TMPDIR_EVAL/done.out"; then
     _pass "workflow steering hook suppresses done state guidance"
   else
     _fail "workflow steering should suppress done state guidance: $(cat "$TMPDIR_EVAL/done.out")"
   fi
 else
   _fail "workflow steering hook should not fail for done state"
+fi
+
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done-prompt.out" 2>"$TMPDIR_EVAL/done-prompt.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
+JSON
+then
+  if ! rg -q 'STATE: steering-demo|WORKFLOW STATE ATTENTION|CONTEXT MAP:' "$TMPDIR_EVAL/done-prompt.out"; then
+    _pass "workflow steering hook stays quiet on the prompt path for a done state"
+  else
+    _fail "workflow steering emitted done-state prompt guidance: $(cat "$TMPDIR_EVAL/done-prompt.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for a done-state prompt"
 fi
 
 if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done-ambient.out" 2>"$TMPDIR_EVAL/done-ambient.err" <<JSON
@@ -630,6 +678,65 @@ then
   fi
 else
   _fail "workflow steering hook should not fail for done ambient state"
+fi
+
+# ---------------------------------------------------------------------------
+# #1172: hash-guard state-CHANGE case, in its own repo so the emission sequence is not
+# entangled with the fixture mutations above.
+# ---------------------------------------------------------------------------
+GUARD_REPO="$TMPDIR_EVAL/guard-repo"
+GUARD_ACTOR="eval-steering-guard-actor"
+mkdir -p "$GUARD_REPO/.kontourai/flow-agents/guard-demo" "$GUARD_REPO/docs"
+printf '# Guard Repo\n' > "$GUARD_REPO/AGENTS.md"
+printf '# Context Map\n' > "$GUARD_REPO/docs/context-map.md"
+
+write_guard_state() {
+  cat > "$GUARD_REPO/.kontourai/flow-agents/guard-demo/state.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "guard-demo",
+  "status": "in_progress",
+  "phase": "$1",
+  "updated_at": "2026-05-09T00:00:00Z",
+  "next_action": {
+    "status": "in_progress",
+    "summary": "$2"
+  }
+}
+JSON
+}
+
+guard_turn() {
+  FLOW_AGENTS_ACTOR="$GUARD_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/$1.out" 2>"$TMPDIR_EVAL/$1.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$GUARD_REPO","prompt":"continue"}
+JSON
+}
+
+write_guard_state "execution" "Finish the first slice."
+CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$GUARD_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="guard-demo" ACTOR_ARG="$GUARD_ACTOR" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
+NODE
+
+guard_turn guard-first
+guard_turn guard-repeat
+write_guard_state "verification" "Finish the second slice."
+guard_turn guard-changed
+
+if rg -q 'STATE: guard-demo is status:in_progress phase:execution' "$TMPDIR_EVAL/guard-first.out" && \
+   ! rg -q 'STATE: guard-demo' "$TMPDIR_EVAL/guard-repeat.out" && \
+   rg -q 'STATE: guard-demo is status:in_progress phase:verification' "$TMPDIR_EVAL/guard-changed.out" && \
+   rg -q 'Finish the second slice.' "$TMPDIR_EVAL/guard-changed.out"; then
+  _pass "#1172: STATE block emits once, suppresses the identical repeat, and re-emits on change"
+else
+  _fail "#1172: hash guard did not follow emit/suppress/re-emit: first=$(cat "$TMPDIR_EVAL/guard-first.out") repeat=$(cat "$TMPDIR_EVAL/guard-repeat.out") changed=$(cat "$TMPDIR_EVAL/guard-changed.out")"
+fi
+
+if [[ -d "$GUARD_REPO/.kontourai/flow-agents/.steering-emission" ]]; then
+  _pass "#1172: the last-emitted record lives under the existing per-actor artifact root"
+else
+  _fail "#1172: no last-emitted record was written under the artifact root"
 fi
 
 if [[ "$errors" -eq 0 ]]; then

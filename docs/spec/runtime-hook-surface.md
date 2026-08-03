@@ -196,18 +196,18 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 ### 2.1 Workflow Steering
 
-**Intent**: Inject phase-transition reminders and ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline after subagent calls or context compaction.
+**Intent**: Inject ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline across turns and context compaction.
 
 **Canonical script**: `scripts/hooks/workflow-steering.js`
 
-**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
+**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding). There is no `postToolUse` wiring: a phase-transition table keyed on an `InvokeSubagents` tool call was removed in #1172 because no shipped runtime wires this hook to `postToolUse` and none emits a tool call by that name.
 
 **Inputs consumed**:
 - `.kontourai/flow-agents/<slug>/state.json` — current workflow phase and status
 - `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 

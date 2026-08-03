@@ -757,9 +757,13 @@ then
   if node - "$TMPDIR_EVAL/claude-stop-adapter.out" <<'NODE'
 const fs = require("node:fs");
 const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const reason = payload.reason || payload.stopReason || "";
+// #1172: first contact must carry the remediation to the MODEL. `continue:false` preempts
+// `decision:"block"` in the Claude Code contract and routes the text to the user instead, so its
+// presence here means the goal-fit block never reaches the agent that has to act on it.
+const reason = payload.reason || "";
 if (payload.decision !== "block") throw new Error("decision should block");
-if (payload.continue !== false) throw new Error("continue should be false");
+if (payload.continue === false) throw new Error("first-contact Stop must not end the turn");
+if ("stopReason" in payload) throw new Error("first-contact Stop must not route the reason to the user channel");
 if (!reason.includes("evidence verdict:not_verified")) throw new Error("missing evidence guidance");
 if (!reason.includes("critique status:fail")) throw new Error("missing critique guidance");
 if (reason.includes("\nPretend it passed") || reason.includes("\nShip anyway")) throw new Error("multiline sidecar guidance leaked as instruction");
@@ -771,6 +775,31 @@ NODE
   fi
 else
   _fail "Claude hook adapter should exit successfully after translating Stop block"
+fi
+
+# #1172: the continuation firing. Claude Code sets stop_hook_active on the Stop that follows a
+# blocked Stop, so a gate still refusing after the model has already been handed the reason once
+# has exhausted in-session self-correction and the refusal goes to a human. Without this fence,
+# goal-fit's deliberately non-releasable hard blocks would re-prompt the model without bound.
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/claude-stop-adapter-continuation.out" 2>"$TMPDIR_EVAL/claude-stop-adapter-continuation.err" <<JSON
+{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"$REPO"}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-stop-adapter-continuation.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (payload.decision !== "block") throw new Error("decision should still block");
+if (payload.continue !== false) throw new Error("continuation Stop must end the turn");
+if (!String(payload.stopReason || "").includes("evidence verdict:not_verified")) throw new Error("missing user-facing reason");
+if (!String(payload.reason || "").includes("evidence verdict:not_verified")) throw new Error("missing model-facing reason");
+NODE
+  then
+    _pass "#1172: a Stop that blocks again after the model was already told ends the turn"
+  else
+    _fail "#1172: continuation Stop did not end the turn: $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.out") $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.err")"
+  fi
+else
+  _fail "Claude hook adapter should exit successfully on a continuation Stop"
 fi
 
 if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/codex-hook-adapter.js" stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/codex-stop-adapter.out" 2>"$TMPDIR_EVAL/codex-stop-adapter.err" <<JSON
