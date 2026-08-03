@@ -178,10 +178,10 @@ requires a source-owned update. It is deliberately separate from the large store
 from Builder composition.
 
 The input follows
-[`schemas/knowledge/context-check-input.schema.json`](../../../schemas/knowledge/context-check-input.schema.json):
+[`schemas/knowledge/context-check-input.schema.json`](../schemas/knowledge/context-check-input.schema.json):
 it binds a workspace, repository, exact 40-character Git commit SHA, target audience, changed
 surfaces (or diff paths), and one or more selected `git-repo` Knowledge roots. The result follows
-[`schemas/knowledge/context-check-result.schema.json`](../../../schemas/knowledge/context-check-result.schema.json).
+[`schemas/knowledge/context-check-result.schema.json`](../schemas/knowledge/context-check-result.schema.json).
 
 ```js
 import { runContextCheck } from "./context-check/index.js";
