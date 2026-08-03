@@ -66,6 +66,11 @@
       "id": "knowledge.promote",
       "path": "flows/promote.flow.json",
       "description": "Knowledge promote sub-flow (issue #313, the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill schema-valid DRAFT decision/vocabulary/learning deltas per the decision-registry contract -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns + divergent content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: outputs land under <session>/proposals/ for the promote step to apply; the sub-flow never writes docs directly. Executable logic: promote/index.js."
+    },
+    {
+      "id": "knowledge.context-check",
+      "path": "flows/context-check.flow.json",
+      "description": "Standalone Living Context recall and reconciliation (issue #1131): bind a repository/workspace and verified raw revision, read selected git-repo Knowledge roots only with sanitized Git revision reads, return contextual current/superseded/unverifiable recall with authority and retrieval provenance, return neutral affected/requires-reconciliation for bounded path intersections unless explicit authority supplies contradiction, and emit minimal owning-source proposals only. It is not a Surface trust derivation or Builder integration. Executable logic: context-check/index.js."
     }
   ],
   "workflow_triggers": [
@@ -136,6 +141,11 @@
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
       "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against schemas/decision-record.schema.json before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir."
+    },
+    {
+      "id": "knowledge.context-check-runner",
+      "path": "context-check/index.js",
+      "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
     }
   ],
   "evals": [
@@ -213,6 +223,11 @@
       "id": "knowledge.promote-suite",
       "path": "promote/promote.test.js",
       "description": "Eval cases for the knowledge.promote sub-flow (issue #313): AC1 (a real-modeled completed session dir yields >=1 schema-valid draft decision delta with PR/merge-SHA/session-archive provenance, validated against the real #310 registry validator); AC2 (a seeded-contradiction registry fixture yields a duplicate-detection report naming BOTH topics + a schema-valid merge-repair proposal naming a merge target; a resolved supersede/merge pair is not re-flagged); AC3 (filesystem diff proves zero writes outside the session/proposal dir); R1 (the FlowDefinition exports every gate claim so a parent uses_flow step resolves it)."
+    },
+    {
+      "id": "knowledge.context-check-suite",
+      "path": "context-check/context-check.test.js",
+      "description": "Deterministic standalone Context Check contract suite (issue #1131): sanitized exact raw-revision reads despite a dirty working tree, Git replace and inherited GIT_DIR adversaries, current/superseded authority status, neutral bounded reconciliation with full surface intersection, explicit per-missing no-answer/not_verified behavior, owning-source-only proposals, no-follow symlink-safe proposal containment, complete input/result schemas, and diff-path handling."
     }
   ],
   "skills": [
