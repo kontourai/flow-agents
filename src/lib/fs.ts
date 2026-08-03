@@ -151,16 +151,63 @@ export type DirectoryCopyTransaction<T> = {
   rollback(): void;
 };
 
-/** Remove only stale, randomly-named artifacts made by copyDirAtomicTransaction. */
-export function cleanupDirectoryCopyArtifacts(root: string, dest: string): Error[] {
+export type DirectoryCopyTransactionOptions = {
+  removeBackup?: (backup: string) => void;
+};
+
+function directoryCopyLockPath(parent: string, dest: string): string {
+  return path.join(parent, `.${path.basename(dest)}.flow-agents.lock`);
+}
+
+function acquireDirectoryCopyLock(parent: string, dest: string): () => Error | undefined {
+  const lock = directoryCopyLockPath(parent, dest);
+  try {
+    fs.mkdirSync(lock, { mode: 0o700 });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+      const error = new Error(`directory copy transaction is active or requires recovery: ${lock}`) as Error & { code?: string };
+      error.code = "DIRECTORY_COPY_LOCKED";
+      throw error;
+    }
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    throw error;
+  }
+  return () => {
+    try {
+      fs.rmdirSync(lock);
+      return undefined;
+    } catch (cause) {
+      return cause instanceof Error ? cause : new Error(String(cause));
+    }
+  };
+}
+
+/**
+ * Remove only old backups from a completed directory-copy transaction. The
+ * caller must first prove its registry still binds the installed target. A
+ * live copy transaction owns the same lock, so cleanup skips rather than
+ * touching a rollback backup while a replacement is in flight.
+ */
+export function cleanupDirectoryCopyBackups(root: string, dest: string): Error[] {
   const parent = ensureSafeDirectory(root, path.dirname(dest));
   const escapedName = path.basename(dest).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const artifact = new RegExp(`^\\.${escapedName}\\.flow-agents-[0-9]+-[0-9a-f]{12}\\.(?:tmp|old)$`);
+  const artifact = new RegExp(`^\\.${escapedName}\\.flow-agents-[0-9]+-[0-9a-f]{12}\\.old$`);
+  let releaseLock: (() => Error | undefined) | undefined;
+  try {
+    releaseLock = acquireDirectoryCopyLock(parent, dest);
+  } catch (cause) {
+    return [cause instanceof Error ? cause : new Error(String(cause))];
+  }
   const errors: Error[] = [];
-  for (const name of fs.readdirSync(parent)) {
-    if (!artifact.test(name)) continue;
-    try { fs.rmSync(path.join(parent, name), { recursive: true, force: true }); }
-    catch (cause) { errors.push(cause instanceof Error ? cause : new Error(String(cause))); }
+  try {
+    for (const name of fs.readdirSync(parent)) {
+      if (!artifact.test(name)) continue;
+      try { fs.rmSync(path.join(parent, name), { recursive: true, force: true }); }
+      catch (cause) { errors.push(cause instanceof Error ? cause : new Error(String(cause))); }
+    }
+  } finally {
+    const releaseError = releaseLock();
+    if (releaseError) errors.push(releaseError);
   }
   return errors;
 }
@@ -170,7 +217,7 @@ export function cleanupDirectoryCopyArtifacts(root: string, dest: string): Error
  * commit/rollback boundary. Callers that persist related metadata can retain
  * the prior directory until that metadata write has succeeded.
  */
-export function copyDirAtomicTransaction<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T): DirectoryCopyTransaction<T> {
+export function copyDirAtomicTransaction<T = void>(root: string, src: string, dest: string, verify?: (target: string) => T, options?: DirectoryCopyTransactionOptions): DirectoryCopyTransaction<T> {
   assertPathsDisjoint(src, dest);
   const parent = ensureSafeDirectory(root, path.dirname(dest));
   if (fs.existsSync(dest)) {
@@ -178,6 +225,7 @@ export function copyDirAtomicTransaction<T = void>(root: string, src: string, de
     if (stat.isSymbolicLink()) throw new Error(`refusing to replace symlink: ${dest}`);
     if (!stat.isDirectory()) throw new Error(`destination is not a directory: ${dest}`);
   }
+  const releaseLock = acquireDirectoryCopyLock(parent, dest);
   const nonce = `${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
   const temp = path.join(parent, `.${path.basename(dest)}.flow-agents-${nonce}.tmp`);
   const backup = path.join(parent, `.${path.basename(dest)}.flow-agents-${nonce}.old`);
@@ -214,22 +262,34 @@ export function copyDirAtomicTransaction<T = void>(root: string, src: string, de
       commit(): Error | undefined {
         if (!transactionOpen) return undefined;
         transactionOpen = false;
+        let cleanupError: Error | undefined;
         try {
-          fs.rmSync(backup, { recursive: true, force: true });
-          return undefined;
+          if (options?.removeBackup) options.removeBackup(backup);
+          else fs.rmSync(backup, { recursive: true, force: true });
         } catch (cause) {
-          return cause instanceof Error ? cause : new Error(String(cause));
+          cleanupError = cause instanceof Error ? cause : new Error(String(cause));
         }
+        const releaseError = releaseLock();
+        if (!cleanupError && releaseError) cleanupError = releaseError;
+        return cleanupError;
       },
       rollback(): void {
         if (!transactionOpen) return;
-        restore();
-        transactionOpen = false;
+        try {
+          restore();
+          transactionOpen = false;
+        } finally {
+          releaseLock();
+        }
       },
     };
   } finally {
-    fs.rmSync(temp, { recursive: true, force: true });
-    if (!transactionOpen && fs.existsSync(backup) && !fs.existsSync(dest)) fs.renameSync(backup, dest);
+    try {
+      fs.rmSync(temp, { recursive: true, force: true });
+      if (!transactionOpen && fs.existsSync(backup) && !fs.existsSync(dest)) fs.renameSync(backup, dest);
+    } finally {
+      if (!transactionOpen) releaseLock();
+    }
   }
 }
 

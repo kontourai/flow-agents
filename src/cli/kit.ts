@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyArtifacts, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
@@ -19,6 +19,7 @@ export type KitCliTestHooks = {
   beforeCopy?: (source: string, target: string) => void;
   afterCopy?: (source: string, target: string) => void;
   writeRegistry?: (root: string, registryFile: string, registry: Record<string, unknown>) => void;
+  cleanupBackup?: (backup: string) => void;
 };
 
 let testHooks: KitCliTestHooks | undefined;
@@ -121,7 +122,7 @@ function installCopiedKit(options: {
     const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
     if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
     return targetObservation.observed_hash;
-  });
+  }, { removeBackup: testHooks?.cleanupBackup });
   if (!transaction.value) {
     transaction.rollback();
     throw new Error("completed copied kit did not produce a content hash");
@@ -156,8 +157,11 @@ function installCopiedKit(options: {
   }
 }
 
-function cleanStaleInstallArtifacts(dest: string, target: string): void {
-  for (const cleanupError of cleanupDirectoryCopyArtifacts(dest, target)) {
+function cleanStaleInstallArtifacts(dest: string, target: string, existing: Record<string, unknown> | undefined): void {
+  if (!existing || typeof existing.hash !== "string") return;
+  const observed = observeKitContentHash(target, { trustedRoot: dest });
+  if (observed.state !== "observed" || observed.observed_hash !== existing.hash) return;
+  for (const cleanupError of cleanupDirectoryCopyBackups(dest, target)) {
     console.warn(`warning: could not clean stale installer artifact for '${path.basename(target)}': ${cleanupError.message}; a later install will retry cleanup`);
   }
 }
@@ -258,9 +262,9 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 1;
   }
   const hash = hashObservation.observed_hash;
-  cleanStaleInstallArtifacts(dest, target);
   const registry = loadRegistry(dest);
   const existing = registry.kits.find((entry) => entry.id === kitId);
+  cleanStaleInstallArtifacts(dest, target, existing);
   const sourceText = source;
   if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
     console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
@@ -359,9 +363,9 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       console.error(`install: unsafe destination: ${(error as Error).message}`);
       return 1;
     }
-    cleanStaleInstallArtifacts(dest, target);
     const registry = loadRegistry(dest);
     const existing = registry.kits.find((entry) => entry.id === kitId);
+    cleanStaleInstallArtifacts(dest, target, existing);
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
     if (existing && existing.source !== sourceText && !update) {
       console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);

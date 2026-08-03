@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { main as kitMain, setKitCliTestHooksForTests } from "../../build/src/cli/kit.js";
 import { observeKitContentHash } from "../../build/src/flow-kit/content-hash.js";
 import { activateCodexLocal } from "../../build/src/runtime-adapters.js";
-import { atomicWriteJson } from "../../build/src/lib/fs.js";
+import { cleanupDirectoryCopyBackups, copyDirAtomicTransaction } from "../../build/src/lib/fs.js";
 
 const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
 
@@ -159,20 +159,16 @@ test("a committed registry write survives backup cleanup failure and an idempote
   copyFixture(source);
   assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
   const target = path.join(dest, "kits", "local", "repositories", "example-kit");
-  const targetParent = path.dirname(target);
-  const targetParentMode = fs.statSync(targetParent).mode & 0o777;
   fs.appendFileSync(path.join(source, "docs", "README.md"), "committed source update\n");
   setKitCliTestHooksForTests({
-    writeRegistry(rootPath, registryFile, registry) {
-      atomicWriteJson(rootPath, registryFile, registry);
-      fs.chmodSync(targetParent, 0o500);
+    cleanupBackup() {
+      throw new Error("deterministic backup cleanup failure");
     },
   });
   try {
     assert.equal(await kitMain(["install", source, "--dest", dest, "--force"]), 0);
   } finally {
     setKitCliTestHooksForTests(undefined);
-    fs.chmodSync(targetParent, targetParentMode);
   }
   const registry = JSON.parse(fs.readFileSync(path.join(dest, "kits", "local", "installed-kits.json"), "utf8"));
   const observed = observeKitContentHash(target, { trustedRoot: dest });
@@ -181,6 +177,25 @@ test("a committed registry write survives backup cleanup failure and an idempote
   assert.ok(transactionArtifacts(target).some((name) => name.endsWith(".old")), "failed cleanup leaves only the prior-target backup for retry");
   assert.equal(await kitMain(["install", source, "--dest", dest]), 0, "same-source reinstall remains idempotent");
   assert.deepEqual(transactionArtifacts(target), [], "idempotent install retries and completes stale artifact cleanup");
+});
+
+test("cleanup cannot remove a live transaction backup before rollback restores the prior target", async () => {
+  const root = tempRoot("flow-kit-install-live-backup-");
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  copyFixture(source);
+  assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
+  const target = path.join(dest, "kits", "local", "repositories", "example-kit");
+  const previousReadme = fs.readFileSync(path.join(target, "docs", "README.md"), "utf8");
+  fs.appendFileSync(path.join(source, "docs", "README.md"), "uncommitted replacement\n");
+  const transaction = copyDirAtomicTransaction(dest, source, target);
+  assert.ok(transactionArtifacts(target).some((name) => name.endsWith(".old")), "live replacement retains its rollback backup");
+  const cleanup = cleanupDirectoryCopyBackups(dest, target);
+  assert.equal(cleanup[0]?.code, "DIRECTORY_COPY_LOCKED", "cleanup fails closed while the transaction lock is live");
+  assert.ok(transactionArtifacts(target).some((name) => name.endsWith(".old")), "active rollback backup remains present");
+  transaction.rollback();
+  assert.equal(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8"), previousReadme, "rollback restores the prior target");
+  assert.deepEqual(transactionArtifacts(target), [], "rollback removes the live backup");
 });
 
 for (const git of [false, true]) {
