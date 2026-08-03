@@ -126,7 +126,7 @@
     "!build/src/cli/workflow.test-support.js"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only",
+    "build": "tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only && node build/src/tools/generate-install-identity.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "npm run build --silent && node scripts/build-test-support.mjs && node --test src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",

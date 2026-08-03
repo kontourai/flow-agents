@@ -5,6 +5,7 @@ import path from "node:path";
 import { validateKitRepository as validateFlowKitRepository } from "../flow-kit/validate.js";
 import { codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { loadJson, readText, rel, root, walkFiles } from "./common.js";
+import { INSTALL_IDENTITY_SCHEMA_VERSION, INSTALL_IDENTITY_STAMP_REL } from "./generate-install-identity.js";
 
 class Reporter {
   errors: string[] = [];
@@ -469,6 +470,31 @@ function validatePackageCommandSurface(reporter: Reporter): void {
     }
   }
 }
+/**
+ * Pack-time truth assertion for the install-identity stamp (#1180).
+ *
+ * `validate:source` runs inside `prepack`, so this is the last gate between a stamp and a
+ * published tarball. Telemetry reads `package_version` from this file verbatim and reports it as
+ * the producer's identity; a stale stamp would therefore not fail loudly, it would LIE quietly in
+ * every event — attributing one release's behavior to another. The assertion converts that into a
+ * pack failure: the stamp must exist, declare the current schema version, and name exactly the
+ * package and version package.json declares.
+ */
+function validateInstallIdentityStamp(reporter: Reporter): void {
+  const stampFile = path.join(root, INSTALL_IDENTITY_STAMP_REL);
+  if (!fs.existsSync(stampFile)) {
+    reporter.fail(`${INSTALL_IDENTITY_STAMP_REL}: install-identity stamp is missing; run npm run build`);
+    return;
+  }
+  const stamp = tryLoadJson(stampFile, reporter);
+  if (!stamp || typeof stamp !== "object") return;
+  const pkg = tryLoadJson(path.join(root, "package.json"), reporter);
+  if (!pkg || typeof pkg !== "object") return;
+  reporter.check(stamp.schema_version === INSTALL_IDENTITY_SCHEMA_VERSION, `${INSTALL_IDENTITY_STAMP_REL}: schema_version must be '${INSTALL_IDENTITY_SCHEMA_VERSION}', got '${stamp.schema_version}'`);
+  reporter.check(stamp.package_name === pkg.name, `${INSTALL_IDENTITY_STAMP_REL}: package_name '${stamp.package_name}' does not match package.json '${pkg.name}'; the stamp is stale — run npm run build`);
+  reporter.check(stamp.package_version === pkg.version, `${INSTALL_IDENTITY_STAMP_REL}: package_version '${stamp.package_version}' does not match package.json '${pkg.version}'; the stamp is stale — run npm run build`);
+  reporter.check(typeof stamp.content_fingerprint === "string" && /^sha256:[0-9a-f]{64}$/.test(stamp.content_fingerprint), `${INSTALL_IDENTITY_STAMP_REL}: content_fingerprint must be 'sha256:<64 hex>', got '${stamp.content_fingerprint}'`);
+}
 function isExcludedPythonPath(file: string): boolean {
   return path.relative(root, file).split(path.sep).some((part) => pythonInventoryExcludes.has(part));
 }
@@ -527,6 +553,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   validateAdrNumbers(reporter);
   validateFixtureOwnership(reporter);
   validatePackageCommandSurface(reporter);
+  validateInstallIdentityStamp(reporter);
   validateNoFirstPartyPythonFiles(reporter);
   validateNoFirstPartyPythonCommands(reporter);
   if (reporter.errors.length) { console.log("Source tree validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }
