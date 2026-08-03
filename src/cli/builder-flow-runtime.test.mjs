@@ -4158,11 +4158,19 @@ test("direct sidecar gate recording derives the exact projected Flow head", asyn
 // freshness against a Git workspace snapshot of the current tree; a changed tree, or no snapshot
 // at all, stays terminal.
 
-function makeGitBackedSession(slug) {
+// A session whose project root is canonicalized, so a test may compare its own
+// captureReviewWorkspaceSnapshot result against what the producer stamped. NOT yet Git-backed.
+function makeCanonicalPathSession(slug) {
   const created = makeSession(slug);
   const projectRoot = fs.realpathSync(created.projectRoot);
   const artifactRoot = path.join(projectRoot, ".kontourai", "flow-agents");
-  const session = { ...created, projectRoot, artifactRoot, sessionDir: path.join(artifactRoot, created.slug) };
+  return { ...created, projectRoot, artifactRoot, sessionDir: path.join(artifactRoot, created.slug) };
+}
+
+// Turn an existing project root into a Git worktree. Split out of makeGitBackedSession so a test
+// can record evidence BEFORE the root is Git-backed and then Git-back it, with the guarantee that
+// the resulting worktree is constructed identically to every other Git-backed fixture here.
+function initGitWorktreeFixture(projectRoot) {
   // Workflow artifacts live under .kontourai/, which the snapshot's `--exclude-standard`
   // untracked scan honors — otherwise every bundle write would change the workspace digest.
   fs.writeFileSync(path.join(projectRoot, ".gitignore"), ".kontourai/\n");
@@ -4171,6 +4179,11 @@ function makeGitBackedSession(slug) {
   execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
   execFileSync("git", ["add", ".gitignore", "review-target"], { cwd: projectRoot });
   execFileSync("git", ["commit", "-m", "workspace fixture"], { cwd: projectRoot, stdio: "ignore" });
+}
+
+function makeGitBackedSession(slug) {
+  const session = makeCanonicalPathSession(slug);
+  initGitWorktreeFixture(session.projectRoot);
   return session;
 }
 
@@ -4515,6 +4528,47 @@ test("a later bundle rebuild never re-anchors an already-recorded check to a new
   assert.deepEqual(rebuiltFirst, originalSnapshot, "the earlier check keeps the tree it was actually recorded against");
   assert.notDeepEqual(second, originalSnapshot, "the fixture must genuinely change the tree between the two writes");
   assert.deepEqual(second, captureReviewWorkspaceSnapshot(session.projectRoot, []));
+});
+
+test("a snapshot-less check is never backfilled once the project root becomes a Git worktree", async () => {
+  // Direct coverage for the `_fresh_record_write` gate itself (verifier finding on d16dbbe7).
+  // The sibling no-re-anchor test above cannot exercise the gate: its check #1 already carries a
+  // snapshot, so `verificationWorkspaceSnapshotMeta ?? ...` short-circuits and the test passes
+  // whether or not the gate exists. The gate only has observable effect on a check that is
+  // legitimately SNAPSHOT-LESS — which is precisely the #1164-shaped claim this slice is about.
+  //
+  // Recording while the root is not a Git worktree is the only way to mint such a check through
+  // the real producer, so the fixture Git-backs the root afterwards and then forces an unrelated
+  // rebuild. Without the gate, restoring check #1 silently stamps it with the LATER tree — a
+  // snapshot of code it was never recorded against.
+  const session = makeCanonicalPathSession("declared-check-snapshot-no-backfill");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({ id: "verifier-ac-1", kind: "external", status: "pass", summary: "Recorded before the project root was a Git worktree." }),
+  ]);
+  assert.equal(checkClaimFor(session, "verifier-ac-1").metadata.verification_workspace_snapshot, undefined, "no Git worktree at record time, so nothing to capture");
+
+  initGitWorktreeFixture(session.projectRoot);
+
+  // Any unrelated later write rebuilds the whole bundle, restoring check #1 through checksFromBundle.
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "partial",
+    "--check-json", JSON.stringify({ id: "verifier-ac-2", kind: "external", status: "pass", summary: "Unrelated later write that rebuilds the bundle." }),
+  ]);
+
+  assert.equal(
+    checkClaimFor(session, "verifier-ac-1").metadata.verification_workspace_snapshot, undefined,
+    "a restored check must never be backfilled with a snapshot of a tree it was not recorded against",
+  );
+  // Test power: proves capture is genuinely live in this state, so the assertion above passes
+  // because the gate held — not because capture happened to return null for both checks.
+  assert.equal(
+    checkClaimFor(session, "verifier-ac-2").metadata.verification_workspace_snapshot.kind, "git-worktree",
+    "the fresh check written after Git-backing must still be stamped",
+  );
 });
 
 test("a sidecar-recorded check recovers a later public evidence write with no caller-supplied snapshot", async () => {
