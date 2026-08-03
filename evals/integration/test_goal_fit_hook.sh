@@ -1028,6 +1028,106 @@ else
   _fail "#1172: the non-blocking Stop probe did not exit cleanly"
 fi
 
+# ─── #1172 review follow-up: a SessionStart must reset the consecutive-block streak ──────────
+#
+# The invariant is "a new session must not inherit the previous one's Stop strikes". Verification
+# of 5fd7028b found it had no test power: deleting the clearStopBlocks call on the adapter's
+# SessionStart path broke nothing, while the latent regression is real and reproducible — exhaust
+# the backstop, start a new session, and its very FIRST Stop reports "blocked 6 times in a row"
+# and ends the turn immediately, with the operator never seeing a first-contact refusal.
+#
+# Driven through the REAL adapter end to end, because the defect lives in the adapter's wiring
+# (which store key it clears, and on which event), not in the counter the lib unit tests cover.
+# Own repo, so the streak starts clean regardless of what the tests above left behind: the store
+# is rooted at the payload cwd's artifact root, so a distinct fixture repo is a distinct store.
+SESSION_RESET_REPO="$TMPDIR_EVAL/session-reset-repo"
+SESSION_RESET_SLUG="session-reset-demo"
+mkdir -p "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG"
+printf '# Test Repo\n' > "$SESSION_RESET_REPO/AGENTS.md"
+cat > "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG/$SESSION_RESET_SLUG--deliver.md" <<MARKDOWN
+# ${SESSION_RESET_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+A gate that keeps refusing, so only the backstop can end a turn here.
+MARKDOWN
+cat > "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${SESSION_RESET_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${SESSION_RESET_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$SESSION_RESET_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$SESSION_RESET_SLUG" ACTOR_ARG="session-reset-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+# One blocking Stop through the real adapter. No stop_hook_active at all, and the gate's own
+# release valve pushed out of reach, so the ONLY thing that can end a turn here is the backstop —
+# which is what makes the assertions below read purely on the counter.
+session_reset_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS="100"
+    export FLOW_AGENTS_STOP_MAX_BLOCKS="2"
+    printf '{"hook_event_name":"Stop","cwd":"%s"}' "$SESSION_RESET_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+
+RESET_BEFORE_1="$(session_reset_stop)"
+RESET_BEFORE_2="$(session_reset_stop)"
+
+# The session boundary itself, through the same adapter binary a real SessionStart runs.
+printf '{"hook_event_name":"SessionStart","source":"startup","cwd":"%s"}' "$SESSION_RESET_REPO" \
+  | node "$ROOT/scripts/hooks/claude-hook-adapter.js" SessionStart session:workflow-steering workflow-steering.js default \
+  >"$TMPDIR_EVAL/session-reset-boundary.out" 2>"$TMPDIR_EVAL/session-reset-boundary.err"
+
+RESET_AFTER="$(session_reset_stop)"
+
+if node - "$RESET_BEFORE_1" "$RESET_BEFORE_2" "$RESET_AFTER" <<'NODE'
+const [, , before1, before2, after] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(before1), p(before2), p(after)];
+
+// Preconditions: the backstop really did exhaust, or the reset below proves nothing.
+if (a.continue === false) throw new Error("setup: the first Stop should not have ended the turn");
+if (b.continue !== false) throw new Error("setup: the backstop should have exhausted on the second Stop");
+if (!String(b.reason || "").includes("blocked 2 times in a row")) throw new Error("setup: the second Stop should carry the backstop escalation note");
+
+// The invariant: the first Stop of the NEW session is a first contact again.
+if (c.decision !== "block") throw new Error("the gate must still refuse after a SessionStart");
+if (c.continue === false) throw new Error("a SessionStart must reset the streak: the new session's first Stop ended the turn instead of handing the reason to the model");
+if (/blocked \d+ times in a row/.test(String(c.reason || ""))) {
+  throw new Error(`a SessionStart must reset the streak: the new session's first Stop inherited a count -> ${String(c.reason).match(/blocked \d+ times in a row/)[0]}`);
+}
+NODE
+then
+  _pass "#1172: a SessionStart resets the consecutive-block streak, so a new session's first Stop is a first contact"
+else
+  _fail "#1172: Stop strikes leaked across a SessionStart boundary: before1=$RESET_BEFORE_1 before2=$RESET_BEFORE_2 after=$RESET_AFTER"
+fi
+
 if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/codex-hook-adapter.js" stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/codex-stop-adapter.out" 2>"$TMPDIR_EVAL/codex-stop-adapter.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$REPO"}
 JSON
