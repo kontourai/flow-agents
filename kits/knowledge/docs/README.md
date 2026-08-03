@@ -178,10 +178,10 @@ requires a source-owned update. It is deliberately separate from the large store
 from Builder composition.
 
 The input follows
-[`schemas/knowledge/context-check-input.schema.json`](../../../schemas/knowledge/context-check-input.schema.json):
+[`schemas/knowledge/context-check-input.schema.json`](../schemas/knowledge/context-check-input.schema.json):
 it binds a workspace, repository, exact 40-character Git commit SHA, target audience, changed
 surfaces (or diff paths), and one or more selected `git-repo` Knowledge roots. The result follows
-[`schemas/knowledge/context-check-result.schema.json`](../../../schemas/knowledge/context-check-result.schema.json).
+[`schemas/knowledge/context-check-result.schema.json`](../schemas/knowledge/context-check-result.schema.json).
 
 ```js
 import { runContextCheck } from "./context-check/index.js";
@@ -527,3 +527,7 @@ NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=testpassword \
   node --test kits/knowledge/providers/neo4j/integration.test.js
 docker rm -f kg-neo4j
 ```
+
+## Schema authority and vendoring
+
+`schemas/knowledge/` is the canonical source for every Knowledge schema. The matching `schemas/knowledge/` directory inside this Kit is an exact install payload, not an independently maintained contract. Update both in the same change; `src/cli/kit-knowledge-vendoring-portability.test.mjs` enforces byte-for-byte parity before the Kit is installed.

@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 import { validate } from "../providers/lib/schema-validate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const INPUT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../schemas/knowledge/context-check-input.schema.json"), "utf8"));
-const RESULT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../schemas/knowledge/context-check-result.schema.json"), "utf8"));
+const INPUT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../schemas/knowledge/context-check-input.schema.json"), "utf8"));
+const RESULT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../schemas/knowledge/context-check-result.schema.json"), "utf8"));
 const REVISION_RE = /^[0-9a-f]{40}$/i;
 const CLAIM_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLAIM_STATUS = new Set(["current", "superseded", "unverifiable"]);

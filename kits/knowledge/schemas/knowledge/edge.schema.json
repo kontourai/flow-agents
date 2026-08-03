@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/edge.schema.json",
+  "title": "Knowledge Graph Edge",
+  "description": "A typed, directed edge between two nodes. The edge-type vocabulary is CLOSED (unlike node types): supersedes, merged-into, blocks, evidence-of, mentions, relates. Every edge carries provenance. The `to` endpoint MAY reference a node that is not present in the graph (an external or dangling reference); `resolved` records whether the provider expects the target to resolve, which the dependency-link-integrity health verb uses to separate deliberate external refs from broken links.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "from", "to", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Provider-scoped stable identifier for the edge."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["supersedes", "merged-into", "blocks", "evidence-of", "mentions", "relates"],
+      "description": "supersedes: from replaces to. merged-into: from was folded into to. blocks: from must complete before to. evidence-of: from is provenance/evidence for to. mentions: from references to in prose. relates: general undirected-ish association."
+    },
+    "from": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source node id."
+    },
+    "to": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target node id. MAY be a node id not present in the graph when `resolved` is false (external ref)."
+    },
+    "resolved": {
+      "type": "boolean",
+      "description": "true (default when omitted) means the provider expects `to` to resolve to a node in the same graph; a missing target is then a broken link. false means `to` is a deliberate external reference (e.g. evidence-of a PR outside the store) and MUST NOT be flagged as broken."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Provider-specific structured fields for the edge."
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "source", "retrieved_at"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string" },
+        "retrieved_at": { "type": "string", "minLength": 1 },
+        "agent": { "type": "string" }
+      }
+    }
+  }
+}
