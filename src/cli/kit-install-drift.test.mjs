@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { main as kitMain, setKitCliTestHooksForTests } from "../../build/src/cli/kit.js";
 import { observeKitContentHash } from "../../build/src/flow-kit/content-hash.js";
 import { activateCodexLocal } from "../../build/src/runtime-adapters.js";
+import { atomicWriteJson } from "../../build/src/lib/fs.js";
 
 const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
 
@@ -149,6 +150,37 @@ test("install rolls back a replaced target when post-copy observation is unsafe"
   assert.equal(fs.readFileSync(registryPath, "utf8"), registryBefore);
   assert.equal(fs.lstatSync(target).isDirectory(), true);
   assert.equal(fs.readFileSync(path.join(target, "docs", "README.md"), "utf8").includes("source update"), false);
+});
+
+test("a committed registry write survives backup cleanup failure and an idempotent install retries cleanup", async () => {
+  const root = tempRoot("flow-kit-install-cleanup-retry-");
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  copyFixture(source);
+  assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
+  const target = path.join(dest, "kits", "local", "repositories", "example-kit");
+  const targetParent = path.dirname(target);
+  const targetParentMode = fs.statSync(targetParent).mode & 0o777;
+  fs.appendFileSync(path.join(source, "docs", "README.md"), "committed source update\n");
+  setKitCliTestHooksForTests({
+    writeRegistry(rootPath, registryFile, registry) {
+      atomicWriteJson(rootPath, registryFile, registry);
+      fs.chmodSync(targetParent, 0o500);
+    },
+  });
+  try {
+    assert.equal(await kitMain(["install", source, "--dest", dest, "--force"]), 0);
+  } finally {
+    setKitCliTestHooksForTests(undefined);
+    fs.chmodSync(targetParent, targetParentMode);
+  }
+  const registry = JSON.parse(fs.readFileSync(path.join(dest, "kits", "local", "installed-kits.json"), "utf8"));
+  const observed = observeKitContentHash(target, { trustedRoot: dest });
+  assert.equal(observed.state, "observed");
+  assert.equal(registry.kits[0].hash, observed.observed_hash, "successful registry write remains the durable commit point");
+  assert.ok(transactionArtifacts(target).some((name) => name.endsWith(".old")), "failed cleanup leaves only the prior-target backup for retry");
+  assert.equal(await kitMain(["install", source, "--dest", dest]), 0, "same-source reinstall remains idempotent");
+  assert.deepEqual(transactionArtifacts(target), [], "idempotent install retries and completes stale artifact cleanup");
 });
 
 for (const git of [false, true]) {

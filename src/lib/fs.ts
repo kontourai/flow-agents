@@ -147,9 +147,23 @@ function copiedTreeDigest(root: string): string {
 
 export type DirectoryCopyTransaction<T> = {
   value: T | undefined;
-  commit(): void;
+  commit(): Error | undefined;
   rollback(): void;
 };
+
+/** Remove only stale, randomly-named artifacts made by copyDirAtomicTransaction. */
+export function cleanupDirectoryCopyArtifacts(root: string, dest: string): Error[] {
+  const parent = ensureSafeDirectory(root, path.dirname(dest));
+  const escapedName = path.basename(dest).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const artifact = new RegExp(`^\\.${escapedName}\\.flow-agents-[0-9]+-[0-9a-f]{12}\\.(?:tmp|old)$`);
+  const errors: Error[] = [];
+  for (const name of fs.readdirSync(parent)) {
+    if (!artifact.test(name)) continue;
+    try { fs.rmSync(path.join(parent, name), { recursive: true, force: true }); }
+    catch (cause) { errors.push(cause instanceof Error ? cause : new Error(String(cause))); }
+  }
+  return errors;
+}
 
 /**
  * Copy through a verified sibling directory, then swap with an explicit
@@ -197,10 +211,15 @@ export function copyDirAtomicTransaction<T = void>(root: string, src: string, de
     transactionOpen = true;
     return {
       value: verified,
-      commit(): void {
-        if (!transactionOpen) return;
-        fs.rmSync(backup, { recursive: true, force: true });
+      commit(): Error | undefined {
+        if (!transactionOpen) return undefined;
         transactionOpen = false;
+        try {
+          fs.rmSync(backup, { recursive: true, force: true });
+          return undefined;
+        } catch (cause) {
+          return cause instanceof Error ? cause : new Error(String(cause));
+        }
       },
       rollback(): void {
         if (!transactionOpen) return;
@@ -220,7 +239,8 @@ export function copyDirAtomic<T = void>(root: string, src: string, dest: string,
   try {
     return transaction.value;
   } finally {
-    transaction.commit();
+    const cleanupError = transaction.commit();
+    if (cleanupError) throw cleanupError;
   }
 }
 
