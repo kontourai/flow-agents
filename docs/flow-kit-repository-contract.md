@@ -52,14 +52,14 @@ It does not edit the source Kit Catalog at `kits/catalog.json`.
 Each registry entry records:
 
 - `id`: kit id from `kit.json`.
-- `source`: absolute local source path used for the install.
-- `hash`: `sha256:` content hash of the source repository.
+- `source`: local source path used for the install, or caller-declared logical provenance supplied with local-only `--record-source <locator>`. `--record-source` is metadata and is not independently acquired or verified.
+- `hash`: `sha256:` content hash of the installed repository bytes; this is the verified byte identity, not `source` metadata.
 - `version`: optional manifest version when a future contract permits one.
 - `installed_at`: UTC ISO timestamp.
-- `installed_path`: copied kit path under the destination.
+- `installed_path`: canonical POSIX repository-relative path, always `kits/local/repositories/<kit-id>`.
 - `state`: install state recorded at install time. Read-only status observation reports the current state separately and never rewrites this registry field.
 
-Reinstalling the same kit id from the same source with the same content is idempotent and leaves the registry unchanged. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--update` replaces the copied kit and registry entry after the new source validates. `--force` re-copies an existing same-source install after validation.
+Reinstalling the same kit id from the same source metadata with the same content is idempotent and leaves the registry unchanged. `--record-source <locator>` is available only for local paths, so callers can preserve logical provenance across source-directory moves; it must be trimmed and non-blank, at most 1024 characters, and contain no control characters. Git installs reject `--record-source` and retain their normalized URL/ref provenance. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--update` replaces the copied kit and registry entry after the new source validates. `--force` re-copies an existing same-source install after validation.
 
 Git sources are shallow-cloned into a temporary directory and validated at the clone root. A
 repository installed from Git must therefore place `kit.json` at its root; subdirectory selection
@@ -74,7 +74,7 @@ repository.
 - `missing`: the registered copied tree is absent.
 - `invalid`: the registry entry or copied tree cannot be safely observed (including symlinks, special files, unreadable paths, and paths replaced during observation).
 
-The canonical tree hash sorts relative paths in locale-independent code-unit order and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation never follows symlinks: for an installed Kit it checks every component from the requested destination root through the copied Kit root, so intermediate and dangling links are invalid too. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
+The canonical tree hash sorts relative paths in locale-independent code-unit order and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation derives the copied Kit target only from the current trusted destination plus kit id; it never follows a registry-supplied target. It accepts the canonical relative `installed_path`, and accepts a legacy absolute value only when it exactly equals that current destination target. Relative aliases, traversal, controls, and an absolute path from another checkout are invalid. Observation never follows symlinks: for an installed Kit it checks every component from the requested destination root through the copied Kit root, so intermediate and dangling links are invalid too. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
 
 ## Runtime Activation
 

@@ -41,7 +41,9 @@ for (const key of ["id", "source", "hash", "installed_at", "installed_path", "st
 if (entry.id !== "example-kit") throw new Error(`unexpected id: ${entry.id}`);
 if (!entry.hash.startsWith("sha256:")) throw new Error("hash should include sha256 prefix");
 if (Number.isNaN(Date.parse(entry.installed_at))) throw new Error("installed_at should be ISO parseable");
-if (!fs.existsSync(path.join(entry.installed_path, "kit.json"))) throw new Error("installed kit copy missing kit.json");
+if (entry.installed_path !== "kits/local/repositories/example-kit") throw new Error(`installed_path must be canonical repo-relative: ${entry.installed_path}`);
+const dest = path.dirname(path.dirname(path.dirname(process.argv[2])));
+if (!fs.existsSync(path.join(dest, entry.installed_path, "kit.json"))) throw new Error("installed kit copy missing kit.json");
 console.log("ok");
 NODE
 then
