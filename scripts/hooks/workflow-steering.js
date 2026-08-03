@@ -537,6 +537,35 @@ function skillDriftSteering(root) {
   }
 }
 
+/**
+ * Compose the SessionStart advisory line for a STALE FLOW AGENTS INSTALL (#1180 PR 2).
+ *
+ * The incident this closes: a session ran old installed hooks, skills, and agents while reading
+ * and editing new source, and nothing anywhere said so — every conclusion that session drew about
+ * hook behavior was about code that was not running.
+ *
+ * All policy lives in the shared library (`scripts/hooks/lib/install-freshness.js`): which signals
+ * exist, what counts as determinable, and why silence is the failure direction. This function is
+ * the wiring only, and it must never hand-roll a second freshness rule.
+ *
+ * LAZY `require` INSIDE THE `try`, deliberately (the same shape `skillDriftSteering` uses): this
+ * file ships a byte-identical mirror at `context/scripts/hooks/workflow-steering.js` (enforced by
+ * validate:source), and that mirror has no `lib/install-freshness.js` beside it. The require
+ * throws there, the catch swallows it, and the mirror stays inert — which is why the require
+ * cannot move to the top of the file.
+ *
+ * @param {string} root  Repository root of the session's cwd
+ * @returns {string}
+ */
+function installFreshnessSteering(root) {
+  try {
+    const { installFreshnessAdvisory } = require('./lib/install-freshness');
+    return installFreshnessAdvisory({ root, env: process.env });
+  } catch {
+    return '';
+  }
+}
+
 function promptText(input) {
   const candidates = [
     input && input.prompt,
@@ -847,11 +876,17 @@ function run(rawInput, _options = {}, fencedRunId = null) {
     //     if this is unconditional.
     //   - the installed-skill drift advisory (#439): fires on every SessionStart inside a
     //     kit-bearing checkout — do NOT fold it into the `current`-gated block above.
+    //   - the install-freshness advisory (#1180 PR 2): whether the INSTALL running these hooks is
+    //     itself behind. Boundary-only for the same reason as the rest of this block, and one
+    //     stronger: an install cannot go stale mid-session, so a per-turn copy would be pure
+    //     context tax. It must never be added to the UserPromptSubmit paths above.
     if (event === 'SessionStart') {
       const contextHint = contextMapSteering(root);
       if (contextHint) hints.push(contextHint);
       const driftHint = skillDriftSteering(root);
       if (driftHint) hints.push(driftHint);
+      const freshnessHint = installFreshnessSteering(root);
+      if (freshnessHint) hints.push(freshnessHint);
     }
 
     if (hints.length === 0) return rawInput;
@@ -879,6 +914,7 @@ module.exports = {
   critiqueSteering,
   contextMapSteering,
   skillDriftSteering,
+  installFreshnessSteering,
   latestWorkflowState,
   findRepoRoot,
   safeStateText,
