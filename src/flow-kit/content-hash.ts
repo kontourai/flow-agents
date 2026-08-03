@@ -192,22 +192,25 @@ export function observeInstalledKitIntegrity(
       diagnostic: "registry entry has an invalid kit id",
     };
   }
+  const resolvedDest = path.resolve(dest);
   const expectedPath = path.join(
-    path.resolve(dest),
+    resolvedDest,
     "kits",
     "local",
     "repositories",
     id,
   );
-  if (entry.installed_path !== expectedPath) {
+  const expectedRelativePath = `kits/local/repositories/${id}`;
+  const recordedPath = entry.installed_path;
+  if (recordedPath !== expectedRelativePath) {
     return {
       state: "invalid",
       recorded_hash,
       observed_hash: null,
-      diagnostic: `registry installed_path does not match expected local path ${expectedPath}`,
+      diagnostic: `registry migration required: installed_path must be the canonical relative path ${expectedRelativePath}; reinstall with 'flow-agents kit install <source> --dest <dest> --update'`,
     };
   }
-  const observation = observeKitContentHash(expectedPath, { trustedRoot: dest });
+  const observation = observeKitContentHash(expectedPath, { trustedRoot: resolvedDest });
   if (observation.state === "missing") {
     return {
       state: "missing",

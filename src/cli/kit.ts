@@ -14,6 +14,12 @@ import { root } from "../tools/common.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
+const REPOSITORIES_REL_POSIX = "kits/local/repositories";
+const MAX_RECORD_SOURCE_LENGTH = 1024;
+// These Unicode categories can alter terminal/log rendering or provenance display.
+// Property escapes are standardized in supported Node runtimes, so this remains
+// deterministic without maintaining a partial hand-written Unicode range table.
+const UNSAFE_RECORD_SOURCE_CHARACTER_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 export type KitCliTestHooks = {
   beforeCopy?: (source: string, target: string) => void;
@@ -30,7 +36,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 }
 
 const KIT_USAGE: Record<string, string> = {
-  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]",
+  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
   validate: "usage: flow-agents kit validate [<kit-dir>]",
   provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
@@ -53,7 +59,11 @@ Commands:
   provision  Copy a kit's declared provisions into a target repository.
   inspect    Report a kit's conformance and consumer targets.
   list       List locally installed Flow Kits.
-  status     Report local Flow Kit installation status.`);
+  status     Report local Flow Kit installation status.
+
+Install notes:
+  --record-source <locator> is local-path-only caller-declared provenance metadata.
+  The recorded hash, not --record-source, verifies copied Kit bytes.`);
 }
 
 function printCommandUsage(command: keyof typeof KIT_USAGE): void {
@@ -62,6 +72,7 @@ function printCommandUsage(command: keyof typeof KIT_USAGE): void {
 
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
+function installedPathRelative(kitId: string): string { return `${REPOSITORIES_REL_POSIX}/${kitId}`; }
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
   const explicit = flagString(flags, "dest");
   return path.resolve(explicit ?? defaultCodexHome());
@@ -133,7 +144,7 @@ function installCopiedKit(options: {
     source: sourceText,
     hash: transaction.value,
     installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
-    installed_path: target,
+    installed_path: installedPathRelative(String(manifest.id)),
     state: "installed",
   };
   if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
@@ -231,7 +242,7 @@ function installWithRegistryTransaction(options: {
     const existing = registry.kits.find((entry) => entry.id === kitId);
     cleanStaleInstallArtifacts(dest, target, existing);
     if (existing && existing.source !== sourceText && !update) return { status: "conflict", source: existing.source };
-    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) return { status: "idempotent" };
+    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force && !update) return { status: "idempotent" };
     testHooks?.beforeCopy?.(source, target);
     installCopiedKit({ source, dest, target, manifest, registry, existing, sourceText, update });
     return { status: "installed", existing: Boolean(existing) };
@@ -286,7 +297,7 @@ async function install(argv: string[]): Promise<number> {
   const source = args.positionals[0] ?? "";
   if (!source) {
     console.error("install: missing <source> argument");
-    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]");
+    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]");
     return 2;
   }
 
@@ -299,9 +310,27 @@ async function install(argv: string[]): Promise<number> {
   return await installLocalSource(resolveCatalogKitSource(source) ?? path.resolve(source), argv);
 }
 
+function resolveLocalRecordSource(flags: ReturnType<typeof parseArgs>["flags"], source: string): string | null {
+  if (!Object.hasOwn(flags, "record-source")) return source;
+  const recordSource = flagString(flags, "record-source");
+  if (
+    typeof recordSource !== "string"
+    || !recordSource.trim()
+    || recordSource !== recordSource.trim()
+    || recordSource.length > MAX_RECORD_SOURCE_LENGTH
+    || UNSAFE_RECORD_SOURCE_CHARACTER_RE.test(recordSource)
+  ) {
+    console.error(`install: --record-source must be a trimmed non-blank locator no longer than ${MAX_RECORD_SOURCE_LENGTH} characters and must not contain unsafe Unicode control, format, or separator characters`);
+    return null;
+  }
+  return recordSource;
+}
+
 async function installLocalSource(source: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const dest = resolveDest(args.flags);
+  const sourceText = resolveLocalRecordSource(args.flags, source);
+  if (sourceText === null) return 2;
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
@@ -333,7 +362,6 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 1;
   }
   const hash = hashObservation.observed_hash;
-  const sourceText = source;
   let outcome: RegistryInstallOutcome;
   try {
     outcome = installWithRegistryTransaction({
@@ -359,12 +387,19 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.log(`kit '${kitId}' is already installed from ${sourceText}`);
     return 0;
   }
-  console.log(`${outcome.existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
+  const sourceNote = Object.hasOwn(args.flags, "record-source")
+    ? `; recorded caller-declared source metadata '${sourceText}' (hash verifies copied bytes)`
+    : "";
+  console.log(`${outcome.existing ? "updated" : "installed"} local kit '${kitId}' at ${target}${sourceNote}`);
   return 0;
 }
 
 async function installGitSource(rawUrl: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  if (Object.hasOwn(args.flags, "record-source")) {
+    console.error("install: --record-source is supported only for local path installs; Git installs record their URL and ref");
+    return 2;
+  }
 
   // Parse ref: #fragment in URL takes precedence over --ref flag.
   let repoUrl = rawUrl;
