@@ -168,31 +168,35 @@ install_identity_is_flow_agents_package() {
   [[ "$pkg_name" == "@kontourai/flow-agents" ]]
 }
 
-# install_identity_package_root — this package's root, found by walking UP from the telemetry
-# script's own directory. Echoes the root, or nothing when it cannot be established.
+# install_identity_package_root — this package's root as seen from the telemetry script's own
+# directory. Echoes the root, or nothing when it cannot be established.
 #
-# WHY A WALK and not fixed path arithmetic: telemetry.sh is shipped in TWO byte-identical copies at
-# DIFFERENT depths — scripts/telemetry/ (two levels below the package root) and the
-# context/scripts/telemetry/ mirror (three). A hardcoded "../.." is therefore correct for one copy
-# and silently wrong for the other, which resolved the mirror's root to context/ and reported
-# source:"unknown" on a fully stamped tree. Because validate:source enforces the two copies
-# byte-identical, no per-copy constant can exist — the root has to be discovered, not assumed.
+# TWO FIXED OFFSETS, NO SEARCH. telemetry.sh ships in two byte-identical copies at two structural
+# depths and nowhere else: scripts/telemetry/ (root is ../..) and the context/scripts/telemetry/
+# mirror (root is ../../..). Because validate:source enforces the copies byte-identical, no per-copy
+# constant can exist — but the SET of legitimate offsets is closed and tiny, so both are simply
+# checked. First offset whose package.json declares this package wins; neither → unknown.
 #
-# The walk does NOT stop at the first package.json it meets: this repository ships
-# scripts/package.json and context/scripts/package.json, both bare `{"type":"commonjs"}` module-type
-# markers rather than real package boundaries, and both sit directly on the walk path of both
-# telemetry.sh copies. Only a manifest that DECLARES this package ends the search; every other one
-# is walked past. Depth is bounded so a detached install terminates at "unknown" instead of walking
-# to / and adopting whatever manifest it finds there.
+# WHY NOT A WALK UP THE TREE (this replaced one, and the replacement is the point): a bounded climb
+# makes ANCESTOR ADOPTION reachable. Install a fresh dist/claude-code bundle into a scratch
+# directory nested under a Flow Agents checkout — an entirely ordinary thing to do — and the climb
+# passes the bundle's own stampless root and the scratch directory, reaches the surrounding
+# checkout, and reports THAT checkout's version and content fingerprint as the bundle's identity.
+# A confidently wrong tuple attributed to a different install copy is strictly worse than no
+# identity at all: the original depth bug only ever failed to "unknown", which is honest. With
+# fixed offsets the bundle's ../.. is its own root and ../../.. is the scratch directory; the
+# surrounding checkout sits deeper than either and is structurally unreachable.
+#
+# The bare {"type":"commonjs"} module-type markers this repo ships at scripts/package.json and
+# context/scripts/package.json are irrelevant here: they sit one level below a telemetry directory's
+# parent, and a depth-1 offset is never a candidate.
 install_identity_package_root() {
-  local dir="$1" depth
-  for ((depth = 0; depth < 6; depth++)); do
-    if install_identity_is_flow_agents_package "$dir/package.json"; then
-      printf '%s' "$dir"
+  local dir="$1" candidate
+  for candidate in "${dir}/../.." "${dir}/../../.."; do
+    if install_identity_is_flow_agents_package "${candidate}/package.json"; then
+      printf '%s' "$candidate"
       return 0
     fi
-    dir="${dir%/*}"
-    [[ -n "$dir" ]] || return 0
   done
   return 0
 }

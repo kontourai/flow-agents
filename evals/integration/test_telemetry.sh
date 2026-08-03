@@ -727,6 +727,40 @@ if [[ -f "$ROOT_DIR/scripts/telemetry/telemetry.sh" && -f "$ROOT_DIR/context/scr
   else
     _fail "shipped copies disagree: scripts=$source_copy_identity mirror=$mirror_copy_identity"
   fi
+
+  # NO ANCESTOR ADOPTION. Installing a bundle into a scratch directory nested under a Flow Agents
+  # checkout is an entirely ordinary thing to do, and it is the shape that breaks any "search upward
+  # for a package.json" resolution: the search passes the bundle's own stampless root and the
+  # scratch directory, reaches the surrounding checkout, and reports THAT checkout's version and
+  # fingerprint as the bundle's identity. A confidently wrong tuple attributed to a different
+  # install copy is strictly worse than no identity — "unknown" is at least honest. This fixture
+  # replicates the bundle layout faithfully (telemetry.sh under scripts/telemetry, the bare
+  # {"type":"commonjs"} scripts/package.json marker the bundle really ships, and NO package.json at
+  # the bundle root) beneath a deliberately distinctive stamped ancestor, so an adoption shows up as
+  # the ancestor's own literal values rather than a vague mismatch.
+  ANCESTOR="$TMPDIR_EVAL/adoption/ancestor"
+  NESTED_BUNDLE="$ANCESTOR/scratch/bundle"
+  mkdir -p "$ANCESTOR/build/generated" "$NESTED_BUNDLE/scripts"
+  printf '{"name":"@kontourai/flow-agents","version":"0.0.0-ANCESTOR"}\n' > "$ANCESTOR/package.json"
+  cat > "$ANCESTOR/build/generated/install-identity.json" <<'ANCESTOR_STAMP'
+{
+  "schema_version": "1.0",
+  "package_name": "@kontourai/flow-agents",
+  "package_version": "0.0.0-ANCESTOR",
+  "content_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "git_sha": null,
+  "git_dirty": null,
+  "built_at": "2026-01-01T00:00:00.000Z"
+}
+ANCESTOR_STAMP
+  cp -R "$ROOT_DIR/scripts/telemetry" "$NESTED_BUNDLE/scripts/telemetry"
+  cp "$ROOT_DIR/scripts/package.json" "$NESTED_BUNDLE/scripts/package.json"
+  nested_identity=$(run_shipped_copy "$NESTED_BUNDLE/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/nested-bundle.jsonl")
+  if [[ "$nested_identity" == '{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}' ]]; then
+    _pass "a bundle nested under a stamped checkout reports unknown, never the ancestor's identity"
+  else
+    _fail "nested bundle adopted a foreign install identity: got $nested_identity"
+  fi
 else
   _fail "expected both shipped telemetry.sh copies to exist for the parity check"
 fi
