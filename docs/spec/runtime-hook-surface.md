@@ -207,7 +207,7 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason, and is emitted at every `SessionStart` whether or not a workflow session is active — a session-less checkout is exactly when an index is worth most. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 
@@ -262,6 +262,53 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, sidecar, or capture cross-reference issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
 - `off`: silent (exits 0, no stderr).
 - Escape hatch: in `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released (exit 0 with a loud notice) so a genuinely-unsatisfiable goal cannot trap the agent. A changing gap resets the streak.
+
+**Turn-ending contract for a blocking Stop (#1172)**: `decision:"block"` + `reason` is the
+model-facing channel; `continue:false` + `stopReason` is the user-facing one, and `continue`
+takes precedence over any event-specific decision field. Emitting both — the shape shipped
+before #1172 — routed the entire remediation block to the operator and delivered none of it to
+the agent that had to act on it. A blocking Stop therefore returns `decision`+`reason`, and
+turn-ending is decided by the class of block:
+
+- **Soft block** (an ordinary evidence gap): the harness adapter MUST NOT end the turn. This
+  gate owns termination for that class through the `MAX_BLOCKS` release valve above. An adapter
+  fence pre-empts the valve, truncating it below the count the gate advertises to the operator.
+- **Hard block** (non-releasable: caught false-completion, capture contradiction, tamper signal,
+  integrity failure, canonical Flow still active): the valve deliberately never fires, so the
+  gate has no termination of its own and the adapter supplies one — end the turn on the
+  continuation firing (`stop_hook_active: true`, i.e. a Stop that fires because a previous Stop
+  blocked). One self-correction attempt, then a human.
+
+A hook declares the hard class on a **structured control line**, never in prose, so no adapter
+has to pattern-match one hook's wording:
+
+```
+[flow-agents:stop-control] {"v":1,"terminal":true,"code":"non-releasable-hard-block"}
+```
+
+Adapters MUST strip every control line from both the agent-facing and user-facing text. An
+absent or malformed line reads as **soft** — a false `terminal` truncates the valve, whereas a
+missed one is still bounded by the backstop below. The contract, parser and backstop live in
+`scripts/hooks/lib/stop-escalation.js`; `stop-goal-fit.js` declares the prefix literal
+independently (its shipped `context/` mirror carries a fixed lib subset) and
+`test_goal_fit_hook.sh` pins the two literals equal.
+
+**Consecutive-block backstop (#1172)**: adapters additionally maintain a per-actor count of
+consecutive blocking Stops and force `continue:false` at `FLOW_AGENTS_STOP_MAX_BLOCKS`
+(default 5) regardless of marker or runtime signal, clearing it on any non-blocking Stop and at
+every SessionStart. This exists because `stop_hook_active` is observed in live Claude Code
+payloads but is no longer listed in the published hooks reference: without a floor, a runtime
+that stopped sending it would let a non-releasable block re-prompt the model indefinitely with
+no human ever seeing it. The threshold sits above `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` so the
+gate's own release always fires first on the normal soft path and the backstop stays invisible.
+Storage is best-effort in the fail-open direction: an unreadable or unwritable counter degrades
+to never escalating — it can never suppress the block itself.
+
+> **Adapter coverage gap (follow-up, not closed by #1172)**: only the Claude Code adapter
+> implements the rules above. `scripts/hooks/codex-hook-adapter.js` has no Stop turn-ending path
+> at all — pre-existing, so a hard block under Codex already re-prompts indefinitely today. The
+> backstop is deliberately runtime-agnostic (it depends on no runtime-specific payload field) and
+> is the shape that closes this for Codex and any future L2 adapter.
 
 **FlowDefinition-driven claim selection (ADR 0016 Abstraction A)**: When `current.json` resolves an active flow/step, `bundleEnforcement`'s claim-selection predicate (`isSelectedClaim`) is a **union**: `workflow.*`-prefixed claims are always selected as a baseline floor, and the active gate's declared `claimType` set (from `expects[].bundle_claim.claimType`, e.g. `builder.verify.tests`) is selected *in addition to* that floor — never instead of it. An earlier design used a pure if/else (declared types selected only when a FlowDefinition was active, with no `workflow.*` fallback) and was found in PR #215 to compose into a HIGH-severity gate-bypass chain: a forged `current.json` pointing at an `expects: []` flow made the if/else select zero claims, silently skipping all re-derivation, tamper-detection, and high/critical enforcement. The union floor closed that chain and is a **permanent** design decision, not a transitional step toward the if/else — see [ADR 0016](../adr/0016-three-hard-boundary-model.md) and the PR #215 post-mortem in [ADR 0015](../adr/0015-flow-flow-agents-boundary-reconciliation.md). Consequently, an active FlowDefinition whose gate resolves to an **empty** `expects[]` is always a `HARD_BLOCK` (`gate misconfiguration: active FlowDefinition has empty expects[]...`) — an empty declared set is treated as a possible tampered flow definition, never as a legitimately-empty gate that quietly enforces nothing beyond the floor.
 

@@ -44,20 +44,33 @@
  *
  * A blocking Stop therefore now returns `decision: "block"` + `reason`, which IS fed back to
  * the model, so the agent can close the evidence gap in-session instead of the turn simply
- * ending. Turn-ending is preserved for exactly one case: the CONTINUATION firing. Claude Code
- * sets `stop_hook_active: true` on the Stop that fires because a previous Stop blocked, so a
- * hook that blocks AGAIN after the model has already been handed the reason once has
- * exhausted in-session self-correction, and the refusal goes to a human.
+ * ending. Turn-ending is not removed, it is moved to where it belongs — and which "where" that
+ * is depends on whether the gate can release the block itself:
  *
- * That fence is load-bearing, not ceremony. goal-fit's release valve is deliberately
- * one-sided: an ordinary block auto-releases after FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS identical
- * refusals (exit 0 — never reaches this branch at all), but a HARD block — caught
- * false-completion, capture contradiction, tamper signal, integrity failure, or a canonical
- * Flow run that is still active — never auto-releases by design (stop-goal-fit.js's
- * `isHardBlock` branch keeps returning exit 2 forever). Dropping `continue: false`
- * unconditionally would let precisely that class re-prompt the model without bound. With the
- * fence, a hard block gets one self-correction attempt and then stops, which is what
- * "requires a real fix or operator override" was always meant to mean.
+ *   SOFT block: the adapter NEVER ends the turn. stop-goal-fit.js already owns termination for
+ *     this class — after FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS identical refusals its valve fires,
+ *     clears the streak and returns exit 0, which never reaches this branch at all. An adapter
+ *     fence here would truncate that valve to fewer refusals than the gate advertises and turn
+ *     its own promise ("after N identical blocks I stop blocking and hand this to you") into a
+ *     false statement. Letting it run is the fix, not a gap.
+ *
+ *   HARD block (non-releasable — caught false-completion, capture contradiction, tamper
+ *     signal, integrity failure, canonical Flow still active): goal-fit's `isHardBlock` branch
+ *     returns exit 2 forever, by design. This class has no termination of its own, so the
+ *     adapter supplies one: end the turn on the CONTINUATION firing, i.e. when Claude Code
+ *     sets `stop_hook_active: true` because a previous Stop blocked. One self-correction
+ *     attempt, then a human — which is what "requires a real fix or operator override" means.
+ *
+ * The adapter learns which class it is holding from a structured control line the hook emits,
+ * not from matching its prose; see scripts/hooks/lib/stop-escalation.js for that contract. An
+ * absent or malformed line reads as SOFT, because a false "terminal" would truncate the valve.
+ *
+ * Underneath both sits a runtime-agnostic backstop: a per-actor count of CONSECUTIVE blocking
+ * Stops that forces the turn to end at DEFAULT_MAX_STOP_BLOCKS regardless of marker or runtime
+ * signal. It exists because `stop_hook_active` is observed in live payloads but is no longer
+ * listed in the published hooks reference — if a runtime stops sending it, the hard-block path
+ * above silently loses its only termination. The threshold sits above goal-fit's soft valve, so
+ * on the normal path the gate's own release always fires first and the backstop is invisible.
  */
 
 'use strict';
@@ -66,6 +79,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { buildDenialResponse } = require('./lib/denial-escalation');
 const { resolveActor } = require('./lib/actor-identity');
+const { parseStopControl, stripStopControl, recordStopBlock, clearStopBlocks, stopTurnDecision } = require('./lib/stop-escalation');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -197,8 +211,8 @@ function blockedOutput(event, reason, escalate = false) {
   if (event === 'Stop') {
     // #1172: `decision`+`reason` is the model-facing channel; `continue:false`+`stopReason` is
     // the user-facing one, and `continue` wins when both are present. Emitting both meant the
-    // remediation text only ever reached the user. First contact now carries the reason to the
-    // model; only the continuation firing (`escalate`, see stopEndsTurn) ends the turn.
+    // remediation text only ever reached the user. The reason now always reaches the model;
+    // `escalate` is resolveStopBlock's verdict and is the ONLY thing that ends the turn.
     return {
       decision: 'block',
       reason,
@@ -217,16 +231,34 @@ function blockedOutput(event, reason, escalate = false) {
 }
 
 /**
- * True when a blocking Stop must end the turn rather than hand the reason back to the model.
+ * Repo the Stop streak is filed against.
  *
- * Claude Code sets `stop_hook_active: true` on a Stop that is firing because a previous Stop
- * blocked. So this is exactly "the model was already given this remediation once in this turn
- * and the gate still refuses" — in-session self-correction is exhausted, and the refusal
- * belongs in front of a human. See the header for why the fence is required rather than
- * optional (goal-fit's hard blocks never auto-release).
+ * The payload's own `cwd` is authoritative for the session and is what every canonical hook
+ * already grounds on (`findRepoRoot(input.cwd || process.cwd())`), so the streak lands beside
+ * the state the block is about rather than beside whatever directory the harness happened to
+ * launch the adapter from.
  */
-function stopEndsTurn(input) {
-  return input.stop_hook_active === true;
+function stopStoreCwd(input) {
+  const cwd = typeof input.cwd === 'string' ? input.cwd.trim() : '';
+  return cwd || process.cwd();
+}
+
+/**
+ * Resolve a blocking Stop into the agent-facing message plus the turn-ending decision.
+ *
+ * Counting the block is a side effect of holding one, so it happens here rather than at the
+ * call site: every blocking Stop advances the backstop streak exactly once. Storage failures
+ * degrade to "never escalates" inside the lib — they can never suppress the block itself.
+ */
+function resolveStopBlock(input, rawMessage) {
+  const control = parseStopControl(rawMessage);
+  const message = stripStopControl(rawMessage) || rawMessage;
+  const streak = recordStopBlock({ cwd: stopStoreCwd(input), actorKey: safeActorKey() });
+  const decision = stopTurnDecision({ control, stopHookActive: input.stop_hook_active === true, streak });
+  return {
+    message: decision.note ? `${message}\n${decision.note}` : message,
+    endTurn: decision.endTurn,
+  };
 }
 
 async function main() {
@@ -234,6 +266,11 @@ async function main() {
   const { raw, truncated } = await readStdinRaw();
   const input = parseInput(raw);
   const event = eventFrom(input, eventArg);
+
+  // #1172: a new session must not inherit the previous one's Stop strikes. Done before the hook
+  // runs, and on every SessionStart invocation (several hooks fire on it), so the reset does not
+  // depend on any one hook succeeding. Idempotent.
+  if (event === 'SessionStart') clearStopBlocks({ cwd: stopStoreCwd(input), actorKey: safeActorKey() });
 
   if (!hookId || !relScriptPath) {
     process.stdout.write(`${JSON.stringify(successOutput(event))}\n`);
@@ -257,9 +294,8 @@ async function main() {
   if (result.status === 2) {
     // Stop is not routed through the graduated-denial path: that path counts denial IDENTITIES
     // per flow step and reshapes the message as a refused TOOL CALL, neither of which fits a
-    // Stop gate whose own hook already owns both the streak accounting and the message. Stop
-    // keeps its hook's message verbatim and takes its turn-ending decision from the runtime's
-    // own continuation signal instead (see stopEndsTurn / the header).
+    // Stop gate that owns its own remediation text. Stop keeps its hook's message verbatim and
+    // takes its turn-ending decision from resolveStopBlock (see the header).
     if (event === 'PreToolUse' || event === 'PostToolUse') {
       const denial = buildDenialResponse({
         hookId,
@@ -270,7 +306,12 @@ async function main() {
       process.stdout.write(`${JSON.stringify(blockedOutput(event, denial.message, denial.escalate))}\n`);
       return;
     }
-    process.stdout.write(`${JSON.stringify(blockedOutput(event, messageFrom(result), stopEndsTurn(input)))}\n`);
+    if (event === 'Stop') {
+      const stop = resolveStopBlock(input, messageFrom(result));
+      process.stdout.write(`${JSON.stringify(blockedOutput(event, stop.message, stop.endTurn))}\n`);
+      return;
+    }
+    process.stdout.write(`${JSON.stringify(blockedOutput(event, messageFrom(result)))}\n`);
     return;
   }
 
@@ -280,6 +321,10 @@ async function main() {
     process.stdout.write(`${JSON.stringify(successOutput(event))}\n`);
     return;
   }
+
+  // #1172: the streak counts CONSECUTIVE blocking Stops. A Stop that does not block means the
+  // obligation cleared (or the gate's own valve released it), so the count starts over.
+  if (event === 'Stop') clearStopBlocks({ cwd: stopStoreCwd(input), actorKey: safeActorKey() });
 
   if (result.stderr) process.stderr.write(result.stderr);
   process.stdout.write(`${JSON.stringify(successOutput(event, guidanceFromStdout(raw, result.stdout)))}\n`);

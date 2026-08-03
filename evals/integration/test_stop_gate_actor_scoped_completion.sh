@@ -35,10 +35,11 @@
 #      still block (AC3: the owning session's real unfinished obligation is not
 #      silently waved through), verified the same two ways (exit 2; adapter emits
 #      decision:"block" + reason, matching exactly what a real subagent receives from
-#      Claude Code's Stop hook contract). #1172: first contact deliberately omits
-#      `continue:false` so the reason reaches the MODEL — `continue` preempts `decision`
-#      and routes the text to the user — and the continuation firing
-#      (stop_hook_active:true, case 2d) is what ends the turn.
+#      Claude Code's Stop hook contract). #1172: `continue:false` is deliberately omitted so
+#      the reason reaches the MODEL — `continue` preempts `decision` and routes the text to
+#      the user instead. This fixture is a SOFT block, so the adapter never ends its turn at
+#      all (case 2d): goal-fit's own max-blocks release valve owns termination for that class,
+#      and an adapter fence would truncate it below the count the gate advertises.
 #   3. Regression guard: a resolved actor with NO own per-actor pointer at all (the
 #      #440 case) remains unblocked regardless of another actor's active session —
 #      unchanged by this fix.
@@ -317,9 +318,11 @@ else
   _fail "2c: real hook path did not block genuinely unfinished work in the model-facing shape: $CONT_ADAPTER_JSON"
 fi
 
-# Fresh repo: goal-fit's block streak is per-repo-root, and $CONT_REPO has already absorbed the
-# direct call plus the adapter call above. A third identical block there hits the max-blocks
-# release valve (exit 0), which would mask the fence under test rather than exercise it.
+# #1172 (review HIGH-2): this fixture is a SOFT block — its warnings are ordinary
+# artifact-status/workflow-state lines, nothing HARD_BLOCK matches — so goal-fit owns its
+# termination via the max-blocks release valve. The adapter must therefore NOT end the turn even
+# on the continuation firing; doing so truncated the valve below the count the gate advertises.
+# Own repo so the streak starts clean (the calls above already blocked twice against $CONT_REPO).
 CONT2_REPO="$(new_repo repo-continue-continuation)"
 seed_shared_session "$CONT2_REPO" "$SLUG" "continue" >/dev/null
 seed_current_pointer "$CONT2_REPO" "$SLUG" "delegate-actor-done"
@@ -327,10 +330,10 @@ seed_current_pointer "$CONT2_REPO" "$SLUG" "delegate-actor-done"
 CONT_CONTINUATION_JSON="$(call_stop_hook_adapter "$CONT2_REPO" "delegate-actor-done" true)"
 CONT_CONTINUATION_CONTINUE="$(json_field "$CONT_CONTINUATION_JSON" "continue")"
 CONT_CONTINUATION_DECISION="$(json_field "$CONT_CONTINUATION_JSON" "decision")"
-if [[ "$CONT_CONTINUATION_DECISION" == "block" && "$CONT_CONTINUATION_CONTINUE" == "false" ]]; then
-  _pass "2d: the continuation Stop (stop_hook_active) still blocks AND ends the turn — the loop fence (#1172)"
+if [[ "$CONT_CONTINUATION_DECISION" == "block" && "$CONT_CONTINUATION_CONTINUE" == "undefined" ]]; then
+  _pass "2d: a SOFT block's continuation Stop still refuses WITHOUT ending the turn — goal-fit's own release valve is left intact (#1172)"
 else
-  _fail "2d: continuation Stop did not end the turn: $CONT_CONTINUATION_JSON"
+  _fail "2d: soft-block continuation Stop was fenced by the adapter, truncating the gate's own valve: $CONT_CONTINUATION_JSON"
 fi
 
 # ─── 3. Regression guard: resolved actor with NO own pointer stays unblocked (#440) ─

@@ -12,8 +12,9 @@
 //   tier 2 -- a per-flow-step counter keyed on denial identity (rule id + resolved target),
 //             escalating only on the third identical denial in one step;
 //   tier 3 -- Stop's own wire contract. #1172 finished the job #1005 started: a blocking Stop
-//             now returns decision:"block" + reason (the model-facing channel) on first contact
-//             and ends the turn only on the continuation firing (stop_hook_active).
+//             now returns decision:"block" + reason (the model-facing channel), and turn-ending
+//             is decided per BLOCK CLASS rather than per runtime signal -- see
+//             scripts/hooks/lib/stop-escalation.js and stop-escalation.test.mjs.
 //
 // The two cases that ARE the policy are the last two sections: a compliant route-around to a
 // different supported form must not increment, and the third identical denial must escalate.
@@ -424,9 +425,6 @@ function blockingStopRepo(actorKey) {
 }
 
 test("#1172: a blocking Stop hands the reason to the MODEL and does not end the turn on first contact", () => {
-  // Colon-free: the per-actor pointer filename is derived from a sanitized actor segment, so a
-  // key that sanitizes differently from the one the reader resolves finds no pointer and the gate
-  // declines to block (#440) — which would silently drain this test of power.
   const actorKey = "stop-first-contact-actor";
   const cwd = blockingStopRepo(actorKey);
   const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", stop_hook_active: false, cwd }, {
@@ -442,19 +440,23 @@ test("#1172: a blocking Stop hands the reason to the MODEL and does not end the 
   assert.ok(String(out.reason || "").length > 0, "the model-facing reason channel must be populated");
 });
 
-test("#1172: a Stop that blocks again after the model was already told ends the turn", () => {
+test("#1172: a SOFT block's continuation firing still does NOT end the turn", () => {
+  // This fixture is an ordinary unfinished session — a SOFT block, which goal-fit terminates
+  // itself via the max-blocks release valve. The review caught that fencing on `stop_hook_active`
+  // alone pre-empted that valve, cutting it below the count the gate promises the operator, so the
+  // adapter must leave this class entirely alone however many times the runtime re-fires.
+  //
+  // The HARD (non-releasable) class, its control-line marker, and the consecutive-block backstop
+  // are covered end-to-end in stop-escalation.test.mjs and evals/integration/test_goal_fit_hook.sh,
+  // which have fixtures for both classes; this file owns the adapter's wire shape.
   const actorKey = "stop-continuation-actor";
   const cwd = blockingStopRepo(actorKey);
   const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", stop_hook_active: true, cwd }, {
     ...STOP_ADAPTER_OPTS, actorKey, cwd, env: { FLOW_AGENTS_GOAL_FIT_MODE: "block" },
   });
   assert.equal(out.decision, "block", "fixture must actually block, or this test has no power");
-  // `stop_hook_active` is Claude Code's own continuation signal. Blocking again after the model
-  // has already been handed the reason once means in-session self-correction is exhausted, and
-  // it is the only bound on goal-fit's deliberately non-releasable hard blocks.
-  assert.equal(out.continue, false, "the continuation firing escalates to a human");
-  assert.ok(String(out.stopReason || "").length > 0, "the user-facing channel carries the reason on escalation");
-  assert.ok(String(out.reason || "").length > 0, "the model-facing channel is still populated");
+  assert.notEqual(out.continue, false, "a soft block's own release valve owns termination, not the adapter");
+  assert.equal(out.stopReason, undefined, "the reason stays on the model-facing channel");
 });
 
 test("counter: state is filed per actor, so one agent's strikes never escalate another's", () => {

@@ -69,6 +69,19 @@ try {
 }
 
 const MAX_STDIN = 1024 * 1024;
+/**
+ * #1172: prefix of the machine-readable control line this hook appends to a HARD (non-releasable)
+ * block, telling the harness adapter that this gate will never release on its own and the refusal
+ * needs a human. The contract — payload shape, strip-before-display rule, and the soft default for
+ * an absent/malformed line — is owned and documented by scripts/hooks/lib/stop-escalation.js.
+ *
+ * The literal is duplicated rather than required from that module on purpose: this hook ships a
+ * byte-identical `context/scripts/hooks/` mirror whose lib set is a fixed subset, so requiring a
+ * new lib here would drag a mirror + CODEOWNERS + validate-source-tree entry along with it.
+ * test_goal_fit_hook.sh asserts the two literals are identical, so a one-sided rename fails the
+ * suite instead of silently unlatching hard-block escalation.
+ */
+const STOP_CONTROL_PREFIX = '[flow-agents:stop-control]';
 const MAX_CANONICAL_FLOW_STATE_BYTES = 1024 * 1024;
 const MAX_CANONICAL_FLOW_DEFINITION_BYTES = 1024 * 1024;
 const CANONICAL_FLOW_STATUSES = new Set(['active', 'blocked', 'needs_decision', 'paused', 'canceled', 'completed', 'failed', 'accepted_by_exception']);
@@ -2787,10 +2800,15 @@ function plainStopLead(result, gapCount) {
   const count = Number.isFinite(gapCount) && gapCount > 0
     ? (gapCount === 1 ? '1 sign-off' : `${gapCount} sign-offs`)
     : 'a few sign-offs';
+  // #1172: audience-neutral. This lead now travels on BOTH channels — to the model in `reason`
+  // on first contact, and to the operator in `stopReason` when the refusal escalates — so it
+  // may not address either one as "you". It states what is paused and what would close it,
+  // without telling the model that a human's options are its own, and without telling a human
+  // that the detail below is not for them.
   return [
     `⏸ In plain terms: the task "${name}" is paused at its ${stepPhrase}. ${count} still need recording before it can finish on its own.${needsList}`,
-    `   Two ways forward: let it finish those checks, or cancel the run to close it now. Nothing else you're doing is blocked by this.`,
-    `   (The technical detail below is for the agent/debugging.)`,
+    `   It closes either way: record the outstanding sign-offs, or cancel the run. No other work is blocked by this pause.`,
+    `   (Specifics follow.)`,
   ].join('\n');
 }
 
@@ -3262,6 +3280,21 @@ async function run(rawInput) {
 
   const maxBlocks = resolveMaxBlocks(root);
   const count = bumpBlockStreak(root, reasonsHash(remediationWarnings));
+
+  // #1172: classify hard-vs-soft ONCE, for every blocking return below, not only at the
+  // max-blocks branch. A hard block is non-releasable from the very first refusal, and the
+  // harness adapter needs to know that on refusal #1 — it is the only signal that lets the
+  // adapter end the turn for this class without also truncating the soft class's release valve.
+  // Hoisting is behaviour-preserving: the predicate is pure over `result`.
+  const isHardBlock = (result.activeFlowRun && !result.activeTurnAuthority) || result.warnings.some(w => isHardStopWarning(w, relative(root, result.latestArtifactDir || root), result.activeTurnAuthority));
+  // The machine-readable half of the contract in scripts/hooks/lib/stop-escalation.js. Appended
+  // to the OUTPUT STRING only — never folded into remediationWarnings/result.warnings, so
+  // reasonsHash, block-dedup and the HARD_BLOCK/FULL_BLOCK detectors stay byte-stable (same
+  // discipline as plainStopLead above). Adapters strip it before any human or model sees it.
+  const stopControlLine = isHardBlock
+    ? `\n${STOP_CONTROL_PREFIX} ${JSON.stringify({ v: 1, terminal: true, code: result.activeFlowRun && !result.activeTurnAuthority ? 'canonical-flow-active' : 'non-releasable-hard-block' })}`
+    : '';
+
   if (count >= maxBlocks) {
     // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
     // tamper signal, gate misconfiguration, integrity failure). An agent burning through
@@ -3271,14 +3304,13 @@ async function run(rawInput) {
     // with runtime-constructed paths or by modifying the warning
     // text so the hash changes. The real anchor is external (signed checkpoints + human
     // review). This raises the cost of the burn-through-the-counter escape vector.
-    const isHardBlock = (result.activeFlowRun && !result.activeTurnAuthority) || result.warnings.some(w => isHardStopWarning(w, relative(root, result.latestArtifactDir || root), result.activeTurnAuthority));
     if (isHardBlock) {
       // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
       return {
         stdout: rawInput,
-        stderr: result.activeFlowRun && !result.activeTurnAuthority
+        stderr: (result.activeFlowRun && !result.activeTurnAuthority
           ? `${message}\n${gatePrefix} max-blocks reached but canonical Flow remains active — not auto-releasing; complete or explicitly cancel the run.`
-          : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+          : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`) + stopControlLine,
         exitCode: 2,
       };
     }
@@ -3289,9 +3321,16 @@ async function run(rawInput) {
       exitCode: 0,
     };
   }
+  // #1172: the tail of this sentence is a promise to the operator about THIS gate's own
+  // behaviour, so it must only be made when this gate is the thing that will stop blocking. A
+  // hard block never releases, and saying otherwise here is exactly the false statement an
+  // adapter-side fence would have made true-by-accident.
+  const blockTail = isHardBlock
+    ? `(block ${count}; this block is non-releasable and will not clear itself — it needs a real fix or an operator override)`
+    : `(block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`;
   return {
     stdout: rawInput,
-    stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) (block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`,
+    stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) ${blockTail}` + stopControlLine,
     exitCode: 2,
   };
 }
@@ -3327,4 +3366,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning };
+module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning };

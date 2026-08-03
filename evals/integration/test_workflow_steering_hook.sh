@@ -739,6 +739,76 @@ else
   _fail "#1172: no last-emitted record was written under the artifact root"
 fi
 
+# ---------------------------------------------------------------------------
+# #1172 review HIGH-1: SessionStart boundary orientation must not require an active session.
+#
+# The context-map pointer used to be nested inside the `current`-gated SessionStart branch, so a
+# SessionStart with NO workflow session — a fresh checkout, or the gap between two pieces of work,
+# which is precisely when an index is worth most — emitted nothing at all. The every-turn call
+# sites that used to paper over that case were removed with the cadence change, so this is the
+# only thing keeping the header's placement rule true.
+# ---------------------------------------------------------------------------
+NOSESSION_REPO="$TMPDIR_EVAL/no-session-repo"
+mkdir -p "$NOSESSION_REPO/docs"
+printf '# No-session Repo\n' > "$NOSESSION_REPO/AGENTS.md"
+printf '# Context Map\n' > "$NOSESSION_REPO/docs/context-map.md"
+
+if FLOW_AGENTS_ACTOR="eval-no-session-actor" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/no-session-start.out" 2>"$TMPDIR_EVAL/no-session-start.err" <<JSON
+{"hook_event_name":"SessionStart","source":"startup","cwd":"$NOSESSION_REPO"}
+JSON
+then
+  if rg -q 'CONTEXT MAP: use docs/context-map.md before broad repo rediscovery' "$TMPDIR_EVAL/no-session-start.out" && \
+     rg -q 'npm run context-map -- --check' "$TMPDIR_EVAL/no-session-start.out"; then
+    _pass "#1172: SessionStart emits the context-map pointer with NO active workflow session"
+  else
+    _fail "#1172: SessionStart with no active session emitted no orientation: $(cat "$TMPDIR_EVAL/no-session-start.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail on a SessionStart with no active session"
+fi
+
+if FLOW_AGENTS_ACTOR="eval-no-session-actor" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/no-session-prompt.out" 2>"$TMPDIR_EVAL/no-session-prompt.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$NOSESSION_REPO","prompt":"continue"}
+JSON
+then
+  if ! rg -q 'CONTEXT MAP:' "$TMPDIR_EVAL/no-session-prompt.out"; then
+    _pass "#1172: the no-session context-map pointer is still a BOUNDARY push, not an every-turn one"
+  else
+    _fail "#1172: context-map pointer leaked onto the prompt path in a session-less repo: $(cat "$TMPDIR_EVAL/no-session-prompt.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail on a prompt in a session-less repo"
+fi
+
+# ---------------------------------------------------------------------------
+# #1172 review MEDIUM-1: an UNRESOLVED actor never suppresses.
+#
+# Unresolved actors have no identity to file under, so they would all share one hash record and
+# an unrelated concurrent session could suppress this one's FIRST state emission — information
+# lost, invisibly, which is the same class of defect #440 fixed for cross-actor steering.
+# Suppression is an optimization; emitting is the correctness floor.
+# ---------------------------------------------------------------------------
+unresolved_turn() {
+  NODE_ENV=test FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 node "$ROOT/scripts/hooks/workflow-steering.js" \
+    >"$TMPDIR_EVAL/$1.out" 2>"$TMPDIR_EVAL/$1.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$GUARD_REPO","prompt":"continue"}
+JSON
+}
+unresolved_turn unresolved-first
+unresolved_turn unresolved-repeat
+if rg -q 'STATE: guard-demo' "$TMPDIR_EVAL/unresolved-first.out" && \
+   rg -q 'STATE: guard-demo' "$TMPDIR_EVAL/unresolved-repeat.out"; then
+  _pass "#1172: an unresolved actor never suppresses, so it can never suppress another session's turn"
+else
+  _fail "#1172: unresolved actor was suppressed by the shared hash bucket: first=$(cat "$TMPDIR_EVAL/unresolved-first.out") repeat=$(cat "$TMPDIR_EVAL/unresolved-repeat.out")"
+fi
+
+if [[ ! -e "$GUARD_REPO/.kontourai/flow-agents/.steering-emission/unresolved-"* ]]; then
+  _pass "#1172: an unresolved actor writes no last-emitted record at all"
+else
+  _fail "#1172: an unresolved actor wrote a shared last-emitted record"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow steering hook integration passed."
   exit 0

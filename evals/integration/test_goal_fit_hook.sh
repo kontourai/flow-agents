@@ -777,10 +777,11 @@ else
   _fail "Claude hook adapter should exit successfully after translating Stop block"
 fi
 
-# #1172: the continuation firing. Claude Code sets stop_hook_active on the Stop that follows a
-# blocked Stop, so a gate still refusing after the model has already been handed the reason once
-# has exhausted in-session self-correction and the refusal goes to a human. Without this fence,
-# goal-fit's deliberately non-releasable hard blocks would re-prompt the model without bound.
+# #1172 (review HIGH-2): the $REPO fixture is a HARD block (its warnings carry
+# "evidence verdict:"/"critique status:", which HARD_BLOCK matches), so goal-fit will never
+# release it on its own. That class — and only that class — ends the turn on the continuation
+# firing, when Claude Code sets stop_hook_active because a previous Stop blocked. One
+# self-correction attempt, then a human.
 if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/claude-stop-adapter-continuation.out" 2>"$TMPDIR_EVAL/claude-stop-adapter-continuation.err" <<JSON
 {"hook_event_name":"Stop","stop_hook_active":true,"cwd":"$REPO"}
 JSON
@@ -789,17 +790,242 @@ then
 const fs = require("node:fs");
 const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (payload.decision !== "block") throw new Error("decision should still block");
-if (payload.continue !== false) throw new Error("continuation Stop must end the turn");
+if (payload.continue !== false) throw new Error("continuation Stop on a HARD block must end the turn");
 if (!String(payload.stopReason || "").includes("evidence verdict:not_verified")) throw new Error("missing user-facing reason");
 if (!String(payload.reason || "").includes("evidence verdict:not_verified")) throw new Error("missing model-facing reason");
 NODE
   then
-    _pass "#1172: a Stop that blocks again after the model was already told ends the turn"
+    _pass "#1172: a HARD Stop block that refuses again after the model was told ends the turn"
   else
     _fail "#1172: continuation Stop did not end the turn: $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.out") $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.err")"
   fi
 else
   _fail "Claude hook adapter should exit successfully on a continuation Stop"
+fi
+
+# #1172 (review HIGH-2/HIGH-3): the control line is a machine-to-machine classification channel.
+# It must be present for a hard block (or the adapter cannot tell the classes apart) and must be
+# stripped from BOTH agent-facing and user-facing text (or it becomes noise in the model's
+# context and gibberish in front of an operator).
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/stop-control-raw.out" 2>"$TMPDIR_EVAL/stop-control-raw.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$REPO"}
+JSON
+then
+  _fail "#1172: hard-block fixture unexpectedly did not block"
+else
+  if rg -q '^\[flow-agents:stop-control\] \{.*"terminal":true' "$TMPDIR_EVAL/stop-control-raw.err" \
+    && ! rg -q 'stop-control' "$TMPDIR_EVAL/claude-stop-adapter-continuation.out" \
+    && ! rg -q 'stop-control' "$TMPDIR_EVAL/claude-stop-adapter.out"; then
+    _pass "#1172: the terminal control line is emitted by the hook and stripped by the adapter"
+  else
+    _fail "#1172: control-line emission/stripping is wrong: raw=$(cat "$TMPDIR_EVAL/stop-control-raw.err") adapter=$(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.out")"
+  fi
+fi
+
+# The literal is duplicated across the hook and the adapter lib on purpose (the hook ships a
+# byte-identical context/ mirror with a fixed lib subset). A one-sided rename would silently make
+# every hard block read as soft and never reach a human, so pin the parity here.
+if ROOT_ARG="$ROOT" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/stop-control-parity.err"
+const root = process.env.ROOT_ARG;
+const hook = require(root + "/scripts/hooks/stop-goal-fit.js");
+const lib = require(root + "/scripts/hooks/lib/stop-escalation.js");
+if (hook.STOP_CONTROL_PREFIX !== lib.STOP_CONTROL_PREFIX) {
+  throw new Error(`prefix drift: hook=${hook.STOP_CONTROL_PREFIX} lib=${lib.STOP_CONTROL_PREFIX}`);
+}
+NODE
+then
+  _pass "#1172: stop-goal-fit.js and stop-escalation.js agree on the control-line literal"
+else
+  _fail "#1172: control-line literal drifted between hook and adapter lib: $(cat "$TMPDIR_EVAL/stop-control-parity.err")"
+fi
+
+# ─── #1172 review HIGH-2: a SOFT block must survive to goal-fit's OWN release valve ──────────
+#
+# The regression this locks: fencing every Stop on stop_hook_active truncated the documented
+# max-blocks valve (default 3) to ~2 and made the gate's own promise to the operator — "after 3
+# identical blocks I stop blocking and hand this to you" — false. A soft block must therefore be
+# refused, and refused again, with stop_hook_active TRUE throughout, and only then release.
+SOFT_REPO="$TMPDIR_EVAL/soft-valve-repo"
+SOFT_SLUG="soft-valve-demo"
+# Filename assembled, not spelled: the repo's own config-protection hook refuses an interpreter
+# invocation or redirect that names a sidecar file literally (see test_stop_gate_actor_scoped
+# _completion.sh's SIDECAR_STATE_FILENAME for the same dodge).
+SOFT_STATE_FILENAME="$(printf 'state.%s' json)"
+mkdir -p "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG"
+printf '# Test Repo\n' > "$SOFT_REPO/AGENTS.md"
+cat > "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG/$SOFT_SLUG--deliver.md" <<MARKDOWN
+# ${SOFT_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+Ordinary unfinished work: an artifact-status gap, nothing HARD_BLOCK matches.
+MARKDOWN
+cat > "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${SOFT_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${SOFT_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$SOFT_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$SOFT_SLUG" ACTOR_ARG="soft-valve-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+soft_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_ACTOR="soft-valve-actor"
+    printf '{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"%s"}' "$SOFT_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+
+SOFT_1="$(soft_stop)"
+SOFT_2="$(soft_stop)"
+SOFT_3="$(soft_stop)"
+if node - "$SOFT_1" "$SOFT_2" "$SOFT_3" <<'NODE'
+const [, , first, second, third] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(first), p(second), p(third)];
+if (a.decision !== "block" || a.continue === false) throw new Error("soft block 1 must refuse without ending the turn");
+if (b.decision !== "block" || b.continue === false) throw new Error("soft block 2 must refuse without ending the turn — this is the valve the adapter fence used to truncate");
+if (c.decision === "block") throw new Error("soft block 3 must be goal-fit's own release, not another refusal");
+if (c.continue !== true) throw new Error("the released Stop must let the turn continue");
+if (!String(a.reason || "").includes("after 3 identical blocks I stop blocking")) throw new Error("gate message must still promise the valve");
+NODE
+then
+  _pass "#1172: a SOFT block runs its full 3-block course to goal-fit's own release, even with stop_hook_active set"
+else
+  _fail "#1172: soft-block valve was truncated: 1=$SOFT_1 2=$SOFT_2 3=$SOFT_3"
+fi
+
+# ─── #1172 review HIGH-3: the backstop bounds a gate that never releases ─────────────────────
+#
+# stop_hook_active is observed in live Claude Code payloads but is no longer listed in the
+# published hooks reference. If it disappears, the marker path above never fires and a
+# non-releasable block would re-prompt the model indefinitely with no human visibility. The
+# adapter's own consecutive-block counter is the floor under that, and under any future hook
+# whose own release valve fails.
+#
+# Simulated exactly: a gate that keeps blocking (its own valve pushed out of reach via
+# FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS) and a payload carrying NO stop_hook_active at all. Its own
+# repo, because this file exports FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED at the top — every
+# adapter invocation here therefore files under the same "unresolved" streak bucket, and sharing
+# $REPO with the blocking tests above would start this one mid-count.
+BACKSTOP_REPO="$TMPDIR_EVAL/backstop-repo"
+BACKSTOP_SLUG="backstop-demo"
+mkdir -p "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG"
+printf '# Test Repo\n' > "$BACKSTOP_REPO/AGENTS.md"
+cat > "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG/$BACKSTOP_SLUG--deliver.md" <<MARKDOWN
+# ${BACKSTOP_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+A gate that keeps refusing and never releases.
+MARKDOWN
+cat > "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${BACKSTOP_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${BACKSTOP_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$BACKSTOP_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$BACKSTOP_SLUG" ACTOR_ARG="backstop-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+backstop_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS="100"
+    export FLOW_AGENTS_STOP_MAX_BLOCKS="3"
+    printf '{"hook_event_name":"Stop","cwd":"%s"}' "$BACKSTOP_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+BACK_1="$(backstop_stop)"
+BACK_2="$(backstop_stop)"
+BACK_3="$(backstop_stop)"
+if node - "$BACK_1" "$BACK_2" "$BACK_3" <<'NODE'
+const [, , first, second, third] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(first), p(second), p(third)];
+for (const [i, out] of [a, b].entries()) {
+  if (out.decision !== "block") throw new Error(`block ${i + 1} should still block`);
+  if (out.continue === false) throw new Error(`block ${i + 1} must not end the turn before the backstop threshold`);
+}
+if (c.decision !== "block") throw new Error("the backstop escalates a refusal; it never stops being one");
+if (c.continue !== false) throw new Error("the threshold-th consecutive blocking Stop must end the turn with no runtime signal at all");
+if (!String(c.reason || "").includes("blocked 3 times in a row")) throw new Error("the escalation must say why it stopped asking");
+NODE
+then
+  _pass "#1172: the adapter's consecutive-block backstop ends the turn without stop_hook_active or a marker"
+else
+  _fail "#1172: backstop did not bound the no-signal case: 1=$BACK_1 2=$BACK_2 3=$BACK_3"
+fi
+
+if [[ -d "$BACKSTOP_REPO/.kontourai/flow-agents/.stop-escalation" ]]; then
+  _pass "#1172: the Stop-block streak is stored per actor under the existing artifact root"
+else
+  _fail "#1172: no Stop-block streak record was written under the artifact root"
+fi
+
+# A Stop that does NOT block clears the streak: the counter is CONSECUTIVE blocks, so a cleared
+# obligation must not leave the next unrelated block one strike from a forced turn-end.
+if FLOW_AGENTS_GOAL_FIT_MODE=off printf '{"hook_event_name":"Stop","cwd":"%s"}' "$BACKSTOP_REPO" \
+  | FLOW_AGENTS_GOAL_FIT_MODE=off node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default >/dev/null 2>&1; then
+  BACK_AFTER_CLEAR="$(backstop_stop)"
+  if node - "$BACK_AFTER_CLEAR" <<'NODE'
+const out = JSON.parse(process.argv[2].trim().split("\n").pop());
+if (out.continue === false) throw new Error("a non-blocking Stop must reset the consecutive-block streak");
+NODE
+  then
+    _pass "#1172: a non-blocking Stop resets the consecutive-block streak"
+  else
+    _fail "#1172: streak survived a non-blocking Stop: $BACK_AFTER_CLEAR"
+  fi
+else
+  _fail "#1172: the non-blocking Stop probe did not exit cleanly"
 fi
 
 if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/codex-hook-adapter.js" stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/codex-stop-adapter.out" 2>"$TMPDIR_EVAL/codex-stop-adapter.err" <<JSON

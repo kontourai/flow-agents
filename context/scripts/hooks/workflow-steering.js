@@ -440,8 +440,10 @@ function contextMapSteering(root) {
 // names sanitize to the same segment do not share a file). No new store, no new location.
 //
 // Both directions fail OPEN toward emitting: an unreadable record emits (today's behaviour),
-// and an unwritable record emits again next turn. Suppression only ever happens on a positive
-// match of a record this hook itself wrote.
+// an unwritable record emits again next turn, and an UNRESOLVED actor never suppresses at all
+// (it has no identity to file under, so a shared bucket could suppress an unrelated concurrent
+// session's first emission). Suppression only ever happens on a positive match of a record this
+// hook itself wrote under a resolved identity.
 function stateEmissionFile(root, actorKey) {
   const artifactRoot = flowAgentsArtifactRoot(root);
   const name = sanitizeSegment(String(actorKey || 'unresolved')).slice(0, 40) || 'unresolved';
@@ -469,8 +471,15 @@ function resetStateEmission(root) {
  * no record exists / could not be read). Records `text` as the new last emission when it does.
  */
 function stateBlockChanged(root, text) {
+  const actorKey = resolveActor(process.env).actor;
+  // #1172 review MEDIUM-1: an unresolved actor has no identity to file under, so every
+  // unresolved session in this repo would share ONE record and could suppress a DIFFERENT
+  // session's first STATE emission — cross-session suppression, the same class of bug #440
+  // fixed for cross-actor steering. Suppression is an optimization; correctness here is
+  // emitting. So an unresolved actor never suppresses and never writes a record.
+  if (isUnresolvedActor(actorKey)) return true;
   const hash = crypto.createHash('sha256').update(String(text || '')).digest('hex');
-  const file = stateEmissionFile(root, resolveActor(process.env).actor);
+  const file = stateEmissionFile(root, actorKey);
   try {
     const prev = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (prev && typeof prev === 'object' && prev.hash === hash) return false;
@@ -824,16 +833,23 @@ function run(rawInput, _options = {}, fencedRunId = null) {
     if (event === 'SessionStart' && current) {
       const resumeBlock = resumeSteering(root, current, guidance);
       if (resumeBlock) hints.push(resumeBlock);
-      const contextHint = contextMapSteering(root);
-      if (contextHint) hints.push(contextHint);
       const supersessionHint = supersessionSteering(root, current);
       if (supersessionHint) hints.push(supersessionHint);
     }
 
-    // SessionStart only, unconditional of `current` (#439): the installed-skill drift advisory
-    // fires on every SessionStart inside a kit-bearing checkout, independent of whether an active
-    // workflow session exists — do NOT fold this into the `current`-gated block above.
+    // SessionStart only, unconditional of `current`: boundary orientation that does not depend on
+    // there being an active session.
+    //   - the context-map pointer (#1172 review HIGH-1): it was previously nested inside the
+    //     `current`-gated block, so a SessionStart with NO active session — a fresh checkout, or
+    //     the gap between two pieces of work, which is exactly when an index is worth most —
+    //     emitted nothing. The every-turn call sites that used to paper over that case are gone,
+    //     so the header's placement rule ("boundaries get the full re-grounding push") only holds
+    //     if this is unconditional.
+    //   - the installed-skill drift advisory (#439): fires on every SessionStart inside a
+    //     kit-bearing checkout — do NOT fold it into the `current`-gated block above.
     if (event === 'SessionStart') {
+      const contextHint = contextMapSteering(root);
+      if (contextHint) hints.push(contextHint);
       const driftHint = skillDriftSteering(root);
       if (driftHint) hints.push(driftHint);
     }
