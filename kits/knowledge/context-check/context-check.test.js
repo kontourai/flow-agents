@@ -198,6 +198,43 @@ describe("Context Check: revision-bound recall and reconciliation (#1131)", () =
     remove(repo, proposalDir, external);
   });
 
+  test("preflights an existing regular proposal target before creating a result or partial proposals", () => {
+    const { repo, revision } = seededRepo();
+    const proposalDir = fs.mkdtempSync(path.join(os.tmpdir(), "context-check-proposals-"));
+    const proposals = path.join(proposalDir, "proposals");
+    fs.mkdirSync(proposals, { mode: 0o700 });
+    const target = path.join(proposals, "context-update-current-context-contract.json");
+    fs.writeFileSync(target, "existing proposal sentinel\n");
+    const before = snapshot(proposalDir);
+    assert.throws(
+      () => runContextCheck({ repoRoot: repo, input: input(revision), proposalDir, write: true }),
+      (cause) => cause.code === "PROPOSAL_WRITE_FAILED"
+    );
+    assert.deepEqual(snapshot(proposalDir), before, "an existing later proposal target must leave every output untouched");
+    assert.ok(!fs.existsSync(path.join(proposalDir, "context-check-result.json")));
+    remove(repo, proposalDir);
+  });
+
+  test("preflights a symlink proposal target before creating a result or changing its external sentinel", () => {
+    const { repo, revision } = seededRepo();
+    const proposalDir = fs.mkdtempSync(path.join(os.tmpdir(), "context-check-proposals-"));
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), "context-check-external-"));
+    const proposals = path.join(proposalDir, "proposals");
+    fs.mkdirSync(proposals, { mode: 0o700 });
+    fs.writeFileSync(path.join(external, "sentinel.json"), "external sentinel\n");
+    const target = path.join(proposals, "context-update-current-context-contract.json");
+    fs.symlinkSync(path.join(external, "sentinel.json"), target);
+    const externalBefore = snapshot(external);
+    assert.throws(
+      () => runContextCheck({ repoRoot: repo, input: input(revision), proposalDir, write: true }),
+      (cause) => cause.code === "PROPOSAL_WRITE_FAILED"
+    );
+    assert.deepEqual(snapshot(external), externalBefore, "a symlink target must not alter its external sentinel");
+    assert.ok(fs.lstatSync(target).isSymbolicLink(), "the rejected target remains a symlink");
+    assert.ok(!fs.existsSync(path.join(proposalDir, "context-check-result.json")));
+    remove(repo, proposalDir, external);
+  });
+
   test("uses the shared schemas to reject extras, traversal, blank identities, and unsupported result states", () => {
     const { revision, repo } = seededRepo();
     assert.match(validateContextCheckInput({ ...input(revision), extra: true }).join(" "), /unexpected property/);

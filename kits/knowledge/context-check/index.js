@@ -231,40 +231,111 @@ function ensurePrivateDirectory(directory, label) {
 function ensurePrivateChildDirectory(root, relative) {
   const candidate = path.resolve(root, relative);
   if (!candidate.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal directory escaped proposalDir: ${relative}`);
-  try { fs.mkdirSync(candidate, { mode: 0o700 }); } catch (cause) { if (cause.code !== "EEXIST") throw cause; }
+  let created = false;
+  try {
+    fs.mkdirSync(candidate, { mode: 0o700 });
+    created = true;
+  } catch (cause) {
+    if (cause.code !== "EEXIST") throw cause;
+  }
   const stat = fs.lstatSync(candidate);
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) throw error("UNSAFE_PROPOSAL_DIR", `proposal directory component '${relative}' must be a private non-symlink directory`);
   const physical = fs.realpathSync(candidate);
   if (!physical.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal directory component '${relative}' resolves outside proposalDir`);
-  return physical;
+  return { path: physical, created };
 }
 
-function writeNewJson(root, relative, value) {
+function outputDestination(root, relative) {
   const destination = path.resolve(root, relative);
   if (!destination.startsWith(`${root}${path.sep}`)) throw error("PROPOSAL_PATH_ESCAPE", `proposal write escaped proposalDir: ${relative}`);
   const parent = ensurePrivateDirectory(path.dirname(destination), `proposal parent for ${relative}`);
   if (!parent.startsWith(`${root}${path.sep}`) && parent !== root) throw error("PROPOSAL_PATH_ESCAPE", `proposal parent for ${relative} resolves outside proposalDir`);
+  return destination;
+}
+
+function requireNewDestination(destination, relative) {
+  try {
+    fs.lstatSync(destination);
+  } catch (cause) {
+    if (cause.code === "ENOENT") return;
+    throw error("PROPOSAL_WRITE_FAILED", `refused proposal write '${relative}': ${cause.message}`);
+  }
+  throw error("PROPOSAL_WRITE_FAILED", `refused proposal write '${relative}': destination already exists or is a symlink`);
+}
+
+function writeStagedJson(root, name, value) {
+  const destination = path.join(root, name);
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
   let descriptor;
   try {
     descriptor = fs.openSync(destination, flags, 0o600);
     fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    return { path: destination, stat: fs.fstatSync(descriptor) };
   } catch (cause) {
-    throw error("PROPOSAL_WRITE_FAILED", `refused proposal write '${relative}': ${cause.message}`);
+    throw error("PROPOSAL_WRITE_FAILED", `could not stage proposal output '${name}': ${cause.message}`);
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
   }
+}
+
+function removeCommittedOutputs(entries) {
+  for (const entry of entries.reverse()) {
+    try {
+      const stat = fs.lstatSync(entry.destination);
+      if (stat.dev === entry.staged.stat.dev && stat.ino === entry.staged.stat.ino) fs.unlinkSync(entry.destination);
+    } catch {
+      // Preserve the original write error. We only remove the exact hard link we created.
+    }
+  }
+}
+
+function removeEmptyCreatedDirectory(directory) {
+  try { fs.rmdirSync(directory); } catch { /* It was not left empty, or another actor owns it now. */ }
 }
 
 function writeResult(proposalDir, result) {
   if (!isIdentity(proposalDir)) throw error("PROPOSAL_DIR_REQUIRED", "Context Check writes require an explicit proposalDir");
   const requestedRoot = path.resolve(proposalDir);
   const outputRoot = ensurePrivateDirectory(requestedRoot, "proposalDir");
-  const proposalsRoot = ensurePrivateChildDirectory(outputRoot, "proposals");
   const written = ["context-check-result.json", ...result.proposals.map((proposal) => `proposals/${proposal.id}.json`)];
   result.written = written;
-  writeNewJson(outputRoot, "context-check-result.json", result);
-  for (const proposal of result.proposals) writeNewJson(proposalsRoot, `${proposal.id}.json`, proposal);
+  const committed = [];
+  let proposals;
+  let stagingRoot;
+  try {
+    // Refuse every existing or symlink target before creating any visible output.
+    const resultDestination = outputDestination(outputRoot, "context-check-result.json");
+    requireNewDestination(resultDestination, "context-check-result.json");
+    proposals = ensurePrivateChildDirectory(outputRoot, "proposals");
+    const outputs = [
+      { relative: "context-check-result.json", destination: resultDestination, value: result },
+      ...result.proposals.map((proposal) => ({
+        relative: `proposals/${proposal.id}.json`,
+        destination: outputDestination(proposals.path, `${proposal.id}.json`),
+        value: proposal,
+      })),
+    ];
+    for (const output of outputs) requireNewDestination(output.destination, output.relative);
+
+    stagingRoot = fs.mkdtempSync(path.join(outputRoot, ".context-check-stage-"));
+    ensurePrivateDirectory(stagingRoot, "Context Check staging directory");
+    for (const [index, output] of outputs.entries()) output.staged = writeStagedJson(stagingRoot, String(index), output.value);
+
+    for (const output of outputs) {
+      // Revalidate the parent and target immediately before the no-replace commit.
+      outputDestination(output.relative.startsWith("proposals/") ? proposals.path : outputRoot, output.relative.startsWith("proposals/") ? output.relative.slice("proposals/".length) : output.relative);
+      requireNewDestination(output.destination, output.relative);
+      fs.linkSync(output.staged.path, output.destination);
+      committed.push(output);
+    }
+  } catch (cause) {
+    removeCommittedOutputs(committed);
+    if (proposals?.created) removeEmptyCreatedDirectory(proposals.path);
+    if (cause.code) throw cause;
+    throw error("PROPOSAL_WRITE_FAILED", `refused Context Check output transaction: ${cause.message}`);
+  } finally {
+    if (stagingRoot) fs.rmSync(stagingRoot, { recursive: true, force: true });
+  }
   return written;
 }
 
