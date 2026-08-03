@@ -154,6 +154,70 @@ runtime_version() {
   echo "${runtime_version:-unknown}"
 }
 
+# install_identity — the producer-identity tuple for the Flow Agents install emitting this event
+# (#1180). Echoes {package_version, content_fingerprint, source}.
+#
+# WHY A TUPLE: a semver string is a lying join key. A tarball packed from post-release main
+# installs as "5.7.0" while containing 5.8.0's code, so per-release effectiveness analysis keyed on
+# version alone attributes the new behavior to the old release. `content_fingerprint` says what the
+# artifact actually CONTAINS; `source` says how the identity was resolved, so a consumer can always
+# tell a shipped stamp from a dev-checkout derivation from nothing at all.
+#
+# WHY A TOP-LEVEL SIBLING and never a member of `run_correlation`: the run correlation envelope is
+# contractually CLOSED in v1 — schemas/run-correlation-envelope.schema.json is
+# additionalProperties:false at every level, and producer identity is not one of its identity
+# slots. The join (correlation_id x install_identity) is available on every record either way.
+# See context/contracts/run-correlation-contract.md.
+#
+# Resolution order, first hit wins:
+#   1. "stamp"   build/generated/install-identity.json shipped inside the package
+#                (src/tools/generate-install-identity.ts, written by the last step of
+#                `npm run build`), resolved through the same "$TELEMETRY_DIR/../../build/generated/"
+#                idiom economics-record.sh already uses for capability-declarations.json. The
+#                fingerprint is computed at build time, so event-time cost is one file read.
+#   2. "git"     no stamp, but the package root IS a Flow Agents source checkout — its package.json
+#                declares THIS package name — and git resolves a HEAD. Fingerprint is "git:<sha>".
+#                The package-name guard is load-bearing: the claude-code project bundle lays
+#                scripts/ into the CONSUMER's own repository, so an unguarded `git rev-parse` there
+#                would stamp the consumer project's commit as Flow Agents' producer identity — a
+#                fabricated join key, precisely the failure this field exists to prevent.
+#   3. "unknown" every field the literal string "unknown". Labeled, never guessed.
+#
+# FLOW_AGENTS_INSTALL_IDENTITY_ROOT overrides the package root (fixture isolation for evals),
+# mirroring the FLOW_AGENTS_CAPABILITY_DECL_FILE override economics-record.sh already exposes.
+install_identity() {
+  local pkg_root stamp_file version fingerprint identity_source pkg_name git_sha
+  pkg_root="${FLOW_AGENTS_INSTALL_IDENTITY_ROOT:-${TELEMETRY_DIR}/../..}"
+  version=""; fingerprint=""; identity_source=""
+  stamp_file="${pkg_root}/build/generated/install-identity.json"
+  if [[ -f "$stamp_file" ]]; then
+    version=$(jq -r '.package_version // ""' "$stamp_file" 2>/dev/null) || version=""
+    fingerprint=$(jq -r '.content_fingerprint // ""' "$stamp_file" 2>/dev/null) || fingerprint=""
+    if [[ -n "$version" && -n "$fingerprint" ]]; then
+      identity_source="stamp"
+    else
+      # A present-but-unreadable/partial stamp is NOT a half-truth to publish: drop it entirely and
+      # fall through to the labeled fallbacks below.
+      version=""; fingerprint=""
+    fi
+  fi
+  if [[ -z "$identity_source" && -f "${pkg_root}/package.json" ]]; then
+    pkg_name=$(jq -r '.name // ""' "${pkg_root}/package.json" 2>/dev/null) || pkg_name=""
+    if [[ "$pkg_name" == "@kontourai/flow-agents" ]]; then
+      git_sha=$(git -C "$pkg_root" rev-parse HEAD 2>/dev/null) || git_sha=""
+      if [[ "$git_sha" =~ ^[0-9a-f]{40,64}$ ]]; then
+        fingerprint="git:${git_sha}"
+        version=$(jq -r '.version // ""' "${pkg_root}/package.json" 2>/dev/null) || version=""
+        [[ -n "$version" ]] || version="unknown"
+        identity_source="git"
+      fi
+    fi
+  fi
+  [[ -n "$identity_source" ]] || { version="unknown"; fingerprint="unknown"; identity_source="unknown"; }
+  jq -nc --arg v "$version" --arg f "$fingerprint" --arg s "$identity_source" \
+    '{package_version: $v, content_fingerprint: $f, source: $s}'
+}
+
 build_base_event() {
   local session_id="$1" schema_event_type="$2" agent_name="$3"
   local runtime_name="${FLOW_AGENTS_TELEMETRY_RUNTIME:-kiro-cli}"
@@ -161,6 +225,12 @@ build_base_event() {
     claude|claude-code) runtime_name="claude-code" ;;
     kiro|kiro-cli) runtime_name="kiro-cli" ;;
   esac
+  # Fail-safe: --argjson aborts jq on malformed input, which would drop the whole event. Any
+  # resolution hiccup degrades to the explicit unknown tuple, never to a missing block.
+  local install_identity_json
+  install_identity_json=$(install_identity 2>/dev/null) || install_identity_json=""
+  printf '%s' "$install_identity_json" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || install_identity_json='{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}'
   jq -nc \
     --arg sv "0.3.0" \
     --arg ts "$(date +%s)000" \
@@ -170,6 +240,7 @@ build_base_event() {
     --arg an "$agent_name" \
     --arg rv "$(runtime_version "$runtime_name")" \
     --arg rn "$runtime_name" \
+    --argjson ii "$install_identity_json" \
     '{
       schema_version: $sv,
       timestamp: $ts,
@@ -180,7 +251,8 @@ build_base_event() {
         name: $an,
         runtime: $rn,
         version: $rv
-      }
+      },
+      install_identity: $ii
     }'
 }
 

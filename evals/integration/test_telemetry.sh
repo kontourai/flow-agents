@@ -47,6 +47,11 @@ _run_telemetry() {
   if [[ -n "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" ]]; then
     env_vars+=(FLOW_AGENTS_TELEMETRY_RUNTIME="$FLOW_AGENTS_TELEMETRY_RUNTIME")
   fi
+  # #1180: lets a caller point install_identity() at a fixture package root so the
+  # stamp / git-checkout / neither resolution branches are all exercisable.
+  if [[ -n "${FLOW_AGENTS_INSTALL_IDENTITY_ROOT:-}" ]]; then
+    env_vars+=(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$FLOW_AGENTS_INSTALL_IDENTITY_ROOT")
+  fi
   mkdir -p "$TMPDIR_EVAL/sessions"
   echo "$input" | env "${env_vars[@]}" bash "$TELEMETRY_SH" "$hook_type" "$agent" 2>/dev/null
   # Wait for background process to append new line(s)
@@ -571,7 +576,7 @@ echo ""
 echo "--- Schema Fields ---"
 output=$(_run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
 
-for field in schema_version timestamp session_id event_id event_type agent; do
+for field in schema_version timestamp session_id event_id event_type agent install_identity; do
   val=$(echo "$output" | jq -r ".${field} // empty" 2>/dev/null)
   if [[ -n "$val" ]]; then
     _pass "agentSpawn has .$field = $val"
@@ -589,6 +594,92 @@ for field in name runtime version; do
     _fail "agentSpawn missing .agent.$field"
   fi
 done
+
+# --- 3b. Producer install identity (#1180) ---
+# The per-release effectiveness join key is a TUPLE {package_version, content_fingerprint}, not a
+# bare semver: a tarball packed from post-release main installs under the OLD version number while
+# containing the NEW code, so a version-only key misattributes behavior across releases. The block
+# is a TOP-LEVEL SIBLING of run_correlation (the envelope is contractually closed in v1), and every
+# event carries it — the `source` label states how the identity was resolved so a consumer can
+# never mistake a fallback for a shipped stamp.
+echo ""
+echo "--- Install Identity (#1180) ---"
+
+for field in package_version content_fingerprint source; do
+  val=$(echo "$output" | jq -r ".install_identity.${field} // empty" 2>/dev/null)
+  if [[ -n "$val" ]]; then
+    _pass "agentSpawn has .install_identity.$field"
+  else
+    _fail "agentSpawn missing .install_identity.$field"
+  fi
+done
+
+identity_source=$(echo "$output" | jq -r '.install_identity.source // empty' 2>/dev/null)
+case "$identity_source" in
+  stamp|git|unknown) _pass "install_identity.source is a declared value ('$identity_source')" ;;
+  *) _fail "install_identity.source must be stamp|git|unknown, got '$identity_source'" ;;
+esac
+
+# install_identity must never leak into the closed run correlation envelope.
+if echo "$output" | jq -e '(.run_correlation // {}) | has("install_identity") | not' >/dev/null 2>&1; then
+  _pass "install_identity stays outside the run_correlation envelope"
+else
+  _fail "install_identity leaked into .run_correlation (the envelope is closed in v1)"
+fi
+
+# Fixture cases: one temp package root per resolution branch, so all three are exercised on every
+# host regardless of how this repo happens to be checked out.
+IDENTITY_FIXTURES="$TMPDIR_EVAL/install-identity"
+mkdir -p "$IDENTITY_FIXTURES/stamped/build/generated" "$IDENTITY_FIXTURES/checkout" "$IDENTITY_FIXTURES/consumer"
+
+# (a) stamp — a shipped build/generated/install-identity.json wins outright.
+cat > "$IDENTITY_FIXTURES/stamped/build/generated/install-identity.json" <<'STAMP'
+{
+  "schema_version": "1.0",
+  "package_name": "@kontourai/flow-agents",
+  "package_version": "9.9.9-fixture",
+  "content_fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "git_sha": null,
+  "git_dirty": null,
+  "built_at": "2026-01-01T00:00:00.000Z"
+}
+STAMP
+stamp_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/stamped" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+stamp_identity=$(echo "$stamp_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ "$stamp_identity" == '{"package_version":"9.9.9-fixture","content_fingerprint":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","source":"stamp"}' ]]; then
+  _pass "install_identity reads the shipped stamp verbatim (source=stamp)"
+else
+  _fail "install_identity stamp case: got $stamp_identity"
+fi
+
+# (b) git — no stamp, but the package root is a Flow Agents source checkout.
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0-checkout"}\n' > "$IDENTITY_FIXTURES/checkout/package.json"
+git -C "$IDENTITY_FIXTURES/checkout" init -q >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/checkout" add -A >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/checkout" -c user.email=eval@example.invalid -c user.name=eval commit -qm "fixture" >/dev/null 2>&1
+checkout_sha=$(git -C "$IDENTITY_FIXTURES/checkout" rev-parse HEAD 2>/dev/null)
+git_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/checkout" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+git_identity=$(echo "$git_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ -n "$checkout_sha" && "$git_identity" == "{\"package_version\":\"0.0.0-checkout\",\"content_fingerprint\":\"git:${checkout_sha}\",\"source\":\"git\"}" ]]; then
+  _pass "install_identity falls back to the checkout HEAD (source=git)"
+else
+  _fail "install_identity git case: got $git_identity (expected git:$checkout_sha)"
+fi
+
+# (c) unknown — a git tree that is NOT Flow Agents. This is the claude-code project-bundle layout:
+# scripts/ lands inside the CONSUMER's repository, so an unguarded `git rev-parse` would stamp the
+# consumer's commit as Flow Agents' producer identity. Labeled unknown beats a fabricated join key.
+printf '{"name":"some-consumer-app","version":"1.2.3"}\n' > "$IDENTITY_FIXTURES/consumer/package.json"
+git -C "$IDENTITY_FIXTURES/consumer" init -q >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/consumer" add -A >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/consumer" -c user.email=eval@example.invalid -c user.name=eval commit -qm "fixture" >/dev/null 2>&1
+unknown_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/consumer" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+unknown_identity=$(echo "$unknown_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ "$unknown_identity" == '{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}' ]]; then
+  _pass "install_identity refuses a foreign checkout and reports unknown"
+else
+  _fail "install_identity unknown case: got $unknown_identity"
+fi
 
 # --- 4. userPromptSubmit captures prompt ---
 echo ""
