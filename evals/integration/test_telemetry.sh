@@ -681,6 +681,56 @@ else
   _fail "install_identity unknown case: got $unknown_identity"
 fi
 
+# SHIPPED-COPY PARITY. telemetry.sh ships in two byte-identical copies at DIFFERENT depths —
+# scripts/telemetry/ (two levels below the package root) and the context/scripts/telemetry/ mirror
+# (three) — so any fixed path arithmetic is right for one and silently wrong for the other. An
+# earlier revision hardcoded "../.." and resolved the mirror's root to the context directory,
+# reporting source:"unknown" on a fully stamped tree; nothing caught it, because the assertions
+# above run with an explicit root override and the harness's default copy is the mirror. These two
+# run each shipped copy with NO override at all, on the real repository layout.
+run_shipped_copy() {
+  local script="$1" out="$2" dir
+  dir=$(mktemp -d)
+  mkdir -p "$dir/sessions"; : > "$dir/telemetry.conf"
+  : > "$out"
+  echo '{"cwd":"/tmp/eval-test"}' | env \
+    TELEMETRY_ENABLED=true TELEMETRY_CHANNELS=full \
+    TELEMETRY_CHANNEL_FULL_LOG_FILE="$out" TELEMETRY_CHANNEL_FULL_REDACT=none \
+    FLOW_AGENTS_TELEMETRY_FOREGROUND=true TELEMETRY_CONFIG_FILE="$dir/telemetry.conf" \
+    TELEMETRY_DATA_DIR="$dir" TELEMETRY_SESSION_DIR="$dir/sessions" \
+    bash "$script" agentSpawn eval-test 2>/dev/null
+  tail -1 "$out" 2>/dev/null | jq -c '.install_identity // {}' 2>/dev/null
+  rm -rf "$dir"
+}
+
+if [[ -f "$ROOT_DIR/scripts/telemetry/telemetry.sh" && -f "$ROOT_DIR/context/scripts/telemetry/telemetry.sh" ]]; then
+  # The stamp is what makes this assertion discriminating: without it both copies would agree on a
+  # git-derived identity and a depth bug would hide.
+  [[ -f "$ROOT_DIR/build/generated/install-identity.json" ]] || (cd "$ROOT_DIR" && npm run build) >/dev/null 2>&1
+  source_copy_identity=$(run_shipped_copy "$ROOT_DIR/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/copy-source.jsonl")
+  mirror_copy_identity=$(run_shipped_copy "$ROOT_DIR/context/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/copy-mirror.jsonl")
+
+  if [[ "$(echo "$mirror_copy_identity" | jq -r '.source // empty')" == "stamp" ]]; then
+    _pass "context/ mirror copy resolves the package root and reads the stamp (source=stamp)"
+  else
+    _fail "context/ mirror copy did not reach the stamp: got $mirror_copy_identity"
+  fi
+
+  if [[ "$(echo "$source_copy_identity" | jq -r '.source // empty')" == "stamp" ]]; then
+    _pass "scripts/ copy resolves the package root and reads the stamp (source=stamp)"
+  else
+    _fail "scripts/ copy did not reach the stamp: got $source_copy_identity"
+  fi
+
+  if [[ -n "$source_copy_identity" && "$source_copy_identity" == "$mirror_copy_identity" ]]; then
+    _pass "both shipped telemetry.sh copies report an identical install identity"
+  else
+    _fail "shipped copies disagree: scripts=$source_copy_identity mirror=$mirror_copy_identity"
+  fi
+else
+  _fail "expected both shipped telemetry.sh copies to exist for the parity check"
+fi
+
 # --- 4. userPromptSubmit captures prompt ---
 echo ""
 echo "--- Prompt Capture ---"

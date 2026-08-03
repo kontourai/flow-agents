@@ -26,8 +26,16 @@ STAMP="$ROOT/build/generated/install-identity.json"
 PROBE_DIR="$ROOT/prompts"
 PROBE="$PROBE_DIR/install-identity-fingerprint-probe.generated.txt"
 
+PKG="$ROOT/package.json"
+PKG_BACKUP="$(mktemp)"
+cp "$PKG" "$PKG_BACKUP"
+
 cleanup() {
   rm -f "$PROBE"
+  # Restore package.json byte-identically: the unsupported-negation case below edits it, and an
+  # interrupted run must never leave a mutated manifest behind.
+  cp "$PKG_BACKUP" "$PKG"
+  rm -f "$PKG_BACKUP"
   (cd "$ROOT" && npm run build) >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -129,6 +137,37 @@ if jq -e --arg v "$pkg_version" '.package_version == $v' "$STAMP" >/dev/null 2>&
   pass "stamp restored to the honest package_version after the tamper case"
 else
   fail "stamp was left tampered"
+fi
+
+# ── 6. an unsupported `files` negation form fails the build loudly ────────────────────────────────
+# The fingerprint's exclusions are derived from package.json's `files` negations. The generator
+# understands three narrow forms; anything else must STOP the build. The failure mode this guards
+# is silent: a negation the parser skipped would leave the digest covering content npm strips from
+# the tarball, so the shipped artifact's identity would be a digest of files it does not contain.
+jq '.files += ["!kits/*.experimental"]' "$PKG_BACKUP" > "$PKG"
+negation_out=$( (cd "$ROOT" && npm run build) 2>&1 )
+negation_status=$?
+cp "$PKG_BACKUP" "$PKG"
+if [[ $negation_status -ne 0 ]] && printf '%s' "$negation_out" | grep -q "uses an exclusion form generate-install-identity.ts does not support"; then
+  pass "an unsupported files negation fails the build with a named, actionable message"
+else
+  fail "the build accepted an unsupported files negation (status=$negation_status)"
+fi
+
+# A supported directory-prefix negation must NOT fail — the guard rejects unknown forms, it does not
+# reject exclusions in general.
+jq '.files += ["!kits/experimental/"]' "$PKG_BACKUP" > "$PKG"
+if (cd "$ROOT" && npm run build) >/dev/null 2>&1; then
+  pass "a supported directory-prefix negation still builds"
+else
+  fail "a supported directory-prefix negation broke the build"
+fi
+cp "$PKG_BACKUP" "$PKG"
+rebuild
+if [[ "$(fingerprint)" == "$baseline" ]]; then
+  pass "package.json restored and the fingerprint is back to baseline"
+else
+  fail "package.json restore left the fingerprint at $(fingerprint), expected $baseline"
 fi
 
 echo ""

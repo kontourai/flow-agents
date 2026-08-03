@@ -70,37 +70,85 @@ function packageManifest(): { name: string; version: string } {
 }
 
 /**
- * Plain relative paths package.json's `files` array explicitly EXCLUDES (entries starting with
- * `!` that are not globs or directories) — content a local build produces but the published
- * artifact never contains, e.g. `build/src/cli/workflow.test-support.js`, which
- * `scripts/build-test-support.mjs` writes during `npm run test:unit`. Reading the exclusions from
- * the packaging manifest instead of hardcoding them keeps "what the fingerprint covers" and "what
- * ships" from drifting apart, and keeps the digest stable whether or not the unit tests have been
- * run in this working tree.
+ * A `files` negation this generator understands. Exactly three narrow forms are supported — this
+ * is deliberately NOT an implementation of npm's full `files` glob semantics.
+ *
+ *   path    "build/src/cli/workflow.test-support.js"  a single relative file
+ *   segment "**\/.DS_Store" / "**\/node_modules/"     a name at any depth (file or directory)
+ *   prefix  "evals/results/"                          a directory and everything under it
  */
-function excludedRelPaths(): Set<string> {
+type FilesNegation =
+  | { kind: "path"; value: string }
+  | { kind: "segment"; value: string }
+  | { kind: "prefix"; value: string };
+
+/**
+ * Parses ONE `!`-prefixed package.json `files` entry, or THROWS.
+ *
+ * The throw is the point. This function used to silently `continue` past any entry containing a
+ * glob or a trailing slash, which meant a future exclusion — `!kits/experimental/`, say — would
+ * quietly leave the fingerprint covering content npm strips out of the tarball, so the shipped
+ * artifact's identity would be a digest of files it does not contain. There is no safe default
+ * for "an exclusion form I do not understand," so an unsupported form fails the build with the
+ * offending entry named, forcing whoever edits `files` to extend this parser deliberately.
+ */
+export function parseFilesNegation(entry: string): FilesNegation {
+  const candidate = entry.slice(1);
+  const unsupported = (): never => {
+    throw new Error(
+      `package.json files entry '${entry}' uses an exclusion form generate-install-identity.ts does not support. ` +
+        "Supported forms: a plain relative path, '**/<name>' or '**/<name>/' (a name at any depth), " +
+        "and '<dir>/' (a directory prefix). Extend parseFilesNegation() rather than letting the content " +
+        "fingerprint cover files the published tarball excludes.",
+    );
+  };
+  if (candidate.startsWith("**/")) {
+    const name = candidate.slice(3).replace(/\/$/, "");
+    if (!name || name.includes("*") || name.includes("/")) unsupported();
+    return { kind: "segment", value: name };
+  }
+  if (candidate.includes("*")) unsupported();
+  if (candidate.endsWith("/")) return { kind: "prefix", value: candidate };
+  if (!candidate) unsupported();
+  return { kind: "path", value: candidate };
+}
+
+/**
+ * Every negation in package.json's `files`, parsed. Reading the exclusions from the packaging
+ * manifest instead of hardcoding them keeps "what the fingerprint covers" and "what ships" from
+ * drifting apart — e.g. `build/src/cli/workflow.test-support.js`, which
+ * `scripts/build-test-support.mjs` writes during `npm run test:unit`, is excluded from the tarball
+ * and so must not perturb the digest of an otherwise identical build.
+ */
+function filesNegations(): FilesNegation[] {
   const pkg = loadJson<{ files?: unknown }>(path.join(root, "package.json"));
-  const excluded = new Set<string>();
+  const negations: FilesNegation[] = [];
   for (const entry of Array.isArray(pkg.files) ? pkg.files : []) {
     if (typeof entry !== "string" || !entry.startsWith("!")) continue;
-    const candidate = entry.slice(1);
-    if (candidate.includes("*") || candidate.endsWith("/")) continue;
-    excluded.add(candidate);
+    negations.push(parseFilesNegation(entry));
   }
-  return excluded;
+  return negations;
+}
+
+function isExcluded(relative: string, negations: FilesNegation[]): boolean {
+  const segments = relative.split("/");
+  return negations.some((negation) => {
+    switch (negation.kind) {
+      case "path": return relative === negation.value;
+      case "segment": return segments.includes(negation.value);
+      case "prefix": return relative.startsWith(negation.value);
+    }
+  });
 }
 
 /** Sorted `<relpath>\0sha256:<hex>` lines over the covered surfaces (deterministic for a tree). */
 export function fingerprintLines(): string[] {
-  const excluded = excludedRelPaths();
+  const negations = filesNegations();
   const lines: string[] = [];
   for (const dir of FINGERPRINT_ROOTS) {
     for (const file of walkFiles(path.join(root, dir))) {
       const relative = rel(file);
-      if (excluded.has(relative)) continue;
-      // Ambient noise that is neither source nor shipped content; a stray .DS_Store must not
-      // change the identity of an otherwise identical build.
-      if (relative.split("/").some((segment) => segment === "node_modules" || segment === ".DS_Store")) continue;
+      if (isExcluded(relative, negations)) continue;
       lines.push(`${relative}\0sha256:${crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex")}`);
     }
   }

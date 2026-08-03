@@ -154,6 +154,49 @@ runtime_version() {
   echo "${runtime_version:-unknown}"
 }
 
+# install_identity_is_flow_agents_package — true iff the given package.json declares THIS package.
+#
+# Load-bearing, not a formality: the claude-code project bundle lays scripts/ into the CONSUMER's
+# own repository (build-universal-bundles.ts resolves hooks against $CLAUDE_PROJECT_DIR), so an
+# identity resolved without this check would report the consumer project's version and commit as
+# Flow Agents' producer identity — a fabricated join key, precisely the failure #1180 exists to
+# prevent. A foreign or unreadable package.json means "not our install," never a guess.
+install_identity_is_flow_agents_package() {
+  local manifest="$1" pkg_name
+  [[ -f "$manifest" ]] || return 1
+  pkg_name=$(jq -r '.name // ""' "$manifest" 2>/dev/null) || return 1
+  [[ "$pkg_name" == "@kontourai/flow-agents" ]]
+}
+
+# install_identity_package_root — this package's root, found by walking UP from the telemetry
+# script's own directory. Echoes the root, or nothing when it cannot be established.
+#
+# WHY A WALK and not fixed path arithmetic: telemetry.sh is shipped in TWO byte-identical copies at
+# DIFFERENT depths — scripts/telemetry/ (two levels below the package root) and the
+# context/scripts/telemetry/ mirror (three). A hardcoded "../.." is therefore correct for one copy
+# and silently wrong for the other, which resolved the mirror's root to context/ and reported
+# source:"unknown" on a fully stamped tree. Because validate:source enforces the two copies
+# byte-identical, no per-copy constant can exist — the root has to be discovered, not assumed.
+#
+# The walk does NOT stop at the first package.json it meets: this repository ships
+# scripts/package.json and context/scripts/package.json, both bare `{"type":"commonjs"}` module-type
+# markers rather than real package boundaries, and both sit directly on the walk path of both
+# telemetry.sh copies. Only a manifest that DECLARES this package ends the search; every other one
+# is walked past. Depth is bounded so a detached install terminates at "unknown" instead of walking
+# to / and adopting whatever manifest it finds there.
+install_identity_package_root() {
+  local dir="$1" depth
+  for ((depth = 0; depth < 6; depth++)); do
+    if install_identity_is_flow_agents_package "$dir/package.json"; then
+      printf '%s' "$dir"
+      return 0
+    fi
+    dir="${dir%/*}"
+    [[ -n "$dir" ]] || return 0
+  done
+  return 0
+}
+
 # install_identity — the producer-identity tuple for the Flow Agents install emitting this event
 # (#1180). Echoes {package_version, content_fingerprint, source}.
 #
@@ -172,23 +215,19 @@ runtime_version() {
 # Resolution order, first hit wins:
 #   1. "stamp"   build/generated/install-identity.json shipped inside the package
 #                (src/tools/generate-install-identity.ts, written by the last step of
-#                `npm run build`), resolved through the same "$TELEMETRY_DIR/../../build/generated/"
-#                idiom economics-record.sh already uses for capability-declarations.json. The
-#                fingerprint is computed at build time, so event-time cost is one file read.
-#   2. "git"     no stamp, but the package root IS a Flow Agents source checkout — its package.json
-#                declares THIS package name — and git resolves a HEAD. Fingerprint is "git:<sha>".
-#                The package-name guard is load-bearing: the claude-code project bundle lays
-#                scripts/ into the CONSUMER's own repository, so an unguarded `git rev-parse` there
-#                would stamp the consumer project's commit as Flow Agents' producer identity — a
-#                fabricated join key, precisely the failure this field exists to prevent.
+#                `npm run build`). The fingerprint is computed at build time, so event-time cost is
+#                one file read.
+#   2. "git"     no stamp, but the package root is a Flow Agents source checkout and git resolves a
+#                HEAD. Fingerprint is "git:<sha>".
 #   3. "unknown" every field the literal string "unknown". Labeled, never guessed.
 #
 # FLOW_AGENTS_INSTALL_IDENTITY_ROOT overrides the package root (fixture isolation for evals),
 # mirroring the FLOW_AGENTS_CAPABILITY_DECL_FILE override economics-record.sh already exposes.
 install_identity() {
-  local pkg_root stamp_file version fingerprint identity_source pkg_name git_sha
-  pkg_root="${FLOW_AGENTS_INSTALL_IDENTITY_ROOT:-${TELEMETRY_DIR}/../..}"
+  local pkg_root stamp_file version fingerprint identity_source git_sha
+  pkg_root="${FLOW_AGENTS_INSTALL_IDENTITY_ROOT:-$(install_identity_package_root "$TELEMETRY_DIR")}"
   version=""; fingerprint=""; identity_source=""
+  [[ -n "$pkg_root" ]] || { jq -nc '{package_version:"unknown",content_fingerprint:"unknown",source:"unknown"}'; return 0; }
   stamp_file="${pkg_root}/build/generated/install-identity.json"
   if [[ -f "$stamp_file" ]]; then
     version=$(jq -r '.package_version // ""' "$stamp_file" 2>/dev/null) || version=""
@@ -202,8 +241,7 @@ install_identity() {
     fi
   fi
   if [[ -z "$identity_source" && -f "${pkg_root}/package.json" ]]; then
-    pkg_name=$(jq -r '.name // ""' "${pkg_root}/package.json" 2>/dev/null) || pkg_name=""
-    if [[ "$pkg_name" == "@kontourai/flow-agents" ]]; then
+    if install_identity_is_flow_agents_package "${pkg_root}/package.json"; then
       git_sha=$(git -C "$pkg_root" rev-parse HEAD 2>/dev/null) || git_sha=""
       if [[ "$git_sha" =~ ^[0-9a-f]{40,64}$ ]]; then
         fingerprint="git:${git_sha}"
