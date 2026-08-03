@@ -8,6 +8,25 @@ import { pathToFileURL } from "node:url";
 
 import { main as kitMain } from "../../build/src/cli/kit.js";
 
+const KNOWLEDGE_SCHEMA_FILES = [
+  "context-check-input.schema.json",
+  "context-check-result.schema.json",
+  "edge.schema.json",
+  "health-report.schema.json",
+  "node.schema.json",
+  "proposal.schema.json",
+];
+
+test("Knowledge Kit ships exact copies of its canonical root schemas", () => {
+  for (const name of KNOWLEDGE_SCHEMA_FILES) {
+    assert.equal(
+      fs.readFileSync(path.join("kits", "knowledge", "schemas", "knowledge", name), "utf8"),
+      fs.readFileSync(path.join("schemas", "knowledge", name), "utf8"),
+      `vendored Knowledge Kit schema drifted from schemas/knowledge/${name}`,
+    );
+  }
+});
+
 function tempRoot(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
