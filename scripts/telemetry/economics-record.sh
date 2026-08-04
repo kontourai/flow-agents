@@ -42,6 +42,12 @@ export TELEMETRY_DIR="${TELEMETRY_DIR:-$SCRIPT_DIR}"
 source "$TELEMETRY_DIR/lib/config.sh" 2>/dev/null || true
 # shellcheck source=/dev/null
 source "$TELEMETRY_DIR/lib/transport.sh" 2>/dev/null || exit 0
+# #970: the SAME producer-identity resolver telemetry.sh stamps onto every event, sourced here so the
+# durable economics record carries the identical {package_version, content_fingerprint, source} tuple
+# and the two halves join on one vocabulary. Best-effort: a missing lib degrades to the labeled unknown
+# tuple below, never blocks the record.
+# shellcheck source=/dev/null
+source "$TELEMETRY_DIR/lib/install-identity.sh" 2>/dev/null || true
 
 # jq is mandatory — it is what guarantees valid JSON + \u-escaping of untrusted fields. No jq ⇒ no-op.
 command -v jq >/dev/null 2>&1 || exit 0
@@ -301,10 +307,23 @@ elif [[ "$explicit_sidecars" == "true" ]]; then
   producer_authority="fixture_input"
 fi
 
+# --- producer identity (#970): the SAME tuple telemetry.sh stamps onto every event, resolved from the
+# shared lib. Rides as a TOP-LEVEL sibling of the record (ConsoleEconomicsRecord has an open index
+# signature; the store appends untouched). Fail-safe parity with telemetry.sh's build_base_event:
+# --argjson aborts jq on malformed input, which would drop the whole record — any resolution hiccup
+# (missing lib, jq error) degrades to the explicit unknown tuple, never a missing block, never a block.
+install_identity_json=""
+if declare -f install_identity >/dev/null 2>&1; then
+  install_identity_json=$(install_identity 2>/dev/null) || install_identity_json=""
+fi
+printf '%s' "$install_identity_json" | jq -e 'type == "object"' >/dev/null 2>&1 \
+  || install_identity_json='{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}'
+
 # --- assemble the record with ONE jq -c filter (injection-safe, valid JSON) -------------------------
 # Untrusted fields (task_slug, model names, finding text) flow through jq string handling so hostile
 # control bytes are \u-escaped rather than emitted raw. NEVER printf/concatenate JSON.
 record="$(printf '%s' "$usage_event" | jq -c \
+  --argjson install_identity "$install_identity_json" \
   --argjson state "$state_json" \
   --argjson critique "$critique_json" \
   --argjson acceptance "$acceptance_json" \
@@ -413,7 +432,8 @@ record="$(printf '%s' "$usage_event" | jq -c \
               | if $known == 0 then "none" elif $known == $n then "full" else "partial" end
             end)
       },
-      tenant_id: (if $tenant == "" then null else $tenant end)
+      tenant_id: (if $tenant == "" then null else $tenant end),
+      install_identity: $install_identity
     }' 2>/dev/null)" || exit 0
 [[ -z "$record" || "$record" == "null" ]] && exit 0
 if ! printf '%s' "$record" | jq -e '

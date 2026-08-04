@@ -84,5 +84,10 @@
     "runtime": "claude-code",
     "per_delegation_tokens": false,
     "per_delegation_outcome": "n/a"
+  },
+  "install_identity": {
+    "package_version": "9.9.9-fixture",
+    "content_fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "source": "stamp"
   }
 }

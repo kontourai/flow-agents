@@ -159,7 +159,21 @@
         }
       }
     },
-    "tenant_id": { "type": ["string", "null"] }
+    "tenant_id": { "type": ["string", "null"] },
+    "install_identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Producer identity of the Flow Agents install that emitted this record (#970/#1180). The per-release effectiveness join key shared with the telemetry firehose so console#267 can segment economics by Kit version. Always present, all three fields always emitted (including the labeled unknown tuple when resolution is unavailable — never omitted, never fabricated). Resolved from scripts/telemetry/lib/install-identity.sh.",
+      "required": ["package_version", "content_fingerprint", "source"],
+      "properties": {
+        "package_version": { "type": "string" },
+        "content_fingerprint": { "type": "string" },
+        "source": {
+          "type": "string",
+          "enum": ["stamp", "git", "unknown"]
+        }
+      }
+    }
   },
   "allOf": [
     {
@@ -168,7 +182,7 @@
         "required": ["version"]
       },
       "then": {
-        "required": ["run_correlation", "observation_semantics", "producer_authority"]
+        "required": ["run_correlation", "observation_semantics", "producer_authority", "install_identity"]
       }
     }
   ]
