@@ -208,6 +208,38 @@ else
   fail "install_identity unknown case: got $none_identity"
 fi
 
+# (vi) NON-OVERRIDE real-resolver path: every other case above pins the resolution via the
+# FLOW_AGENTS_INSTALL_IDENTITY_ROOT override, so the suite would never notice the shared resolver
+# picking the WRONG base for the economics producer's own package root (the resolver-base-shift class).
+# This case unsets the override entirely and asserts economics-record.sh resolves ITS OWN install
+# identity through the real two-fixed-offset package-root logic against this actual checkout. In a
+# built tree the stamp is present → source=stamp + the real package_version; in an unbuilt checkout
+# the resolver must still find the Flow Agents root → source=git with a real version, NEVER unknown.
+# A resolver that resolves the wrong/no root for the economics producer turns this positive assertion
+# red — independent of telemetry.sh's mirror-parity test.
+REAL_STAMP="$ROOT/build/generated/install-identity.json"
+REAL_LOG="$TMP/econ-real-identity.jsonl"; : > "$REAL_LOG"
+env -u FLOW_AGENTS_INSTALL_IDENTITY_ROOT TELEMETRY_ECONOMICS_LOG_FILE="$REAL_LOG" bash "$EMITTER" "$USAGE_EVENT" >/dev/null 2>&1
+real_identity="$(jq -c '.install_identity' "$REAL_LOG" 2>/dev/null)"
+real_source="$(printf '%s' "$real_identity" | jq -r '.source' 2>/dev/null)"
+real_version="$(printf '%s' "$real_identity" | jq -r '.package_version' 2>/dev/null)"
+real_fp="$(printf '%s' "$real_identity" | jq -r '.content_fingerprint' 2>/dev/null)"
+if [[ -f "$REAL_STAMP" ]]; then
+  exp_version="$(jq -r '.package_version' "$REAL_STAMP" 2>/dev/null)"
+  exp_fp="$(jq -r '.content_fingerprint' "$REAL_STAMP" 2>/dev/null)"
+  if [[ "$real_source" == "stamp" && "$real_version" == "$exp_version" && "$real_fp" == "$exp_fp" ]]; then
+    pass "non-override real resolver finds the economics producer's own stamped root (source=stamp, version=$real_version)"
+  else
+    fail "non-override real resolver: expected stamp/$exp_version/$exp_fp, got $real_identity"
+  fi
+else
+  if [[ "$real_source" == "git" && -n "$real_version" && "$real_version" != "unknown" ]]; then
+    pass "non-override real resolver finds the economics producer's checkout root (source=git, version=$real_version)"
+  else
+    fail "non-override real resolver degraded to unknown/wrong (expected a resolved Flow Agents root): got $real_identity"
+  fi
+fi
+
 # ── AC1/AC6: schema validation — golden validates; cost-only (no defects) FAILS (R7 Goodhart) ─────
 echo "--- AC1/AC6: schema — golden validates positive; a cost-only record FAILS (co-required cost+defects) ---"
 SCHEMA_CHECK="$(node -e '

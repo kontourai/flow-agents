@@ -182,7 +182,7 @@
         "required": ["version"]
       },
       "then": {
-        "required": ["run_correlation", "observation_semantics", "producer_authority"]
+        "required": ["run_correlation", "observation_semantics", "producer_authority", "install_identity"]
       }
     }
   ]
