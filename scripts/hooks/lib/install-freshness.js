@@ -49,7 +49,7 @@
  *
  * BOUNDARY ONLY: `workflow-steering.js` calls this from its SessionStart-unconditional block and
  * nowhere else. It must never ride along on UserPromptSubmit — an install cannot go stale
- * mid-session, so a per-turn copy would be pure context tax.
+ * mid-session, so a per-turn copy would be pure context overhead.
  */
 
 const fs = require('fs');

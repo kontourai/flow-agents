@@ -873,6 +873,11 @@ CACHE
 
 iso_now() { node -e 'process.stdout.write(new Date().toISOString())'; }
 iso_days_ago() { node -e "process.stdout.write(new Date(Date.now() - $1 * 86400000).toISOString())"; }
+iso_hours_ahead() { node -e "process.stdout.write(new Date(Date.now() + $1 * 3600000).toISOString())"; }
+
+# The classifier itself, for the two assertions that must distinguish "silent" from "silent AND
+# asked for a refresh" — an end-to-end silence check alone cannot see the refresh decision.
+export FRESHNESS_LIB="$ROOT/scripts/hooks/lib/install-freshness.js"
 
 # $1=outfile  $2=install root  $3=cwd  $4=hook event  ($FRESHNESS_DEST scopes the registry cache)
 freshness_run() {
@@ -998,6 +1003,42 @@ if ! grep -qF "[INSTALL STALE]" "$TMPDIR_EVAL/reg-expired.out"; then
   _pass "#1180: silent when the cache is older than the TTL, however newer its recorded release"
 else
   _fail "#1180: advisory fired from an expired cache: $(cat "$TMPDIR_EVAL/reg-expired.out")"
+fi
+
+# CLOCK SKEW. A cache stamped in the FUTURE cannot be aged, so it cannot be trusted — a machine
+# whose clock jumped (or a hand-edited stamp) must not get a permanently un-expirable cache. The
+# guard treats it exactly like an expired one: no claim, and a refresh is warranted. Asserted on
+# both the end-to-end advisory (silent) and the classifier's own verdict (refresh:true), because
+# "silent" alone would also be satisfied by a guard that silently gave up and never refreshed.
+FRESHNESS_DEST="$TMPDIR_EVAL/registry-dest-future"
+write_registry_cache "$FRESHNESS_DEST" '"7.7.7"' "$(iso_hours_ahead 1)"
+freshness_run "$TMPDIR_EVAL/reg-future.out" "$INSTALL_BEHIND" "$REG_CWD" "SessionStart"
+REG_FUTURE_VERDICT="$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$INSTALL_BEHIND" \
+  FLOW_AGENTS_USER_CLAUDE_SETTINGS="$FRESHNESS_DEST/settings.json" node -e '
+const { installedIdentity, registryStaleness } = require(process.env.FRESHNESS_LIB);
+process.stdout.write(JSON.stringify(registryStaleness(installedIdentity(process.env), process.env)));
+' 2>&1)"
+if ! grep -qF "[INSTALL STALE]" "$TMPDIR_EVAL/reg-future.out" && \
+   [[ "$REG_FUTURE_VERDICT" == '{"determinable":false,"refresh":true}' ]]; then
+  _pass "#1180: a future-dated cache is never trusted — advisory silent and the classifier asks for a refresh"
+else
+  _fail "#1180: future-dated cache mishandled (verdict $REG_FUTURE_VERDICT): $(cat "$TMPDIR_EVAL/reg-future.out")"
+fi
+
+# Same guard, other half: a fetched_at that does not parse at all yields no age, so no claim.
+FRESHNESS_DEST="$TMPDIR_EVAL/registry-dest-badstamp"
+write_registry_cache "$FRESHNESS_DEST" '"7.7.7"' "not-a-timestamp"
+freshness_run "$TMPDIR_EVAL/reg-badstamp.out" "$INSTALL_BEHIND" "$REG_CWD" "SessionStart"
+REG_BADSTAMP_VERDICT="$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$INSTALL_BEHIND" \
+  FLOW_AGENTS_USER_CLAUDE_SETTINGS="$FRESHNESS_DEST/settings.json" node -e '
+const { installedIdentity, registryStaleness } = require(process.env.FRESHNESS_LIB);
+process.stdout.write(JSON.stringify(registryStaleness(installedIdentity(process.env), process.env)));
+' 2>&1)"
+if ! grep -qF "[INSTALL STALE]" "$TMPDIR_EVAL/reg-badstamp.out" && \
+   [[ "$REG_BADSTAMP_VERDICT" == '{"determinable":false,"refresh":true}' ]]; then
+  _pass "#1180: an unparseable fetched_at yields no age and therefore no claim (refresh requested)"
+else
+  _fail "#1180: unparseable fetched_at mishandled (verdict $REG_BADSTAMP_VERDICT): $(cat "$TMPDIR_EVAL/reg-badstamp.out")"
 fi
 
 FRESHNESS_DEST="$TMPDIR_EVAL/registry-dest-absent"

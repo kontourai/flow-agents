@@ -879,7 +879,7 @@ function run(rawInput, _options = {}, fencedRunId = null) {
     //   - the install-freshness advisory (#1180 PR 2): whether the INSTALL running these hooks is
     //     itself behind. Boundary-only for the same reason as the rest of this block, and one
     //     stronger: an install cannot go stale mid-session, so a per-turn copy would be pure
-    //     context tax. It must never be added to the UserPromptSubmit paths above.
+    //     context overhead. It must never be added to the UserPromptSubmit paths above.
     if (event === 'SessionStart') {
       const contextHint = contextMapSteering(root);
       if (contextHint) hints.push(contextHint);
