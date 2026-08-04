@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.9.0](https://github.com/kontourai/flow-agents/compare/v5.8.0...v5.9.0) (2026-08-04)
+
+
+### Features
+
+* **hooks:** SessionStart install-freshness advisory — ancestry + registry signals, cache-as-untrusted-input ([#1180](https://github.com/kontourai/flow-agents/issues/1180) PR2) ([#1186](https://github.com/kontourai/flow-agents/issues/1186)) ([02c40e9](https://github.com/kontourai/flow-agents/commit/02c40e921bcb4232a9bff6252d398f4649b4a4c6))
+* **telemetry:** install-identity join key — build-time stamp, pack-time truth assertion, labeled source enum ([#1180](https://github.com/kontourai/flow-agents/issues/1180) PR1) ([#1184](https://github.com/kontourai/flow-agents/issues/1184)) ([5042549](https://github.com/kontourai/flow-agents/commit/504254951c5e2ae29924731218af6e629b4d3eb4))
+
 ## [5.8.0](https://github.com/kontourai/flow-agents/compare/v5.7.0...v5.8.0) (2026-08-03)
 
 
