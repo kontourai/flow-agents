@@ -26,6 +26,10 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/telemetry/run-usage-scope.js", { mirror: "context/scripts/telemetry/run-usage-scope.js", allowedDifferences: [] }],
   ["scripts/telemetry/lib/config.sh", { mirror: "context/scripts/telemetry/lib/config.sh", allowedDifferences: [] }],
   ["scripts/telemetry/lib/session.sh", { mirror: "context/scripts/telemetry/lib/session.sh", allowedDifferences: [] }],
+  // #970: the shared producer-identity resolver, sourced by BOTH telemetry.sh (event stamp)
+  // and economics-record.sh (durable record stamp). Enforce byte-identical mirror so the two
+  // callers can never resolve against a drifted copy.
+  ["scripts/telemetry/lib/install-identity.sh", { mirror: "context/scripts/telemetry/lib/install-identity.sh", allowedDifferences: [] }],
   ["scripts/telemetry/telemetry.conf", { mirror: "context/scripts/telemetry/telemetry.conf", allowedDifferences: [] }],
   ["scripts/telemetry/console-presets.sh", { mirror: "context/scripts/telemetry/console-presets.sh", allowedDifferences: [] }],
   ["scripts/telemetry/install-console-config.sh", { mirror: "context/scripts/telemetry/install-console-config.sh", allowedDifferences: [] }],
