@@ -485,6 +485,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-board-sync-integration
 
+      - name: Console outbox integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-outbox-integration
+
       - name: Capability declarations integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
