@@ -3937,7 +3937,12 @@ test("public workflow drive rejects a non-owner before adapter execution", async
 
   await assert.rejects(
     workflowMain(["drive", "--session-dir", session.sessionDir, "--adapter-command-file", commandFile]),
-    /active, matching assignment actor/,
+    (error) => {
+      assert.match(error.message, /active, matching assignment actor/);
+      assert.match(error.message, /assignment-provider claim/);
+      assert.match(error.message, /--subject-id continuation-driver-owner/);
+      return true;
+    },
   );
   assert.equal(fs.existsSync(marker), false);
   assert.equal(fs.existsSync(path.join(session.sessionDir, "continuation-driver")), false);
