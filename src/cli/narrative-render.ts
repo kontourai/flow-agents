@@ -576,6 +576,10 @@ async function render(flags: ReturnType<typeof parseArgs>["flags"]): Promise<num
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    usage();
+    return 0;
+  }
   const args = parseArgs(argv);
   const verb = args.positionals[0];
   try {
