@@ -164,10 +164,14 @@ type TrustBundleSnapshot = {
 // Flow state via the public interface (loadBuilderFlowRun / flowRunHead) — never a
 // sidecar-local projection, which may lag the canonical head (#1164).
 //
-// The terminal set mirrors Flow's own closed-run check (flow-run-store.js):
-// ["canceled", "completed", "failed", "accepted_by_exception"]. "archived" is a
+// The terminal set mirrors Flow's lifecycle eligibility (flow-run-lifecycle.ts):
+// attach_evidence/evaluate reject only paused and canceled, and accepted_by_exception
+// is a CONTINUING status — the run still evaluates the excepted gate and Flow
+// reverses it to active on continuation (flow-run-store.ts claim-admission path);
+// Flow Agents' own terminal classification test calls it "continue". Only
+// completed/canceled/failed are closed for every mutation. "archived" is a
 // sidecar-level status, not a Flow run status, and is not included here.
-export const TERMINAL_FLOW_STATUSES = ["completed", "canceled", "failed", "accepted_by_exception"];
+export const TERMINAL_FLOW_STATUSES = ["completed", "canceled", "failed"];
 
 export type SignalValidationCode = "run_closed" | "gate_advanced";
 

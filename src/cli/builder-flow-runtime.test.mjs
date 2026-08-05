@@ -8272,6 +8272,38 @@ test("#1191 run_closed: record-evidence against a canceled run is rejected; a di
   );
 });
 
+test("#1191 accepted_by_exception is not terminal: record-evidence still succeeds (review MEDIUM)", async () => {
+  // Independent-review finding: accepted_by_exception was initially classified
+  // terminal, but it is a CONTINUING status — Flow's lifecycle eligibility only
+  // rejects paused/canceled for attach_evidence/evaluate, Flow reverses it to
+  // active on continuation, and Flow Agents' own terminal classification calls
+  // it "continue". The legitimate workflow — accept exception, keep writing
+  // evidence, sync to evaluate — must not hit run_closed.
+  const session = makeGitBackedSession("signal-validation-accepted-exception");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nAccepted exception fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  await acceptException(session.slug, {
+    cwd: session.projectRoot,
+    gate: "pull-work-gate",
+    reason: "authorized fixture waiver",
+    authority: "test-reviewer",
+  });
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.status, "accepted_by_exception");
+
+  // The write must NOT be rejected — accepted_by_exception is not closed.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-evidence", session.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write on an accepted_by_exception run" }),
+    ]),
+    0,
+    "record-evidence succeeds on an accepted_by_exception run",
+  );
+});
+
 test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is rejected; the run remains writable", async () => {
   const session = makeGitBackedSession("signal-validation-gate-advanced");
   claimAmbientSessionAssignment(session);
