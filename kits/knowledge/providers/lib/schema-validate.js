@@ -3,8 +3,8 @@
  *
  * Supports exactly the draft-07 subset used by the Knowledge Kit graph schemas
  * (schemas/knowledge/*.schema.json): type, required, properties,
- * additionalProperties:false, enum, const, items, minLength, minItems, integer,
- * and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
+ * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
+ * uniqueItems, anyOf, oneOf, integer, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
  * without pulling an external dependency (the same zero-dep discipline the
  * decision-registry validator follows).
@@ -48,6 +48,28 @@ function validateNode(value, schema, root, pathStr, errors) {
     }
   }
 
+  if (Array.isArray(schema.anyOf)) {
+    const candidateErrors = schema.anyOf.map((candidate) => {
+      const candidateResult = [];
+      validateNode(value, candidate, root, pathStr, candidateResult);
+      return candidateResult;
+    });
+    if (!candidateErrors.some((candidate) => candidate.length === 0)) {
+      errors.push(`${pathStr}: does not satisfy any allowed schema (${candidateErrors.flat().join("; ")})`);
+    }
+  }
+
+  if (Array.isArray(schema.oneOf)) {
+    const candidateErrors = schema.oneOf.map((candidate) => {
+      const candidateResult = [];
+      validateNode(value, candidate, root, pathStr, candidateResult);
+      return candidateResult;
+    });
+    if (candidateErrors.filter((candidate) => candidate.length === 0).length !== 1) {
+      errors.push(`${pathStr}: must satisfy exactly one allowed schema`);
+    }
+  }
+
   if (schema.enum) {
     if (!schema.enum.includes(value)) {
       errors.push(`${pathStr}: value ${JSON.stringify(value)} not in enum ${JSON.stringify(schema.enum)}`);
@@ -66,11 +88,25 @@ function validateNode(value, schema, root, pathStr, errors) {
     if (typeof schema.minLength === "number" && value.length < schema.minLength) {
       errors.push(`${pathStr}: string shorter than minLength ${schema.minLength}`);
     }
+    if (typeof schema.pattern === "string" && !(new RegExp(schema.pattern).test(value))) {
+      errors.push(`${pathStr}: string does not match pattern ${JSON.stringify(schema.pattern)}`);
+    }
   }
 
   if (Array.isArray(value)) {
     if (typeof schema.minItems === "number" && value.length < schema.minItems) {
       errors.push(`${pathStr}: array shorter than minItems ${schema.minItems}`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      errors.push(`${pathStr}: array longer than maxItems ${schema.maxItems}`);
+    }
+    if (schema.uniqueItems === true) {
+      const seen = new Set();
+      for (const item of value) {
+        const identity = JSON.stringify(item);
+        if (seen.has(identity)) { errors.push(`${pathStr}: array items must be unique`); break; }
+        seen.add(identity);
+      }
     }
     if (schema.items) {
       value.forEach((item, i) => validateNode(item, schema.items, root, `${pathStr}[${i}]`, errors));

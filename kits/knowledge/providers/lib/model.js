@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_DIR = path.resolve(__dirname, "../../../../schemas/knowledge");
+const SCHEMA_DIR = path.resolve(__dirname, "../../schemas/knowledge");
 
 /** Closed vocabulary of edge types (schema-enforced). */
 export const EDGE_TYPES = Object.freeze([

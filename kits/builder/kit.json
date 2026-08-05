@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "observability_contribution": { "path": "kit-observability.contribution.json" },
   "id": "builder",
   "name": "Builder Kit",
   "product_name": "Builder Kit",
@@ -219,21 +220,6 @@
       ],
       "must_include_actions": [
         "route decision_gap back to design-probe/pickup Probe"
-      ]
-    },
-    {
-      "id": "dev-builder-review-before-verify-after-execute",
-      "description": "review-before-verify after execute",
-      "tier": "adapter",
-      "event": "PostToolUse",
-      "must_include_guidance": [
-        "Next: review",
-        "then verify",
-        "report only"
-      ],
-      "must_include_actions": [
-        "review-work for report-only critique before verify-work",
-        "not count report-only critique as verification evidence"
       ]
     },
     {

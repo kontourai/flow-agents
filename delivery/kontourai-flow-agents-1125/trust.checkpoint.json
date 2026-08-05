@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-1125",
+  "work_item": null,
+  "status": "provisional",
+  "phase": "ci-readiness",
+  "sealed_at": "2026-08-01T20:21:38.531Z",
+  "commit_sha": "8d9e9326e9b3d89fec28bc441e805eccf89c9e29",
+  "checkpoint": {
+    "asOf": "2026-08-01T20:21:38.531Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-1125-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1125-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-979aaf81727be37d41e6cb1c12602a4df90ba77c28232ed5af73a0b6bebb8952-gate-visit-2026-08-01t20-11-27z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-pickup-probe-readiness.flow-agents-workflow.the-authorized-evidence-only-recovery-is-provider-held-exact-head-bounded-and-ready-gate-visit-2026-08-01t20-11-44-471z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.reuse-the-existing-exact-head-implementation-do-not-duplicate-source-work-board-readiness-bypass-is-the-sole-accepted-pickup-gap-gate-visit-2026-08-01t20-11-44-854z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-implementation-plan.flow-agents-workflow.the-evidence-only-plan-maps-all-three-criteria-to-exact-head-commands-and-forbids-source-widening-gate-visit-2026-08-01t20-12-07-499z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-implementation-scope.flow-agents-workflow.exact-commit-8d9e932-implements-the-bounded-regression-and-documentation-in-two-files-this-run-made-no-source-changes-gate-visit-2026-08-01t20-12-34-192z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-tests-evidence.flow-agents-workflow.independent-exact-head-verification-passed-all-three-acceptance-criteria-and-the-canonical-public-api-command-passed-7-7-gate-visit-2026-08-01t20-20-03-531z": "verified",
+      "kontourai-flow-agents-1125-gate-claim-merge-readiness.flow-agents-workflow.exact-head-scope-independent-critique-acceptance-evidence-local-readiness-and-substantive-provider-ci-support-delivery-publication-final-merge-remains-gated-on-trust-reconcile-after-bundle-publication-gate-visit-2026-08-01t20-20-33-142z": "verified",
+      "kontourai-flow-agents-1125-ac-1125-1-public-workflow-tests-evidence-records-complete-criterion-evidence-in-trust-bundle-while-acceptance-json-retains-its-incomplete-planned-source-placeholder.flow-agents-workflow.ac-1125-1-public-workflow-tests-evidence-records-complete-criterion-evidence-in-trust-bundle-while-acceptance-json-retains-its-incomplete-planned-source-placeholder-verified-2026-08-01t20-20-03-531z": "verified",
+      "kontourai-flow-agents-1125-ac-1125-2-generic-and-private-evidence-paths-remain-fail-closed-for-incomplete-source-references.flow-agents-workflow.ac-1125-2-generic-and-private-evidence-paths-remain-fail-closed-for-incomplete-source-references-verified-2026-08-01t20-20-03-531z": "verified",
+      "kontourai-flow-agents-1125-ac-1125-3-public-workflow-cli-documentation-explains-the-planning-contract-and-verified-evidence-distinction.flow-agents-workflow.ac-1125-3-public-workflow-cli-documentation-explains-the-planning-contract-and-verified-evidence-distinction-verified-2026-08-01t20-20-03-531z": "verified",
+      "kontourai-flow-agents-1125-codex-review-1128-8d9e9326.flow-agents-workflow.exact-head-review-found-no-correctness-maintainability-scope-regression-coverage-or-fail-closed-defects-in-the-two-file-change-reviewed-2026-08-01t20-16-21-253z": "verified"
+    },
+    "throughEventCreatedAt": "2026-08-01T20:20:33.142Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-1125-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1125-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-979aaf81727be37d41e6cb1c12602a4df90ba77c28232ed5af73a0b6bebb8952-gate-visit-2026-08-01t20-11-27z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-pickup-probe-readiness.flow-agents-workflow.the-authorized-evidence-only-recovery-is-provider-held-exact-head-bounded-and-ready-gate-visit-2026-08-01t20-11-44-471z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.reuse-the-existing-exact-head-implementation-do-not-duplicate-source-work-board-readiness-bypass-is-the-sole-accepted-pickup-gap-gate-visit-2026-08-01t20-11-44-854z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-implementation-plan.flow-agents-workflow.the-evidence-only-plan-maps-all-three-criteria-to-exact-head-commands-and-forbids-source-widening-gate-visit-2026-08-01t20-12-07-499z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-implementation-scope.flow-agents-workflow.exact-commit-8d9e932-implements-the-bounded-regression-and-documentation-in-two-files-this-run-made-no-source-changes-gate-visit-2026-08-01t20-12-34-192z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-tests-evidence.flow-agents-workflow.independent-exact-head-verification-passed-all-three-acceptance-criteria-and-the-canonical-public-api-command-passed-7-7-gate-visit-2026-08-01t20-20-03-531z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-gate-claim-merge-readiness.flow-agents-workflow.exact-head-scope-independent-critique-acceptance-evidence-local-readiness-and-substantive-provider-ci-support-delivery-publication-final-merge-remains-gated-on-trust-reconcile-after-bundle-publication-gate-visit-2026-08-01t20-20-33-142z": "2026-08-01T20:20:33.142Z",
+      "kontourai-flow-agents-1125-ac-1125-1-public-workflow-tests-evidence-records-complete-criterion-evidence-in-trust-bundle-while-acceptance-json-retains-its-incomplete-planned-source-placeholder.flow-agents-workflow.ac-1125-1-public-workflow-tests-evidence-records-complete-criterion-evidence-in-trust-bundle-while-acceptance-json-retains-its-incomplete-planned-source-placeholder-verified-2026-08-01t20-20-03-531z": "2026-08-01T20:20:03.531Z",
+      "kontourai-flow-agents-1125-ac-1125-2-generic-and-private-evidence-paths-remain-fail-closed-for-incomplete-source-references.flow-agents-workflow.ac-1125-2-generic-and-private-evidence-paths-remain-fail-closed-for-incomplete-source-references-verified-2026-08-01t20-20-03-531z": "2026-08-01T20:20:03.531Z",
+      "kontourai-flow-agents-1125-ac-1125-3-public-workflow-cli-documentation-explains-the-planning-contract-and-verified-evidence-distinction.flow-agents-workflow.ac-1125-3-public-workflow-cli-documentation-explains-the-planning-contract-and-verified-evidence-distinction-verified-2026-08-01t20-20-03-531z": "2026-08-01T20:20:03.531Z",
+      "kontourai-flow-agents-1125-codex-review-1128-8d9e9326.flow-agents-workflow.exact-head-review-found-no-correctness-maintainability-scope-regression-coverage-or-fail-closed-defects-in-the-two-file-change-reviewed-2026-08-01t20-16-21-253z": "2026-08-01T20:20:33.142Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/knowledge/context-check-result/1.0.json",
+  "title": "Knowledge Kit Context Check result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "flow", "input", "recalls", "reconciliation", "proposals", "verdict", "written"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "flow": { "const": "knowledge.context-check" },
+    "input": { "$ref": "#/$defs/resultInput" },
+    "recalls": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/recall" } },
+    "reconciliation": { "type": "array", "items": { "$ref": "#/$defs/reconciliation" } },
+    "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal" } },
+    "verdict": { "enum": ["pass", "not_verified"] },
+    "written": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }
+  },
+  "$defs": {
+    "identity": { "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$" },
+    "claimId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!\\s)(?!.*\\s$)(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))(?!.*[\\u0000-\\u001F\\u007F]).+$" },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "citation", "revision"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "citation": { "$ref": "#/$defs/identity" },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "retrievalProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "knowledge_roots", "manifest_paths", "revision", "read_mode"],
+      "properties": {
+        "provider": { "const": "git-repo" },
+        "knowledge_roots": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/claimId" } },
+        "manifest_paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "read_mode": { "const": "git-show" }
+      }
+    },
+    "resolvedRecall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "claim", "status", "authority", "retrieval_provenance"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" },
+        "claim": { "$ref": "#/$defs/identity" },
+        "status": { "enum": ["current", "superseded", "unverifiable"] },
+        "superseded_by": { "$ref": "#/$defs/claimId" },
+        "authority": { "$ref": "#/$defs/authority" },
+        "retrieval_provenance": { "$ref": "#/$defs/retrievalProvenance" }
+      }
+    },
+    "noAnswerRecall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "status", "reason", "retrieval_provenance"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" },
+        "status": { "const": "unverifiable" },
+        "reason": { "const": "no_answer" },
+        "retrieval_provenance": { "$ref": "#/$defs/retrievalProvenance" }
+      }
+    },
+    "recall": { "anyOf": [{ "$ref": "#/$defs/resolvedRecall" }, { "$ref": "#/$defs/noAnswerRecall" }] },
+    "reconciliationBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" },
+        "status": { "enum": ["clean", "affected", "contradicted", "unverifiable"] },
+        "affected_surfaces": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } },
+        "authority": { "$ref": "#/$defs/authority" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority"],
+          "properties": { "authority": { "$ref": "#/$defs/authority" } }
+        }
+      }
+    },
+    "cleanReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "clean" },
+        "affected_surfaces": { "type": "array", "maxItems": 0 }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "affectedReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "affected" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "unverifiableReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "unverifiable" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" }
+      }
+    },
+    "contradictedReconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_id", "status", "affected_surfaces", "authority", "evidence"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/claimId" }, "status": { "const": "contradicted" },
+        "affected_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } }, "authority": { "$ref": "#/$defs/authority" },
+        "evidence": {
+          "type": "object", "additionalProperties": false, "required": ["authority"],
+          "properties": { "authority": { "$ref": "#/$defs/authority" } }
+        }
+      }
+    },
+    "reconciliation": { "oneOf": [
+      { "$ref": "#/$defs/cleanReconciliation" },
+      { "$ref": "#/$defs/affectedReconciliation" },
+      { "$ref": "#/$defs/unverifiableReconciliation" },
+      { "$ref": "#/$defs/contradictedReconciliation" }
+    ] },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "status", "kind", "claim_id", "route", "rationale", "provenance"],
+      "properties": {
+        "schema_version": { "const": "1.0" },
+        "id": { "$ref": "#/$defs/claimId" },
+        "status": { "const": "proposed" },
+        "kind": { "const": "context-update" },
+        "claim_id": { "$ref": "#/$defs/claimId" },
+        "route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "path"],
+          "properties": { "owner": { "$ref": "#/$defs/identity" }, "path": { "$ref": "#/$defs/relativePath" } }
+        },
+        "rationale": { "$ref": "#/$defs/identity" },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority", "retrieval"],
+          "properties": { "authority": { "$ref": "#/$defs/authority" }, "retrieval": { "const": "git-show" } }
+        }
+      }
+    },
+    "resultInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace", "repository", "revision", "target_audience", "changed_surfaces", "knowledge_roots"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/identity" },
+        "repository": { "$ref": "#/$defs/identity" },
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "target_audience": { "$ref": "#/$defs/identity" },
+        "changed_surfaces": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } },
+        "knowledge_roots": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "provider", "manifest_path"],
+            "properties": { "id": { "$ref": "#/$defs/claimId" }, "provider": { "const": "git-repo" }, "manifest_path": { "$ref": "#/$defs/relativePath" } }
+          }
+        }
+      }
+    }
+  }
+}

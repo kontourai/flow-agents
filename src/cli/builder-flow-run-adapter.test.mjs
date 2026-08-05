@@ -156,6 +156,12 @@ function snapshotRun(cwd, runId) {
   };
 }
 
+function liveEvidenceIds(cwd, runId, gateId) {
+  return snapshotRun(cwd, runId).manifest.evidence
+    .filter((entry) => entry.gate_id === gateId && typeof entry.superseded_by !== "string")
+    .map((entry) => entry.id);
+}
+
 function assertSnapshotUnchanged(before, after) {
   assert.deepEqual(after.state, before.state, "state.json changed after rejected input");
   assert.deepEqual(after.manifest, before.manifest, "evidence manifest changed after rejected input");
@@ -169,7 +175,7 @@ function assertAdapterRejectedInput(error) {
   return true;
 }
 
-function trustBundle({ claims, status = "verified", waiver = false, stale = false }) {
+function trustBundle({ claims, status = "verified", waiver = false, stale = false, now = FIXTURE_NOW }) {
   const policyId = "policy.duration";
   const evidence = claims.map((claim, index) => ({
     id: `evidence.${index + 1}`,
@@ -178,7 +184,7 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
     method: stale ? "validation" : "attestation",
     sourceRef: "src/cli/builder-flow-run-adapter.test.mjs",
     excerptOrSummary: `fixture for ${claim.claimType}`,
-    observedAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
+    observedAt: stale ? "2026-01-01T00:00:00.000Z" : now,
     collectedBy: "flow-agents-test",
   }));
   return {
@@ -195,8 +201,8 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
         workflow_subject_ref: claim.workflowSubjectRef ?? claim.subjectId,
         ...(waiver ? { waiver: { reason: "plausible fixture waiver", approved_by: "flow-agents-test", approved_at: FIXTURE_NOW } } : {}),
       },
-      createdAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
-      updatedAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
+      createdAt: stale ? "2026-01-01T00:00:00.000Z" : now,
+      updatedAt: stale ? "2026-01-01T00:00:00.000Z" : now,
       ...(stale ? { impactLevel: "high", verificationPolicyId: policyId } : {}),
     })),
     evidence,
@@ -222,14 +228,14 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
       actor: "flow-agents-test",
       method: stale ? "npm test" : "attestation",
       evidenceIds: [`evidence.${index + 1}`],
-      createdAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
-      verifiedAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
+      createdAt: stale ? "2026-01-01T00:00:00.000Z" : now,
+      verifiedAt: stale ? "2026-01-01T00:00:00.000Z" : now,
     })),
   };
 }
 
-function claim(claimType, subjectType, subjectId = SUBJECT) {
-  return { id: `claim.${claimType}.${subjectType}`, claimType, subjectType, subjectId };
+function claim(claimType, subjectType, subjectId = SUBJECT, identitySuffix = "") {
+  return { id: `claim.${claimType}.${subjectType}${identitySuffix ? `.${identitySuffix}` : ""}`, claimType, subjectType, subjectId };
 }
 
 function evidenceFile(cwd, name, bundle) {
@@ -279,6 +285,96 @@ async function advanceParentPrefixThroughExecute(cwd, runId) {
     await evaluateBuilderBuildRun({ cwd, runId, evidence: gateEvidence(cwd, { gate, claimType, subjectType, name: claimType }) });
   }
   assert.equal(snapshotRun(cwd, runId).state.current_step, "execute", "sequential parent-prefix setup must reach execute");
+}
+
+async function advanceParentPrefixThroughMergeReadyCi(cwd, runId) {
+  await advanceParentPrefixThroughVerify(cwd, runId);
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "verify-gate",
+      claimType: "builder.verify.tests",
+      subjectType: "flow-step",
+      name: "verify-all-selectors",
+      bundle: trustBundle({ claims: [
+        claim("workflow.critique.review", "workflow-critique"),
+        claim("workflow.acceptance.criterion", "flow-step"),
+        claim("builder.verify.tests", "flow-step"),
+        claim("builder.verify.policy-compliance", "artifact"),
+      ] }),
+    }),
+  });
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, { gate: "merge-ready-gate", claimType: "builder.merge-ready.readiness", subjectType: "change" }),
+  });
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, { gate: "builder.publish-learn:pr-open-gate", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" }),
+  });
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "merge-ready-ci", "composed publish-learn setup must reach merge-ready-ci");
+}
+
+async function advanceExecuteThroughMergeReadyCi(cwd, runId, attempt) {
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "execute", "route-back retry setup must resume at execute");
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "execute-gate",
+      claimType: "builder.execute.scope",
+      subjectType: "change",
+      name: `execute-retry-${attempt}`,
+      bundle: trustBundle({ claims: [claim("builder.execute.scope", "change", SUBJECT, `retry-${attempt}`)], now: new Date().toISOString() }),
+      supersede: liveEvidenceIds(cwd, runId, "execute-gate"),
+    }),
+  });
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "verify", "fresh execute evidence must advance the retry to verify");
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "verify-gate",
+      claimType: "builder.verify.tests",
+      subjectType: "flow-step",
+      name: `verify-retry-${attempt}`,
+      bundle: trustBundle({ claims: [
+        claim("workflow.critique.review", "workflow-critique", SUBJECT, `retry-${attempt}`),
+        claim("workflow.acceptance.criterion", "flow-step", SUBJECT, `retry-${attempt}`),
+        claim("builder.verify.tests", "flow-step", SUBJECT, `retry-${attempt}`),
+        claim("builder.verify.policy-compliance", "artifact", SUBJECT, `retry-${attempt}`),
+      ], now: new Date().toISOString() }),
+      supersede: liveEvidenceIds(cwd, runId, "verify-gate"),
+    }),
+  });
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "merge-ready-gate",
+      claimType: "builder.merge-ready.readiness",
+      subjectType: "change",
+      name: `merge-ready-retry-${attempt}`,
+      bundle: trustBundle({ claims: [claim("builder.merge-ready.readiness", "change", SUBJECT, `retry-${attempt}`)], now: new Date().toISOString() }),
+      supersede: liveEvidenceIds(cwd, runId, "merge-ready-gate"),
+    }),
+  });
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "builder.publish-learn:pr-open-gate",
+      claimType: "builder.pr-open.pull-request",
+      subjectType: "pull-request",
+      name: `pr-open-retry-${attempt}`,
+      bundle: trustBundle({ claims: [claim("builder.pr-open.pull-request", "pull-request", SUBJECT, `retry-${attempt}`)], now: new Date().toISOString() }),
+      supersede: liveEvidenceIds(cwd, runId, "builder.publish-learn:pr-open-gate"),
+    }),
+  });
+  assert.equal(snapshotRun(cwd, runId).state.current_step, "merge-ready-ci", "route-back retry setup must return to merge-ready-ci");
 }
 
 test("start is creation-only and persists canonical id/version", async () => {
@@ -708,6 +804,102 @@ test("failed verify evidence routes back only after sequential prefix advancemen
   assert.equal(transition.from_step, "verify");
   assert.equal(transition.to_step, "execute");
   assert.deepEqual(transition.expectation_ids, ["tests-evidence"]);
+});
+
+test("failed composed CI merge readiness routes implementation defects to execute with bounded retries", async () => {
+  const cwd = makeWorkspace();
+  const runId = "merge-ready-ci-implementation-defect";
+  await advanceParentPrefixThroughMergeReadyCi(cwd, runId);
+  const beforeUndeclaredReason = snapshotRun(cwd, runId);
+
+  await assert.rejects(
+    () => evaluateBuilderBuildRun({
+      cwd,
+      runId,
+      evidence: gateEvidence(cwd, {
+        gate: "builder.publish-learn:merge-ready-ci-gate",
+        claimType: "builder.merge-ready-ci.readiness",
+        subjectType: "pull-request",
+        status: "failed",
+        routeReason: "missing_evidence",
+        expectationIds: ["ci-merge-readiness"],
+        name: "merge-ready-ci-undeclared-reason",
+      }),
+    }),
+    /route_reason.*is not declared by gate builder\.publish-learn:merge-ready-ci-gate/,
+  );
+  assertSnapshotUnchanged(beforeUndeclaredReason, snapshotRun(cwd, runId));
+
+  await evaluateBuilderBuildRun({
+    cwd,
+    runId,
+    evidence: gateEvidence(cwd, {
+      gate: "builder.publish-learn:merge-ready-ci-gate",
+      claimType: "builder.merge-ready-ci.readiness",
+      subjectType: "pull-request",
+      status: "failed",
+      routeReason: "implementation_defect",
+      expectationIds: ["ci-merge-readiness"],
+    }),
+  });
+  const persisted = snapshotRun(cwd, runId);
+  const outcome = persisted.state.gate_outcomes.at(-1);
+  const transition = persisted.state.transitions.at(-1);
+
+  assert.equal(persisted.state.current_step, "execute");
+  assert.equal(persisted.state.status, "active");
+  assert.equal(outcome.gate_id, "builder.publish-learn:merge-ready-ci-gate");
+  assert.equal(outcome.status, "route-back");
+  assert.equal(outcome.route_reason, "implementation_defect");
+  assert.equal(outcome.route_back_to, "execute");
+  assert.equal(outcome.attempt, 1);
+  assert.equal(outcome.max_attempts, 3);
+  assert.equal(transition.type, "route_back");
+  assert.equal(transition.from_step, "merge-ready-ci");
+  assert.equal(transition.to_step, "execute");
+  assert.equal(transition.route_reason, "implementation_defect");
+  assert.equal(transition.gate_id, "builder.publish-learn:merge-ready-ci-gate");
+  assert.deepEqual(transition.expectation_ids, ["ci-merge-readiness"]);
+});
+
+test("composed CI merge readiness blocks after its third implementation-defect route-back", async () => {
+  const cwd = makeWorkspace();
+  const runId = "merge-ready-ci-route-back-exhaustion";
+  await advanceParentPrefixThroughMergeReadyCi(cwd, runId);
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await evaluateBuilderBuildRun({
+      cwd,
+      runId,
+      evidence: gateEvidence(cwd, {
+        gate: "builder.publish-learn:merge-ready-ci-gate",
+        claimType: "builder.merge-ready-ci.readiness",
+        subjectType: "pull-request",
+        status: "failed",
+        routeReason: "implementation_defect",
+        expectationIds: ["ci-merge-readiness"],
+        name: `merge-ready-ci-failure-${attempt}`,
+        bundle: trustBundle({ claims: [claim("builder.merge-ready-ci.readiness", "pull-request", SUBJECT, `failure-${attempt}`)], now: new Date().toISOString() }),
+        supersede: liveEvidenceIds(cwd, runId, "builder.publish-learn:merge-ready-ci-gate"),
+      }),
+    });
+    const persisted = snapshotRun(cwd, runId);
+    const outcome = persisted.state.gate_outcomes.at(-1);
+
+    assert.equal(outcome.gate_id, "builder.publish-learn:merge-ready-ci-gate");
+    assert.equal(outcome.attempt, attempt);
+    assert.equal(outcome.max_attempts, 3);
+    if (attempt <= 3) {
+      assert.equal(outcome.status, "route-back");
+      assert.equal(persisted.state.current_step, "execute");
+      assert.equal(persisted.state.status, "active");
+      await advanceExecuteThroughMergeReadyCi(cwd, runId, attempt);
+    } else {
+      assert.equal(outcome.status, "block");
+      assert.equal(persisted.state.current_step, "merge-ready-ci");
+      assert.equal(persisted.state.status, "blocked");
+    }
+  }
 });
 
 test("failed execute evidence routes declared plan_gap to plan without replacing the run", async () => {

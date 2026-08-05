@@ -191,6 +191,13 @@ npx @kontourai/flow-agents kit install path/to/my-kit
 npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 ```
 
+For a local source that may move between machines or worktrees, add
+`--record-source <locator>` to record caller-declared logical provenance. The
+registry remains portable by storing the copied Kit as
+`kits/local/repositories/<kit-id>`; the recorded `sha256:` hash, not source
+metadata, verifies the installed bytes. Git installs continue to record their
+URL/ref and reject `--record-source`.
+
 - [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.
 - [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
 - [Knowledge Kit docs](kits/knowledge/docs/README.md) — store contract, record types, mutation ops, similarity detectors, and the Obsidian adapter.
