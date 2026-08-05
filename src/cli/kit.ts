@@ -1,21 +1,78 @@
 import * as child_process from "node:child_process";
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
-import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
+import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
+import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
+import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
+const REPOSITORIES_REL_POSIX = "kits/local/repositories";
+const MAX_RECORD_SOURCE_LENGTH = 1024;
+// These Unicode categories can alter terminal/log rendering or provenance display.
+// Property escapes are standardized in supported Node runtimes, so this remains
+// deterministic without maintaining a partial hand-written Unicode range table.
+const UNSAFE_RECORD_SOURCE_CHARACTER_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+export type KitCliTestHooks = {
+  beforeCopy?: (source: string, target: string) => void;
+  afterCopy?: (source: string, target: string) => void;
+  writeRegistry?: (root: string, registryFile: string, registry: Record<string, unknown>) => void;
+  cleanupBackup?: (backup: string) => void;
+};
+
+let testHooks: KitCliTestHooks | undefined;
+
+/** Test-only deterministic race seam. Production callers never set this. */
+export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): void {
+  testHooks = hooks;
+}
+
+const KIT_USAGE: Record<string, string> = {
+  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
+  validate: "usage: flow-agents kit validate [<kit-dir>]",
+  provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
+  inspect: "usage: flow-agents kit inspect [<kit-dir>] [--json]",
+  list: "usage: flow-agents kit list [--dest <path>]",
+  status: "usage: flow-agents kit status [<kit-id>] [--dest <path>]",
+};
+
+function hasHelp(argv: string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+function printKitUsage(): void {
+  console.log(`Usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> [args]
+
+Commands:
+  install    Install a Flow Kit from a local path or Git URL.
+  activate   Write runtime projections for installed and built-in kits.
+  validate   Validate a Flow Kit repository.
+  provision  Copy a kit's declared provisions into a target repository.
+  inspect    Report a kit's conformance and consumer targets.
+  list       List locally installed Flow Kits.
+  status     Report local Flow Kit installation status.
+
+Install notes:
+  --record-source <locator> is local-path-only caller-declared provenance metadata.
+  The recorded hash, not --record-source, verifies copied Kit bytes.`);
+}
+
+function printCommandUsage(command: keyof typeof KIT_USAGE): void {
+  console.log(KIT_USAGE[command]);
+}
 
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
+function installedPathRelative(kitId: string): string { return `${REPOSITORIES_REL_POSIX}/${kitId}`; }
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
   const explicit = flagString(flags, "dest");
   return path.resolve(explicit ?? defaultCodexHome());
@@ -35,11 +92,161 @@ function resolveCatalogKitSource(source: string): string | null {
   return path.resolve(path.dirname(repoCatalogPath), "..", rel);
 }
 
+function resolveProvisionKitSource(source: string, dest: string): string | null {
+  const localPath = path.resolve(source);
+  if (fs.existsSync(localPath)) return localPath;
+  const installed = loadRegistry(dest).kits.find((entry) => entry.id === source);
+  if (installed) {
+    const installedSource = installedPath(dest, source);
+    if (fs.existsSync(installedSource)) return installedSource;
+  }
+  return resolveCatalogKitSource(source);
+}
+
 function loadRegistry(dest: string): { schema_version: string; kits: Record<string, unknown>[] } {
   const file = registryPath(dest);
   if (!fs.existsSync(file)) return { schema_version: "1.0", kits: [] };
   const data = readJson(file) as { schema_version?: string; kits?: unknown[] };
   return { schema_version: data.schema_version ?? "1.0", kits: Array.isArray(data.kits) ? data.kits.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [] };
+}
+
+type InstalledKitRegistry = ReturnType<typeof loadRegistry>;
+
+/**
+ * Make the copied target and registry entry one transaction. The target swap
+ * remains reversible until the registry's atomic write has completed, so a
+ * registry failure cannot leave an unregistered replacement on disk.
+ */
+function installCopiedKit(options: {
+  source: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  registry: InstalledKitRegistry;
+  existing: Record<string, unknown> | undefined;
+  sourceText: string;
+  update: boolean;
+}): void {
+  const { source, dest, target, manifest, registry, existing, sourceText, update } = options;
+  const transaction = copyDirAtomicTransaction(dest, source, target, (completedTarget) => {
+    testHooks?.afterCopy?.(source, completedTarget);
+    const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
+    if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
+    return targetObservation.observed_hash;
+  }, { removeBackup: testHooks?.cleanupBackup });
+  if (!transaction.value) {
+    transaction.rollback();
+    throw new Error("completed copied kit did not produce a content hash");
+  }
+
+  const entry: Record<string, unknown> = {
+    id: String(manifest.id),
+    source: sourceText,
+    hash: transaction.value,
+    installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
+    installed_path: installedPathRelative(String(manifest.id)),
+    state: "installed",
+  };
+  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
+  registry.kits = existing ? registry.kits.map((item) => item.id === entry.id ? entry : item) : [...registry.kits, entry];
+
+  try {
+    const file = registryPath(dest);
+    if (testHooks?.writeRegistry) testHooks.writeRegistry(dest, file, registry);
+    else atomicWriteJson(dest, file, registry);
+  } catch (error) {
+    try {
+      transaction.rollback();
+    } catch (rollbackError) {
+      throw new Error(`registry write failed and target rollback also failed: ${(error as Error).message}; ${(rollbackError as Error).message}`);
+    }
+    throw new Error(`registry write failed; target rolled back: ${(error as Error).message}`);
+  }
+  const cleanupError = transaction.commit();
+  if (cleanupError) {
+    console.warn(`warning: kit '${String(manifest.id)}' is installed and registered, but cleanup of its replaced target failed: ${cleanupError.message}; a later install will retry cleanup`);
+  }
+}
+
+function cleanStaleInstallArtifacts(dest: string, target: string, existing: Record<string, unknown> | undefined): void {
+  if (!existing || typeof existing.hash !== "string") return;
+  const observed = observeKitContentHash(target, { trustedRoot: dest });
+  if (observed.state !== "observed" || observed.observed_hash !== existing.hash) return;
+  for (const cleanupError of cleanupDirectoryCopyBackups(dest, target)) {
+    console.warn(`warning: could not clean stale installer artifact for '${path.basename(target)}': ${cleanupError.message}; a later install will retry cleanup`);
+  }
+}
+
+function acquireInstallRegistryLock(dest: string): () => Error | undefined {
+  const lock = path.join(ensureSafeDirectory(dest, path.dirname(registryPath(dest))), ".installed-kits.flow-agents.lock");
+  try {
+    fs.mkdirSync(lock, { mode: 0o700 });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+      const error = new Error(`destination install/registry transaction is active or requires recovery: ${lock}`) as Error & { code?: string };
+      error.code = "INSTALL_REGISTRY_LOCKED";
+      throw error;
+    }
+    throw cause;
+  }
+  return () => {
+    try {
+      fs.rmdirSync(lock);
+      return undefined;
+    } catch (cause) {
+      return cause instanceof Error ? cause : new Error(String(cause));
+    }
+  };
+}
+
+function withInstallRegistryLock<T>(dest: string, action: () => T): T {
+  const release = acquireInstallRegistryLock(dest);
+  let completed = false;
+  try {
+    const result = action();
+    completed = true;
+    return result;
+  } finally {
+    const releaseError = release();
+    if (releaseError) {
+      console.warn(`warning: destination install/registry lock cleanup failed${completed ? " after the install transaction completed" : " while preserving the primary transaction outcome"}: ${releaseError.message}; later installs will fail closed until recovery`);
+    }
+  }
+}
+
+type RegistryInstallOutcome =
+  | { status: "installed"; existing: boolean }
+  | { status: "idempotent" }
+  | { status: "conflict"; source: unknown };
+
+/**
+ * Serialize every registry-dependent install decision before taking the
+ * narrower target-copy lock. The ordering is always registry then target.
+ */
+function installWithRegistryTransaction(options: {
+  source: string;
+  manifestPath: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  sourceText: string;
+  hash: string;
+  update: boolean;
+  force: boolean;
+}): RegistryInstallOutcome {
+  const { source, manifestPath, dest, target, manifest, sourceText, hash, update, force } = options;
+  return withInstallRegistryLock(dest, () => {
+    warnUninstalledDependencies(manifest, manifestPath, dest);
+    const registry = loadRegistry(dest);
+    const kitId = String(manifest.id);
+    const existing = registry.kits.find((entry) => entry.id === kitId);
+    cleanStaleInstallArtifacts(dest, target, existing);
+    if (existing && existing.source !== sourceText && !update) return { status: "conflict", source: existing.source };
+    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force && !update) return { status: "idempotent" };
+    testHooks?.beforeCopy?.(source, target);
+    installCopiedKit({ source, dest, target, manifest, registry, existing, sourceText, update });
+    return { status: "installed", existing: Boolean(existing) };
+  });
 }
 
 /**
@@ -64,32 +271,15 @@ function warnUninstalledDependencies(manifest: Record<string, unknown>, manifest
   }
 }
 
-function contentHash(root: string): string {
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const rel = path.relative(root, file).split(path.sep).join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
-/** Content hash that excludes .git and other VCS/cache directories (for install git clones). */
-function kitContentHash(root: string): string {
-  const EXCLUDE_DIRS = new Set([".git", "__pycache__", ".pytest_cache"]);
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const parts = path.relative(root, file).split(path.sep);
-    if (parts.some((p) => EXCLUDE_DIRS.has(p))) continue;
-    const rel = parts.join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
+/**
+ * Print non-blocking kit-validation warnings (e.g. an agent-spawning trigger surface
+ * declared without complete guard config — context/contracts/trigger-guards.md).
+ * Shared by BOTH install source forms (local path and git clone) so the standing
+ * warning contract cannot silently diverge between them. Same non-blocking
+ * `warning:` convention as warnUninstalledDependencies above.
+ */
+async function printKitValidationWarnings(kitDir: string): Promise<void> {
+  for (const warning of (await validateKitRepositoryDiagnostics(kitDir)).warnings) console.log(`warning: ${warning}`);
 }
 
 /**
@@ -107,7 +297,7 @@ async function install(argv: string[]): Promise<number> {
   const source = args.positionals[0] ?? "";
   if (!source) {
     console.error("install: missing <source> argument");
-    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]");
+    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]");
     return 2;
   }
 
@@ -120,12 +310,31 @@ async function install(argv: string[]): Promise<number> {
   return await installLocalSource(resolveCatalogKitSource(source) ?? path.resolve(source), argv);
 }
 
+function resolveLocalRecordSource(flags: ReturnType<typeof parseArgs>["flags"], source: string): string | null {
+  if (!Object.hasOwn(flags, "record-source")) return source;
+  const recordSource = flagString(flags, "record-source");
+  if (
+    typeof recordSource !== "string"
+    || !recordSource.trim()
+    || recordSource !== recordSource.trim()
+    || recordSource.length > MAX_RECORD_SOURCE_LENGTH
+    || UNSAFE_RECORD_SOURCE_CHARACTER_RE.test(recordSource)
+  ) {
+    console.error(`install: --record-source must be a trimmed non-blank locator no longer than ${MAX_RECORD_SOURCE_LENGTH} characters and must not contain unsafe Unicode control, format, or separator characters`);
+    return null;
+  }
+  return recordSource;
+}
+
 async function installLocalSource(source: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const dest = resolveDest(args.flags);
+  const sourceText = resolveLocalRecordSource(args.flags, source);
+  if (sourceText === null) return 2;
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
+    await printKitValidationWarnings(source);
   } catch (error) {
     console.log("Flow Kit repository validation failed:");
     for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) console.log(` - ${diagnostic}`);
@@ -147,37 +356,50 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.error(`install: unsafe source or destination: ${(error as Error).message}`);
     return 1;
   }
-  warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
-  const hash = contentHash(source);
-  const registry = loadRegistry(dest);
-  const existing = registry.kits.find((entry) => entry.id === kitId);
-  const sourceText = source;
-  if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
-    console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
+  const hashObservation = observeKitContentHash(source);
+  if (hashObservation.state !== "observed") {
+    console.error(`install: cannot safely observe kit content: ${hashObservation.diagnostic}`);
+    return 1;
+  }
+  const hash = hashObservation.observed_hash;
+  let outcome: RegistryInstallOutcome;
+  try {
+    outcome = installWithRegistryTransaction({
+      source,
+      manifestPath: path.join(source, "kit.json"),
+      dest,
+      target,
+      manifest,
+      sourceText,
+      hash,
+      update: flagBool(args.flags, "update") ?? false,
+      force: flagBool(args.flags, "force") ?? false,
+    });
+  } catch (error) {
+    console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
+    return 1;
+  }
+  if (outcome.status === "conflict") {
+    console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
     return 2;
   }
-  if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !flagBool(args.flags, "force")) {
+  if (outcome.status === "idempotent") {
     console.log(`kit '${kitId}' is already installed from ${sourceText}`);
     return 0;
   }
-  copyDirAtomic(dest, source, target);
-  const entry: Record<string, unknown> = {
-    id: kitId,
-    source: sourceText,
-    hash,
-    installed_at: existing && existing.source === sourceText && !flagBool(args.flags, "update") ? existing.installed_at : isoNow(),
-    installed_path: target,
-    state: "installed",
-  };
-  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-  registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-  atomicWriteJson(dest, registryPath(dest), registry);
-  console.log(`${existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
+  const sourceNote = Object.hasOwn(args.flags, "record-source")
+    ? `; recorded caller-declared source metadata '${sourceText}' (hash verifies copied bytes)`
+    : "";
+  console.log(`${outcome.existing ? "updated" : "installed"} local kit '${kitId}' at ${target}${sourceNote}`);
   return 0;
 }
 
 async function installGitSource(rawUrl: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  if (Object.hasOwn(args.flags, "record-source")) {
+    console.error("install: --record-source is supported only for local path installs; Git installs record their URL and ref");
+    return 2;
+  }
 
   // Parse ref: #fragment in URL takes precedence over --ref flag.
   let repoUrl = rawUrl;
@@ -213,6 +435,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     let manifest: Record<string, unknown>;
     try {
       manifest = await assertKitRepository(tmpBase);
+      await printKitValidationWarnings(tmpBase);
     } catch (error) {
       console.log("Flow Kit repository validation failed:");
       for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) {
@@ -223,10 +446,12 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
 
     // Delegate to the shared install logic (copy + registry update).
     const kitId = String(manifest.id);
-    warnUninstalledDependencies(manifest, path.join(tmpBase, "kit.json"), dest);
-    const hash = kitContentHash(tmpBase);
-    const registry = loadRegistry(dest);
-    const existing = registry.kits.find((entry) => entry.id === kitId);
+    const hashObservation = observeKitContentHash(tmpBase);
+    if (hashObservation.state !== "observed") {
+      console.error(`install: cannot safely observe cloned kit content: ${hashObservation.diagnostic}`);
+      return 1;
+    }
+    const hash = hashObservation.observed_hash;
     const target = installedPath(dest, kitId);
     try {
       ensureSafeDirectory(dest, dest);
@@ -242,27 +467,32 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       return 1;
     }
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
-    if (existing && existing.source !== sourceText && !update) {
-      console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
+    let outcome: RegistryInstallOutcome;
+    try {
+      outcome = installWithRegistryTransaction({
+        source: tmpBase,
+        manifestPath: path.join(tmpBase, "kit.json"),
+        dest,
+        target,
+        manifest,
+        sourceText,
+        hash,
+        update,
+        force,
+      });
+    } catch (error) {
+      console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
+      return 1;
+    }
+    if (outcome.status === "conflict") {
+      console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
       return 2;
     }
-    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) {
+    if (outcome.status === "idempotent") {
       console.log(`kit '${kitId}' is already installed from ${sourceText}`);
       return 0;
     }
-    copyDirAtomic(dest, tmpBase, target);
-    const entry: Record<string, unknown> = {
-      id: kitId,
-      source: sourceText,
-      hash,
-      installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
-      installed_path: target,
-      state: "installed",
-    };
-    if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-    registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-    atomicWriteJson(dest, registryPath(dest), registry);
-    console.log(`${existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
+    console.log(`${outcome.existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
     return 0;
   } finally {
     fs.rmSync(tmpBase, { recursive: true, force: true });
@@ -300,7 +530,14 @@ function status(argv: string[]): number {
     return 0;
   }
   for (const entry of entries.sort((a, b) => String(a.id ?? "").localeCompare(String(b.id ?? "")))) {
-    console.log(JSON.stringify({ ...entry, state: fs.existsSync(String(entry.installed_path ?? "")) ? "installed" : "missing" }, null, 2));
+    const integrity = observeInstalledKitIntegrity(entry, dest);
+    console.log(JSON.stringify({
+      ...entry,
+      state: integrity.state,
+      recorded_hash: integrity.recorded_hash,
+      observed_hash: integrity.observed_hash,
+      ...(integrity.diagnostic ? { diagnostic: integrity.diagnostic } : {}),
+    }, null, 2));
   }
   return 0;
 }
@@ -323,6 +560,60 @@ function activate(argv: string[]): number {
     : activateCodexLocal(sourceRoot, dest);
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
+}
+
+async function validate(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const kitDir = path.resolve(args.positionals[0] ?? ".");
+  const diagnostics = await validateKitRepositoryDiagnostics(kitDir);
+  for (const warning of diagnostics.warnings) console.log(`warning: ${warning}`);
+  if (diagnostics.errors.length) {
+    console.log("Flow Kit repository validation failed:");
+    for (const error of diagnostics.errors) console.log(` - ${error}`);
+    return 1;
+  }
+  console.log(`Flow Kit repository validation passed: ${kitDir}`);
+  return 0;
+}
+
+async function provision(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const source = args.positionals[0];
+  if (!source) {
+    console.error("provision: missing <kit-id-or-path> argument");
+    console.error("usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--force] [--dry-run]");
+    return 2;
+  }
+  const dest = resolveDest(args.flags);
+  const kitDir = resolveProvisionKitSource(source, dest);
+  if (!kitDir) {
+    console.error(`provision: kit '${source}' was not found as a local path, installed kit, or catalog kit`);
+    return 1;
+  }
+  const target = path.resolve(flagString(args.flags, "target", process.cwd()) ?? process.cwd());
+  try {
+    const result = await provisionKit(kitDir, target, {
+      force: flagBool(args.flags, "force"),
+      dryRun: flagBool(args.flags, "dry-run"),
+    });
+    for (const file of result.files) console.log(`${result.dry_run ? "would provision" : "provisioned"}: ${file.source} -> ${file.destination}`);
+    if (result.dry_run) console.log(`dry-run: ${result.files.length} file(s) declared by kit '${result.kit_id}'; no files written`);
+    else if (result.files.length === 0) console.log(`kit '${result.kit_id}' declares no provisions`);
+    else console.log(`provisioned ${result.files.length} file(s) from kit '${result.kit_id}' into ${target}`);
+    return 0;
+  } catch (error) {
+    if (error instanceof ProvisionConflictError) {
+      console.error(`provision: ${error.message}; rerun with --force to overwrite`);
+      for (const conflict of error.conflicts) console.error(`conflict: ${conflict.target} (${conflict.destination})`);
+      return 1;
+    }
+    const diagnostics = (error as Error & { diagnostics?: string[] }).diagnostics;
+    if (diagnostics?.length) {
+      console.error("Flow Kit repository validation failed:");
+      for (const diagnostic of diagnostics) console.error(` - ${diagnostic}`);
+    } else console.error(`provision: ${(error as Error).message}`);
+    return 1;
+  }
 }
 
 /**
@@ -366,6 +657,38 @@ async function inspect(argv: string[]): Promise<number> {
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "--help" || command === "-h") {
+    printKitUsage();
+    return 0;
+  }
+  if (command === "install" && hasHelp(rest)) {
+    printCommandUsage("install");
+    return 0;
+  }
+  if (command === "activate" && hasHelp(rest)) {
+    printCommandUsage("activate");
+    return 0;
+  }
+  if (command === "validate" && hasHelp(rest)) {
+    printCommandUsage("validate");
+    return 0;
+  }
+  if (command === "provision" && hasHelp(rest)) {
+    printCommandUsage("provision");
+    return 0;
+  }
+  if (command === "inspect" && hasHelp(rest)) {
+    printCommandUsage("inspect");
+    return 0;
+  }
+  if (command === "list" && hasHelp(rest)) {
+    printCommandUsage("list");
+    return 0;
+  }
+  if (command === "status" && hasHelp(rest)) {
+    printCommandUsage("status");
+    return 0;
+  }
   if (command === "install") return await install(rest);
   // Legacy sub-subcommands forwarded for backward compatibility within the kit subcommand.
   if (command === "install-local") return await installLocalSource(path.resolve(rest[0] ?? ""), rest);
@@ -373,8 +696,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
   if (command === "activate") return activate(rest);
+  if (command === "validate") return await validate(rest);
+  if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|inspect|list|status> ...");
+  console.error("usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> ...");
   return 2;
 }
 

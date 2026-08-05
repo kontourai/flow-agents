@@ -7,13 +7,21 @@ test-results/
 # .kontourai/flow-agents. Durable source belongs in docs/, context/,
 # integrations/, scripts/, or tracked bundle source directories.
 .flow-agents/*
+!.flow-agents/
+!.flow-agents/config/
+!.flow-agents/config/**
 .claude/
 /.codex/
 .ai/
 .omx/
 .telemetry/
 .promptfoo/
-.veritas/
+.veritas/claims/
+.veritas/evidence/
+.veritas/eval-drafts/
+.veritas/init-plans/
+.veritas/runs/
+.veritas/standards-feedback-drafts/
 .surface/
 .kontourai/
 

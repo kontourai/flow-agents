@@ -29,12 +29,29 @@ Every Flow Agents event has a canonical name that is runtime-neutral. Adapters m
 | `userPromptSubmit` | The user submits a new turn or message. Maps from `UserPromptSubmit`. | `hook_event_name` | `turn.prompt_text` (redacted by default), `cwd` |
 | `preToolUse` | Immediately before a tool call is executed. Maps from `PreToolUse`. | `hook_event_name`, `tool_name`, `tool_input` | `tool_id`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
 | `permissionRequest` | The runtime is asking for permission to run a tool or action. Maps from `PermissionRequest`. | `hook_event_name`, `tool_name` | `tool_input`, `cwd` |
-| `postToolUse` | After a tool call completes (success or failure). Maps from `PostToolUse` and `PostToolUseFailure`. | `hook_event_name`, `tool_name`, `tool_response` | `tool_input`, `tool_output`, `error`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
+| `postToolUse` | After a tool call completes (success or failure). Maps from `PostToolUse` and `PostToolUseFailure`. | `hook_event_name`, `tool_name`, `tool_response` | `tool_input`, `tool_output`, `error`, `cwd`, `tool.duration_ms`, `tool.outcome`, `tool.status`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
 | `stop` | The agent is about to stop and return control to the user. Maps from `Stop` and `SessionEnd`. | `hook_event_name` | `stop_reason`, `cwd` |
 | `subagentStart` | A subagent or specialist delegate is spawning. Maps from `SubagentStart` (Claude Code). | `hook_event_name` | `agent_name`, `agent_type` |
 | `subagentStop` | A subagent or specialist delegate has stopped. Maps from `SubagentStop` (Claude Code). | `hook_event_name` | `agent_name`, `outcome` |
 
 **`usage.*` on `preToolUse`/`postToolUse` (#568 slice 1).** These two events carry an optional `.usage` object — `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `estimated_cost_usd`, `pricing_version` — sourced from the runtime transcript's LAST assistant turn (the turn that produced this specific tool call), joined via a bounded tail-read of `hook.transcript_path`. This is **per-turn, not a per-tool-call cost fraction**: multiple tool calls inside the same assistant turn (parallel tool_use blocks) report the *same* whole-turn usage figures — do not sum `estimated_cost_usd` across `tool.invoke`/`tool.result` rows within one turn, or cost will be double-counted; `session.usage`'s cumulative totals remain the authoritative aggregate. When the transcript join is unavailable but the runtime's `.model` hook field is present, only `usage.model` is populated and every token/cost field is explicitly `null` (never a guessed number); `.model` itself is best-effort on these two events (see §8.2), not a contractually guaranteed field. `tool.permission_request` (`permissionRequest`) is explicitly excluded from this enrichment.
+
+**Typed tool results on `tool.result`.** Every `tool.result` record (from `postToolUse`/`PostToolUse`/`PostToolUseFailure`) carries intrinsic result fields on its `.tool` object (co-located with `.tool.name`/`.tool.output`):
+- **`duration_ms`** — non-negative wall-clock milliseconds between this tool's invoke and its result, correlated per tool call (host call id when present, else a content hash of `tool_name` + compact `tool_input`). The invoke's start time is recorded on `preToolUse` and read+unlinked on the matching result. It is **`null`** — never a fabricated `0` or a stale value — when the matching start record is absent (a result with no prior recorded invoke). Best-effort and non-blocking; a missing/corrupt start record degrades to `null`. Resolution is millisecond on hosts with a sub-second clock (`$EPOCHREALTIME`/GNU `date +%s%3N`) and second-granular on the portable fallback.
+- **`exit_code`** — the clean host exit code when available, otherwise `null`.
+- **`status`** — `completed`, `failed`, `canceled`, or `blocked` when the host supplies deterministic evidence; `unknown` when it does not. Explicit cancellation and denial signals take precedence over the generic pass/fail observation.
+- **`outcome`** — the evidence-oriented `pass`, `fail`, or `ambiguous` observation retained separately from lifecycle status.
+
+Every `.usage` object declares its aggregation semantics. Per-turn tool records
+use `semantics: "delta"`. A correlated terminal record uses `scope: "run"`,
+`semantics: "delta"`, and `baseline_status: "present"` only after subtracting the
+cumulative transcript and elapsed-duration baseline sealed at the first
+non-terminal observation for that correlation. Without that baseline it remains an explicit session-scoped
+snapshot and is ineligible for hosted per-run economics.
+- **`outcome`** — the deterministic tri-state `pass` | `fail` | `ambiguous` from the canonical observation contract (§2.5), computed in-process by a jq port of `scripts/hooks/evidence-capture.js observeResult` so the Claude hot path stays hermetic (no node subprocess). A `PostToolUseFailure` event folds to `fail`. Never derived from stdout text or model narration. On the Codex runtime only — where the exit code lives in the rollout banner rather than the payload — the code is resolved via `scripts/hooks/lib/codex-exit-code.js` and fed through the same tri-state; an unreadable rollout degrades to `ambiguous`.
+- **`status`** — the host-surfaced integer exit code when one is cleanly present (the same fields §2.5 scans), else **`null`**.
+
+`tool.invoke` and `tool.permission_request` records carry none of these three fields (an invoke has no result yet; a permission request is not a tool result). The three fields are derived scalars only (a timestamp delta, a verdict, an integer) — no args/output/secret material — and the start record stores a bare timestamp, so the console-relay sanitize backstop is unaffected.
 
 ### Redaction Defaults
 
@@ -87,6 +104,64 @@ way.
   supported, it resolves from step 3 onward. Adapters MUST document which manifests they honor so the
   attribution granularity difference is explicit, not surprising.
 
+#### Authenticated run correlation and work-item attribution
+
+Where `context.project` groups events by *codebase*, `run_correlation` binds an event to the exact
+authenticated Builder run. `task_slug` remains a convenience projection for displays and grouping;
+it is emitted only when that correlation resolves successfully and is not an independent join key.
+
+| Field | Semantics | Redacted? | Producer requirement |
+| --- | --- | --- | --- |
+| `run_correlation` | The exact validated envelope persisted by the actor-bound Builder run, or `{status:"incomplete", reason}`. | **No** (validated opaque identities and bounded reasons only) | Every event MUST carry this field. Unbound, changing, unsupported, or invalid bindings stay explicitly incomplete. A Stop/SessionEnd event may consume only its actor's exact terminal retirement generation after validating the matching terminal Flow state. |
+| `task_slug` | Top-level slug of the successfully authenticated Builder run. | **No** (an opaque run slug; carries no path or content) | Emit only with a present `run_correlation`; omit for incomplete correlation. |
+
+Canonical resolution uses `scripts/telemetry/run-correlation-binding.js`:
+
+1. Resolve the canonical runtime actor from the hook environment.
+2. Read only that actor's `current/<actor>.json` pointer; never shared `current.json`.
+3. Read the pointed task's `state.json` without following symlinks and validate its correlation
+   through the public run-correlation contract.
+4. Require pointer generation, Flow run identity, runtime actor identity, and selected Work Item
+   to agree, then re-read the actor pointer to detect a concurrent generation change.
+5. For Stop/SessionEnd only, accept an exact actor retirement marker when its
+   `binding_reason` matches the terminal Flow status and all generation checks still hold.
+6. Embed the exact envelope and derive `task_slug`, or emit a content-free incomplete reason.
+
+The adapter reads no prompts, tool arguments, or source content. Redaction preserves valid opaque
+identity fields, while the validator rejects credential-shaped or malformed values before they can
+enter either telemetry channel.
+
+Delegation telemetry is emitted from the already-correlated tool event. Both the
+standalone `agent.delegate` record and the ordinary tool event's additive `delegation`
+projection therefore carry the exact same envelope. Runtime adapters do not reconstruct
+or post-stamp delegation identity.
+
+At stop time, `session.usage` is the authenticated source for economics correlation.
+Sidecars are captured through one descriptor-safe snapshot and are eligible only when
+the correlated task state embeds the same envelope; the shared `current.json` pointer
+is never consulted. When a validated state contains the canonical Builder
+`workflow_outcome` projection, telemetry mirrors it as a `workflow.outcome` event.
+The complete pointer, state, sidecar, and final-pointer capture runs while
+holding Flow's canonical per-run mutation lock. The binding is incomplete while
+Flow recovery is fenced or when the projected run head, status, or step differs
+from canonical Flow; hooks never relay a stale projection as authenticated
+runtime evidence.
+Telemetry does not derive a terminal state from Stop itself. If Flow already retired
+the binding, the terminal-only path validates that exact actor generation and terminal
+state rather than reviving the binding for ordinary events.
+
+Local economics keeps every Stop observation. Hosted economics relay occurs only
+when the actor binding is authenticated, a run-scoped usage baseline is present,
+and the outcome is canonical completed, canceled, or failed. It uses the
+correlation id as the immutable run id, preventing repeated Stop observations from
+being summed as independent runs.
+
+`workflow.outcome.workflow_outcome.process_status` distinguishes `completed`, `blocked`,
+`canceled`, `failed`, and `not_verified`. Its `quality_status` is fixed to
+`not_independently_evaluated`: process completion and an explicit verification verdict
+do not impersonate an independent task-quality grade. Artifact-derived status and eval
+attempt/grade records remain separate sources.
+
 ### Exit Code Protocol (Canonical Hook Scripts)
 
 Canonical hook scripts in `scripts/hooks/` use the following exit code contract — originally derived from Kiro conventions and shared across all harness adapters via the adapter translation layer:
@@ -121,18 +196,18 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 ### 2.1 Workflow Steering
 
-**Intent**: Inject phase-transition reminders and ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline after subagent calls or context compaction.
+**Intent**: Inject ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline across turns and context compaction.
 
 **Canonical script**: `scripts/hooks/workflow-steering.js`
 
-**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
+**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding). There is no `postToolUse` wiring: a phase-transition table keyed on an `InvokeSubagents` tool call was removed in #1172 because no shipped runtime wires this hook to `postToolUse` and none emits a tool call by that name.
 
 **Inputs consumed**:
 - `.kontourai/flow-agents/<slug>/state.json` — current workflow phase and status
 - `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason, and is emitted at every `SessionStart` whether or not a workflow session is active — a session-less checkout is exactly when an index is worth most. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 
@@ -175,8 +250,9 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `.kontourai/flow-agents/<slug>/acceptance.json` — acceptance criteria; a criterion's `command`-kind `evidence_ref` (`excerpt`) is the most-trusted backstop command
 - `.kontourai/flow-agents/current.json` (`active_flow_id`/`active_step_id`) — when present, resolves the active kit FlowDefinition's gate `expects[]` via the compiled `build/src/lib/flow-resolver.js` (`loadActiveFlowStep`, ADR 0016 Abstraction A P-c); requires `build/` to exist and fails open to the legacy `workflow.*`-only behavior when it does not (the `hasBuild` guard — the same fail-open pattern already used for the trust-bundle validator)
 - The active kit's `kits/<kit>/flows/<flow>.flow.json` — the FlowDefinition file `current.json` resolves against; the matching gate's `expects[].bundle_claim.claimType` values become the declared claim types enforced for the active step (see FlowDefinition-driven claim selection below)
-- `FLOW_AGENTS_GOAL_FIT_MODE` env var — `block` | `warn` | `off` (the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is an alias for `block`)
-- `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` env var — consecutive-identical-block cap before the escape hatch releases (default 3)
+- `.flow-agents/config/core.config.json` — strict committed core policy, resolved only from the immutable `HEAD` blob; absent config preserves the historical defaults and invalid committed config fails closed.
+- `.flow-agents/config/<kit-id>.kit.config.json` — proposal-only Flow `gate_overrides.<gate>.expectations.<expectation>` changes. The filename stem must equal `kit_id`; only a Kit listed by the bounded local init activation record receives a non-mutating preview, and that preview compares committed `.flow/config.json` authority. It cannot install/activate Kits, apply the preview, or patch arbitrary Flow authority.
+- Goal-fit environment values — development conveniences only. Production can only move upward through `off < warn < block` mode and `skip < off < block` backstop policy, in addition to tightening block cap, timeout, and sidecar/critique requirements. `FLOW_AGENTS_GOAL_FIT_BACKSTOP=warn` remains a development alias for `off`. `recheck` is different: it executes model-supplied command text, so it is a committed-policy opt-in and a production environment value cannot turn it from `false` to `true`; malformed policy fails closed with recheck disabled.
 - `FLOW_AGENTS_GOAL_FIT_BACKSTOP` env var — `block` (default) | `off`/`warn` | `skip`; controls the capture backstop re-run (see Capture cross-reference below)
 - `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` env var — per-backstop-command timeout in ms (default 120000; runaway commands are SIGKILL'd)
 - `FLOW_AGENTS_GOAL_FIT_RECHECK` env var — `true` opts into re-running the model's free-form `evidence.checks[].command` (the RCE-risky path; off by default)
@@ -186,6 +262,53 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, sidecar, or capture cross-reference issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
 - `off`: silent (exits 0, no stderr).
 - Escape hatch: in `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released (exit 0 with a loud notice) so a genuinely-unsatisfiable goal cannot trap the agent. A changing gap resets the streak.
+
+**Turn-ending contract for a blocking Stop (#1172)**: `decision:"block"` + `reason` is the
+model-facing channel; `continue:false` + `stopReason` is the user-facing one, and `continue`
+takes precedence over any event-specific decision field. Emitting both — the shape shipped
+before #1172 — routed the entire remediation block to the operator and delivered none of it to
+the agent that had to act on it. A blocking Stop therefore returns `decision`+`reason`, and
+turn-ending is decided by the class of block:
+
+- **Soft block** (an ordinary evidence gap): the harness adapter MUST NOT end the turn. This
+  gate owns termination for that class through the `MAX_BLOCKS` release valve above. An adapter
+  fence pre-empts the valve, truncating it below the count the gate advertises to the operator.
+- **Hard block** (non-releasable: caught false-completion, capture contradiction, tamper signal,
+  integrity failure, canonical Flow still active): the valve deliberately never fires, so the
+  gate has no termination of its own and the adapter supplies one — end the turn on the
+  continuation firing (`stop_hook_active: true`, i.e. a Stop that fires because a previous Stop
+  blocked). One self-correction attempt, then a human.
+
+A hook declares the hard class on a **structured control line**, never in prose, so no adapter
+has to pattern-match one hook's wording:
+
+```
+[flow-agents:stop-control] {"v":1,"terminal":true,"code":"non-releasable-hard-block"}
+```
+
+Adapters MUST strip every control line from both the agent-facing and user-facing text. An
+absent or malformed line reads as **soft** — a false `terminal` truncates the valve, whereas a
+missed one is still bounded by the backstop below. The contract, parser and backstop live in
+`scripts/hooks/lib/stop-escalation.js`; `stop-goal-fit.js` declares the prefix literal
+independently (its shipped `context/` mirror carries a fixed lib subset) and
+`test_goal_fit_hook.sh` pins the two literals equal.
+
+**Consecutive-block backstop (#1172)**: adapters additionally maintain a per-actor count of
+consecutive blocking Stops and force `continue:false` at `FLOW_AGENTS_STOP_MAX_BLOCKS`
+(default 5) regardless of marker or runtime signal, clearing it on any non-blocking Stop and at
+every SessionStart. This exists because `stop_hook_active` is observed in live Claude Code
+payloads but is no longer listed in the published hooks reference: without a floor, a runtime
+that stopped sending it would let a non-releasable block re-prompt the model indefinitely with
+no human ever seeing it. The threshold sits above `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` so the
+gate's own release always fires first on the normal soft path and the backstop stays invisible.
+Storage is best-effort in the fail-open direction: an unreadable or unwritable counter degrades
+to never escalating — it can never suppress the block itself.
+
+> **Adapter coverage gap (follow-up, not closed by #1172)**: only the Claude Code adapter
+> implements the rules above. `scripts/hooks/codex-hook-adapter.js` has no Stop turn-ending path
+> at all — pre-existing, so a hard block under Codex already re-prompts indefinitely today. The
+> backstop is deliberately runtime-agnostic (it depends on no runtime-specific payload field) and
+> is the shape that closes this for Codex and any future L2 adapter.
 
 **FlowDefinition-driven claim selection (ADR 0016 Abstraction A)**: When `current.json` resolves an active flow/step, `bundleEnforcement`'s claim-selection predicate (`isSelectedClaim`) is a **union**: `workflow.*`-prefixed claims are always selected as a baseline floor, and the active gate's declared `claimType` set (from `expects[].bundle_claim.claimType`, e.g. `builder.verify.tests`) is selected *in addition to* that floor — never instead of it. An earlier design used a pure if/else (declared types selected only when a FlowDefinition was active, with no `workflow.*` fallback) and was found in PR #215 to compose into a HIGH-severity gate-bypass chain: a forged `current.json` pointing at an `expects: []` flow made the if/else select zero claims, silently skipping all re-derivation, tamper-detection, and high/critical enforcement. The union floor closed that chain and is a **permanent** design decision, not a transitional step toward the if/else — see [ADR 0016](../adr/0016-three-hard-boundary-model.md) and the PR #215 post-mortem in [ADR 0015](../adr/0015-flow-flow-agents-boundary-reconciliation.md). Consequently, an active FlowDefinition whose gate resolves to an **empty** `expects[]` is always a `HARD_BLOCK` (`gate misconfiguration: active FlowDefinition has empty expects[]...`) — an empty declared set is treated as a possible tampered flow definition, never as a legitimately-empty gate that quietly enforces nothing beyond the floor.
 
@@ -199,6 +322,15 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
    - **(c) model free-form command** — `evidence.checks[].command`, ONLY when `FLOW_AGENTS_GOAL_FIT_RECHECK=true` (opt-in; the RCE-risky path).
 
    If the resolved backstop re-run fails, it is a caught false-completion. If NO trusted command resolves, the gate records `NOT_VERIFIED` — never a guess, never a silent pass, never auto-running an unlisted string.
+
+**Tests-evidence scope divergence (#1171)**: cases 2 and 3 above both accept the claim by verifying the command the claim *names* — neither verifies that the named command is the command the repo *declares* for a tests-shaped claim. A claimed-pass `npx vitest run test/one.test.ts` is captured, exits 0, and re-runs green while the declared suite is never re-checked. So on those two accepting paths only, the gate additionally reports a **scope divergence** when the claimed command is a NARROWED test invocation (a recognized test runner carrying an explicit file/name selector) and the repo declares a test target (the same `declaredManifestTarget` used by backstop source (b)) that the claim does not name. Deliberately conservative: an unrecognized runner, a runner with no selector, or a command the repo itself declares as one of its scripts is never flagged. Severity is `warn` (visible, non-blocking) by default because the standing #1048 workaround institutionalized recording narrowed direct-runner commands; `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block` escalates the same finding to a `HARD_BLOCK`. Narrowing is legitimate when it is *declared*: a claim carrying `metadata.evidence_scope = {narrowed: true, reason: "<why>"}` in `trust.bundle` (or an `evidence_scope` field on the `evidence.json` check) reconciles clean in both modes — the requirement is that narrowing be visible in the bundle, never inferred as full coverage. Disclosure is evaluated **per claim**: bundle-sourced checks are deduplicated by command text, so when several claims name the identical command the divergence survives unless *every* one of them is disclosed, and the warning names an undisclosed claim. The CI reconciler already refuses a non-manifest tests-shaped command outright (`not-run` divergence), so this closes the local Stop backstop, which was the unguarded surface — though note that is a *logical* argument, not an operational one: during a CI outage the Stop hook is the only layer a session experiences, and its default here is warn.
+
+The finding is bound to what was **actually executed**, not to the claimed command text. When the backstop resolves source (b) — the declared manifest target — the full suite genuinely ran, and no divergence is reported even though the claim named a narrower command.
+
+Known limitations, disclosed rather than detected:
+
+- **Text-level detection only.** Narrowing expressed in a runner config (`vitest.config` `include`, `jest` `testMatch`), in source (`.only`/`fdescribe`), through state-based flags (`--onlyChanged`, `--changedSince`), or inside a wrapper script body is invisible to this check. A clean result means "the command text does not admit narrowing", never "the full declared suite demonstrably ran". Closing these needs config parsing or per-run test-count accounting — a different mechanism with a much larger false-positive surface.
+- **The `repoDeclaresCommand` exemption is npm-only.** `declaredManifestTarget` recognizes Makefile, Cargo, tox/pytest, and just/task targets, but the "the repo itself declares this exact command" false-positive guard only scans `package.json` scripts. A non-npm consumer whose declared narrow-looking command is a Make or cargo target can therefore see a warn line; the `evidence_scope` disclosure escape covers that case, and severity is warn by default.
 
 **Backstop guardrails**: each backstop command runs under a per-command timeout (`FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS`, default 120s; runaway commands are killed). The trusted-source backstop (a/b) rides `block` mode by default but is operator-disablable for latency: `FLOW_AGENTS_GOAL_FIT_BACKSTOP=off` (re-run becomes warn-only, never blocks) or `=skip` (no re-run at all → record `NOT_VERIFIED`). The arbitrary-model-command backstop (c) is opt-in only via `FLOW_AGENTS_GOAL_FIT_RECHECK`.
 
@@ -308,6 +440,54 @@ The adapter implements L1 plus all blocking policy classes.
 **Permitted gaps**: None. All four policy classes are wired. Any missing host trigger must be documented as a named gap in the adapter's conformance declaration.
 
 **Use case**: Claude Code (current reference implementation), Codex (current reference implementation). The target conformance level for new harness adapters.
+
+---
+
+## 4.1 Orchestration-Native Capabilities
+
+The conformance levels in section 4 grade **one** thing: how much of the policy
+contract a *runtime adapter* can enforce given its host's hook surface
+(telemetry-only → steering → enforcing gates). The scale is capped at L3 —
+"all four policy classes blocking, bounded by each host's hook surface" — and
+is **not** extended with a fourth rung.
+
+Some ideas an orchestration layer can realize are not "an adapter that blocks
+harder"; they are properties of a layer that owns the dispatch seam itself.
+Grading those on the adapter scale would be a category error: an L3 adapter is
+already doing the most its surface allows, and a rung that only one product can
+reach collapses "conformant at that level" into "is that product," destroying
+the scale's meaning. (Decision agreed with the maintainer; see issue #86, which
+supersedes the earlier "define a new top conformance tier" framing.)
+
+Instead, these are defined here as a small, **named capability set** that an
+orchestration layer may *declare*, separate from the adapter conformance scale:
+
+1. **Host-independent enforcement** — the same enforcing-gate guarantees
+   regardless of which host the agent runs in, because enforcement happens
+   *below* the host at the orchestration/dispatch layer rather than in a
+   per-host adapter. (A property of the orchestration layer, not of any one
+   adapter — which is exactly why it does not belong on the adapter scale.)
+2. **Durable workflow state across runtime switches** — workflow and gate state
+   survives switching from one runtime to another mid-flow. The proof artifact
+   is a `RUNTIME SWITCH` integration test demonstrating an in-flight flow's
+   status/phase/gate state carried intact across a runtime change.
+3. **Block reasons reaching the model** — the reason a gate blocked is delivered
+   into the model's context, not just a log, so the agent can self-correct.
+   Tracked separately in #100.
+
+**Declaration, not certification (independence guardrail).** An orchestration
+layer may **declare and cite** these capabilities today as *its own* — e.g.
+"Station declares host-independent enforcement and durable cross-runtime state"
+— in the same spirit as an adapter's conformance declaration (section 7). They
+are **not** promoted to a portable, certifiable standard until a second,
+non-Station implementer could build to the spec without copying the first
+implementation: one implementation is a feature, two is a standard. If a second
+orchestration layer is already expected, this ordering may flip (spec-first).
+
+**Related.** #99 (export the sidecar writer as a library, so orchestration
+hosts share the canonical implementation rather than reimplementing it); #87
+(make canonical skills workspace-portable); #100 (block reasons reaching the
+model).
 
 ---
 
@@ -577,6 +757,7 @@ For structured `run()` responses (native import form), the return value is:
 | `FLOW_AGENTS_GOAL_FIT_BACKSTOP` | `block` (default) / `off` (=`warn`) / `skip` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` | Integer string (default 120000) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_RECHECK` | `true` / `false` (opt-in re-run of model free-form command) | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE` | `warn` (default) / `block` (escalate the tests-evidence scope divergence to a hard block; tighten-only, no `off`) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_SIDECARS` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_CRITIQUE` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_HOOK_RUNTIME` | `claude-code`, `codex`, etc. | Hook adapters (forwarded to scripts) |

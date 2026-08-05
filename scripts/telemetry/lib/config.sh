@@ -109,6 +109,13 @@ FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="${FLOW_AGENTS_CONSOLE_ECONOMICS_ENDP
 # Set (non-empty) only when the config file carries an explicit console_economics_relay key —
 # distinguishes "operator said 0/1" from "key absent" for the default-on rule below.
 console_economics_relay_raw=""
+# Liveness relay (#567): same conf-driven, opt-out-not-silent-off shape as economics (#469) so an
+# operator enables the hosted liveness mirror via console_liveness_relay=1 in the conf, NOT an env
+# var/.profile. A caller-pre-set env var is the starting point; the config key overrides it; absent
+# any key the default-on rule below turns it on once a console telemetry sink resolves.
+FLOW_AGENTS_CONSOLE_LIVENESS_RELAY="${FLOW_AGENTS_CONSOLE_LIVENESS_RELAY:-}"
+FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="${FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL:-}"
+console_liveness_relay_raw=""
 # Pricing registry source (consumed by lib/pricing.sh). Explicit file/URL win;
 # otherwise lib/pricing.sh uses the bundled pricing.json offline.
 TELEMETRY_PRICING_FILE="${TELEMETRY_PRICING_FILE:-${FLOW_AGENTS_PRICING_FILE:-}}"
@@ -164,6 +171,17 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
           esac
           ;;
         console_economics_endpoint_url) FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$value" ;;
+        console_liveness_relay)
+          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|on) console_liveness_relay_raw="1" ;;
+            0|false|no|off) console_liveness_relay_raw="0" ;;
+            *)
+              printf 'warning: config.sh: unrecognized console_liveness_relay value %q; treating as off\n' "$value" >&2
+              console_liveness_relay_raw="$value"
+              ;;
+          esac
+          ;;
+        console_liveness_endpoint_url) FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$value" ;;
         console_pricing_url) TELEMETRY_PRICING_URL="$value" ;;
         pricing_url) TELEMETRY_PRICING_URL="$value" ;;
         pricing_file) TELEMETRY_PRICING_FILE="$value" ;;
@@ -184,6 +202,17 @@ if [[ -n "$console_economics_relay_raw" ]]; then
 elif [[ -z "$FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY" \
       && ( -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ) ]]; then
   FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+fi
+
+# Liveness relay default-on rule (#567), identical shape to economics above: an explicit
+# console_liveness_relay config key always wins; otherwise, once a console telemetry sink resolves,
+# the relay defaults ON unless a caller already pre-set FLOW_AGENTS_CONSOLE_LIVENESS_RELAY in the
+# environment. relay.sh's own opt-in gate reads this exact variable.
+if [[ -n "$console_liveness_relay_raw" ]]; then
+  FLOW_AGENTS_CONSOLE_LIVENESS_RELAY="$console_liveness_relay_raw"
+elif [[ -z "$FLOW_AGENTS_CONSOLE_LIVENESS_RELAY" \
+      && ( -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ) ]]; then
+  FLOW_AGENTS_CONSOLE_LIVENESS_RELAY=1
 fi
 
 # Pricing URL is explicit-only (env or config). Do not derive the console

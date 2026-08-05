@@ -8,7 +8,7 @@
  * path outside the session directory. The Builder promote step names this sub-flow
  * as its assisted path; the `promote` CLI stays the recording mechanism.
  *
- * FlowDefinition: kits/knowledge/flows/promote.flow.json (id `knowledge.promote`).
+ * FlowDefinition: flows/promote.flow.json (id `knowledge.promote`).
  * See context/contracts/knowledge-store-contract.md and
  * context/contracts/decision-registry-contract.md.
  *
@@ -17,6 +17,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 import { ingestSession } from "./ingest.js";
 import { distill } from "./distill.js";
 import { link } from "./link.js";
@@ -93,13 +94,178 @@ function renderReadme(result) {
   ].join("\n");
 }
 
-/** Write every draft ONLY under outDir. Returns the list of relative paths written. */
-function writeProposals(outDir, linked, healthResult, result) {
+function assertDirectoryNoSymlink(directory, label) {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink()) throw new Error(`${label} must not be a symbolic link: ${directory}`);
+  if (!stat.isDirectory()) throw new Error(`${label} must be a directory: ${directory}`);
+}
+
+function isStrictDescendant(candidate, parent) {
+  return candidate.startsWith(parent + path.sep);
+}
+
+function sameDirectory(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+const descriptorFallbackPaths = new Map();
+
+// Linux writes below an opened directory descriptor. Darwin's Node runtime has
+// no openat-style child path, so it validates the /dev/fd anchor and verifies
+// physical directory identity around every operation. That prevents untrusted
+// artifact-path traversal and detects replacement; it cannot defend against an
+// already-compromised same-UID process, which can mutate the session directly.
+function descriptorPath(fd) {
+  if (process.platform === "linux") return `/proc/self/fd/${fd}`;
+  if (process.platform === "darwin") {
+    // Darwin exposes the opened directory through /dev/fd, but Node cannot
+    // resolve a child below that descriptor as openat(2) can on Linux. Probe
+    // the real descriptor and use its physical path only with fstat/lstat
+    // identity checks before and after every operation below.
+    const anchor = `/dev/fd/${fd}`;
+    if (!fs.statSync(anchor).isDirectory()) throw new Error(`Darwin descriptor anchor is not a directory: ${anchor}`);
+    const fallback = descriptorFallbackPaths.get(fd);
+    if (!fallback) throw new Error(`no physical path registered for directory descriptor ${fd}`);
+    return fallback;
+  }
+  throw new Error(`descriptor-bound proposal publication is unsupported on ${process.platform}`);
+}
+
+function closeDirectory(fd) {
+  descriptorFallbackPaths.delete(fd);
+  fs.closeSync(fd);
+}
+
+function assertDirectoryIdentity(fd, label) {
+  const opened = fs.fstatSync(fd);
+  const named = fs.statSync(descriptorPath(fd));
+  if (!opened.isDirectory() || !named.isDirectory() || !sameDirectory(opened, named)) {
+    throw new Error(`${label} changed directory identity`);
+  }
+}
+
+function directoryFlags() {
+  return fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+}
+
+function openDirectoryAt(parentFd, name, label) {
+  assertDirectoryIdentity(parentFd, `${label} parent`);
+  const candidate = path.join(descriptorPath(parentFd), name);
+  try {
+    if (fs.lstatSync(candidate).isSymbolicLink()) {
+      throw new Error(`${label} contains a symbolic-link component: ${candidate}`);
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  let fd;
+  try {
+    fd = fs.openSync(candidate, directoryFlags());
+  } catch (err) {
+    throw new Error(`${label} contains a symbolic-link component or is unavailable: ${err.message}`);
+  }
+  try {
+    const named = fs.lstatSync(candidate);
+    const opened = fs.fstatSync(fd);
+    if (named.isSymbolicLink() || !named.isDirectory() || !opened.isDirectory() || !sameDirectory(named, opened)) {
+      throw new Error(`${label} changed while it was opened`);
+    }
+    descriptorFallbackPaths.set(fd, candidate);
+    return fd;
+  } catch (err) {
+    closeDirectory(fd);
+    throw err;
+  }
+}
+
+function writeFileAt(directoryFd, name, content) {
+  if (!name || name.includes(path.sep) || name === "." || name === "..") throw new Error(`unsafe proposal filename: ${name}`);
+  assertDirectoryIdentity(directoryFd, "proposal parent");
+  const file = path.join(descriptorPath(directoryFd), name);
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
+  const fd = fs.openSync(file, flags, 0o600);
+  try {
+    fs.writeFileSync(fd, content, "utf8");
+    assertDirectoryIdentity(directoryFd, "proposal parent");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function createDirectoryAt(parentFd, name, label) {
+  assertDirectoryIdentity(parentFd, `${label} parent`);
+  const candidate = path.join(descriptorPath(parentFd), name);
+  fs.mkdirSync(candidate, { mode: 0o700 });
+  return openDirectoryAt(parentFd, name, label);
+}
+
+function removeOwnedEntry(parentFd, name, expected) {
+  const candidate = path.join(descriptorPath(parentFd), name);
+  try {
+    const current = fs.lstatSync(candidate);
+    if (sameDirectory(current, expected)) fs.rmSync(candidate, { recursive: true, force: true });
+  } catch {
+    // A hostile rename must never make cleanup delete its replacement.
+  }
+}
+
+function openProposalDestination(sessionDir, requestedOutDirInput) {
+  const requestedSession = path.resolve(sessionDir);
+  assertDirectoryNoSymlink(requestedSession, "sessionDir");
+  const session = fs.realpathSync.native(requestedSession);
+  const requestedOutDir = path.resolve(requestedOutDirInput);
+  if (!isStrictDescendant(requestedOutDir, requestedSession)) {
+    throw new Error(`outDir must be a new descendant of sessionDir: ${requestedOutDir}`);
+  }
+  const relative = path.relative(requestedSession, requestedOutDir).split(path.sep);
+  const leaf = relative.pop();
+  if (!leaf || relative.some((part) => !part || part === "." || part === "..")) {
+    throw new Error(`outDir must be a new descendant of sessionDir: ${requestedOutDir}`);
+  }
+
+  const sessionFd = fs.openSync(session, directoryFlags());
+  descriptorFallbackPaths.set(sessionFd, session);
+  let parentFd = sessionFd;
+  try {
+    for (const part of relative) {
+      const next = openDirectoryAt(parentFd, part, "outDir component");
+      if (parentFd !== sessionFd) closeDirectory(parentFd);
+      parentFd = next;
+    }
+    const parentPath = path.join(session, ...relative);
+    const namedParent = fs.lstatSync(parentPath);
+    if (!sameDirectory(namedParent, fs.fstatSync(parentFd))) throw new Error("outDir parent changed while it was opened");
+    return { sessionFd, parentFd, parentPath, leaf, outDir: path.join(parentPath, leaf) };
+  } catch (err) {
+    if (parentFd !== sessionFd) closeDirectory(parentFd);
+    closeDirectory(sessionFd);
+    throw err;
+  }
+}
+
+/** Write every draft through descriptor-anchored directories. Returns relative paths. */
+function writeProposals(stageFd, linked, healthResult, result) {
   const written = [];
   const write = (rel, content) => {
-    const abs = path.join(outDir, rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, content, "utf8");
+    const parts = rel.split(path.sep);
+    const name = parts.pop();
+    let currentFd = stageFd;
+    const opened = [];
+    try {
+      for (const part of parts) {
+        let next;
+        try { next = createDirectoryAt(currentFd, part, "proposal parent"); }
+        catch (err) {
+          if (err.code !== "EEXIST") throw err;
+          next = openDirectoryAt(currentFd, part, "proposal parent");
+        }
+        opened.push(next);
+        currentFd = next;
+      }
+      writeFileAt(currentFd, name, content);
+    } finally {
+      for (const fd of opened.reverse()) closeDirectory(fd);
+    }
     written.push(rel);
   };
 
@@ -119,6 +285,68 @@ function writeProposals(outDir, linked, healthResult, result) {
   return written;
 }
 
+function publishProposals(sessionDir, requestedOutDir, linked, healthResult, result) {
+  const destination = openProposalDestination(sessionDir, requestedOutDir);
+  const { sessionFd, parentFd, leaf, outDir } = destination;
+  const lockName = `.${leaf}.promote.lock`;
+  const stageName = `.promote-stage-${randomBytes(16).toString("hex")}`;
+  let stageFd = null;
+  let stageIdentity = null;
+  let lockCreated = false;
+  try {
+    assertDirectoryIdentity(parentFd, "proposal output parent");
+    let lockFd;
+    try {
+      lockFd = fs.openSync(
+        path.join(descriptorPath(parentFd), lockName),
+        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0),
+        0o600,
+      );
+    } catch (err) {
+      if (err.code === "EEXIST") throw new Error(`outDir already exists or publication is in progress: ${outDir}`);
+      throw err;
+    }
+    fs.closeSync(lockFd);
+    lockCreated = true;
+
+    try { fs.lstatSync(path.join(descriptorPath(parentFd), leaf)); }
+    catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      stageFd = createDirectoryAt(parentFd, stageName, "proposal staging directory");
+      stageIdentity = fs.fstatSync(stageFd);
+      const written = writeProposals(stageFd, linked, healthResult, result);
+      assertDirectoryIdentity(stageFd, "proposal staging directory");
+      assertDirectoryIdentity(parentFd, "proposal output parent");
+      const stagePath = path.join(descriptorPath(parentFd), stageName);
+      const namedStage = fs.lstatSync(stagePath);
+      if (!sameDirectory(namedStage, stageIdentity)) throw new Error("proposal staging directory changed before publication");
+      try { fs.lstatSync(path.join(descriptorPath(parentFd), leaf)); }
+      catch (missing) {
+        if (missing.code !== "ENOENT") throw missing;
+        assertDirectoryIdentity(parentFd, "proposal output parent");
+        fs.renameSync(stagePath, path.join(descriptorPath(parentFd), leaf));
+        const publishedFd = openDirectoryAt(parentFd, leaf, "published proposal directory");
+        try {
+          if (!sameDirectory(fs.fstatSync(publishedFd), stageIdentity)) throw new Error("proposal publication changed directory identity");
+        } finally {
+          closeDirectory(publishedFd);
+        }
+        return { outDir, written };
+      }
+      throw new Error(`outDir already exists; refusing to overwrite proposals: ${outDir}`);
+    }
+    throw new Error(`outDir already exists; refusing to overwrite proposals: ${outDir}`);
+  } finally {
+    if (stageFd !== null) closeDirectory(stageFd);
+    if (stageIdentity) removeOwnedEntry(parentFd, stageName, stageIdentity);
+    if (lockCreated) {
+      try { fs.unlinkSync(path.join(descriptorPath(parentFd), lockName)); } catch { /* cleanup best effort */ }
+    }
+    if (parentFd !== sessionFd) closeDirectory(parentFd);
+    closeDirectory(sessionFd);
+  }
+}
+
 /**
  * Run the promote sub-flow over a completed session directory.
  *
@@ -126,7 +354,7 @@ function writeProposals(outDir, linked, healthResult, result) {
  * @param {string} opts.sessionDir            absolute path to the completed session dir.
  * @param {string} opts.repoRoot              repo root (registry + CONTEXT.md live here).
  * @param {object} [opts.provenance]          { pr, mergeSha, sessionArchivePath }.
- * @param {string} [opts.outDir]              proposals dir (default <sessionDir>/proposals).
+ * @param {string} [opts.outDir]              new proposals dir beneath sessionDir; its parent must already exist (default <sessionDir>/proposals).
  * @param {string} [opts.decided]             ISO date stamped on drafts.
  * @param {string} [opts.agent]
  * @param {boolean} [opts.write=true]         write drafts to disk (still only under outDir).
@@ -136,7 +364,7 @@ export async function runPromote(opts = {}) {
   const { sessionDir, repoRoot, provenance = {}, decided, agent, write = true } = opts;
   if (!sessionDir) throw new Error("runPromote requires { sessionDir }");
   if (!repoRoot) throw new Error("runPromote requires { repoRoot }");
-  const outDir = opts.outDir || path.join(sessionDir, "proposals");
+  const outDir = path.resolve(opts.outDir || path.join(sessionDir, "proposals"));
 
   const residue = ingestSession(sessionDir, { agent });
   const distilled = distill(residue, { repoRoot, decided });
@@ -157,7 +385,15 @@ export async function runPromote(opts = {}) {
       transcript_refs: residue.transcriptRefs,
       touched_files: residue.touchedFiles,
     },
-    decisions: linked.decisions.map((d) => ({ slug: d.slug, subject: d.subject, evidence: d.evidence, new_vocabulary: d.newVocabulary })),
+    decisions: linked.decisions.map((d) => ({
+      subject: d.subject,
+      slug: d.slug,
+      status: d.status,
+      decided: d.decided,
+      body: d.body,
+      evidence: d.evidence,
+      new_vocabulary: d.newVocabulary,
+    })),
     vocabulary: linked.vocabulary,
     learnings: linked.learnings,
     manifest: linked.manifest,
@@ -168,8 +404,12 @@ export async function runPromote(opts = {}) {
     warnings: distilled.warnings,
   };
 
-  const written = write ? writeProposals(outDir, linked, healthResult, result) : [];
-  result.written = written;
+  if (write) {
+    const published = publishProposals(sessionDir, outDir, linked, healthResult, result);
+    result.written = published.written;
+  } else {
+    result.written = [];
+  }
   return result;
 }
 

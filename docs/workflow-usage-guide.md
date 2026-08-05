@@ -120,6 +120,71 @@ Expected artifact:
 
 When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In this repository, the optional GitHub adapter resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for that configured provider path.
 
+### Configure the provider set
+
+Provider bindings are consumer-owned configuration and are not copied from the
+Flow Agents source repository into universal bundles. Configure the three
+workflow legs together during installation:
+
+```bash
+flow-agents init --runtime codex --dest . \
+  --configure-providers --online --yes
+```
+
+This detects the GitHub repository from its `origin`, verifies `gh` auth,
+selects the sole accessible GitHub Project (or validates
+`--provider-project NUMBER`), creates the `agent:claimed` label when missing,
+schema-validates all three documents before atomically replacing each file:
+
+- `context/settings/backlog-provider-settings.json`
+- `context/settings/assignment-provider-settings.json`
+- `context/settings/change-provider-settings.json`
+
+For a headless offline setup, omit `--online` and provide
+`--provider-project NUMBER`. The command does not pretend remote state was
+verified; it prints the exact `gh` checks to run. `--provider-scope global`
+instead merges a repository-specific entry into each settings file under
+`~/.config/flow-agents`, preserving entries for other repositories. The same
+operation is available independently as `flow-agents provider-bootstrap`.
+Existing `project.paths` entries remain consumer-owned; resolution chooses the
+longest matching repository-relative path prefix and otherwise uses the
+repository-root entry.
+
+To prepare a specific provider-backed pickup without hand-authoring its
+identity or positive status documents, include the exact Work Item:
+
+```bash
+flow-agents provider-bootstrap --scope project \
+  --repo-path . \
+  --provider-project 2 \
+  --work-item owner/repository#123 \
+  --provider-login authenticated-login \
+  --provider-branch "$(git branch --show-current)" \
+  --json
+```
+
+The command derives the canonical session slug and structured runtime actor
+through the same helpers used by `workflow start` and the assignment provider.
+It refuses a Work Item from another repository, a detached checkout, a branch
+that differs from the actual worktree branch, an unresolved actor, or an
+artifact root other than `<repository>/.kontourai/flow-agents`. The public
+`workflow start` operation rechecks that the validated provider branch is still
+the current named Git worktree branch before it mirrors ownership or creates a
+session. The result contains:
+
+- exact `gh` argv arrays for the rendered assignment claim, but does not run
+  those mutations;
+- a read-only issue-observation argv and its pinned output path;
+- an assignment-status argv and immutable effective-state output path; and
+- the final `workflow start` argv bound to that status artifact.
+
+Run the emitted operations in order. Redirect only the declared
+`stdout_file` results to their named paths. Re-running setup for the same Work
+Item, actor, and branch reuses the exact prepared claim generation; a changed
+identity fails closed and requires an explicit recovery or restart decision.
+With `--online`, the authenticated GitHub login is discovered. Offline setup
+requires `--provider-login` so the command never invents provider identity.
+
 ### Assignment ownership: the third provider leg
 
 Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership represented by the configured provider. For example, the optional GitHub adapter can use an issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment; tracker-less repos and evals can use an equivalent local JSON record. Join it against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.
@@ -150,7 +215,7 @@ After `pull-work` passes the pickup gate in the Builder Kit build flow, use the 
 
 The pickup Probe must record goal fit and scope, blockers and dependencies, dependency freshness, acceptance criteria quality, provider state, risk, stop-short risks, planning readiness, decisions, unresolved questions, accepted gaps, sandbox/worktree mode, expected modified files, and conflict risks. Record those in `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` or the plan handoff artifact before `plan-work` begins.
 
-When the selected work item includes `planned_base_ref` and `planned_base_sha`, compare that base with current `main` before planning. If relevant files, contracts, docs, schemas, or dependency states changed since the work was shaped, classify the drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`. Ask for alignment before planning when drift changes scope, acceptance criteria, dependency assumptions, or execution risk.
+When the selected work item includes `planned_base_ref` and `planned_base_sha`, compare that base with current `main` before planning. If relevant files, contracts, docs, schemas, or dependency states changed since the work was shaped, classify the drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`. Ask for alignment before planning when drift changes scope, acceptance criteria, dependency assumptions, or execution risk. This drift-outcome judgment is distinct from `pull-work`'s mechanical `fresh`/`drifted`/`stale`/`not_verified` revision-freshness severity (work-item-contract.md "Planning Base And Drift") — the judgment is derived from that severity plus dependency/scope/conflict context, not a synonym for it.
 
 Provider-backed `plan-work` consumes that recorded freshness context before planning. The plan must name the latest target ref/SHA or accepted-gap fallback baseline used, then record which upstream acceptance criteria were revalidated against drift and which assumptions are now stale. Missing historical `planned_base_sha` is an accepted gap only when the fallback baseline is explicit; it is not a fresh baseline by itself.
 
@@ -259,7 +324,7 @@ Expected behavior:
 - flag weakened tests, changed requirements, skipped checks, or suspicious scope drift
 - produce `PASS`, `FAIL`, or `NOT_VERIFIED`
 
-When verification or evidence gates route work backward, the handoff must name both the route reason and the next action for the next agent. Use these Builder Kit route reasons consistently: `missing_evidence` returns to `verify-work`, `implementation_defect` returns to `execute-plan`, `plan_gap` returns to `plan-work`, and `decision_gap` returns to the `design-probe` step. Record the route reason in the evidence or handoff artifact, then state the exact next action needed before the gate can be retried.
+When verification or evidence gates route work backward, the handoff must name both the route reason and the next action for the next agent. Use Builder Kit route reasons only where the current Flow gate declares them: `missing_evidence` returns to `verify-work`, `implementation_defect` returns to `execute-plan`, `plan_gap` returns to `plan-work`, and `decision_gap` returns to the `design-probe` step. In particular, `execute -> plan` is available only when that active run's `execute-gate` declares `plan_gap -> plan`; it has no default or implicit route and Flow owns its three-attempt block policy. Record the route reason in the evidence or handoff artifact, then state the exact next action needed before the gate can be retried. Status and sync never infer a route-back or amend an active definition.
 
 For pickup or planning alignment gaps, `decision_gap -> design-probe` means returning to the pickup Probe record, resolving the missing decision or recording an accepted gap, and only then retrying `plan-work`.
 
@@ -312,7 +377,122 @@ flow-agents workflow critique \
   --lane-json '{"id":"code-review","status":"pass","summary":"Code quality, correctness, architecture, and standards were reviewed.","evidence_refs":[{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--deliver.md","summary":"Reviewed delivery artifact and changed-scope context."}]}'
 ```
 
+### Which commands can be evidence
+
+Two independent rules govern `--command`, and a claim must satisfy both:
+
+1. **`tests-evidence` requires a recognised test runner.** A shell script scores zero test units
+   unless it contains `set -e` and matches the inline-assertion pattern, so this repository's
+   tally-style integration evals — which deliberately run every check, count failures, and exit
+   non-zero at the end — are refused. `set -e` would abort at the first failing check and destroy
+   the tally, so the suites are right and the heuristic simply does not fit them.
+2. **`publish-delivery` requires a CI-manifest command.** CI cannot self-declare an arbitrary
+   command, so any command claim whose text is not in the reconcile manifest is refused at
+   publication — long after the step that recorded it has passed, and after the run can be rebound.
+
+Taken together these once made a suite either citable or reconcilable, never both.
+
+**The pattern that satisfies both** is a thin `node --test` wrapper, registered in a CI lane as the
+lane's command:
+
+```js
+// evals/integration/<name>.test.mjs
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+
+test("<name> eval passes", () => {
+  const result = spawnSync("bash", ["evals/integration/test_<name>.sh"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+```
+
+Register the **wrapper** as the lane command, not the `.sh`:
+
+```
+"<Label>|node --test evals/integration/<name>.test.mjs"
+```
+
+It is then a recognised runner *and* a manifest entry, and the eval still runs exactly once with
+unchanged failure semantics. The CI coverage audit follows the wrapper to the `.sh` it spawns, so
+the eval stays attributed. Three suites use this today.
+
+**Do not attach `--command` to evidence that is not a test.** A measured diff is the right evidence
+for a scope claim, but `git diff --stat origin/main...HEAD` is not a manifest command and will be
+refused at publication. Put the measurement in `--summary` and reference the artifact that records
+it. `workflow evidence` warns at record time when a command will not reconcile, while the owning
+step can still fix it.
+
 Only the step skill declared for that Flow expectation should publish it.
+The requested gate verdict remains authoritative: a successful command never upgrades or replaces
+an explicit `fail` or `not_verified`; a failing or ambiguous command can prevent a requested
+`pass`. The JSON result reports that persisted gate verdict separately from redacted command
+observations (ordinal, command digest, exit code, output digest, and outcome), rather than
+echoing command text or command output. The same redaction applies to default command errors.
+
+The public evidence command first writes a transaction-unique, non-authoritative candidate under
+`.workflow-evidence-transaction-<id>/trust.bundle.candidate`. It verifies the candidate through its
+open descriptor, fsyncs the candidate and its pinned parent directory, and asks Flow to attach only
+that exact digest. The candidate directory and file are retained as correlated recovery residue;
+the command never automatically renames, unlinks, or cleans them up.
+
+Before staging, the command pins the canonical `trust.bundle` baseline. If synchronization fails
+and the exact attachment is proved absent, canonical trust remains at that baseline and the
+append-only `command-log.jsonl` receives a transaction-correlated abort record. The original error
+is then safe to correct and retry. If attachment or baseline identity is unknown, the command does
+not roll anything back: it returns `recovery required` and retains the candidate for inspection.
+If the exact candidate digest is proved attached, the operation is committed even when a later
+projection or presentation step fails; successful recovery reports
+`recovery.committed: true`, `recovery.retry: "none"` in JSON and `No retry is required` in text.
+Do not submit that evidence again.
+
+For an existing canonical bundle, commit writes the verified candidate bytes only through the
+pinned original descriptor and refuses a changed pathname. For an absent canonical bundle, only
+an exact `lstat` result of `ENOENT` proves absence. The command then creates the canonical
+descriptor with `O_CREAT | O_EXCL | O_NOFOLLOW`, copies complete bytes from the pinned staged
+descriptor, and fsyncs, rereads, identity-checks, and parent-directory-fsyncs that new descriptor.
+`EEXIST`, a non-`ENOENT` absence error, short copy, inode/digest mismatch, filesystem uncertainty,
+or directory-fsync uncertainty fail closed: no rename, hard-link, overwrite, or removal of a
+foreign target is permitted. Once exclusive creation has succeeded, any later uncertainty retains
+both the staged candidate and reachable owned canonical residue, returns `recovery required` with
+no retry, and requires explicit recovery rather than rollback.
+
+The transaction also pins the session-directory descriptor and checks its pathname identity before
+exclusive creation, immediately after it, and after the parent fsync. A persistent cooperative
+rename or replacement is therefore reported as `recovery required` with no retry and must not
+write a canonical bundle into the replacement namespace. Those checks detect ordinary local races;
+they do not claim atomic protection against replacement-and-restoration between checks.
+
+Flow and Flow Agents runtime state is local state writable by the invoking OS user. The protocol
+provides cooperative serialization, non-overwrite behavior, append-only observations, and visible
+recovery boundaries; it is not a privilege boundary against a malicious process running as that
+same user, which can directly rewrite runtime state, candidates, logs, locks, or executable code.
+Hostile same-user ABA namespace manipulation and direct same-user state forgery are explicitly
+out of scope and `NOT_VERIFIED`. No native helper is required for that excluded threat model.
+
+If Flow retains an evidence `*.candidate` receipt or the local transaction retains a staged
+candidate, treat it as recovery evidence rather than a retry instruction: do not promote, rename,
+replay, delete, or manually attach it. A prior no-retry result remains authoritative until an
+explicit recovery procedure is available.
+
+Command-log serialization likewise leaves audit residue. The legacy
+`command-log.jsonl.lock` pathname is a permanent versioned fence, created and validated
+exclusively with no-follow semantics and durable descriptor/parent checks before a generation can
+be acquired. Malformed, foreign, or wrong-version fence entries are never overwritten or removed.
+Behind the fence, persistent `command-log.jsonl.lock.<generation>` records serialize writers: the
+highest valid generation must be durably `released` before the next generation can be acquired.
+Active, malformed, stale, or replaced highest generations are never stolen, deleted, or
+automatically superseded. Ordinary capture denied append authority leaves the command log
+byte-for-byte unchanged and emits only a redacted diagnostic; transaction abort remains fail
+closed. A false generation-release result emits an immediate redacted diagnostic: ordinary hook
+and writer observation capture remain append-only/fail-open, while transaction abort returns false
+so public evidence becomes recovery-required with no retry. There is no automatic crashed-generation recovery or lock cleanup; authenticated recovery
+of that state is explicitly `NOT_VERIFIED` and outside #756, so retain the residue until an
+explicit artifact-lifecycle action is appropriate.
+
+Do not place passwords, tokens, signed URLs, or authorization headers in `--command`. Although
+the default report does not echo command text, command arguments remain local evidence; use a
+secure environment or file mechanism appropriate to the runner for secrets.
 Run authenticated critique before `tests-evidence`; the delegated reviewer
 invokes the public critique command under a runtime identity distinct from the
 active implementation actor. The command does not accept a caller-selected
@@ -530,6 +710,51 @@ After `evidence-gate` is clean:
 - collect provider checks such as CI, status checks, required review, mergeability, policy, or deployment checks
 - record missing provider checks as `not_verified` unless they are explicitly skipped under the risk policy
 
+For an active Builder `pull-request-opened` gate, first inspect the projected action with
+`flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json`. A configured,
+compatible ChangeProvider exposes the operation argv; invoke it with the verified branch and
+intended change text:
+
+```bash
+flow-agents publish-change execute \
+  --session-dir .kontourai/flow-agents/<slug> \
+  --title "Describe the verified change" \
+  --body "Explain the change and its evidence" \
+  --head-ref feature/verified-change \
+  --base-ref main \
+  --draft
+```
+
+`--draft` is optional; all other flags are required and bounded. The command derives the
+repository, resolved immutable SHA for `--head-ref`, active assignment actor, run, and gate visit.
+It does not take `--result-json`, arbitrary evidence/expectation ids, credentials, or a private
+writer option. Configure the provider explicitly in
+`<repo-path>/context/settings/change-provider-settings.json`, optionally with a global base at
+`$HOME/.config/flow-agents/change-provider-settings.json`, and inspect the effective setting with
+`flow-agents effective-change-provider-settings --repo-path . --json`. Project match, project
+defaults, global project match, then global defaults take precedence.
+
+If status is `external_capability_required` (unconfigured) or reports an incompatible setting,
+do not claim completion or synthesize a result file: record the external gap and resolve the
+configuration/provider condition. For a configured GitHub adapter, `gh` is resolved from a fixed
+trusted absolute location rather than caller-controlled `PATH`; its authentication and the exact
+repository/base/head/SHA/title/body/draft match are verified before Flow records the result.
+The adapter recovers one matching published pull request before creation and after an ambiguous
+create failure, so a retry is a recovery attempt rather than permission to create a duplicate.
+Open records support the normal path; merged records support reconciliation after provider work
+completed ahead of the local run. Auth, provider, ambiguity, stale/closed-but-unmerged-record, or
+wrong-intent failures leave the gate unresolved.
+
+Only the authenticated Flow-owned transaction writes the bounded
+`publish-change.result.json`, revalidates the assignment, gate visit, and configuration under the
+subject lock, satisfies only `pull-request-opened`, and requires Flow to advance exactly one
+canonical step. Generic driver
+JSON/evidence, caller-authored result files, and package-internal writers cannot substitute for
+that transaction. The receipt separately preserves the bound `assignment_actor` and actual
+authenticated GitHub `provider_actor`. Credentials and provider diagnostics are never stored in workflow artifacts,
+trust bundles, logs, or snapshots. A real provider mutation remains separate from local test
+proof; do not report a live recovery as complete without its provider and canonical-run evidence.
+
 Example prompt:
 
 ```text
@@ -605,10 +830,34 @@ Correction records live in `learning.json` for this slice. They are local workfl
 To publish local workflow-learning as Console-readable context, run:
 
 ```bash
-flow-agents console-learning-projection --artifact-root .flow-agents --kontour-root .kontour
+flow-agents console-learning-projection --artifact-root .kontourai/flow-agents --kontour-root .kontour
 ```
 
-Those flags are the defaults. The command writes `.kontour/projections/flow-agents-learning/<scope-kind>-<scope-id>.json`. Generated learnings are inert, non-authoritative Console read models with `family: "workflow"` and `nonAuthority: true`. `learning.json` remains the Flow Agents-owned source data; the command does not mutate it, execute routing or prevention, create provider issues, implement Source/Sink storage, add UI, or model domain-learning. The producer performs minimal projection source-shape checks for required fields; full `learning.json` JSON Schema validation remains covered by `npm run workflow:validate-artifacts`. When a sibling Console checkout is available, `inspectLocalKontour` may inspect the generated projection, but Flow Agents local tests validate the committed projection shape.
+Those flags are the defaults (`.kontourai/flow-agents` is the runtime artifact root every active session actually writes under, per `src/lib/local-artifact-root.ts`; earlier docs and `console.telemetry.json` itself pointed at the legacy, non-runtime `.flow-agents` durable-config directory before #778 corrected them). The command writes `.kontour/projections/flow-agents-learning/<scope-kind>-<scope-id>.json`. Generated learnings are inert, non-authoritative Console read models with `family: "workflow"` and `nonAuthority: true`. `learning.json` remains the Flow Agents-owned source data; the command does not mutate it, execute routing or prevention, create provider issues, implement Source/Sink storage, add UI, or model domain-learning. The producer performs minimal projection source-shape checks for required fields; full `learning.json` JSON Schema validation remains covered by `npm run workflow:validate-artifacts`. When a sibling Console checkout is available, `inspectLocalKontour` may inspect the generated projection, but Flow Agents local tests validate the committed projection shape.
+
+To publish local workflow **process/interactive-session state** as Console-readable context (issue #778 -- the workflow-state -> Console `ConsoleProcess`/`ProcessStatusProjection` status mapping, including the `needs_input`/`review_pending` states and `blockedReason` that console#236 added to Console's projection schema), run:
+
+```bash
+flow-agents console-process-projection --artifact-root .kontourai/flow-agents --kontour-root .kontourai/console
+```
+
+Those flags are the defaults too. `--kontour-root` defaults to `.kontourai/console` -- Console's *actual* local runtime root (`DEFAULT_CONSOLE_RUNTIME_ROOT` in console-server's `runtime-root.ts`; `docs/migrations/console-runtime-root.md`: "Console now reads and writes generated local state only under `.kontourai/console`. It does not read, merge, or write the former `.kontour` tree."), corrected by #778 review after the original draft copied `console-learning-projection`'s older `.kontour` default. `console-learning-projection` above still defaults to the older `.kontour` path; that is a real, separately-flagged latent gap (#778 review), out of this issue's scope to fix.
+
+The command writes `.kontourai/console/projections/flow-agents-process/<scope-kind>-<scope-id>.json`, an inert, non-authoritative `kontour.console.projection` envelope (same schema/version/`nonAuthority: true` shape as the learning projection above, with a `processes[]` array instead of `learnings[]`). Each process's `status` is derived from `state.json`'s `status` + `next_action.status`, refined by the AUTHORITATIVE trust.bundle critique state, via `mapWorkflowStatusToConsoleProcessStatus` (`src/lib/workflow-process-projection.ts`) onto Console's `ConsoleProcessStatus` vocabulary (`not_started`/`running`/`blocked`/`needs_input`/`review_pending`/`completed`/`failed`/`cancelled`); `needs_decision` and `not_verified` map to `needs_input`. `review_pending` is derived from `hasUnresolvedLiveCritique` over `workflow-sidecar.ts`'s own `critiquesFromBundle(dir)` reader (a live, non-superseded critique claim whose verdict is not `pass`) -- **never** from a separately-written per-critique sidecar file (that file-based approach is retired, unsupported historical residue; trust.bundle is the sole critique source, per the Phase 4c comment in `workflow-sidecar.ts`). No `state.json` status value alone maps cleanly onto `review_pending`, `waiting`, or `paused`, so those are derived (review_pending) or left unset (waiting/paused) rather than guessed. A joined sidecar's own identity is checked before it is trusted: a `handoff.json` whose `task_slug` disagrees with its directory's `state.json`, or a trust.bundle critique whose `workflow_subject_ref` names a different session, is skipped (not joined) and reported as a warning on stderr (and in the JSON summary's `warnings[]`) rather than silently accepted. `blockedReason` is sourced from `handoff.json`'s `blockers` (falling back to `next_action.summary`) when blocked, or from `next_action.summary` when `needs_input`, and is retained -- not force-cleared -- for `waiting`/`paused` too per console#236's own clearing-rule contract, even though no `state.json` signal produces those two today; it is never emitted for any other status.
+
+By default, ONE malformed legacy `state.json`/`handoff.json` throws and aborts the whole run (the CLI's long-standing "throw" contract). Pass `--skip-invalid` to instead warn-and-skip just that workflow, on stderr and in the JSON summary's `warnings[]`, and still project every valid sibling with exit code 0 (issue #918) -- this mirrors `console-trust-projection`'s own sibling reader, which already always applies this warn+skip behavior unconditionally (see below); `console-trust-projection` accepts `--skip-invalid` too, purely so the two commands share one flag surface, but it is a documented no-op there since that default can't be turned off.
+
+This projection is local-artifact generation, the same mechanism as the learning projection above, and it is **not** itself a live Console board feed: Console's Kanban board reads `OperatingState`/`ConsoleProcess` populated by discrete `process.*` events (a separate, event-sourced ingest path), not by scanning `.kontourai/console/projections/`. What this command's output DOES match, verified by executing Console's own `console-inspect local` (`console-server/bin/console-inspect.ts`) against a real generated envelope at the console#236 commit (`cffecca5`): Console's generic local-projection reader (`inspectLocalKontour`, recursively scanning `<kontourRoot>/projections/**/*.json`) and its `validateProjection`/`validateProcess` shape checks accept this envelope with zero validation errors -- `id`/`status` (required strings) and the console#236-added optional `blockedReason` string all match field-for-field. That reader backs the `console-inspect` CLI audit/migration tool, not the live SSE-driven board; wiring a projection like this into the live board is Console-side scope (a bridge analogous to Console's `kontour-flow-bridge`), tracked separately, not attempted in this repo.
+
+To publish each workflow's canonical Surface trust report alongside that process projection, run:
+
+```bash
+flow-agents console-trust-projection --artifact-root .kontourai/flow-agents --kontour-root .kontourai/console
+```
+
+The command reads workflow directories without mutating them, skips directories with no `trust.bundle`, validates every present bundle with Surface's `validateTrustBundle`, and carries `surface.buildTrustReport(bundle)` verbatim in an inert `kontour.console.projection` envelope under `trusts[]`. Invalid bundles are skipped with a warning so one bad workflow does not abort its valid siblings; an unavailable Surface runtime fails the command because unvalidated trust is never projected. A malformed workflow's `state.json`/`handoff.json` is likewise always warned and skipped, unconditionally (issue #891 finding 2) -- `console-trust-projection` accepts `--skip-invalid` for flag-surface parity with `console-process-projection` above, but it is a no-op here since this behavior is already the only mode. Gate associations come only from each claim's stamped `metadata.gate_claim.expectation_id` and its evidence/event `claimId` links. Work Item refs include canonical GitHub issue URLs when derivable, plus assignment branch, actor, and artifact-directory refs when the workflow state or assignment claim records provide them. By default the file is written under `.kontourai/console/projections/flow-agents-trust/`; pass `--out <file>` to override it or `--out -` for stdout.
+
+The status table, the two pure mappers (`mapWorkflowStatusToConsoleProcessStatus`, `deriveConsoleProcessBlockedReason`), and both projection families' envelope/entry/ref types above are importable directly, without shelling out to either CLI, from this package's stable `./console-contract` subpath (issue #933): `import { WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS, mapWorkflowStatusToConsoleProcessStatus, deriveConsoleProcessBlockedReason } from "@kontourai/flow-agents/console-contract"` (see `src/console-contract.ts` for the full export list, including `ConsoleProcessProjectionEnvelope`/`ConsoleTrustProjectionEnvelope` and their entry/ref types). This exists so downstream consumers of a published projection envelope (e.g. station's console board) can import the real, frozen contract instead of hand-mirroring it -- a hand-mirrored copy has no trip-wire against this table being re-bucketed later. Only the pure contract ships here; the filesystem-reading `readWorkflow*` functions and the `build*Projection` builders that produce these envelopes remain internal to the two `console-*-projection` CLI commands above.
 
 For local-only users, `.kontourai/flow-agents/<slug>/` is the recent recovery cache and queue dashboard. Retain active blockers and unresolved learning. Prune or archive routine successful runtime artifacts after 14-30 days once provider records, durable docs, or knowledge notes contain the useful history. Keep security, migration, release, or provider-governance evidence longer when auditability matters, usually 30-90 days unless a project policy says otherwise.
 
@@ -667,7 +916,10 @@ For unattended runtime re-entry, the active assignment actor may use `workflow d
 explicit runtime adapter argv file. The driver repeats the same public projection/evidence cycle,
 persists its mission turn budget, and parks on adapter-declared PID or deadline barriers instead of
 spending turns while external work is incomplete. Adapter completion never advances a gate by
-self-report; only trust evidence accepted by canonical Flow can change the current step. See
+self-report; only trust evidence accepted by canonical Flow can change the current step. Use
+`--context-policy fresh` when the selected adapter supports canonical fresh-context handoffs and
+the runtime capability profile calls for bounded contexts. This preserves every gate while avoiding
+prior-transcript replay between actions; `warm` remains the default. See
 [`docs/public-workflow-cli.md`](public-workflow-cli.md#bounded-continuation-driver) for the protocol.
 
 If the same Builder slice is interrupted, inspect its canonical status. Resume

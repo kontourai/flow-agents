@@ -55,6 +55,22 @@ function functionCall(callId, command) {
   };
 }
 
+function execCommandCall(callId, cmd) {
+  return {
+    timestamp: "2026-07-06T00:00:00Z",
+    type: "response_item",
+    payload: { type: "function_call", call_id: callId, name: "exec_command", arguments: JSON.stringify({ cmd }) },
+  };
+}
+
+function functionToolCall(callId, name, args) {
+  return {
+    timestamp: "2026-07-06T00:00:00Z",
+    type: "response_item",
+    payload: { type: "function_call", call_id: callId, name, arguments: JSON.stringify(args) },
+  };
+}
+
 // --- extractExitCodeFromBanner: preamble-anchored (CRITICAL finding #1) ---
 
 test("extractExitCodeFromBanner: forgery in post-Output: stdout is ignored (preamble wins)", () => {
@@ -95,7 +111,7 @@ test("readExitCodeFromRollout: malformed JSONL lines are skipped, valid entry st
 
 // --- truncation arithmetic (HEAD-anchored bounded scan, MEDIUM finding #5) ---
 
-test("readExitCodeFromRollout: target line near EOF still found when file exceeds the scan window", () => {
+test("readExitCodeFromRollout: call-id target near EOF is found when file exceeds the scan window", () => {
   const filler = [];
   for (let i = 0; i < 60; i++) filler.push({ timestamp: "2026-07-06T00:00:00Z", type: "turn_context", payload: {} });
   const target = functionCallOutput("call_1", "Process exited with code 1\nOutput:\n...");
@@ -106,7 +122,7 @@ test("readExitCodeFromRollout: target line near EOF still found when file exceed
   // Window smaller than the whole file (forces truncation) but comfortably
   // larger than the target line itself.
   const maxScanBytes = targetLineBytes + 50;
-  assert.equal(readExitCodeFromRollout(file, { maxScanBytes }), 1);
+  assert.equal(readExitCodeFromRollout(file, { callId: "call_1", maxScanBytes }), 1);
 });
 
 test("readExitCodeFromRollout: target line start beyond maxScanBytes yields null (never mis-reads a fragment)", () => {
@@ -130,6 +146,15 @@ test("readExitCodeFromRollout: call_id match wins over the newer entry", () => {
   assert.equal(readExitCodeFromRollout(file, { callId: "call_b" }), 5);
 });
 
+test("readExitCodeFromRollout: an unresolved explicit call_id never downgrades to command matching", () => {
+  const file = writeRollout([
+    execCommandCall("call_other", "npm test"),
+    functionCallOutput("call_other", "Process exited with code 0\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { callId: "call_missing", command: "npm test" }), null);
+});
+
 // --- command cross-check correlation (Decision B #2, HIGH finding #4) ---
 
 test("readExitCodeFromRollout: command cross-check mismatch declines to null", () => {
@@ -146,6 +171,196 @@ test("readExitCodeFromRollout: command cross-check match uses the correlated ent
     functionCallOutput("call_1", "Process exited with code 1\nOutput:\n..."),
   ]);
   assert.equal(readExitCodeFromRollout(file, { command: "npm run lint" }), 1);
+});
+
+test("readExitCodeFromRollout: Codex exec_command cmd argument correlates the result", () => {
+  const file = writeRollout([
+    execCommandCall("call_1", "npm run lint"),
+    functionCallOutput("call_1", "Process exited with code 1\nOutput:\n..."),
+  ]);
+  assert.equal(readExitCodeFromRollout(file, { command: "npm run lint" }), 1);
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: parallel call cannot inherit the previous call result", () => {
+  const file = writeRollout([
+    execCommandCall("call_pass", "find seed -type f"),
+    execCommandCall("call_fail", "cat seed/src/window.js"),
+    functionCallOutput("call_pass", "Process exited with code 0\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "find seed -type f" }), 0);
+  assert.equal(readExitCodeFromRollout(file, { command: "cat seed/src/window.js" }), null);
+});
+
+test("readExitCodeFromRollout: parallel outputs correlate to their exact commands", () => {
+  const file = writeRollout([
+    execCommandCall("call_pass", "find seed -type f"),
+    execCommandCall("call_fail", "cat seed/src/window.js"),
+    functionCallOutput("call_pass", "Process exited with code 0\nOutput:\n..."),
+    functionCallOutput("call_fail", "Process exited with code 1\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "find seed -type f" }), 0);
+  assert.equal(readExitCodeFromRollout(file, { command: "cat seed/src/window.js" }), 1);
+});
+
+test("readExitCodeFromRollout: repeated parallel command text is ambiguous without call_id", () => {
+  const file = writeRollout([
+    execCommandCall("call_a", "npm test"),
+    execCommandCall("call_b", "npm test"),
+    functionCallOutput("call_a", "Process exited with code 0\nOutput:\n..."),
+    functionCallOutput("call_b", "Process exited with code 1\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, { callId: "call_a", command: "npm test" }), 0);
+  assert.equal(readExitCodeFromRollout(file, { callId: "call_b", command: "npm test" }), 1);
+});
+
+test("readExitCodeFromRollout: a repeated call without its output cannot reuse an older result", () => {
+  const file = writeRollout([
+    execCommandCall("call_old", "npm test"),
+    functionCallOutput("call_old", "Process exited with code 0\nOutput:\n..."),
+    execCommandCall("call_current", "npm test"),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: unresolved multi-call tail never falls back to newest output", () => {
+  const file = writeRollout([
+    {
+      timestamp: "2026-07-06T00:00:00Z",
+      type: "response_item",
+      payload: { type: "function_call", call_id: "call_a", name: "unknown", arguments: "not-json" },
+    },
+    functionCallOutput("call_a", "Process exited with code 0\nOutput:\n..."),
+    functionCallOutput("call_b", "Process exited with code 1\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, {}), null);
+});
+
+test("readExitCodeFromRollout: malformed function call cannot make an output look unpaired", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const file = path.join(dir, "rollout.jsonl");
+  const output = JSON.stringify(functionCallOutput("call_old", "Process exited with code 0\nOutput:\n..."));
+  fs.writeFileSync(file, `${output}\n{"payload":{"type":"function_call","call_id":"call_current"\n`);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: truncated call context cannot make an output look unpaired", () => {
+  const output = functionCallOutput("call_old", "Process exited with code 7\nOutput:\n...");
+  const file = writeRollout([functionCall("call_old", "npm run lint"), output]);
+  const outputLineBytes = Buffer.byteLength(JSON.stringify(output), "utf8") + 1;
+
+  assert.equal(readExitCodeFromRollout(file, {
+    command: "npm test",
+    maxScanBytes: outputLineBytes + 10,
+  }), null);
+});
+
+test("readExitCodeFromRollout: reused call IDs are ambiguous", () => {
+  const file = writeRollout([
+    execCommandCall("same", "npm test"),
+    execCommandCall("same", "npm run lint"),
+    functionCallOutput("same", "Process exited with code 9\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, { command: "npm run lint" }), null);
+});
+
+test("readExitCodeFromRollout: an unresolvable current call blocks historical command reuse", () => {
+  const file = writeRollout([
+    execCommandCall("call_old", "npm test"),
+    functionCallOutput("call_old", "Process exited with code 0\nOutput:\n..."),
+    {
+      timestamp: "2026-07-06T00:00:01Z",
+      type: "response_item",
+      payload: { type: "function_call", call_id: "call_current", name: "exec_command", arguments: "not-json" },
+    },
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: malformed duplicate call IDs remain ambiguous", () => {
+  const file = writeRollout([
+    execCommandCall("same", "npm test"),
+    {
+      timestamp: "2026-07-06T00:00:01Z",
+      type: "response_item",
+      payload: { type: "function_call", call_id: "same", name: "exec_command", arguments: "not-json" },
+    },
+    functionCallOutput("same", "Process exited with code 9\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { callId: "same", command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: malformed JSON blocks historical and explicit-id correlation", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const file = path.join(dir, "rollout.jsonl");
+  const call = JSON.stringify(execCommandCall("same", "npm test"));
+  const output = JSON.stringify(functionCallOutput("same", "Process exited with code 0\nOutput:\n..."));
+  fs.writeFileSync(file, `${call}\n${output}\n{"payload":{"type":"function_call","call_id":"same"\n`);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, { callId: "same", command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: a partial function-call token blocks historical correlation", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const file = path.join(dir, "rollout.jsonl");
+  const call = JSON.stringify(execCommandCall("old", "npm test"));
+  const output = JSON.stringify(functionCallOutput("old", "Process exited with code 0\nOutput:\n..."));
+  fs.writeFileSync(file, `${call}\n${output}\n{"payload":{"type":"function_cal\n`);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+});
+
+test("readExitCodeFromRollout: unrelated function tools do not poison exact command correlation", () => {
+  const file = writeRollout([
+    functionToolCall("patch_call", "apply_patch", { patch: "*** Begin Patch" }),
+    execCommandCall("command_call", "npm test"),
+    functionCallOutput("command_call", "Process exited with code 0\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), 0);
+});
+
+test("readExitCodeFromRollout: nameless command-shaped calls participate in ambiguity checks", () => {
+  const file = writeRollout([
+    execCommandCall("old", "npm test"),
+    functionCallOutput("old", "Process exited with code 0\nOutput:\n..."),
+    functionToolCall("current", null, { cmd: "npm test" }),
+    functionCallOutput("current", "Process exited with code 1\nOutput:\n..."),
+  ]);
+
+  assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  assert.equal(readExitCodeFromRollout(file, { callId: "current", command: "npm test" }), 1);
+});
+
+test("readExitCodeFromRollout: semantically nameless malformed calls block historical command reuse", () => {
+  for (const name of [null, "", "   "]) {
+    const file = writeRollout([
+      execCommandCall("old", "npm test"),
+      functionCallOutput("old", "Process exited with code 0\nOutput:\n..."),
+      {
+        timestamp: "2026-07-06T00:00:01Z",
+        type: "response_item",
+        payload: { type: "function_call", call_id: "current", name, arguments: "not-json" },
+      },
+      functionCallOutput("current", "Process exited with code 1\nOutput:\n..."),
+    ]);
+
+    assert.equal(readExitCodeFromRollout(file, { command: "npm test" }), null);
+  }
 });
 
 test("readExitCodeFromRollout: no resolvable pairing falls back to the newest banner (single-call case)", () => {

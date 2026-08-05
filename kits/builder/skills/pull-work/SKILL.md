@@ -32,6 +32,18 @@ Select ready backlog work and prepare a bounded handoff without implementing it.
 
 An optional GitHub adapter may implement these interfaces. Do not require GitHub issue numbers, labels, Projects, pull requests, `gh`, or provider-native dependency APIs.
 
+### Readiness Source Integrity
+
+A configured `BoardProvider` is the canonical Backlog Readiness Source
+(`docs/decisions/backlog-readiness-source.md`). When the configured board
+yields zero ready items or cannot be read, record the provider warning
+(`zero_ready_items`, or the read failure) in the pull-work artifact and route
+to triage/intake for an explicit readiness decision. Never silently
+substitute `WorkItemProvider` issue-level listing for board-driven selection:
+a deliberate issue-listing pass must carry the `board_provider_bypassed`
+warning it received into the artifact, with the reason the board was
+bypassed.
+
 ## Model Routing
 
 For board scans, WIP assessment, dependency joins, and selection bookkeeping, resolve `delegate-mechanical` from `.datum/config.json`. If unavailable, inherit the session model and record the fallback.
@@ -172,6 +184,6 @@ Pass `pickup-probe` the selected identifiers, artifact path, provider state, dep
 
 Fetch or otherwise resolve the latest target ref before classifying readiness. Compare the current target ref/SHA to the Work Item's `planned_base_ref` and `planned_base_sha`; record commits-since, planned age, changed files, and changed-file intersections with `planning_scope_refs`.
 
-Classify revision freshness as `fresh`, `drifted`, or `stale`, and classify material drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`. `drifted` requires an alignment decision or accepted gap. `stale` routes back to `idea-to-backlog`. Missing `planned_base_sha` is not fresh: record `NOT_VERIFIED` and stop unless an accepted-gap baseline explicitly names the current target ref/SHA plus provider history.
+Classify revision freshness as `fresh`, `drifted`, or `stale` — this severity vocabulary is what `classifyRevisionFreshness()` mechanically emits. `drifted` requires an alignment decision or accepted gap. `stale` routes back to `idea-to-backlog`. Missing `planned_base_sha` is not fresh: record `NOT_VERIFIED` and stop unless an accepted-gap baseline explicitly names the current target ref/SHA plus provider history. Material drift (`no_material_drift`/`scope_drift`/`dependency_drift`/`contract_drift`/`conflict_risk`) is a distinct routing-judgment dimension pickup Probe produces from this severity plus dependency/scope/conflict context (work-item-contract.md "Planning Base And Drift") — do not conflate the two vocabularies.
 
 Provider discovery and normalization belong to configured adapters, not this skill. Consume configured `WorkItemProvider`, `BoardProvider`, and `AssignmentProvider` results; when configuration is absent, ask for the intended adapters instead of assuming one.

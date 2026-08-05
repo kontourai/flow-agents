@@ -1,0 +1,2 @@
+{"kind":"message","at":"2026-07-14T12:00:00.000Z","text":"fixture agent event"}
+{"kind":"delegation","at":"2026-07-14T12:00:01.000Z","target":"fixture-worker","task":"fixture delegation"}

@@ -24,6 +24,92 @@ npm install --silent --prefix "$TOOL_ROOT" --no-save "$TARBALL"
 FLOW_AGENTS_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents"
 WORKFLOW_SIDECAR_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents-workflow-sidecar"
 [[ -x "$FLOW_AGENTS_BIN" && -x "$WORKFLOW_SIDECAR_BIN" ]] || fail "packed install did not expose the expected binaries"
+
+PICKUP_CONSUMER="$TMP/provider-pickup-consumer"
+PICKUP_ROOT="$PICKUP_CONSUMER/.kontourai/flow-agents"
+PICKUP_BRANCH="agent/installed-provider-pickup"
+PICKUP_RUNTIME_ID="raw-codex-thread-id-must-not-leak"
+mkdir -p "$PICKUP_CONSUMER"
+git -C "$PICKUP_CONSUMER" init -q
+git -C "$PICKUP_CONSUMER" remote add origin git@github.com:acme/widgets.git
+git -C "$PICKUP_CONSUMER" checkout -qb "$PICKUP_BRANCH"
+PICKUP_JSON="$(env -u FLOW_AGENTS_ACTOR CODEX_THREAD_ID="$PICKUP_RUNTIME_ID" "$FLOW_AGENTS_BIN" provider-bootstrap \
+  --scope project \
+  --repo-path "$PICKUP_CONSUMER" \
+  --provider-project 4 \
+  --work-item acme/widgets#44 \
+  --provider-login provider-login \
+  --provider-branch "$PICKUP_BRANCH" \
+  --json)"
+node - "$PICKUP_JSON" "$PICKUP_RUNTIME_ID" "$PICKUP_BRANCH" <<'NODE'
+const result = JSON.parse(process.argv[2]);
+const rawRuntimeId = process.argv[3];
+const branch = process.argv[4];
+if (result.pickup.work_item_ref !== "acme/widgets#44"
+    || result.pickup.slug !== "acme-widgets-44"
+    || result.pickup.provider_branch !== branch
+    || result.pickup.actor.actorKey === rawRuntimeId
+    || JSON.stringify(result).includes(rawRuntimeId)
+    || !result.pickup.actor.actor.session_id.startsWith("thread-")) process.exit(1);
+NODE
+PICKUP_SESSION="$PICKUP_ROOT/acme-widgets-44"
+PICKUP_PLAN="$PICKUP_SESSION/provider-pickup.json"
+node - "$PICKUP_PLAN" <<'NODE'
+const fs = require("node:fs");
+const plan = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+fs.writeFileSync(plan.artifacts.issue_snapshot_file, `${JSON.stringify({
+  number: 44,
+  state: "OPEN",
+  assignees: [{ login: "provider-login" }],
+  labels: [{ name: "agent:claimed" }],
+  comments: [{
+    id: "IC_installed_pickup_44",
+    createdAt: plan.claim.record.claimed_at,
+    author: { login: "provider-login" },
+    body: plan.claim.claim_comment_body,
+  }],
+}, null, 2)}\n`);
+NODE
+PICKUP_ACTOR="$(node -p "require(process.argv[1]).actor.actorKey" "$PICKUP_PLAN")"
+"$FLOW_AGENTS_BIN" assignment-provider status \
+  --provider github \
+  --repo acme/widgets \
+  --issue-json "$PICKUP_SESSION/provider-pickup.issue.json" \
+  --subject-id acme-widgets-44 \
+  --liveness-events-json "$PICKUP_SESSION/provider-pickup.liveness.json" \
+  --self-actor "$PICKUP_ACTOR" > "$PICKUP_SESSION/provider-pickup.effective-state.json"
+printf 'Selected Work Item: acme/widgets#44\n' > "$PICKUP_SESSION/acme-widgets-44--pull-work.md"
+env -u FLOW_AGENTS_ACTOR CODEX_THREAD_ID="$PICKUP_RUNTIME_ID" "$FLOW_AGENTS_BIN" workflow start \
+  --artifact-root "$PICKUP_ROOT" \
+  --flow builder.build \
+  --work-item acme/widgets#44 \
+  --assignment-provider github \
+  --effective-state-json "$PICKUP_SESSION/provider-pickup.effective-state.json" >/dev/null
+node - "$PICKUP_ROOT" "$PICKUP_BRANCH" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const branch = process.argv[3];
+const session = path.join(root, "acme-widgets-44");
+const files = [
+  path.join(root, "assignment", "acme-widgets-44.json"),
+  path.join(session, "state.json"),
+  path.join(root, "current.json"),
+  path.join(session, "assignment-provider-state.json"),
+];
+const actorCurrent = fs.readdirSync(path.join(root, "current"));
+files.push(path.join(root, "current", actorCurrent[0]));
+for (const file of files) {
+  const document = JSON.parse(fs.readFileSync(file, "utf8"));
+  const observed = file.endsWith("assignment-provider-state.json")
+    ? document.assignment.record.branch
+    : document.branch;
+  if (observed !== branch) process.exit(1);
+}
+if (!fs.readFileSync(path.join(session, "acme-widgets-44--deliver.md"), "utf8").includes(`branch: ${branch}`)) process.exit(1);
+NODE
+pass "packed provider bootstrap hides raw runtime identity and preserves the actual provider branch across every workflow projection"
+
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$CONSUMER/checks/check-public-workflow.sh"
 chmod +x "$CONSUMER/checks/check-public-workflow.sh"
 printf '#!/usr/bin/env bash\nset -eu\ntouch "$1"\nsleep 1\n' > "$CONSUMER/checks/check-command-lock.sh"
@@ -34,6 +120,8 @@ printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; tou
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
 chmod +x "$CONSUMER/checks/check-success-background.sh"
+printf '.kontourai/\n' > "$CONSUMER/.gitignore"
+(cd "$CONSUMER" && git init -q && git config user.email public-workflow@example.invalid && git config user.name 'Public Workflow Eval' && git add . && git commit -qm 'seed public workflow consumer')
 
 run_candidate() {
   (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow "$@")
@@ -52,7 +140,7 @@ snapshot_tree() {
 
 PRIMARY_HELP="$(cd "$CONSUMER" && "$FLOW_AGENTS_BIN" --help)"
 WORKFLOW_HELP="$(run_candidate --help)"
-[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits workflow"
+[[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" == *"publish-delivery"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits the delivery publisher"
 pass "isolated packed install exposes the public workflow command without internal writer terminology"
 
 seed_pull_work() {
@@ -69,6 +157,28 @@ RELEASE_SESSION="$ARTIFACT_ROOT/acme-widgets-101"
 [[ -f "$RELEASE_SESSION/state.json" ]] || fail "packed start did not create a session"
 [[ ! -e "$CONSUMER/package.json" ]] || fail "consumer unexpectedly gained package.json"
 pass "packed start works in a non-Node consumer"
+set +e
+PUBLISH_PRIVATE_ARGS="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" --repo-root "$CONSUMER" 2>&1)"
+PUBLISH_PRIVATE_ARGS_RC=$?
+set -e
+[[ "$PUBLISH_PRIVATE_ARGS_RC" -ne 0 && "$PUBLISH_PRIVATE_ARGS" == *"does not support --repo-root"* ]] || fail "public delivery publishing accepted a caller-selected output repository"
+pass "public delivery publishing derives its repository from the bound session"
+set +e
+PARTIAL_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+PARTIAL_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$PARTIAL_BUNDLE_PUBLISH_RC" -ne 0 && "$PARTIAL_BUNDLE_PUBLISH" == *"requires a completed canonical builder.build run after passing learning"* && ! -e "$CONSUMER/delivery/acme-widgets-101/trust.bundle" ]] || fail "public delivery publishing accepted a partial Builder session"
+pass "public delivery publishing refuses partial Builder sessions even when selected-work created a trust bundle"
+seed_pull_work acme/widgets#108
+run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#108 --assignment-provider local-file --summary "Missing delivery bundle fixture" >/dev/null
+MISSING_BUNDLE_SESSION="$ARTIFACT_ROOT/acme-widgets-108"
+rm -f "$MISSING_BUNDLE_SESSION/trust.bundle"
+set +e
+MISSING_BUNDLE_PUBLISH="$(run_candidate publish-delivery --session-dir "$MISSING_BUNDLE_SESSION" 2>&1)"
+MISSING_BUNDLE_PUBLISH_RC=$?
+set -e
+[[ "$MISSING_BUNDLE_PUBLISH_RC" -ne 0 && "$MISSING_BUNDLE_PUBLISH" == *"requires a current session trust.bundle"* && ! -e "$CONSUMER/delivery/acme-widgets-108/trust.bundle" ]] || fail "public delivery publishing did not fail closed for a missing session bundle"
+pass "public delivery publishing refuses a missing session bundle before writing delivery evidence"
 seed_pull_work provider:work-item-123
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:work-item-123 --assignment-provider local-file --summary "Provider-neutral fixture" >/dev/null
 PROVIDER_STATUS="$(run_candidate status --session-dir "$ARTIFACT_ROOT/provider-work-item-123" --json)"
@@ -76,11 +186,13 @@ node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.build
 pass "documented provider-neutral Work Item refs start without GitHub identity inference"
 seed_pull_work provider:externally-owned-456
 PROVIDER_STATE="$CONSUMER/provider-assignment-state.json"
-node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" <<'NODE'
+CONSUMER_BRANCH="$(git -C "$CONSUMER" branch --show-current)"
+node - "$PROVIDER_STATE" "$ARTIFACT_ROOT/assignment/acme-widgets-101.json" "$CONSUMER_BRANCH" <<'NODE'
 const fs = require('node:fs');
 const local = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+const branch = process.argv[4];
 const subject = 'provider-externally-owned-456';
-const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456' };
+const record = { ...local, subject_id: subject, work_item_ref: 'provider:externally-owned-456', branch };
 fs.writeFileSync(process.argv[2], `${JSON.stringify({ role: 'AssignmentStatus', provider: 'example-provider', assignment: { subject_id: subject, provider: 'example-provider', assignee: local.actor_key, record }, effective: { effective_state: 'held', reason: 'self_is_holder', holder: { actor: local.actor_key } } }, null, 2)}\n`);
 NODE
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item provider:externally-owned-456 --assignment-provider example-provider --effective-state-json "$PROVIDER_STATE" --summary "Externally assigned fixture" >/dev/null
@@ -309,6 +421,119 @@ NODE
 [[ "$(wc -l < "$MULTI_COMMAND_ONE" | tr -d ' ')" == 1 && "$(wc -l < "$MULTI_COMMAND_TWO" | tr -d ' ')" == 1 ]] || fail "public evidence did not execute every repeated --command exactly once"
 pass "tests-evidence executes every repeated command once and records matching observations"
 
+# The remaining provider operations are independently covered by their authenticated
+# operation E2Es. Put this already-verified canonical fixture at the supported release-ready
+# boundary so this test can exercise the public publisher itself, including its exact actor,
+# freshness, and fresh-companion invariants.
+FLOW_STATE="$CONSUMER/.kontourai/flow/runs/$(basename "$RELEASE_SESSION")/state.json"
+node - "$FLOW_STATE" "$RELEASE_SESSION/release.json" "$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const [stateFile, releaseFile, slug] = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+fs.writeFileSync(releaseFile, `${JSON.stringify({ schema_version: '1.0', task_slug: slug, decision: 'merge' }, null, 2)}\n`);
+NODE
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.sig.json"
+printf '{"stale":true}\n' > "$RELEASE_SESSION/trust.checkpoint.intoto.json"
+printf '{"status":"signed","path":"trust.checkpoint.sig.json"}\n' > "$RELEASE_SESSION/trust.checkpoint.attestation.json"
+set +e
+ACTOR_MISMATCH_PUBLISH="$(run_candidate_as unrelated-publisher publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+ACTOR_MISMATCH_RC=$?
+set -e
+[[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
+pass "public delivery publishing requires the exact ordinary assignment actor"
+printf 'source snapshot B\n' > "$CONSUMER/source-b.txt"
+(cd "$CONSUMER" && git add source-b.txt && git commit -qm 'source snapshot B after initial verification')
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+# Reset only the prior review slice so this fixture can record an independent
+# canonical review at B while deliberately retaining the tests-evidence from A.
+node - "$RELEASE_SESSION/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const removed = new Set(bundle.claims.filter((claim) => claim.metadata?.origin === 'critique').map((claim) => claim.id));
+bundle.claims = bundle.claims.filter((claim) => !removed.has(claim.id));
+bundle.evidence = bundle.evidence.filter((entry) => !removed.has(entry.claimId));
+bundle.events = bundle.events.filter((entry) => !removed.has(entry.claimId));
+bundle.critique_resolution_events = [];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+run_candidate_as public-reviewer critique --session-dir "$RELEASE_SESSION" --id public-review --verdict pass --summary "Review source snapshot B." --artifact-ref "$DELIVER_REPORT" --lane-json "$CODE_LANE" --lane-json "$SECURITY_LANE" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'completed';
+state.current_step = 'done';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+set +e
+STALE_TESTS_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_TESTS_RC=$?
+set -e
+[[ "$STALE_TESTS_RC" -ne 0 && "$STALE_TESTS_PUBLISH" == *"test verification evidence bound to the exact same source snapshot"* ]] || fail "a fresh critique rebound tests from source snapshot A onto source snapshot B"
+pass "fresh critique at source snapshot B cannot reuse tests recorded at snapshot A"
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'verify';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation tests-evidence --status pass --summary "Re-run verification for source snapshot B." --command "$TEST_COMMAND" --command "$TEST_COMMAND_TWO" --command "$TEST_COMMAND_THREE" --evidence-ref-json "$COMMAND_REF" --evidence-ref-json "$COMMAND_REF_TWO" --evidence-ref-json "$COMMAND_REF_THREE" --criterion-json "$CRITERION_JSON" --json >/dev/null
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'completed';
+state.current_step = 'done';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+pass "canonical verification rerun binds tests to source snapshot B"
+PUBLISH_JSON="$(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval \
+  TRUST_RECONCILE_COMMANDS="$TEST_COMMAND
+$TEST_COMMAND_TWO
+$TEST_COMMAND_THREE" "$FLOW_AGENTS_BIN" workflow publish-delivery --session-dir "$RELEASE_SESSION" --json)"
+node - "$PUBLISH_JSON" "$RELEASE_SESSION" "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" <<'NODE'
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const [reportText, session, delivery] = process.argv.slice(2);
+const report = JSON.parse(reportText);
+const attestation = JSON.parse(fs.readFileSync(`${session}/trust.checkpoint.attestation.json`, 'utf8'));
+const companion = `${session}/${attestation.path}`;
+const stale = attestation.status === 'signed' ? `${session}/trust.checkpoint.intoto.json` : `${session}/trust.checkpoint.sig.json`;
+const statement = attestation.status === 'signed'
+  ? JSON.parse(Buffer.from(JSON.parse(fs.readFileSync(companion, 'utf8')).payload, 'base64').toString('utf8'))
+  : JSON.parse(fs.readFileSync(companion, 'utf8'));
+const checkpointDigest = crypto.createHash('sha256').update(fs.readFileSync(`${session}/trust.checkpoint.json`)).digest('hex');
+const subject = statement.subject?.find((entry) => entry.name === 'trust.checkpoint.json');
+if (!report.published || !fs.existsSync(`${delivery}/trust.bundle`) || !fs.existsSync(`${delivery}/${attestation.path}`)
+  || fs.existsSync(stale) || subject?.digest?.sha256 !== checkpointDigest
+  || JSON.stringify(statement.predicate) !== JSON.stringify(JSON.parse(fs.readFileSync(`${session}/trust.bundle`, 'utf8')))) process.exit(1);
+NODE
+pass "release-ready public publishing emits and copies only newly digest-bound checkpoint companions"
+(cd "$CONSUMER" && git add "delivery/$(basename "$RELEASE_SESSION")" && git commit -qm 'commit public delivery evidence')
+[[ -f "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")/trust.bundle" ]] || fail "tracked public delivery output did not remain available after commit"
+pass "public publishing supports tracked delivery evidence"
+printf 'post-verification source change\n' > "$CONSUMER/source-change.txt"
+(cd "$CONSUMER" && git add source-change.txt && git commit -qm 'post verification source change')
+set +e
+STALE_EVIDENCE_PUBLISH="$(run_candidate publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
+STALE_EVIDENCE_RC=$?
+set -e
+[[ "$STALE_EVIDENCE_RC" -ne 0 && "$STALE_EVIDENCE_PUBLISH" == *"exact same source snapshot"* ]] || fail "public delivery publishing rebound old verification evidence onto a newer HEAD"
+pass "public delivery publishing requires canonical re-verification after HEAD changes"
+
 ASSIGNMENT="$ARTIFACT_ROOT/assignment/$(basename "$RELEASE_SESSION").json"
 ASSIGNMENT_TARGET="$TMP/assignment-target.json"
 cp "$ASSIGNMENT" "$ASSIGNMENT_TARGET"
@@ -359,6 +584,14 @@ set -e
 [[ "$SYMLINK_RC" -ne 0 && "$SYMLINK_EVIDENCE" == *"session directory must be a non-symlink directory"* && "$(snapshot_tree "$OUTSIDE")" == "$OUTSIDE_BEFORE" ]] || fail "evidence followed a symlinked session"
 pass "evidence rejects symlinked session paths before mutation"
 
+node - "$FLOW_STATE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+state.status = 'active';
+state.current_step = 'learn';
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
 run_candidate pause --session-dir "$RELEASE_SESSION" --reason "consumer pause" >/dev/null
 run_candidate resume --session-dir "$RELEASE_SESSION" --reason "consumer resume" >/dev/null
 run_candidate release --session-dir "$RELEASE_SESSION" --reason "consumer release" >/dev/null
@@ -377,8 +610,6 @@ const slug = path.basename(session);
 const assignment = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`), 'utf8'));
 const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
 const keys = generateKeyPairSync('ed25519');
-fs.mkdirSync(path.join(project, '.flow-agents'), { recursive: true });
-fs.writeFileSync(path.join(project, '.flow-agents', 'lifecycle-authority-keys.json'), JSON.stringify({ schema_version: '1.0', keys: [{ id: 'consumer', algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }] }, null, 2));
 for (const operation of ['cancel', 'archive']) {
   const requestedAt = new Date();
   const unsigned = {
@@ -393,10 +624,9 @@ for (const operation of ['cancel', 'archive']) {
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
 NODE
-run_candidate cancel --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/cancel.authorization.json" >/dev/null
-run_candidate archive --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/archive.authorization.json" >/dev/null
-[[ -f "$ARTIFACT_ROOT/archive/acme-widgets-102/state.json" && ! -e "$CANCEL_SESSION" ]] || fail "cancel/archive did not retain archived session"
-pass "signed cancel and archive execute through the public command"
+! run_candidate cancel --session-dir "$CANCEL_SESSION" --authorization-file "$CONSUMER/cancel.authorization.json" >/dev/null 2>&1 || fail "repository-local authority unexpectedly authorized cancellation"
+[[ -d "$CANCEL_SESSION" ]] || fail "failed-closed cancellation mutated the session"
+pass "public lifecycle commands reject repository-local authority without an external trust anchor"
 
 seed_pull_work acme/widgets#106
 run_candidate start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#106 --assignment-provider local-file --summary "Command authority lock fixture" >/dev/null

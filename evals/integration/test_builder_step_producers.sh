@@ -444,6 +444,13 @@ echo "=== PUBLIC CLI: canonical skill path and external operation boundary ==="
 flow_agents_build_ts || _fail "public CLI fixture build failed"
 PUBLIC_ROOT="$TMP/public/.kontourai/flow-agents"
 PUBLIC_SESSION="$PUBLIC_ROOT/acme-builder-901"
+mkdir -p "$TMP/public"
+git -C "$TMP/public" init -q
+git -C "$TMP/public" config user.email builder-producers@example.invalid
+git -C "$TMP/public" config user.name "Builder Producer Eval"
+printf '.kontourai/\n' > "$TMP/public/.gitignore"
+git -C "$TMP/public" add .gitignore
+git -C "$TMP/public" commit -qm "seed public producer fixture"
 
 public_flow() {
   env -u CODEX_THREAD_ID CODEX_SESSION_ID=builder-public-producers node "$ROOT/build/src/cli.js" workflow "$@"
@@ -747,7 +754,7 @@ NODE
   record_public_expectation "slices-defined"
   assert_public_shape_step "file-issues" "idea-to-backlog"
   record_public_expectation "work-items-filed"
-  assert_public_shape_step "shape-done" "" "active-or-completed"
+  assert_public_shape_step "file-issues" "" "completed"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────

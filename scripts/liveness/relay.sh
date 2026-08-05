@@ -7,26 +7,36 @@
 # never forked). The Console side ingests this record type and projects the fleet view + runs the
 # janitor (console repo #125); this script is only the flow-agents EMIT half.
 #
-# STRICTLY OPTIONAL and local-first (ADR 0012 §5): a no-op unless FLOW_AGENTS_CONSOLE_LIVENESS_RELAY
-# is enabled AND a console endpoint is configured. Best-effort throughout — it must NEVER block, slow,
-# or fail the local liveness write that already happened before this was invoked. Every failure path
-# is a quiet `exit 0`.
+# STRICTLY OPTIONAL and local-first (ADR 0012 §5): a no-op unless the liveness relay is enabled AND a
+# console endpoint is configured. Enablement is conf-driven (#567, parity with economics #469): an
+# operator sets `console_liveness_relay=1` in the console conf (or it defaults on once a console url
+# resolves) — NOT an env var. config.sh (sourced below) is the authoritative, trust-gated decision
+# and also supplies the endpoint/token/tenant from the conf. Best-effort throughout — it must NEVER
+# block, slow, or fail the local liveness write that already happened before this was invoked. Every
+# failure path is a quiet `exit 0`.
 #
 # Invoked (fully detached, best-effort) from scripts/hooks/lib/liveness-write.js after the durable
 # local append. Usage: relay.sh '<liveness-event-json>'
 set -uo pipefail
-
-# Opt-in gate — off by default.
-case "${FLOW_AGENTS_CONSOLE_LIVENESS_RELAY:-}" in
-  1 | true | TRUE | yes | on) ;;
-  *) exit 0 ;;
-esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 
 # transport.sh sources ${TELEMETRY_DIR}/lib/redact.sh at load — point it at the telemetry lib dir,
 # then reuse the SAME console POST core the telemetry mirror uses.
 export TELEMETRY_DIR="${TELEMETRY_DIR:-$SCRIPT_DIR/../telemetry}"
+
+# Source config.sh FIRST (best-effort, like economics-record.sh) so the conf resolves enablement
+# (FLOW_AGENTS_CONSOLE_LIVENESS_RELAY) and the endpoint/token/tenant — trust-gated for default-path
+# confs. This is what makes conf-only operation work with NO env var set.
+# shellcheck source=/dev/null
+[[ -f "$TELEMETRY_DIR/lib/config.sh" ]] && source "$TELEMETRY_DIR/lib/config.sh" 2>/dev/null || true
+
+# Opt-in gate — off by default, now honoring the conf-derived value config.sh just resolved.
+case "${FLOW_AGENTS_CONSOLE_LIVENESS_RELAY:-}" in
+  1 | true | TRUE | yes | on) ;;
+  *) exit 0 ;;
+esac
+
 [[ -f "$TELEMETRY_DIR/lib/transport.sh" ]] || exit 0
 # shellcheck source=/dev/null
 source "$TELEMETRY_DIR/lib/transport.sh" 2>/dev/null || exit 0
@@ -73,7 +83,9 @@ record="$(printf '%s' "$event_json" | jq -c '{
   ttlSeconds: (.ttlSeconds // null),
   host: (.host // null),
   branch: (.branch // null),
-  artifact_dir: (.artifact_dir // .artifactDir // null)
+  artifact_dir: (.artifact_dir // .artifactDir // null),
+  source: (.source // null),
+  activity: (.activity // null)
 }' 2>/dev/null)" || exit 0
 [[ -z "$record" || "$record" == "null" ]] && exit 0
 

@@ -4,9 +4,18 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { evaluateGate, expectationsForGate, openGates, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
 import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepExpectationBinding } from "./flow-kit/validate.js";
-import { PUBLIC_OPERATION_CONTRACTS, WORKFLOW_CRITIQUE_STATUSES } from "./cli/public-contracts.js";
+import {
+  EVIDENCE_REF_JSON_SCHEMA,
+  PUBLIC_OPERATION_CONTRACTS,
+  publicOperationContracts,
+  type PublishChangeActionBinding,
+  type PublishChangeOperationProtocol,
+  WORKFLOW_CRITIQUE_PARAMETERS,
+  WORKFLOW_EVIDENCE_PARAMETERS,
+} from "./cli/public-contracts.js";
+import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import { flowAgentsPackageRoot } from "./lib/package-version.js";
-import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
 
 const MAX_METADATA_BYTES = 1_048_576;
 const MAX_ENVELOPE_BYTES = 65_536;
@@ -24,9 +33,39 @@ export type GateActionInterfaceParameter = {
   name: string;
   flag: string;
   required: boolean;
-  allowed_values?: string[];
+  allowed_values?: readonly string[];
   repeatable?: boolean;
   required_when?: { parameter: string; equals: string };
+  value_schema_ref?: "#/public_interfaces/schemas/evidence_ref_json";
+};
+
+export type GateActionArtifactTarget =
+  | {
+      kind: "file";
+      ref: string;
+      path: string;
+      direct_write_allowed: true;
+      produced_via: { interface: "skill"; skill_ids: string[] };
+    }
+  | {
+      kind: "file";
+      ref: string;
+      path: string;
+      direct_write_allowed: false;
+      produced_via: { interface: "operation"; operations: string[] };
+    }
+  | {
+      kind: "trust_slice";
+      ref: string;
+      bundle_file: "trust.bundle";
+      slice_id: string;
+      direct_write_allowed: false;
+      record_via: Array<"workflow.evidence" | "workflow.critique">;
+    };
+
+export type GateActionArtifactBinding = {
+  target: GateActionArtifactTarget;
+  expectation_ids: string[];
 };
 
 export type GateActionWorkflowMutation = {
@@ -35,7 +74,7 @@ export type GateActionWorkflowMutation = {
       package: { name: "@kontourai/flow-agents"; version: string };
       command: "flow-agents";
       argv: string[];
-      parameters: GateActionInterfaceParameter[];
+      parameters: readonly GateActionInterfaceParameter[];
     };
 
 export type GateActionPublicMutation =
@@ -44,20 +83,22 @@ export type GateActionPublicMutation =
       expectation_id: string;
       interface: "operation";
       operation: string;
-      protocol: (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS];
+      protocol: PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS];
+      binding: PublishChangeActionBinding;
       completion: {
-        status: "external_verification_required";
-        executable_by_flow_agents: false;
+        status: "external_verification_required" | "configured_provider_execution_required";
+        executable_by_flow_agents: boolean;
         gate_evidence_interface: null;
       };
     };
 
 export type GateActionEnvelope = {
-  schema_version: "1.0";
+  schema_version: "3.0";
   flow: {
     run_id: string;
     definition_id: string;
     definition_version: string;
+    definition_digest: string;
     status: string;
     current_step: string;
     gate_ids: string[];
@@ -65,6 +106,7 @@ export type GateActionEnvelope = {
   gate: {
     requirements: Array<{
       id: string;
+      gate_id: string;
       required: boolean;
       description: string;
       claim_type: string;
@@ -83,12 +125,20 @@ export type GateActionEnvelope = {
       sha256: string;
     }>;
     operations: string[];
-    declared_artifacts: string[];
+    declared_artifacts: GateActionArtifactTarget[];
+    artifact_bindings: GateActionArtifactBinding[];
     declared_evidence: string[];
     implementation_allowed: boolean;
   };
   public_interfaces: {
-    status: { command: string };
+    status: {
+      package: { name: "@kontourai/flow-agents"; version: string };
+      command: "flow-agents";
+      argv: string[];
+    };
+    schemas: {
+      evidence_ref_json: AnyRecord;
+    };
     mutations: GateActionPublicMutation[];
   };
   stop_condition: {
@@ -101,7 +151,7 @@ export type GateActionEnvelope = {
     };
     required: {
       skill_ids: string[];
-      artifact_refs: string[];
+      artifact_refs: GateActionArtifactTarget[];
       unresolved_evidence_ids: string[];
     };
     sequence: ["activate_required_skills", "produce_declared_artifacts", "record_bound_evidence", "synchronize_canonical_flow", "return_adapter_result"];
@@ -122,8 +172,13 @@ export type GateActionEnvelope = {
   };
 };
 
+export { EVIDENCE_REF_JSON_SCHEMA } from "./cli/public-contracts.js";
+
 export type GateActionProgressSnapshot = Pick<GateActionEnvelope["progress"], "canonical_evidence" | "observed_artifacts"> & {
   current_step: string;
+  /** Effective Flow definition identity; absent only in legacy snapshots. */
+  definition_version?: string;
+  definition_digest?: string;
   /** Optional for compatibility with snapshots persisted before terminal status capture. */
   canonical_status?: string;
 };
@@ -144,6 +199,7 @@ export type BuilderGateActionEnvelopeInput = {
     runId: string;
     definitionId: string;
     definitionVersion: string;
+    definitionDigest: string;
     state: FlowRunState;
     manifest: AnyRecord;
     config: AnyRecord;
@@ -168,6 +224,104 @@ type DerivedGateRequirements = {
   acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"];
 };
 
+export function installedBuilderSkillIdentity(skill: string): GateActionEnvelope["action"]["skills"][number] {
+  const packageRoot = flowAgentsPackageRoot();
+  const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
+  if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
+  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
+  return skillIdentity(kit, packageRoot, packageMetadata.version, skill);
+}
+
+export function installedBuilderImplementationAllowed(definitionId: string, currentStep: string): boolean {
+  const packageRoot = flowAgentsPackageRoot();
+  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
+  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
+  const selected = parsed.entries.filter((entry) => entry.flow_id === definitionId && entry.step_id === currentStep);
+  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${definitionId}/${currentStep}`);
+  return selected[0]!.implementation_allowed;
+}
+
+export function installedBuilderGateActionAuthority(definitionId: string, currentStep: string, runId: string): {
+  definition_version: string;
+  gate_id: string;
+  requirements: Array<Omit<GateActionEnvelope["gate"]["requirements"][number], "status">>;
+  action: GateActionEnvelope["action"];
+  mutations: GateActionPublicMutation[];
+  artifact_bindings: GateActionArtifactBinding[];
+  external_capability?: NonNullable<GateActionEnvelope["stop_condition"]["external_capability"]>;
+} {
+  const packageRoot = flowAgentsPackageRoot();
+  const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
+  if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
+  const packageVersion = packageMetadata.version;
+  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
+  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
+  const selected = parsed.entries.filter((entry) => entry.flow_id === definitionId && entry.step_id === currentStep);
+  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${definitionId}/${currentStep}`);
+  const action = selected[0]!;
+  const definition = resolveEffectiveFlowDefinition(definitionId, packageRoot, { allowOverride: false });
+  if (typeof definition?.version !== "string" || definition.version.length === 0) {
+    throw new Error(`Installed Builder Flow has no version for ${definitionId}`);
+  }
+  const gates: Array<[string, AnyRecord]> = isRecord(definition?.gates) ? Object.entries(definition.gates)
+    .flatMap(([gateId, gate]) => isRecord(gate) && gate.step === currentStep ? [[gateId, gate]] : []) : [];
+  if (gates.length !== 1) throw new Error(`Installed Builder Flow must declare exactly one gate for ${definitionId}/${currentStep}`);
+  const [gateId, gate] = gates[0]!;
+  const expects = Array.isArray(gate.expects) ? gate.expects : [];
+  const requirements = expects.map((expectation) => {
+    if (!isRecord(expectation)) throw new Error("Installed Builder gate expectation is malformed");
+    const requirement = requirementFromExpectation(gateId, expectation as unknown as FlowExpectation, new Set<string>(), false);
+    const { status: _status, ...shape } = requirement;
+    return shape;
+  });
+  if (!sameSet(action.expectation_ids, requirements.map((requirement) => requirement.id))) {
+    throw new Error(`Installed Builder action evidence does not match ${definitionId}/${currentStep}`);
+  }
+  const sessionArgument = `.kontourai/flow-agents/${runId}`;
+  const declaredArtifacts = action.artifacts.filter((artifact) => !isControlArtifact(artifact))
+    .map((artifact) => artifactTarget(artifact, runId, sessionArgument, action));
+  const artifactBindings = action.artifact_bindings
+    .filter((binding) => !isControlArtifact(binding.artifact))
+    .map((binding) => ({
+      target: artifactTarget(binding.artifact, runId, sessionArgument, action),
+      expectation_ids: [...binding.expectation_ids],
+    }));
+  const operation = action.operations[0];
+  const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const actionEnvelope: GateActionEnvelope["action"] = {
+    skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
+    operations: [...action.operations],
+    declared_artifacts: declaredArtifacts,
+    artifact_bindings: artifactBindings,
+    declared_evidence: [...action.expectation_ids],
+    implementation_allowed: action.implementation_allowed,
+  };
+  return {
+    definition_version: definition.version,
+    gate_id: gateId,
+    requirements,
+    action: actionEnvelope,
+    mutations: action.expectation_bindings.map((binding) => publicMutation(
+      binding,
+      sessionArgument,
+      packageVersion,
+      operationContractsForProject(packageRoot),
+      authorityOperationBinding(runId, definitionId, definition.version as string, currentStep, gateId),
+    )),
+    artifact_bindings: artifactBindings,
+    ...(protocol?.availability.status === "external_capability_required" ? {
+      external_capability: {
+        status: "waiting" as const,
+        operation: protocol.operation,
+        capability: protocol.capability,
+        completion: "external_verification_required" as const,
+      },
+    } : {}),
+  };
+}
+
 /** Derive bounded adapter context without trusting adapter telemetry. */
 export function deriveBuilderGateActionEnvelope(input: BuilderGateActionEnvelopeInput): GateActionEnvelope {
   const loaded = loadGateAction(input);
@@ -186,6 +340,8 @@ export function deriveBuilderGateActionProgressSnapshot(input: BuilderGateAction
   const { actions } = loadGateAction(input);
   return {
     current_step: input.run.state.current_step,
+    definition_version: input.run.definitionVersion,
+    definition_digest: input.run.definitionDigest,
     canonical_status: input.run.state.status,
     canonical_evidence: canonicalEvidence(input.run.manifest),
     observed_artifacts: observeBuilderArtifactsForProgress(input.sessionDir, actions.flatMap((entry) => entry.artifacts)),
@@ -222,7 +378,7 @@ function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: K
     const matched = new Set((Array.isArray(outcome.matched_expectations) ? outcome.matched_expectations : [])
       .flatMap((entry) => isRecord(entry) && typeof entry.expectation_id === "string" ? [entry.expectation_id] : []));
     return (expectationsForGate(gate, input.run.config) as FlowExpectation[])
-      .map((expectation) => requirementFromExpectation(expectation, matched, typeof outcome.accepted_exception_id === "string"));
+      .map((expectation) => requirementFromExpectation(gate.id, expectation, matched, typeof outcome.accepted_exception_id === "string"));
   });
   if (requirements.length > MAX_REQUIREMENTS) throw new Error("Builder gate-action envelope requirements exceed the supported bound");
   if (!sameSet(action.expectation_ids, requirements.map((requirement) => requirement.id))) {
@@ -238,27 +394,33 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
   const { gates, requirements, unresolved, unresolvedRequired, acceptedExceptions } = derived;
   const sessionDir = path.resolve(input.sessionDir);
   const sessionArgument = sessionPathForPublicCommand(input.projectRoot, sessionDir);
-  const statusCommand = pinnedFlowAgentsCommand(packageVersion, ["workflow", "status", "--session-dir", sessionArgument, "--json"]);
   const requiredArtifacts = action.artifact_bindings
     .filter((binding) => !isControlArtifact(binding.artifact) && binding.expectation_ids.some((id) => unresolvedRequired.includes(id)))
-    .map((binding) => binding.artifact);
+    .map((binding) => artifactTarget(binding.artifact, sessionDir, sessionArgument, action));
+  const operationContracts = operationContractsForProject(input.projectRoot);
   const envelope: GateActionEnvelope = {
-    schema_version: "1.0",
+    schema_version: "3.0",
     flow: {
       run_id: input.run.runId,
       definition_id: input.run.definitionId,
       definition_version: input.run.definitionVersion,
+      definition_digest: input.run.definitionDigest,
       status: input.run.state.status,
       current_step: input.run.state.current_step,
       gate_ids: gates.map((gate) => gate.id),
     },
     gate: { requirements, unresolved_requirement_ids: unresolved, accepted_exceptions: acceptedExceptions },
-    action: envelopeAction(action, actionableArtifacts, kit, packageRoot, packageVersion),
+    action: envelopeAction(action, actionableArtifacts, sessionDir, sessionArgument, kit, packageRoot, packageVersion),
     public_interfaces: {
-      status: { command: statusCommand },
-      mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion)),
+      status: {
+        package: { name: "@kontourai/flow-agents", version: packageVersion },
+        command: "flow-agents",
+        argv: ["workflow", "status", "--session-dir", sessionArgument, "--json"],
+      },
+      schemas: { evidence_ref_json: structuredClone(EVIDENCE_REF_JSON_SCHEMA) },
+      mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion, operationContracts, operationBinding(input, gates))),
     },
-    stop_condition: envelopeStopCondition(input, gates, action, requiredArtifacts, unresolvedRequired),
+    stop_condition: envelopeStopCondition(input, gates, action, requiredArtifacts, unresolvedRequired, operationContracts),
     progress: {
       canonical_evidence: canonicalEvidence(input.run.manifest),
       observed_artifacts: observeBuilderArtifactsForProgress(sessionDir, actions.flatMap((entry) => entry.artifacts)),
@@ -267,11 +429,18 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
   return envelope;
 }
 
-function envelopeAction(action: KitFlowStepActionEntry, artifacts: string[], kit: AnyRecord, packageRoot: string, packageVersion: string): GateActionEnvelope["action"] {
+function envelopeAction(action: KitFlowStepActionEntry, artifacts: string[], sessionDir: string, sessionArgument: string, kit: AnyRecord, packageRoot: string, packageVersion: string): GateActionEnvelope["action"] {
+  const declaredArtifacts = artifacts.map((artifact) => artifactTarget(artifact, sessionDir, sessionArgument, action));
   return {
     skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
     operations: [...action.operations],
-    declared_artifacts: [...artifacts],
+    declared_artifacts: declaredArtifacts,
+    artifact_bindings: action.artifact_bindings
+      .filter((binding) => !isControlArtifact(binding.artifact))
+      .map((binding) => ({
+        target: artifactTarget(binding.artifact, sessionDir, sessionArgument, action),
+        expectation_ids: [...binding.expectation_ids],
+      })),
     declared_evidence: [...action.expectation_ids],
     implementation_allowed: action.implementation_allowed,
   };
@@ -281,11 +450,12 @@ function envelopeStopCondition(
   input: BuilderGateActionEnvelopeInput,
   gates: Array<FlowGate & { id: string }>,
   action: KitFlowStepActionEntry,
-  artifactRefs: string[],
+  artifactRefs: GateActionArtifactTarget[],
   unresolvedEvidenceIds: string[],
+  operationContracts: Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]>,
 ): GateActionEnvelope["stop_condition"] {
   const operation = action.operations[0];
-  const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const protocol = operation ? operationContracts[operation] : undefined;
   return {
     kind: "one_turn",
     scope: { run_id: input.run.runId, current_step: input.run.state.current_step, gate_ids: gates.map((gate) => gate.id), current_gate_only: true },
@@ -308,6 +478,8 @@ function envelopeStopCondition(
 export function gateActionProgressSnapshot(envelope: GateActionEnvelope): GateActionProgressSnapshot {
   return {
     current_step: envelope.flow.current_step,
+    definition_version: envelope.flow.definition_version,
+    definition_digest: envelope.flow.definition_digest,
     canonical_status: envelope.flow.status,
     canonical_evidence: [...envelope.progress.canonical_evidence],
     observed_artifacts: [...envelope.progress.observed_artifacts],
@@ -321,19 +493,28 @@ export function withGateActionPriorProgress(envelope: GateActionEnvelope, priorT
   return copy;
 }
 
-function publicMutation(binding: KitFlowStepExpectationBinding, sessionArgument: string, packageVersion: string): GateActionPublicMutation {
+function publicMutation(
+  binding: KitFlowStepExpectationBinding,
+  sessionArgument: string,
+  packageVersion: string,
+  operationContracts: Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]>,
+  operationBindingValue?: PublishChangeActionBinding,
+): GateActionPublicMutation {
   if (binding.interface === "operation") {
     const operation = binding.operation!;
-    const protocol = PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS];
+    const protocol = operationContracts[operation];
     if (!protocol) throw new Error(`Builder gate-action operation '${operation}' has no canonical public protocol`);
+    if (!operationBindingValue) throw new Error(`Builder gate-action operation '${operation}' requires canonical run and gate-visit binding`);
+    const configured = protocol.availability.status === "configured";
     return {
       expectation_id: binding.expectation_id,
       interface: "operation",
       operation,
       protocol: structuredClone(protocol),
+      binding: structuredClone(operationBindingValue),
       completion: {
-        status: "external_verification_required",
-        executable_by_flow_agents: false,
+        status: configured ? "configured_provider_execution_required" : "external_verification_required",
+        executable_by_flow_agents: configured,
         gate_evidence_interface: null,
       },
     };
@@ -345,18 +526,53 @@ function publicMutation(binding: KitFlowStepExpectationBinding, sessionArgument:
       package: { name: "@kontourai/flow-agents", version: packageVersion },
       command: "flow-agents",
       argv: ["workflow", "critique", "--session-dir", sessionArgument, "--json"],
-      parameters: [
-        { name: "id", flag: "--id", required: false },
-        { name: "verdict", flag: "--verdict", required: true, allowed_values: [...WORKFLOW_CRITIQUE_STATUSES] },
-        { name: "summary", flag: "--summary", required: true },
-        { name: "lane_json", flag: "--lane-json", required: true, repeatable: true },
-        { name: "artifact_ref", flag: "--artifact-ref", required: false, repeatable: true, required_when: { parameter: "verdict", equals: "pass" } },
-        { name: "finding_json", flag: "--finding-json", required: false, repeatable: true },
-        { name: "timestamp", flag: "--timestamp", required: false },
-      ],
+      parameters: structuredClone(WORKFLOW_CRITIQUE_PARAMETERS),
     };
   }
   return workflowEvidenceMutation(binding.expectation_id, sessionArgument, packageVersion);
+}
+
+function operationContractsForProject(projectRoot: string): Record<string, PublishChangeOperationProtocol | (typeof PUBLIC_OPERATION_CONTRACTS)[keyof typeof PUBLIC_OPERATION_CONTRACTS]> {
+  const resolved = resolveEffectiveChangeProviderSettings(
+    projectRoot,
+    path.join(projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  const provider = resolved.status === "configured" ? resolved.provider : resolved.status === "unsupported" ? {} : undefined;
+  return { ...PUBLIC_OPERATION_CONTRACTS, ...publicOperationContracts(provider) };
+}
+
+function operationBinding(input: BuilderGateActionEnvelopeInput, gates: Array<FlowGate & { id: string }>): PublishChangeActionBinding {
+  const enteredAt = currentGateVisitIdentity(input.run.state, input.run.state.current_step);
+  const gateIds = gates.map((gate) => gate.id);
+  const source = [input.run.runId, input.run.definitionId, input.run.definitionVersion, input.run.state.current_step, ...gateIds, enteredAt].join("\n");
+  return {
+    run_id: input.run.runId,
+    definition_id: input.run.definitionId,
+    definition_version: input.run.definitionVersion,
+    step_id: input.run.state.current_step,
+    gate_ids: gateIds,
+    gate_visit_id: createHash("sha256").update(source).digest("hex"),
+  };
+}
+
+function authorityOperationBinding(runId: string, definitionId: string, definitionVersion: string, stepId: string, gateId: string): PublishChangeActionBinding {
+  return {
+    run_id: runId,
+    definition_id: definitionId,
+    definition_version: definitionVersion,
+    step_id: stepId,
+    gate_ids: [gateId],
+    gate_visit_id: "0".repeat(64),
+  };
+}
+
+function currentGateVisitIdentity(state: FlowRunState, step: string): string {
+  const transitions = Array.isArray(state.transitions) ? state.transitions : [];
+  for (const transition of [...transitions].reverse()) {
+    if (transition?.to_step === step && typeof transition.at === "string" && transition.at.length > 0) return transition.at;
+  }
+  if (typeof state.updated_at === "string" && state.updated_at.length > 0) return state.updated_at;
+  throw new Error("Builder gate-action operation requires a canonical current gate visit timestamp");
 }
 
 function workflowEvidenceMutation(expectationId: string, sessionArgument: string, packageVersion: string): GateActionWorkflowMutation {
@@ -366,20 +582,57 @@ function workflowEvidenceMutation(expectationId: string, sessionArgument: string
     package: { name: "@kontourai/flow-agents", version: packageVersion },
     command: "flow-agents",
     argv: ["workflow", "evidence", "--session-dir", sessionArgument, "--expectation", expectationId, "--json"],
-    parameters: [
-      { name: "status", flag: "--status", required: true, allowed_values: ["pass", "fail", "not_verified"] },
-      { name: "summary", flag: "--summary", required: true },
-      { name: "evidence_ref_json", flag: "--evidence-ref-json", required: true, repeatable: true },
-      { name: "route_reason", flag: "--route-reason", required: false },
-      { name: "criterion_json", flag: "--criterion-json", required: false, repeatable: true },
-      { name: "accepted_gap_reason", flag: "--accepted-gap-reason", required: false },
-      { name: "waived_by", flag: "--waived-by", required: false },
-      { name: "command", flag: "--command", required: false, repeatable: true },
-    ],
+    parameters: structuredClone(WORKFLOW_EVIDENCE_PARAMETERS),
   };
 }
 
-function requirementFromExpectation(expectation: FlowExpectation, satisfied: Set<string>, acceptedException: boolean): GateActionEnvelope["gate"]["requirements"][number] {
+function artifactTarget(artifact: string, sessionDir: string, sessionArgument: string, action: KitFlowStepActionEntry): GateActionArtifactTarget {
+  if (!artifact.includes("#")) {
+    const fileName = artifact.replaceAll("<slug>", path.basename(sessionDir));
+    const expectationIds = new Set(action.artifact_bindings
+      .filter((binding) => binding.artifact === artifact)
+      .flatMap((binding) => binding.expectation_ids));
+    const operations = action.expectation_bindings
+      .filter((binding) => expectationIds.has(binding.expectation_id) && binding.interface === "operation")
+      .flatMap((binding) => binding.operation ? [binding.operation] : []);
+    if (operations.length > 0) {
+      return {
+        kind: "file",
+        ref: artifact,
+        path: path.join(sessionArgument, fileName).split(path.sep).join("/"),
+        direct_write_allowed: false,
+        produced_via: { interface: "operation", operations: [...new Set(operations)] },
+      };
+    }
+    if (action.skills.length === 0) throw new Error(`Builder gate-action file '${artifact}' has no skill or operation producer`);
+    return {
+      kind: "file",
+      ref: artifact,
+      path: path.join(sessionArgument, fileName).split(path.sep).join("/"),
+      direct_write_allowed: true,
+      produced_via: { interface: "skill", skill_ids: [...action.skills] },
+    };
+  }
+  const match = /^trust\.bundle#([a-z0-9]+(?:[.-][a-z0-9]+)*)$/.exec(artifact);
+  if (!match) throw new Error(`Builder gate-action artifact '${artifact}' is not a supported trust slice`);
+  const expectationIds = new Set(action.artifact_bindings
+    .filter((binding) => binding.artifact === artifact)
+    .flatMap((binding) => binding.expectation_ids));
+  const recordVia = [...new Set(action.expectation_bindings
+    .filter((binding) => expectationIds.has(binding.expectation_id))
+    .flatMap((binding) => binding.interface === "workflow.evidence" || binding.interface === "workflow.critique" ? [binding.interface] : []))];
+  if (recordVia.length === 0) throw new Error(`Builder gate-action trust slice '${artifact}' has no public recording interface`);
+  return {
+    kind: "trust_slice",
+    ref: artifact,
+    bundle_file: "trust.bundle",
+    slice_id: match[1]!,
+    direct_write_allowed: false,
+    record_via: recordVia,
+  };
+}
+
+function requirementFromExpectation(gateId: string, expectation: FlowExpectation, satisfied: Set<string>, acceptedException: boolean): GateActionEnvelope["gate"]["requirements"][number] {
   const record = expectation as unknown as AnyRecord;
   const claim = isRecord(record.bundle_claim) ? record.bundle_claim : null;
   if (typeof record.id !== "string" || typeof record.description !== "string" || !claim || typeof claim.claimType !== "string") {
@@ -387,6 +640,7 @@ function requirementFromExpectation(expectation: FlowExpectation, satisfied: Set
   }
   return {
     id: record.id,
+    gate_id: gateId,
     required: record.required === true,
     description: record.description,
     claim_type: claim.claimType,

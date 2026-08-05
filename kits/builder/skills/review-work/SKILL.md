@@ -58,6 +58,17 @@ fallback or escalation in the critique artifact.
      security-policy changes.
    - `tool-dependencies-updater` for dependency-manifest, lockfile, or dependency-tooling changes.
    - A configured domain or policy reviewer when the repository requires one.
+
+   When review fans out to delegated reviewer lanes, declare the fan-out in the
+   session's wave manifest (`waves.json`, schema
+   `schemas/workflow-waves.schema.json`, step `review`) with one
+   `expected_workers` entry per reviewer lane before dispatch. Reconcile against
+   that manifest at collection — "N of M reported" — instead of collecting from
+   memory: every declared reviewer lands exactly one terminal status record;
+   record a reviewer that never reports as `not_reported` in the manifest —
+   never silently absorb it — and carry that lane into the critique as
+   `not_verified` with the missing report named. A missing reviewer is never a
+   clean lane.
 3. Use repository-provided scanners and checks when applicable. Do not install
    a scanner, silently substitute a different one, or mark an unavailable
    required lane clean; record the lane as `NOT_VERIFIED` with the missing

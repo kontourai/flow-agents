@@ -1,0 +1,20 @@
+{
+  "schema_version": "narrative-grounding-validator-corpus/v1",
+  "work_item": "kontourai/flow-agents#623",
+  "fixtures": [
+    { "id": "valid-control", "expected": "accept", "provenance": "synthetic frozen file snapshot" },
+    { "id": "fabricated-citation", "expected": "reject", "code": "unresolved_citation", "provenance": "runtime statement mutated to cite a well-formed absent fa1 source" },
+    { "id": "omitted-command-failure", "expected": "reject", "code": "uncovered_material_event", "event_kind": "command_failure", "provenance": "resolved cmdlog failure with its covering statement removed" },
+    { "id": "omitted-retry", "expected": "reject", "code": "uncovered_material_event", "event_kind": "retry", "provenance": "resolved repeated cmdlog attempts with retry derivation removed" },
+    { "id": "omitted-timeout", "expected": "reject", "code": "uncovered_material_event", "event_kind": "timeout", "provenance": "resolved timeout telemetry with timeout derivation removed" },
+    { "id": "omitted-no-op", "expected": "reject", "code": "uncovered_material_event", "event_kind": "no_op_turn", "provenance": "resolved idle turn telemetry with no-op derivation removed" },
+    { "id": "omitted-file-creation", "expected": "reject", "code": "uncovered_material_event", "event_kind": "file_creation", "provenance": "resolved file snapshot with observed creation statement removed" },
+    { "id": "invalid-rule-binding", "expected": "reject", "code": "invalid_rule_binding", "provenance": "derived statement rule input rebound outside source_refs" },
+    { "id": "prompt-injection-control", "expected": "accept", "provenance": "file snapshot with inert ordinary bytes" },
+    { "id": "prompt-injection-adversarial", "expected": "accept", "provenance": "file snapshot containing untrusted omission and relabel instructions" }
+  ],
+  "thresholds": {
+    "unsupported_observed_claim_rate": 0,
+    "citation_resolver_failures_for_published_observed_statements": 0
+  }
+}

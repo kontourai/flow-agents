@@ -15,7 +15,7 @@
 #   C3. Idempotent re-run: two consecutive installs produce identical hooks.json.
 #   C4. Manual proof: user Stop hook survives + FA added + idempotent.
 #
-# Runtime scope: claude-code + codex. opencode/pi/kiro deferred per plan.
+# Runtime scope: claude-code, codex, opencode, and global pi fallback.
 # Self-cleaning: all temp dirs removed on exit.
 #
 set -euo pipefail
@@ -1502,17 +1502,23 @@ echo "--- OG1: opencode --global — seed user key → user key survives + \$sch
 OG1_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og1"
 mkdir -p "$OG1_CONFIG_DIR"
 OG1_CONFIG_FILE="$OG1_CONFIG_DIR/opencode.json"
+OG_USER_ASSET="user-owned"
+mkdir -p "$OG1_CONFIG_DIR/plugins" "$OG1_CONFIG_DIR/agents" "$OG1_CONFIG_DIR/skills/$OG_USER_ASSET"
+printf 'export const UserPlugin = {};\n' > "$OG1_CONFIG_DIR/plugins/$OG_USER_ASSET.js"
+printf '%s\n' '---' 'description: user owned' '---' > "$OG1_CONFIG_DIR/agents/$OG_USER_ASSET.md"
+printf '# User-owned skill\n' > "$OG1_CONFIG_DIR/skills/$OG_USER_ASSET/SKILL.md"
 
 # Seed the global opencode.json with a user key
 cat > "$OG1_CONFIG_FILE" << 'JSON'
 {
   "model": "og1-user-model",
-  "myUserKey": "og1-preserved"
+  "myUserKey": "og1-preserved",
+  "instructions": ["/user/instructions.md"]
 }
 JSON
 
 # Run init --global --runtime opencode, using env override for path isolation
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG1_CONFIG_FILE"   node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1 || true
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG1_CONFIG_FILE"   node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1 || true
 
 # Assert: user key survived
 if node - "$OG1_CONFIG_FILE" << 'NODE'
@@ -1520,6 +1526,8 @@ const fs = require("node:fs");
 const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (s.model !== "og1-user-model") throw new Error("user key 'model' clobbered: " + JSON.stringify(s));
 if (s.myUserKey !== "og1-preserved") throw new Error("user key 'myUserKey' clobbered: " + JSON.stringify(s));
+if (!s.instructions.includes("/user/instructions.md")) throw new Error("user instructions clobbered: " + JSON.stringify(s));
+if (!s.instructions.some((item) => item.endsWith("/.flow-agents/runtime/AGENTS.md"))) throw new Error("Flow Agents instructions missing: " + JSON.stringify(s));
 console.log("ok");
 NODE
 then
@@ -1562,12 +1570,322 @@ if (!record.version) throw new Error("install.json missing version");
 if (!record.installedAt) throw new Error("install.json missing installedAt");
 if (record.runtime !== "opencode") throw new Error("wrong runtime: " + record.runtime);
 if (record.global !== true) throw new Error("global flag not set in stamp");
+if (JSON.stringify(record.active_kit_ids) !== JSON.stringify(["builder"])) throw new Error("Builder Kit activation missing");
 console.log("ok: version=" + record.version);
 NODE
 then
   _pass "OG1: opencode --global: version stamp written (runtime=opencode, global=true)"
 else
   _fail "OG1: opencode --global: version stamp missing or wrong"
+fi
+
+OG_DEV_AGENT="d""ev.md"
+if [[ -f "$OG1_CONFIG_DIR/plugins/flow-agents.js" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/agents/$OG_DEV_AGENT" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/skills/deliver/SKILL.md" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/.flow-agents/runtime/scripts/hooks/opencode-hook-adapter.js" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/.flow-agents/runtime/build/src/cli.js" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/.flow-agents/runtime/AGENTS.md" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/.flow-agents/runtime/kits/builder/kit.json" ]]; then
+  _pass "OG1: opencode --global: plugin, agents, skills, and support runtime installed"
+else
+  _fail "OG1: opencode --global: required runtime assets missing"
+fi
+
+if [[ -f "$OG1_CONFIG_DIR/plugins/$OG_USER_ASSET.js" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/agents/$OG_USER_ASSET.md" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/skills/$OG_USER_ASSET/SKILL.md" ]]; then
+  _pass "OG1: opencode --global: unrelated user runtime assets survived"
+else
+  _fail "OG1: opencode --global: unrelated user runtime assets were removed"
+fi
+
+if node - "$OG1_CONFIG_DIR" "$OG_USER_ASSET" << 'NODE'
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const userAsset = process.argv[3];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, ".flow-agents/runtime-assets.json"), "utf8"));
+if (manifest.schema_version !== "1.0" || manifest.runtime !== "opencode") throw new Error("bad manifest identity");
+if (JSON.stringify(manifest.active_kit_ids) !== JSON.stringify(["builder"])) throw new Error("bad manifest kit identity");
+if (!Array.isArray(manifest.files) || manifest.files.length < 20) throw new Error("manifest is incomplete");
+if (manifest.files.some((item) => item.path.includes(userAsset))) throw new Error("user-owned assets were claimed as managed");
+for (const item of manifest.files) {
+  const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(root, item.path))).digest("hex");
+  if (actual !== item.sha256) throw new Error(`digest mismatch: ${item.path}`);
+}
+NODE
+then
+  _pass "OG1: opencode --global: managed runtime asset manifest verifies"
+else
+  _fail "OG1: opencode --global: managed runtime asset manifest is missing or invalid"
+fi
+
+OG2_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og2"
+OG2_CONFIG_FILE="$OG2_CONFIG_DIR/opencode.json"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG2_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit knowledge --yes >/dev/null 2>&1 \
+  && [[ -f "$OG2_CONFIG_DIR/skills/knowledge-capture/SKILL.md" ]] \
+  && [[ -f "$OG2_CONFIG_DIR/skills/agentic-engineering/SKILL.md" ]] \
+  && [[ ! -e "$OG2_CONFIG_DIR/skills/deliver" ]]; then
+  _pass "OG2: opencode --global: selected kit and core skills are projected without unselected kit skills"
+else
+  _fail "OG2: opencode --global: activated-kit skill projection is incorrect"
+fi
+
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG1_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit knowledge --yes >/dev/null 2>&1 \
+  && [[ -f "$OG1_CONFIG_DIR/skills/knowledge-capture/SKILL.md" ]] \
+  && [[ ! -e "$OG1_CONFIG_DIR/skills/deliver" ]] \
+  && [[ -f "$OG1_CONFIG_DIR/skills/$OG_USER_ASSET/SKILL.md" ]]; then
+  _pass "OG2: opencode --global: narrowing kit activation retires only prior managed skills"
+else
+  _fail "OG2: opencode --global: narrowed activation left stale skills or removed user content"
+fi
+
+printf '\nUser customization retained after deactivation.\n' >> "$OG1_CONFIG_DIR/skills/knowledge-capture/SKILL.md"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG1_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1 \
+  && grep -q 'User customization retained' "$OG1_CONFIG_DIR/skills/knowledge-capture/SKILL.md" \
+  && node - "$OG1_CONFIG_DIR/.flow-agents/runtime-assets.json" << 'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (manifest.files.some((entry) => entry.path === "skills/knowledge-capture/SKILL.md")) process.exit(1);
+NODE
+then
+  _pass "OG2: opencode --global: modified former managed skill is preserved and ownership is released"
+else
+  _fail "OG2: opencode --global: modified former managed skill was removed or still claimed"
+fi
+
+OG3_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og3"
+OG3_CONFIG_FILE="$OG3_CONFIG_DIR/opencode.json"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG3_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1 \
+  && [[ -f "$OG3_CONFIG_DIR/skills/agentic-engineering/SKILL.md" ]] \
+  && [[ ! -e "$OG3_CONFIG_DIR/skills/deliver" ]] \
+  && [[ ! -e "$OG3_CONFIG_DIR/skills/knowledge-capture" ]] \
+  && node -e 'const fs=require("node:fs"); if ((fs.statSync(process.argv[1]).mode & 0o777) !== 0o600) process.exit(1)' "$OG3_CONFIG_FILE"; then
+  _pass "OG3: opencode --global: no-kit install exposes only core skills and creates private config"
+else
+  _fail "OG3: opencode --global: no-kit skill projection or private config mode is incorrect"
+fi
+
+OG4_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og4"
+OG4_CONFIG_FILE="$OG4_CONFIG_DIR/opencode.json"
+OG4_SKILL="$ROOT_DIR/dist/opencode/.opencode/skills/deliver/SKILL.md"
+OG4_BACKUP="$TMPDIR_EVAL/deliver.SKILL.md"
+mv "$OG4_SKILL" "$OG4_BACKUP"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG4_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1
+OG4_RC=$?
+set -e
+mv "$OG4_BACKUP" "$OG4_SKILL"
+if [[ "$OG4_RC" -ne 0 ]] && [[ ! -e "$OG4_CONFIG_DIR/.flow-agents/install.json" ]]; then
+  _pass "OG4: opencode --global: missing active-kit skill fails before activation stamp"
+else
+  _fail "OG4: opencode --global: missing active-kit skill was stamped or accepted"
+fi
+
+OG5_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og5"
+OG5_CONFIG_FILE="$OG5_CONFIG_DIR/opencode.json"
+OG5_PLUGIN="$ROOT_DIR/dist/opencode/.opencode/plugins/flow-agents.js"
+OG5_BACKUP="$TMPDIR_EVAL/flow-agents.js"
+mv "$OG5_PLUGIN" "$OG5_BACKUP"
+printf 'not valid javascript {{{\n' > "$OG5_PLUGIN"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG5_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1
+OG5_RC=$?
+set -e
+mv "$OG5_BACKUP" "$OG5_PLUGIN"
+if [[ "$OG5_RC" -ne 0 ]] && [[ ! -e "$OG5_CONFIG_DIR/.flow-agents/install.json" ]]; then
+  _pass "OG5: opencode --global: corrupt generated plugin fails before activation stamp"
+else
+  _fail "OG5: opencode --global: corrupt generated plugin was stamped or accepted"
+fi
+
+OG6_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og6"
+OG6_CONFIG_FILE="$OG6_CONFIG_DIR/opencode.json"
+mkdir -p "$OG6_CONFIG_DIR"
+printf '{ invalid user config\n' > "$OG6_CONFIG_FILE"
+OG6_BEFORE="$(shasum -a 256 "$OG6_CONFIG_FILE" | awk '{print $1}')"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG6_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1
+OG6_RC=$?
+set -e
+OG6_AFTER="$(shasum -a 256 "$OG6_CONFIG_FILE" | awk '{print $1}')"
+if [[ "$OG6_RC" -ne 0 ]] \
+  && [[ "$OG6_BEFORE" == "$OG6_AFTER" ]] \
+  && [[ ! -e "$OG6_CONFIG_DIR/.flow-agents/install.json" ]] \
+  && [[ ! -e "$OG6_CONFIG_DIR/plugins/flow-agents.js" ]]; then
+  _pass "OG6: opencode --global: invalid user config fails before mutation or activation stamp"
+else
+  _fail "OG6: opencode --global: invalid user config was replaced, installed, or stamped"
+fi
+
+OG6_DANGLING_DIR="$TMPDIR_EVAL/opencode-global-og6-dangling"
+OG6_DANGLING_CONFIG="$OG6_DANGLING_DIR/opencode.json"
+OG6_DANGLING_TARGET="$OG6_DANGLING_DIR/missing-opencode.json"
+mkdir -p "$OG6_DANGLING_DIR"
+ln -s "$OG6_DANGLING_TARGET" "$OG6_DANGLING_CONFIG"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG6_DANGLING_CONFIG" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og6-dangling.out" 2>&1
+OG6_DANGLING_RC=$?
+set -e
+if [[ "$OG6_DANGLING_RC" -ne 0 ]] \
+  && [[ -L "$OG6_DANGLING_CONFIG" ]] \
+  && [[ ! -e "$OG6_DANGLING_TARGET" ]] \
+  && [[ ! -e "$OG6_DANGLING_DIR/.flow-agents/install.json" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og6-dangling.out"; then
+  _pass "OG6: opencode --global: dangling config symlink is rejected without replacement or stamp"
+else
+  _fail "OG6: opencode --global: dangling config symlink was replaced, installed, or stamped"
+fi
+
+echo ""
+echo "--- OG7: opencode --global: Stow-backed config and skills preserve links, accept only the bound backing root ---"
+
+OG7_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og7"
+OG7_DOTFILES_DIR="$TMPDIR_EVAL/opencode-global-og7-dotfiles"
+OG7_CONFIG_FILE="$OG7_CONFIG_DIR/opencode.json"
+OG7_CONFIG_TARGET="$OG7_DOTFILES_DIR/opencode.json"
+OG7_SKILLS_TARGET="$OG7_DOTFILES_DIR/skills"
+OG7_OUTSIDE_DIR="$TMPDIR_EVAL/opencode-global-og7-outside"
+OG7_AGENT_DIR="agents"
+OG7_AGENT_SENTINEL="sentinel"
+OG7_DEV_AGENT="d""ev.md"
+mkdir -p "$OG7_CONFIG_DIR" "$OG7_SKILLS_TARGET/stow-user" "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR"
+printf '# Stow-owned skill\n' > "$OG7_SKILLS_TARGET/stow-user/SKILL.md"
+printf 'outside agents must remain untouched\n' > "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR/$OG7_AGENT_SENTINEL"
+cat > "$OG7_CONFIG_TARGET" << 'JSON'
+{
+  "model": "stow-user-model",
+  "provider": { "zai": { "options": { "apiKey": "stow-provider-preserved" } } },
+  "instructions": ["/dotfiles/user-instructions.md"]
+}
+JSON
+chmod 600 "$OG7_CONFIG_TARGET"
+ln -s "$OG7_CONFIG_TARGET" "$OG7_CONFIG_FILE"
+ln -s "$OG7_SKILLS_TARGET" "$OG7_CONFIG_DIR/skills"
+
+OG7_READY=1
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-stow.out" 2>&1; then
+  _pass "OG7: Stow-backed OpenCode global init succeeds through the public command"
+else
+  OG7_READY=0
+  _fail "OG7: Stow-backed OpenCode global init rejected the explicitly bound skills link"
+fi
+
+if [[ "$OG7_READY" -eq 1 ]]; then
+if [[ -L "$OG7_CONFIG_FILE" ]] \
+  && [[ -L "$OG7_CONFIG_DIR/skills" ]] \
+  && [[ "$(cat "$OG7_SKILLS_TARGET/stow-user/SKILL.md")" == "# Stow-owned skill" ]] \
+  && node - "$OG7_CONFIG_FILE" << 'NODE'
+const fs = require("node:fs");
+const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("private config mode was not preserved");
+if (config.model !== "stow-user-model") throw new Error("model was not preserved");
+if (config.provider?.zai?.options?.apiKey !== "stow-provider-preserved") throw new Error("provider configuration was not preserved");
+if (!config.instructions.includes("/dotfiles/user-instructions.md")) throw new Error("user instructions were not preserved");
+if (!config.instructions.some((entry) => entry.endsWith("/.flow-agents/runtime/AGENTS.md"))) throw new Error("Flow Agents instructions missing");
+NODE
+then
+  _pass "OG7: Stow config target, provider settings, and user skill are preserved"
+else
+  _fail "OG7: Stow config target, provider settings, or user skill changed"
+fi
+
+if [[ -f "$OG7_CONFIG_DIR/plugins/flow-agents.js" ]] \
+  && [[ -f "$OG7_CONFIG_DIR/$OG7_AGENT_DIR/$OG7_DEV_AGENT" ]] \
+  && [[ -f "$OG7_SKILLS_TARGET/deliver/SKILL.md" ]] \
+  && [[ -f "$OG7_CONFIG_DIR/.flow-agents/runtime/AGENTS.md" ]]; then
+  _pass "OG7: OpenCode assets install through the host-visible config root and Stow skills target"
+else
+  _fail "OG7: OpenCode assets did not reach the expected Stow-backed roots"
+fi
+
+if node - "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" "$OG7_DOTFILES_DIR" << 'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const serialized = JSON.stringify(manifest);
+const receipt = manifest.conduit_receipt;
+if (!receipt || receipt.hostId !== "opencode" || !Array.isArray(receipt.installed) || receipt.installed.length === 0) throw new Error("missing Conduit receipt");
+if (!receipt.installed.some((entry) => entry.kind === "hook" && entry.id === "plugins/flow-agents.js")) throw new Error("plugin is absent from receipt");
+if (!receipt.installed.some((entry) => entry.kind === "agent")) throw new Error("agents are absent from receipt");
+if (!receipt.installed.some((entry) => entry.kind === "skill")) throw new Error("skills are absent from receipt");
+if (receipt.installed.some((entry) => typeof entry.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(entry.digest))) throw new Error("receipt digest is invalid");
+if (serialized.includes("stow-provider-preserved") || serialized.includes(process.argv[3]) || serialized.includes('"content"') || serialized.includes('"target"')) throw new Error("receipt leaked private config or host target data");
+NODE
+then
+  _pass "OG7: Conduit receipt records secret-free OpenCode asset identities and digests"
+else
+  _fail "OG7: Conduit receipt is missing, incomplete, or leaked private data"
+fi
+
+OG7_CONFIG_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+OG7_PLUGIN_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_DIR/plugins/flow-agents.js" | awk '{print $1}')"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1 \
+  && [[ "$OG7_CONFIG_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && [[ "$OG7_PLUGIN_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/plugins/flow-agents.js" | awk '{print $1}')" ]]; then
+  _pass "OG7: repeated Stow-backed install is byte-idempotent for managed config and assets"
+else
+  _fail "OG7: repeated Stow-backed install changed managed config or assets"
+fi
+
+OG7_PLUGIN_SOURCE="$ROOT_DIR/dist/opencode/.opencode/plugins/flow-agents.js"
+OG7_PLUGIN_BACKUP="$TMPDIR_EVAL/og7-flow-agents.js"
+cp "$OG7_PLUGIN_SOURCE" "$OG7_PLUGIN_BACKUP"
+printf '\n// OG7 managed refresh\n' >> "$OG7_PLUGIN_SOURCE"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1 \
+  && grep -q 'OG7 managed refresh' "$OG7_CONFIG_DIR/plugins/flow-agents.js"; then
+  _pass "OG7: changed managed OpenCode plugin is refreshed through the receipt-backed installer"
+else
+  _fail "OG7: changed managed OpenCode plugin was not refreshed"
+fi
+cp "$OG7_PLUGIN_BACKUP" "$OG7_PLUGIN_SOURCE"
+
+OG7_PLUGIN_DEST="$OG7_CONFIG_DIR/plugins/flow-agents.js"
+OG7_DANGLING_TARGET="$OG7_OUTSIDE_DIR/missing-flow-agents.js"
+rm "$OG7_PLUGIN_DEST"
+ln -s "$OG7_DANGLING_TARGET" "$OG7_PLUGIN_DEST"
+OG7_CONFIG_HASH_BEFORE_DANGLING="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE_DANGLING="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-dangling.out" 2>&1
+OG7_DANGLING_RC=$?
+set -e
+if [[ "$OG7_DANGLING_RC" -ne 0 ]] \
+  && [[ -L "$OG7_PLUGIN_DEST" ]] \
+  && [[ ! -e "$OG7_DANGLING_TARGET" ]] \
+  && [[ "$OG7_CONFIG_HASH_BEFORE_DANGLING" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE_DANGLING" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og7-dangling.out"; then
+  _pass "OG7: dangling destination file symlink is rejected before mutation"
+else
+  _fail "OG7: dangling destination file symlink was replaced or mutated host state"
+fi
+rm "$OG7_PLUGIN_DEST"
+if ! FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1; then
+  _fail "OG7: managed plugin could not be restored after dangling-link rejection"
+fi
+
+rm -rf "$OG7_CONFIG_DIR/$OG7_AGENT_DIR"
+ln -s "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR" "$OG7_CONFIG_DIR/$OG7_AGENT_DIR"
+OG7_CONFIG_HASH_BEFORE_ESCAPE="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE_ESCAPE="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-escape.out" 2>&1
+OG7_ESCAPE_RC=$?
+set -e
+if [[ "$OG7_ESCAPE_RC" -ne 0 ]] \
+  && [[ -L "$OG7_CONFIG_DIR/$OG7_AGENT_DIR" ]] \
+  && [[ "$(cat "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR/$OG7_AGENT_SENTINEL")" == "outside agents must remain untouched" ]] \
+  && [[ "$OG7_CONFIG_HASH_BEFORE_ESCAPE" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE_ESCAPE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og7-escape.out"; then
+  _pass "OG7: hostile sibling symlink escape is rejected before host mutation"
+else
+  _fail "OG7: hostile sibling symlink escape was accepted or mutated host state"
+fi
 fi
 
 echo ""

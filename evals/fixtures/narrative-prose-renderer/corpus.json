@@ -1,0 +1,15 @@
+{
+  "schema_version": "narrative-prose-renderer-corpus/v1",
+  "work_item": "kontourai/flow-agents#614",
+  "fixtures": [
+    { "id": "valid-control", "expected": "accept", "provenance": "stub generator over a fully-covered frozen material fixture" },
+    { "id": "unsupported-summary-foreign-citation", "expected": "reject", "code": "unsupported_summary", "provenance": "generator cites a resolvable manifest source with no covering atomic statement (a transcript stream source, which projection.ts never converts into a statement)" },
+    { "id": "unsupported-summary-empty-citation", "expected": "reject", "provenance": "generator returns a sentence with zero statement_refs" },
+    { "id": "no-op-loop", "expected": "accept", "provenance": "an idle turn's derived no-op statement is summarized without ever asserting success/completion language" },
+    { "id": "prompt-injection-control", "expected": "accept", "provenance": "command text carries inert ordinary bytes" },
+    { "id": "prompt-injection-adversarial", "expected": "accept", "provenance": "command text carries untrusted omission/relabel/reveal-canary instructions, byte-length matched to the control" }
+  ],
+  "thresholds": {
+    "unsupported_published_sentence_rate": 0
+  }
+}

@@ -157,6 +157,25 @@ NODE
   else
     _fail "content boundary nested runtime rejection was not actionable"
   fi
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/config/core.config.json' node scripts/check-content-boundary.cjs >/tmp/content-boundary-config.out 2>&1); then
+    _pass "content boundary permits committed Flow Agents config"
+  else
+    _fail "content boundary rejects committed Flow Agents config"
+  fi
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/install.json' node scripts/check-content-boundary.cjs >/tmp/content-boundary-install.out 2>&1); then
+    _fail "content boundary allows Flow Agents install artifacts"
+  elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-install.out; then
+    _pass "content boundary blocks Flow Agents install artifacts"
+  else
+    _fail "content boundary install rejection was not actionable"
+  fi
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/config' node scripts/check-content-boundary.cjs >/tmp/content-boundary-config-root.out 2>&1); then
+    _fail "content boundary allows the config directory marker outside config subtree"
+  elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-config-root.out; then
+    _pass "content boundary requires a committed config subtree file"
+  else
+    _fail "content boundary config directory rejection was not actionable"
+  fi
   current_branch="$(cd "$ROOT_DIR" && git branch --show-current 2>/dev/null || true)"
   tracked_runtime_artifacts="$(cd "$ROOT_DIR" && git ls-files -- '.kontourai/flow-agents' 2>/dev/null || true)"
   if [[ "$current_branch" == "main" && -n "$tracked_runtime_artifacts" ]]; then
@@ -194,6 +213,7 @@ NODE
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const publishLearn = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+if (publishLearn.version !== "1.3") throw new Error("publish-learn route-back behavior requires Flow Definition version 1.3");
 const steps = Object.fromEntries((flow.steps || []).map((step) => [step.id, step.next]));
 if (steps["pull-work"] !== "design-probe") throw new Error("pull-work should route to design-probe");
 if (steps["design-probe"] !== "plan") throw new Error("design-probe should route to plan");
@@ -210,6 +230,18 @@ for (const gateId of ["verify-gate", "merge-ready-gate"]) {
   for (const [reason, target] of Object.entries(expected)) if (gate.on_route_back?.[reason] !== target) throw new Error(`${gateId} ${reason} should route to ${target}`);
   if (gate.route_back_policy?.on_exceeded !== "block") throw new Error(`${gateId} route_back_policy should block on exceeded attempts`);
 }
+// #695 item (a): pr-open must not be a one-way door — the composed publish-learn
+// pr-open-gate declares the missing_evidence repair route back to verify.
+const prOpenGate = publishLearn.gates?.["pr-open-gate"] || {};
+if (prOpenGate.on_route_back?.missing_evidence !== "verify") throw new Error("pr-open-gate missing_evidence should route to verify");
+if (prOpenGate.on_route_back?.default !== "verify") throw new Error("pr-open-gate default route-back should target verify");
+if (prOpenGate.route_back_policy?.on_exceeded !== "block") throw new Error("pr-open-gate route_back_policy should block on exceeded attempts");
+// A failed composed CI readiness check is an implementation defect, so it must
+// reopen execute and preserve the same bounded retry contract as other repair gates.
+const mergeReadyCiGate = publishLearn.gates?.["merge-ready-ci-gate"] || {};
+if (mergeReadyCiGate.on_route_back?.implementation_defect !== "execute") throw new Error("merge-ready-ci-gate implementation_defect should route to execute");
+if (mergeReadyCiGate.route_back_policy?.max_attempts !== 3) throw new Error("merge-ready-ci-gate route_back_policy should allow three attempts");
+if (mergeReadyCiGate.route_back_policy?.on_exceeded !== "block") throw new Error("merge-ready-ci-gate route_back_policy should block on exceeded attempts");
 for (const stepId of ["pr-open", "merge-ready-ci", "learn"]) {
   const step = (flow.steps || []).find((item) => item.id === stepId);
   if (step?.uses_flow !== "builder.publish-learn") throw new Error(`${stepId} should compose builder.publish-learn`);

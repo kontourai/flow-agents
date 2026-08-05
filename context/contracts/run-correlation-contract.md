@@ -1,0 +1,150 @@
+# Run Correlation Contract
+
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
+The run correlation envelope is the portable identity carrier for joining one
+workflow execution across runtime telemetry, Flow state, trust references,
+economics, delegation lineage, and terminal outcomes. Flow Agents creates or
+accepts the opaque `correlation_id`; consumers treat it only as an equality key.
+
+Every identity slot is explicit. A runtime or producer records `present` with
+the authority-owned identifier, or records `unavailable`, `unsupported`, or
+`not_applicable` with a non-sensitive reason. Consumers must not infer a missing
+identity from paths, timestamps, working directories, process ancestry, or
+similarity.
+
+The envelope carries references; it does not replace the owning records:
+
+- Flow remains authoritative for workflow run and step identities.
+- Runtime adapters remain authoritative for session, turn, trace, and span
+  support.
+- The work-item provider remains authoritative for work-item identity.
+- Terminal record producers remain authoritative for their outcome record.
+
+The same envelope is embedded unchanged in each participating record. Extension
+fields are not permitted in version 1. New identity classes require a new
+contract version so older consumers fail visibly instead of silently dropping a
+join dimension.
+
+Producer identity rides beside the envelope, never inside it. The envelope
+answers "which run is this"; it does not answer "which build of Flow Agents
+produced this record," and that is not one of its identity slots. Runtime
+telemetry therefore carries the producer's install identity — the
+`{package_version, content_fingerprint}` tuple with an explicit `source` label —
+as a top-level sibling block on the event, so the
+`correlation_id` x `install_identity` join is available on every record without
+widening a closed contract. A version string alone is not that identity: an
+artifact packed from post-release history can install under the previous
+version number while containing the newer code, so the content fingerprint is
+what makes the join honest. Consumers read the `source` label before trusting
+the tuple, and never repair an `unknown` identity from adjacent records,
+timestamps, or paths.
+
+Runtime adapters declare support for every identity slot through
+`runtimeCorrelationIdentityDeclaration`. `supported` means the adapter can
+observe that identity when the host supplies it; `partial` names the host mode
+where it is absent; `unsupported` means the host cannot expose it; and
+`not_applicable` means another authority owns the slot. These declarations do
+not manufacture values.
+
+Use `attachRunCorrelation` for runtime events, Flow projections, trust
+references, economics records, delegation facts, and terminal outcomes. It
+validates and defensively copies the envelope, preventing later mutation from
+cross-joining otherwise independent records. `readRunCorrelation` returns an
+explicit `incomplete` result for older records that omit the field. Consumers
+must preserve that status and must not repair it from neighboring timestamps,
+paths, work items, or sessions.
+
+Builder Flow runs accept the envelope as `correlation` when started. The
+`flow_run` identity must be present and must equal the requested run id. Flow's
+string-only parameter contract stores the canonical JSON bytes; Builder load
+and evaluation validate those bytes before exposing them. Trust evidence
+analytics carry either the same envelope or the explicit incomplete result.
+
+Production `startBuilderFlowSession` serializes allocation per selected subject
+and mints that envelope exactly once from the canonical Flow run id, selected
+Work Item, and authenticated assignment actor. Start requires the current
+runtime actor to match the claimed assignment's canonical actor and actor key.
+The same envelope is projected into the task's `state.json`; its correlation id
+is the generation on the actor-scoped current pointer. Canonical state commits
+before pointer projection, and retirement compares that generation so a
+delayed callback cannot retire a newer binding. Recovery reuses the
+Flow-persisted envelope; only a genuinely absent legacy parameter projects an
+explicit `incomplete` result. A persisted envelope cannot be downgraded to that
+legacy marker.
+
+Installed runtime telemetry resolves that binding through the same canonical
+actor identity and the actor's own `current/<actor>.json` generation. It never
+falls back to shared `current.json`, a newest-run scan, or a task-slug join.
+The adapter validates the task projection with this contract, requires the
+pointer generation to equal `correlation_id`, verifies the Flow run and actor
+identities, and rechecks the pointer after reading state. A valid event embeds
+the exact persisted envelope unchanged. An event before activation, during a
+binding change, or against malformed/tampered state emits an explicit
+content-free `incomplete` correlation instead. Ordinary events also treat
+retirement as incomplete. Stop and SessionEnd may consume only their actor's
+exact retired generation when the retirement reason matches the canonical
+terminal Flow status.
+
+Delegation events inherit the already-validated telemetry envelope. Economics
+records copy it from the authenticated `session.usage` source and may join task
+sidecars only when `state.json` contains the exact same envelope. Terminal
+workflow outcomes are persisted by the canonical Builder projection before an
+actor binding can retire; Stop telemetry may mirror that projection through the
+generation-bound terminal handoff but must not invent an outcome from hook
+timing. Shared current pointers, task paths, and
+timestamps are not correlation authorities for any of these producers.
+
+Agent-event delegation inputs carry the exact envelope from their authenticated
+runtime actor binding; callers cannot select another actor for this writer.
+An unresolved runtime actor is rejected before any event or shared-pointer
+mutation. The writer revalidates the sampled actor binding generation while
+holding the pointer mutation lock, so a same-session rebind cannot stamp an old
+envelope onto a new generation.
+Economics ignores unbound or differently correlated agent events. The first
+non-terminal correlated hook observation seals a cumulative usage baseline for
+that correlation. Terminal usage subtracts that baseline and declares run-scoped
+delta semantics for tokens, cost, and elapsed duration. If no baseline exists,
+the session-wide snapshot remains local
+and cannot relay. Hosted relay additionally waits for a canonical terminal outcome
+and uses `correlation_id` as the immutable run identity.
+
+An authenticated producer holds Flow's canonical per-run mutation lock across
+its complete read or write transaction. While holding that lock it proves that
+the recovery fence is open and that the projected run head, status, and step
+match canonical Flow.
+Legacy local events without a correlation binding may remain inspectable, but
+they cannot become authenticated economics or terminal facts.
+
+The terminal workflow outcome distinguishes completed, blocked, canceled,
+failed, and not verified process states. It records verification status derived
+from the canonical Flow `verify-gate` outcome separately and fixes quality status
+to `not_independently_evaluated`.
+Artifact-derived task status remains a different observational source and
+cannot impersonate the runtime outcome.
+
+`reconstructRun` rebuilds a run account from identity-bearing facts only. A
+complete account contains runtime session and turn facts, tool results, Flow
+gates and route-backs, delegations, trust references, economics, and a terminal
+outcome. Delegation facts may point to a child correlation id, making a nested
+run discoverable without using prompt text, paths, timestamps, or process
+ancestry. Facts from concurrent runs remain separate even when every surrounding
+label is identical.
+
+Evaluation identity remains external. `joinIndependentEvaluation` joins an eval
+cell, attempt, and independent grade through the correlation id after
+reconstruction. Run facts reject experiment arms, grade status, scores, and eval
+identifiers. Process completion and task-quality acceptance are separate
+booleans: a run can finish successfully while an independent grader rejects its
+quality.
+
+This is intentionally an embedded value rather than a standalone Kontour
+Resource Contract. It has no independent lifecycle, desired state, authority,
+or status conditions; wrapping every occurrence in resource metadata would
+multiply identities and make equality joins less reliable. The telemetry,
+workflow, trust, economics, delegation, and terminal records that contain it
+retain their own resource or native record shapes.
+
+Import `createRunCorrelationEnvelope`, `validateRunCorrelationEnvelope`, and the
+related types from `@kontourai/flow-agents`. The JSON Schema ships at
+`@kontourai/flow-agents/schemas/run-correlation-envelope.schema.json`.

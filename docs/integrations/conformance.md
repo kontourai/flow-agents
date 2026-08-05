@@ -158,7 +158,6 @@ The fixtures in `packaging/conformance/fixtures/` cover all four policy classes:
 | `stop-goal-fit--block-strict-mode.json` | stop-goal-fit | stop | L2 |
 | `workflow-steering--allow-no-state.json` | workflow-steering | userPromptSubmit | L1 |
 | `workflow-steering--inject-active-state.json` | workflow-steering | userPromptSubmit | L1 |
-| `workflow-steering--inject-subagent-steering.json` | workflow-steering | postToolUse | L1 |
 
 Fixtures with `workspace_setup` create a temporary directory with the listed files before invoking the adapter and clean up afterward. The `cwd` field in those payloads is replaced with the temp directory path at runtime.
 

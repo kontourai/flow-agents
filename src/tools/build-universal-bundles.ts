@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { buildSync } from "esbuild";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
 import { CODEX_REASONING_EFFORTS, codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
@@ -123,6 +124,17 @@ function copyTree(src: string, dest: string, target: string, rootReplacement: st
   for (const file of walkFiles(src)) {
     const relPath = path.relative(src, file);
     if (path.basename(src) === "evals" && relPath.split(path.sep)[0] === "results") continue;
+    // Provider bindings are consumer-owned authority. Flow Agents keeps its own
+    // dogfood settings in source, but must never ship those repository-specific
+    // bindings as defaults in a universal bundle.
+    if (
+      path.basename(src) === "context"
+      && [
+        path.join("settings", "backlog-provider-settings.json"),
+        path.join("settings", "assignment-provider-settings.json"),
+        path.join("settings", "change-provider-settings.json"),
+      ].includes(relPath)
+    ) continue;
     const out = path.join(dest, relPath);
     if (textExtensions.has(path.extname(file).toLowerCase())) {
       writeText(out, sanitizeText(readText(file), target, rootReplacement, !isCodeAsset(src, relPath)));
@@ -401,34 +413,190 @@ function codexPolicy(script: string, envPrefix = ""): string {
 // operator-overridable via the FLOW_AGENTS_GOAL_FIT_MODE environment variable.
 // The canonical engine default stays warn so the conformance contract is honest.
 const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_MODE:-block}" ';
-function exportClaudeSettings(): string {
-  const hooks: Record<string, Array<Record<string, unknown>>> = {};
-  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"]) {
-    hooks[event] = [{ hooks: [shellHook(claudeTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
+
+/**
+ * #1024: the ONE policy-hook table every runtime derives from.
+ *
+ * This used to be open-coded once per runtime — `exportClaudeSettings` and `exportCodexHooks`
+ * were hand-maintained parallel lists, and codex's copy simply omitted two `.push(...)` lines.
+ * The result: codex sessions shipped WITHOUT `config-protection` (the gate that refuses
+ * interpreter writes to protected gate files) and WITHOUT `quality-gate`, with nothing anywhere
+ * declaring the gap. Not a capability limit — codex already wires `PreToolUse` and `PostToolUse`
+ * for telemetry, so the events demonstrably exist — just drift between two copies of a list.
+ *
+ * A hook is now added in exactly one place. Every runtime must then either MAP it to that
+ * runtime's own event vocabulary or DECLARE it unsupported with a reason; `assertPolicyHookCoverage`
+ * fails the build on silence. Mapping is the legitimate kind of runtime-specificity — the same
+ * generic outcome reached the way that runtime requires — and a declared `null` is the honest
+ * kind of gap. Silent absence is neither.
+ */
+type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
+
+const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envPrefix?: string }[] = [
+  { id: "workflow-steering-session", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "workflow-steering-prompt", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "config-protection", script: "config-protection.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "quality-gate", script: "quality-gate.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "evidence-capture", script: "evidence-capture.js", statusMessage: "Capturing Flow Agents command evidence" },
+  { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envPrefix: GOAL_FIT_MODE_PREFIX },
+];
+
+/** Telemetry events per runtime. A runtime absent from an event emits no record for it — declare why below. */
+const RUNTIME_TELEMETRY_EVENTS: Record<string, string[]> = {
+  "claude-code": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"],
+  codex: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"],
+};
+
+/**
+ * Each runtime's event vocabulary for each policy hook. `null` = declared unsupported.
+ * Every `null` MUST have a matching entry in `RUNTIME_HOOK_NOTES`.
+ */
+const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>> = {
+  "claude-code": {
+    "workflow-steering-session": "SessionStart",
+    "workflow-steering-prompt": "UserPromptSubmit",
+    "config-protection": "PreToolUse",
+    "quality-gate": "PostToolUse",
+    "evidence-capture": "PostToolUse",
+    "stop-goal-fit": "Stop",
+  },
+  codex: {
+    "workflow-steering-session": "SessionStart",
+    "workflow-steering-prompt": "UserPromptSubmit",
+    "config-protection": "PreToolUse",
+    "quality-gate": "PostToolUse",
+    "evidence-capture": "PostToolUse",
+    "stop-goal-fit": "Stop",
+  },
+  // opencode and pi wire the same canonical policies through their own plugin/extension
+  // generators below rather than a JSON hook map. They are declared here anyway so the coverage
+  // assertion spans every shipped runtime, and so a hook added to POLICY_HOOKS cannot silently
+  // skip them — `assertGeneratedPolicyCoverage` checks their emitted source against these rows.
+  opencode: {
+    "workflow-steering-session": "session.created",
+    "workflow-steering-prompt": null,
+    "config-protection": "tool.execute.before",
+    "quality-gate": "tool.execute.after",
+    "evidence-capture": "tool.execute.after",
+    "stop-goal-fit": "session.idle",
+  },
+  pi: {
+    "workflow-steering-session": "before_agent_start",
+    "workflow-steering-prompt": null,
+    "config-protection": "tool_call",
+    "quality-gate": "tool_result",
+    "evidence-capture": "tool_result",
+    "stop-goal-fit": "session_shutdown",
+  },
+};
+
+/** Declared, reasoned gaps. Keyed `<runtime>:<policy hook id>` or `<runtime>:telemetry:<event>`. */
+const RUNTIME_HOOK_NOTES: Record<string, string> = {
+  "codex:telemetry:SessionEnd":
+    "codex's hooks.json vocabulary exposes no SessionEnd event; session termination is observed through Stop. Revisit if codex adds one.",
+  "opencode:workflow-steering-prompt":
+    "opencode exposes no user-prompt-submit hook; session.created carries session-start steering and tool.execute.before carries per-tool policy. Closest honest approximation, not equivalent coverage.",
+  "pi:workflow-steering-prompt":
+    "pi exposes no user-prompt-submit hook; before_agent_start carries session-start steering. Closest honest approximation, not equivalent coverage.",
+};
+
+/**
+ * Runtimes whose policies are emitted as generated plugin/extension SOURCE rather than a JSON
+ * hook map. Their coverage is proven by checking the emitted text mentions each mapped hook's
+ * script — coarse, but it is the difference between "the table is enforced everywhere" and "the
+ * table is enforced on the two runtimes that happen to use JSON."
+ */
+const SOURCE_GENERATED_RUNTIMES = new Set(["opencode", "pi"]);
+
+function assertedPolicySource(runtime: string, source: string): string {
+  assertPolicyHookCoverage();
+  assertGeneratedPolicyCoverage(runtime, source);
+  return source;
+}
+
+/**
+ * Is `script` actually WIRED to `event` in the generated source, rather than merely mentioned?
+ *
+ * Both source-generated runtimes dispatch policy through one call shape —
+ * `runAdapter(<adapter>, <event>, [detail,] <hookId>, <script>)` — so requiring the event and the
+ * script to appear as quoted arguments of the SAME `runAdapter(` call is a real wiring check.
+ *
+ * A whole-file `includes(script)` was not. It passed on a source with zero handlers whose only
+ * mention of the script sat in a dead comment: an independent review removed opencode's
+ * `config-protection` enforcement, left the name in a comment, and got a clean build plus 22/22
+ * green eval checks with the shipped plugin enforcing nothing. That is #1024's own failure —
+ * a runtime silently shipping without enforcement — one level down, inside the guard meant to
+ * prevent it.
+ *
+ * Binding to the event also stops a hook from silently moving to the wrong lifecycle point, and
+ * separates two hook ids that share one script (`workflow-steering-session` and
+ * `workflow-steering-prompt`) but map to different events — previously one mention satisfied both.
+ */
+function policyHookIsWired(generatedSource: string, event: string, script: string): boolean {
+  const quoted = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(String.raw`runAdapter\s*\([^\n]*['"]${quoted(event)}['"][^\n]*['"]${quoted(script)}['"]`).test(generatedSource);
+}
+
+export function assertGeneratedPolicyCoverage(runtime: string, generatedSource: string): void {
+  if (!SOURCE_GENERATED_RUNTIMES.has(runtime)) return;
+  const mapped = RUNTIME_POLICY_EVENTS[runtime] ?? {};
+  const missing: string[] = [];
+  for (const hook of POLICY_HOOKS) {
+    const event = mapped[hook.id];
+    if (!event) continue;
+    if (!policyHookIsWired(generatedSource, event, hook.script)) missing.push(`${hook.id} -> ${event}`);
   }
-  hooks.Stop.push({ hooks: [shellHook(claudePolicy("Stop", "stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
-  hooks.SessionStart.push({ hooks: [shellHook(claudePolicy("SessionStart", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
-  hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
+  if (missing.length) {
+    throw new Error(`${runtime}: generated source does not wire policy hooks mapped in RUNTIME_POLICY_EVENTS: ${missing.join(", ")}`);
+  }
+}
+
+function buildRuntimeHookMap(
+  runtime: string,
+  telemetryCommand: (event: string) => string,
+  policyCommand: (event: string, script: string, envPrefix?: string) => string,
+): Record<string, Array<Record<string, unknown>>> {
+  const hooks: Record<string, Array<Record<string, unknown>>> = {};
+  for (const event of RUNTIME_TELEMETRY_EVENTS[runtime] ?? []) {
+    hooks[event] = [{ hooks: [shellHook(telemetryCommand(event), 10, "Recording Flow Agents telemetry")] }];
+  }
+  for (const hook of POLICY_HOOKS) {
+    const event = RUNTIME_POLICY_EVENTS[runtime]?.[hook.id];
+    if (!event) continue; // declared unsupported; assertPolicyHookCoverage proves it was declared, not forgotten
+    (hooks[event] ??= []).push({ hooks: [shellHook(policyCommand(event, hook.script, hook.envPrefix), 30, hook.statusMessage)] });
+  }
+  return hooks;
+}
+
+/**
+ * Fail the build when a runtime neither maps nor declares a policy hook. This is what makes the
+ * table load-bearing rather than decorative: adding a hook and forgetting a runtime is now a build
+ * error, which is exactly the failure that shipped codex without config-protection.
+ */
+export function assertPolicyHookCoverage(): void {
+  const problems: string[] = [];
+  for (const runtime of Object.keys(RUNTIME_POLICY_EVENTS)) {
+    for (const hook of POLICY_HOOKS) {
+      const mapped = RUNTIME_POLICY_EVENTS[runtime][hook.id];
+      if (mapped === undefined) problems.push(`${runtime}: policy hook '${hook.id}' is neither mapped to an event nor declared unsupported`);
+      else if (mapped === null && !RUNTIME_HOOK_NOTES[`${runtime}:${hook.id}`]) problems.push(`${runtime}: policy hook '${hook.id}' is declared unsupported with no reason in RUNTIME_HOOK_NOTES`);
+    }
+  }
+  if (problems.length) throw new Error(`policy-hook coverage is undeclared:\n  - ${problems.join("\n  - ")}`);
+}
+
+function exportClaudeSettings(): string {
+  assertPolicyHookCoverage();
   return `${JSON.stringify({
     statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
     permissions: manifest.claude_code.permissions ?? {},
     skipDangerousModePermissionPrompt: manifest.claude_code.skipDangerousModePermissionPrompt ?? true,
-    hooks,
+    hooks: buildRuntimeHookMap("claude-code", claudeTelemetry, (event, script, envPrefix) => claudePolicy(event, script, envPrefix ?? "")),
   }, null, 2)}\n`;
 }
 function exportCodexHooks(): string {
-  const hooks: Record<string, Array<Record<string, unknown>>> = {};
-  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
-    hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
-  }
-  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
-  hooks.SessionStart.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(codexPolicy("evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
-  return `${JSON.stringify({ hooks }, null, 2)}\n`;
+  assertPolicyHookCoverage();
+  return `${JSON.stringify({ hooks: buildRuntimeHookMap("codex", codexTelemetry, (_event, script, envPrefix) => codexPolicy(script, envPrefix ?? "")) }, null, 2)}\n`;
 }
 
 function copySharedContent(targetRoot: string, targetName: string, token: string): void {
@@ -454,12 +622,124 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
+  writeBundledFlowValidator(targetRoot);
+  // #620: ship the build-only capability-declarations JSON inside each bundle so an
+  // installed economics-record emitter (and hooks) can read it at build/generated/
+  // relative to the bundle root. It is generated unconditionally by `npm run build`
+  // (the tsc build's --json-only step) and is never committed (build/ is gitignored).
+  const capabilityDeclJson = path.join(root, "build/generated/capability-declarations.json");
+  if (fs.existsSync(capabilityDeclJson)) {
+    writeText(path.join(targetRoot, "build/generated/capability-declarations.json"), readText(capabilityDeclJson));
+  }
+}
+
+/**
+ * Stop hooks run from universal bundles without an npm installation. Bundle the
+ * exact Flow consistency validator and its schemas so installed hooks retain
+ * Flow's complete schema, lifecycle, amendment-ledger, and retry-history checks
+ * without resolving code from the consumer checkout.
+ */
+function writeBundledFlowValidator(targetRoot: string): void {
+  const flowSchemas = path.join(root, "node_modules/@kontourai/flow/schemas");
+  const stateSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "flow-run.schema.json"));
+  const manifestSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "gate-evidence.schema.json"));
+  const temporaryFlowRoot = path.join(targetRoot, "build/.flow-validator-source");
+  const temporaryFlowDist = path.join(temporaryFlowRoot, "dist");
+  let outputText: string | null = null;
+  try {
+    fs.cpSync(path.join(root, "node_modules/@kontourai/flow/dist"), temporaryFlowDist, { recursive: true });
+    for (const dependency of ["ajv", "ajv-formats", "fast-deep-equal", "fast-uri", "json-schema-traverse", "require-from-string"]) {
+      const destination = path.join(temporaryFlowRoot, "node_modules", dependency);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.cpSync(path.join(root, "node_modules", dependency), destination, { recursive: true });
+    }
+    const validatorSource = path.join(temporaryFlowRoot, "flow-run-validator.mjs");
+    writeText(validatorSource, `
+import Ajv from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import { validateRunLifecycle } from ${JSON.stringify(path.join(temporaryFlowDist, "runtime/flow-run-lifecycle.js"))};
+const stateSchema = ${JSON.stringify(stateSchema)};
+const manifestSchema = ${JSON.stringify(manifestSchema)};
+let validateState;
+let validateManifest;
+function compileSchema(schema) {
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  addFormats(ajv);
+  return ajv.compile(schema);
+}
+function schemaError(validate, contract) {
+  const details = (validate.errors ?? []).slice(0, 5)
+    .map((error) => \`${"${error.instancePath || '/'}"} ${"${error.message ?? 'is invalid'}"}\`).join("; ");
+  return new Error(\`${"${contract}"}: ${"${details}"}\`);
+}
+export function validateRunStateSchema(state) {
+  validateState ??= compileSchema(stateSchema);
+  if (validateState(state)) return validateRunLifecycle(state);
+  throw schemaError(validateState, "run state does not satisfy flow-run.schema.json");
+}
+export function validateEvidenceManifestSchema(manifest) {
+  validateManifest ??= compileSchema(manifestSchema);
+  if (validateManifest(manifest)) return manifest;
+  throw schemaError(validateManifest, "evidence manifest does not satisfy gate-evidence.schema.json");
+}
+`);
+    const temporaryAmendment = path.join(temporaryFlowDist, "runtime/flow-run-definition-amendment.js");
+    const amendmentSource = readText(temporaryAmendment);
+    const validatorImport = 'from "./flow-run-validator.js"';
+    if (!amendmentSource.includes(validatorImport)) {
+      throw new Error("installed Flow amendment runtime no longer imports the expected run-state validator");
+    }
+    writeText(temporaryAmendment, amendmentSource.replace(
+      validatorImport,
+      `from ${JSON.stringify(validatorSource)}`,
+    ));
+    const result = buildSync({
+      absWorkingDir: temporaryFlowRoot,
+      stdin: {
+        contents: `
+import { validateRunStateSchema } from ${JSON.stringify(validatorSource)};
+import { normalizeRunStateLifecycle, validateDefinition } from ${JSON.stringify(path.join(temporaryFlowDist, "definition/flow-definition.js"))};
+import { definitionDigest, resolveEffectiveDefinition } from ${JSON.stringify(temporaryAmendment)};
+import { validateRetryAuthorizationHistory } from ${JSON.stringify(path.join(temporaryFlowDist, "runtime/flow-run-retry-proof.js"))};
+export { definitionDigest };
+export function validateRunStateConsistency(startDefinitionValue, stateValue, options = {}) {
+  const startDefinition = validateDefinition(startDefinitionValue);
+  validateRunStateSchema(stateValue);
+  const state = normalizeRunStateLifecycle(stateValue);
+  const definition = resolveEffectiveDefinition(startDefinition, state);
+  const runId = options.runId ?? state.run_id;
+  if (state.run_id !== runId) throw new Error(\`run state run_id mismatch: expected ${"${runId}"}, got ${"${state.run_id}"}\`);
+  if (state.definition_id !== definition.id) throw new Error(\`run state definition_id mismatch: expected ${"${definition.id}"}, got ${"${state.definition_id}"}\`);
+  if (state.definition_version !== definition.version) throw new Error(\`run state definition_version mismatch: expected ${"${definition.version}"}, got ${"${state.definition_version}"}\`);
+  validateRetryAuthorizationHistory(definition, state);
+  return { startDefinition, definition, state };
+}
+`,
+        resolveDir: temporaryFlowRoot,
+        sourcefile: "flow-validator-entry.mjs",
+      },
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      target: "node22",
+      minifyWhitespace: true,
+      legalComments: "none",
+      write: false,
+    });
+    const output = result.outputFiles?.[0];
+    if (!output) throw new Error("flow validator bundle produced no output");
+    outputText = output.text;
+  } finally {
+    fs.rmSync(temporaryFlowRoot, { recursive: true, force: true });
+  }
+  if (outputText === null) throw new Error("flow validator bundle produced no output");
+  writeText(path.join(targetRoot, "build/src/vendor/flow-validator.cjs"), outputText);
 }
 function installScript(label: string, capability: BundleCapability, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }, stampConfig?: { runtime: string; version: string }): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" \\( -path "$DEST/AGENTS.md" -o -path "$DEST/CLAUDE.md" \\) -prune -o -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";
   const destFallback = destFallbackShell ? `\nif [[ -z "$DEST" ]]; then\n  DEST="${destFallbackShell}"\nfi` : "";
   const destRequired = !destFallbackShell;
-  const requiredCheck = `${destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : ""}while [[ "$DEST" != "/" && "$DEST" == */ ]]; do\n  DEST="\${DEST%/}"\ndone\n`;
+  const requiredCheck = `${destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : ""}while [[ "$DEST" != "/" && "$DEST" == */ ]]; do\n  DEST="\${DEST%/}"\ndone\nif [[ -n "\${CONSOLE_TELEMETRY_URL:-}" && -z "\${CONSOLE_URL:-}" ]]; then\n  CONSOLE_URL="$CONSOLE_TELEMETRY_URL"\nfi\n`;
   const usageDest = destRequired ? "/path/to/workspace" : defaultDestDisplay;
   const mergeBlock = mergeConfig
     ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --config "$DEST/${mergeConfig.configRelPath}" --managed-hooks "$SRC/${mergeConfig.managedConfigRelPath}" --version "${mergeConfig.version}" --install-record "$DEST/${durableInstallRecordRel}" --runtime "${mergeConfig.runtime}" || true\nfi`
@@ -472,7 +752,7 @@ function installScript(label: string, capability: BundleCapability, defaultDestD
   const instructionBlock = capability.instructionPath
     ? `\nif [[ ! -e "$DEST/${capability.instructionPath}" && ! -L "$DEST/${capability.instructionPath}" ]]; then\n  instruction_tmp="$(mktemp "$DEST/.flow-agents-instructions.XXXXXX")"\n  cp "$SRC/${capability.instructionPath}" "$instruction_tmp"\n  if ! ln "$instruction_tmp" "$DEST/${capability.instructionPath}" 2>/dev/null; then\n    if [[ ! -e "$DEST/${capability.instructionPath}" && ! -L "$DEST/${capability.instructionPath}" ]]; then\n      rm -f "$instruction_tmp"\n      echo "install.sh: could not safely install ${capability.instructionPath}" >&2\n      exit 1\n    fi\n  fi\n  rm -f "$instruction_tmp"\nfi`
     : "";
-  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}--exclude='/AGENTS.md' --exclude='/CLAUDE.md' ${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}"$SRC"/ "$DEST"/${instructionBlock}${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
+  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}--exclude='/AGENTS.md' --exclude='/CLAUDE.md' --exclude='/context/settings/backlog-provider-settings.json' --exclude='/context/settings/assignment-provider-settings.json' --exclude='/context/settings/change-provider-settings.json' ${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}"$SRC"/ "$DEST"/${instructionBlock}${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
 
 function buildBase(agents: Agent[]): void {
@@ -547,6 +827,9 @@ function exportOpencodeAgent(spec: Agent): string {
   return lines.join("\n");
 }
 function exportOpencodePlugin(): string {
+  return assertedPolicySource("opencode", buildOpencodePluginSource());
+}
+function buildOpencodePluginSource(): string {
   // Generate the Flow Agents opencode plugin.
   // opencode plugins are auto-loaded from .opencode/plugins/*.js at startup.
   //
@@ -588,27 +871,40 @@ function exportOpencodePlugin(): string {
  */
 
 import { spawnSync } from 'node:child_process';
-import { join, basename } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, basename, dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // opencode runs plugins inside its own compiled (Bun-based) binary, so
 // process.execPath points at opencode itself — spawning it with a script
 // path silently does nothing (caught by live acceptance smoke 2026-06-11).
 // Resolve a real node binary instead; fall back to PATH lookup.
 const NODE_BIN = basename(process.execPath).startsWith('node') ? process.execPath : 'node';
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 
 export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
-  const root = directory || process.cwd();
+  const resolvedWorktree = typeof worktree === 'string' ? resolve(worktree) : null;
+  const fallbackRoot = typeof directory === 'string' && directory ? directory : process.cwd();
+  // opencode uses the filesystem root as its worktree sentinel outside a Git
+  // checkout. In that case directory is the active task root.
+  const root = resolvedWorktree && resolvedWorktree !== dirname(resolvedWorktree)
+    ? resolvedWorktree
+    : fallbackRoot;
+  const projectBundleRoot = resolve(PLUGIN_DIR, '..', '..');
+  const globalRuntimeRoot = join(resolve(PLUGIN_DIR, '..'), '.flow-agents', 'runtime');
+  const runtimeRoot = existsSync(join(globalRuntimeRoot, 'scripts', 'hooks'))
+    ? globalRuntimeRoot
+    : projectBundleRoot;
 
   // Deterministic load marker. opencode invokes this factory at startup but
   // does not reliably surface plugin console output to its log file, and its
   // internal "loading plugin" message was dropped in opencode 1.17.x. Write a
-  // marker into the workspace telemetry dir so acceptance tests can confirm the
-  // plugin loaded without depending on opencode internals. Best-effort only.
+  // marker into the Flow Agents runtime-artifact dir so acceptance tests can
+  // confirm the plugin loaded without depending on opencode internals.
   try {
-    const telemetryDir = join(root, '.telemetry');
-    mkdirSync(telemetryDir, { recursive: true });
-    writeFileSync(join(telemetryDir, 'opencode-plugin.loaded'), 'flow-agents');
+    const artifactDir = join(root, '.kontourai', 'flow-agents');
+    mkdirSync(artifactDir, { recursive: true });
+    writeFileSync(join(artifactDir, 'opencode-plugin.loaded'), 'flow-agents');
   } catch (_err) {
     // Marker is diagnostic only; never block plugin load on a write failure.
   }
@@ -621,7 +917,7 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
   }
 
   function runAdapter(adapterScript, eventName, detail, ...args) {
-    const adapterPath = join(root, 'scripts', 'hooks', adapterScript);
+    const adapterPath = join(runtimeRoot, 'scripts', 'hooks', adapterScript);
     const result = spawnSync(NODE_BIN, [adapterPath, eventName, ...args], {
       input: hookPayload(eventName, detail),
       encoding: 'utf8',
@@ -637,7 +933,7 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
   }
 
   function runTelemetry(eventName, detail) {
-    const telemetryPath = join(root, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
+    const telemetryPath = join(runtimeRoot, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
     spawnSync(NODE_BIN, [telemetryPath, eventName, 'dev'], {
       input: hookPayload(eventName, detail),
       encoding: 'utf8',
@@ -715,6 +1011,9 @@ function buildOpencode(agents: Agent[]): void {
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function exportPiExtension(): string {
+  return assertedPolicySource("pi", buildPiExtensionSource());
+}
+function buildPiExtensionSource(): string {
   // Generate the Flow Agents pi extension.
   // pi extensions are auto-discovered from .pi/extensions/*.ts (needs project trust).
   // pi has no named-subagent registry; agents are not exported. The extension

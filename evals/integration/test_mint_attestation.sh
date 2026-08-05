@@ -296,6 +296,52 @@ else
   _fail "WITH-RESULTS-FILE: predicate.commit_sha mismatch or file missing"
 fi
 
+# TEST 4: EXACT RECONCILED SUBJECT
+echo ""
+echo "=== TEST 4: EXACT RECONCILED SUBJECT — signs the bundle selected by reconcile ==="
+
+ATTEST_DIR4="$TMP/attest4"
+RUNNER_TEMP4="$TMP/runner4"
+REPO4="$TMP/repo4"
+mkdir -p "$ATTEST_DIR4" "$RUNNER_TEMP4" "$REPO4/delivery/new-session" "$REPO4/delivery"
+node - "$REPO4" "$RUNNER_TEMP4" << 'NODE'
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const [repo, runner] = process.argv.slice(2);
+fs.writeFileSync(path.join(repo, 'delivery/trust.bundle'), 'older-flat');
+const selected = 'delivery/new-session/trust.bundle';
+const bytes = Buffer.from('newer-selected-session');
+fs.writeFileSync(path.join(repo, selected), bytes);
+fs.writeFileSync(path.join(runner, 'ci-trust-reconcile-results.json'), JSON.stringify({
+  commit_sha: 'feedface',
+  canonical_commands: [{ command: 'npm test', exitCode: 0, passed: true }],
+  reconciled: true,
+  reconciled_bundle: { path: selected, sha256: crypto.createHash('sha256').update(bytes).digest('hex') },
+  built_at: '2026-07-21T00:00:00Z',
+}));
+NODE
+
+out4=$(env -u ACTIONS_ID_TOKEN_REQUEST_URL -u SIGSTORE_ID_TOKEN -u GITHUB_ACTIONS \
+  GITHUB_WORKSPACE="$REPO4" ATTESTATION_OUT_DIR="$ATTEST_DIR4" RUNNER_TEMP="$RUNNER_TEMP4" \
+  node "$MINT" 2>&1)
+if [[ $? -eq 0 ]] && echo "$out4" | grep -q 'subject: delivery/new-session/trust.bundle'; then
+  _pass "EXACT-SUBJECT: minting uses the reconciler-selected per-session bundle"
+else
+  _fail "EXACT-SUBJECT: expected selected per-session subject, got: $out4"
+fi
+
+node - "$ATTEST_DIR4/trust.attestation.intoto.json" << 'NODE'
+const fs = require('fs');
+const statement = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (statement.subject[0].name !== 'delivery/new-session/trust.bundle') process.exit(1);
+NODE
+if [[ $? -eq 0 ]]; then
+  _pass "EXACT-SUBJECT: statement excludes the older inherited flat bundle"
+else
+  _fail "EXACT-SUBJECT: statement subject does not match reconciled bundle"
+fi
+
 # WORKFLOW-YAML structural validation
 echo ""
 echo "=== WORKFLOW-YAML: trust-reconcile.yml structure ==="

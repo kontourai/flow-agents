@@ -29,7 +29,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const KIT_ROOT = path.resolve(__dirname, "../../../..");
+const KIT_ROOT = path.resolve(__dirname, "../..");
 
 // ---------------------------------------------------------------------------
 // Adapter resolution (same pattern as contract-suite)
@@ -39,7 +39,7 @@ function resolveAdapterPath() {
   const adapterFlag = process.argv.find((a) => a.startsWith("--adapter="));
   if (adapterFlag) return path.resolve(adapterFlag.slice("--adapter=".length));
   if (process.env.KNOWLEDGE_ADAPTER) return path.resolve(process.env.KNOWLEDGE_ADAPTER);
-  return path.join(KIT_ROOT, "kits/knowledge/adapters/default-store/index.js");
+  return path.join(KIT_ROOT, "adapters/default-store/index.js");
 }
 
 const adapterPath = resolveAdapterPath();
@@ -48,8 +48,8 @@ const AdapterClass = adapterModule.default
   || adapterModule.DefaultKnowledgeStore
   || adapterModule.ObsidianKnowledgeStore;
 
-const runnerPath = path.join(KIT_ROOT, "kits/knowledge/adapters/flow-runner/index.js");
-const extractorPath = path.join(KIT_ROOT, "kits/knowledge/adapters/flow-runner/entity-extractor.js");
+const runnerPath = path.join(KIT_ROOT, "adapters/flow-runner/index.js");
+const extractorPath = path.join(KIT_ROOT, "adapters/flow-runner/entity-extractor.js");
 const { KnowledgeFlowRunner } = await import(runnerPath);
 const { defaultEntityExtractor, isPossibleDuplicate, isExactMatch, normalizeName } = await import(extractorPath);
 
@@ -544,7 +544,7 @@ describe("AC3: card merge via propose/apply unions backlinks+aliases; reject lea
 // ---------------------------------------------------------------------------
 
 const obsidianAdapterPath = path.join(
-  KIT_ROOT, "kits/knowledge/adapters/obsidian-store/index.js"
+  KIT_ROOT, "adapters/obsidian-store/index.js"
 );
 let _obsidianModule = null;
 try {

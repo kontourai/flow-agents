@@ -18,6 +18,13 @@ source "$ROOT/evals/lib/node.sh"
 
 TMPDIR_EVAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_EVAL"; [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null' EXIT
+
+# Hermetic HOME: the conf-driven relay resolver (#567) reads ~/.flow-agents/telemetry-console.conf
+# as a resolution slot. Point HOME at an empty dir so these tests never read the running machine's
+# real console conf — enablement here is controlled only by the env flag / an explicit
+# TELEMETRY_CONFIG_FILE, exactly as each case sets up.
+export HOME="$TMPDIR_EVAL/clean-home"
+mkdir -p "$HOME"
 PORT=38795
 RECV="$TMPDIR_EVAL/recv.jsonl"
 
@@ -29,6 +36,12 @@ fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 # controls the response — "ok" (200) or "fail" (500) — to exercise the relay-failure path.
 start_stub() {
   local mode="$1"
+  # Fresh port per stub: the relay POST is detached/async, so a late POST from a PRIOR "on" case
+  # could otherwise race into the next case's freshly-cleared RECV on a reused port and cause a
+  # spurious "a POST happened" failure in a "no POST" assertion. A new port each time sends any
+  # stray prior-case POST to a now-dead port (connection refused), never into this case's RECV.
+  PORT=$((PORT + 1))
+  ENDPOINT="http://127.0.0.1:${PORT}/records"
   STUB_MODE="$mode" node -e '
 const http=require("http"),fs=require("fs");
 const out=process.argv[1], mode=process.env.STUB_MODE||"ok";
@@ -67,7 +80,7 @@ echo "=== console liveness relay (#295) ==="
 echo "--- 1. relay on+configured: liveness emit mirrors to the Console with Bearer + tenant ---"
 : > "$RECV"; start_stub ok || { fail "stub server did not start"; }
 ROOT_A="$TMPDIR_EVAL/a"
-EVT1='{"type":"claim","subjectId":"relay-subj-1","actor":"claude-code:sessA:host","actor_key":"claude-code:sessA:host","at":"2026-07-05T00:00:00Z","ttlSeconds":1800,"host":"host","branch":"agent/a/relay-subj-1","artifact_dir":"relay-subj-1"}'
+EVT1='{"type":"claim","subjectId":"relay-subj-1","actor":"claude-code:sessA:host","actor_key":"claude-code:sessA:host","at":"2026-07-05T00:00:00Z","ttlSeconds":1800,"host":"host","branch":"agent/a/relay-subj-1","artifact_dir":"relay-subj-1","source":"tool-activity","activity":{"tool":"Bash"}}'
 (
   export FLOW_AGENTS_CONSOLE_LIVENESS_RELAY=1
   export FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$ENDPOINT"
@@ -92,6 +105,8 @@ const checks=[
   ["subjectId", b.subjectId==="relay-subj-1"],
   ["actor", b.actor==="claude-code:sessA:host"],
   ["branch", b.branch==="agent/a/relay-subj-1"],
+  ["source tool-activity", b.source==="tool-activity"],
+  ["activity.tool Bash (richer real-liveness rides to the Console)", !!b.activity && b.activity.tool==="Bash"],
 ];
 for(const [name,ok] of checks) console.log((ok?"OK ":"BAD ")+name);
 ' "$RECV" > "$TMPDIR_EVAL/checks.txt" 2>&1
@@ -154,6 +169,81 @@ const hasRawCtl=/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(body);
 console.log(hasRawCtl?"RAW":"ESCAPED");
 ' "$RECV" > "$TMPDIR_EVAL/inj.txt" 2>&1
 if grep -q ESCAPED "$TMPDIR_EVAL/inj.txt"; then pass "hostile actor/branch control bytes are JSON-escaped, never raw in the POST body (injection discipline)"; else fail "raw control bytes reached the POST body: $(cat "$TMPDIR_EVAL/inj.txt")"; fi
+stop_stub
+
+# ─── 6. CONF-DRIVEN enablement (#567): NO env flag, `console_liveness_relay=1` in the conf → POST ─
+echo "--- 6. conf-driven (#567): console_liveness_relay=1 in the conf relays with NO env var ---"
+: > "$RECV"; start_stub ok
+ROOT_F="$TMPDIR_EVAL/f"
+CONF6="$TMPDIR_EVAL/conf6.conf"
+printf 'console_telemetry_url=https://example.invalid\nconsole_liveness_relay=1\n' > "$CONF6"
+(
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_RELAY   # the whole point: no env var
+  export TELEMETRY_CONFIG_FILE="$CONF6"
+  export FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$ENDPOINT"   # POST target (stub)
+  emit_event "$ROOT_F" '{"type":"claim","subjectId":"conf-on-1","actor":"a","at":"t"}'
+)
+[[ -s "$ROOT_F/liveness/events.jsonl" ]] && pass "local write happened (conf-driven case)" || fail "local write missing (conf-driven)"
+if wait_for_post; then pass "conf-driven relay POSTed with NO env var (console_liveness_relay=1)"; else fail "conf-driven relay did NOT POST (env-var-free enablement broken)"; fi
+stop_stub
+
+# ─── 7. CONF-DRIVEN auto-on parity (#469): a console url with no explicit key defaults ON ────────
+echo "--- 7. conf-driven auto-on: a console url with no explicit key relays; explicit =0 suppresses ---"
+: > "$RECV"; start_stub ok
+ROOT_G="$TMPDIR_EVAL/g"
+CONF7="$TMPDIR_EVAL/conf7.conf"
+printf 'console_telemetry_url=https://example.invalid\n' > "$CONF7"   # url only, no explicit key
+(
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_RELAY
+  export TELEMETRY_CONFIG_FILE="$CONF7"
+  export FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$ENDPOINT"
+  emit_event "$ROOT_G" '{"type":"claim","subjectId":"auto-on-1","actor":"a","at":"t"}'
+)
+if wait_for_post; then pass "auto-on: a configured console url defaults the relay ON (#469 parity)"; else fail "auto-on did NOT POST (console-url default-on broken)"; fi
+stop_stub
+
+: > "$RECV"; start_stub ok
+ROOT_H="$TMPDIR_EVAL/h"
+CONF8="$TMPDIR_EVAL/conf8.conf"
+printf 'console_telemetry_url=https://example.invalid\nconsole_liveness_relay=0\n' > "$CONF8"   # explicit off wins
+(
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_RELAY
+  export TELEMETRY_CONFIG_FILE="$CONF8"
+  export FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$ENDPOINT"
+  emit_event "$ROOT_H" '{"type":"claim","subjectId":"conf-off-1","actor":"a","at":"t"}'
+)
+sleep 1
+[[ -s "$ROOT_H/liveness/events.jsonl" ]] && pass "local write happened (explicit conf off)" || fail "local write missing (explicit conf off)"
+[[ ! -s "$RECV" ]] && pass "explicit console_liveness_relay=0 suppresses the relay even with a url (opt-out wins)" || fail "a POST happened despite console_liveness_relay=0"
+stop_stub
+
+# ─── 8. EXFIL DEFENSE: an UNTRUSTED (mode 644) default-path conf must NOT relay (trust gate) ─────
+# The cases above drive enablement through TELEMETRY_CONFIG_FILE, which is trusted BY DESIGN (an
+# explicit env override bypasses the mode-600 gate). This case exercises the actual supply-chain
+# defense end-to-end: a conf planted at the user-global default slot (~/.flow-agents/…, reached via
+# the hermetic HOME set at the top) pointing at an attacker stub with console_liveness_relay=1, but
+# mode 644 — exactly what a non-operator drop (clone/tarball/local tool) can produce, since git can
+# only ship 644/755, never 600. relay.sh re-sources config.sh, whose telemetry_conf_trusted gate
+# (mode 600 + owner + not-a-symlink) rejects it, so no URL resolves and nothing is POSTed — while
+# the durable local write still happens. NO env flag, NO TELEMETRY_CONFIG_FILE, NO endpoint env:
+# the untrusted conf is the ONLY possible signal, so a POST here would be a real exfil regression.
+echo "--- 8. exfil defense: an untrusted (mode 644) ~/.flow-agents conf with an attacker url never relays ---"
+: > "$RECV"; start_stub ok
+ROOT_X="$TMPDIR_EVAL/x"
+mkdir -p "$HOME/.flow-agents"
+UNTRUSTED_CONF="$HOME/.flow-agents/telemetry-console.conf"
+printf 'console_telemetry_url=http://127.0.0.1:%s\nconsole_liveness_relay=1\n' "$PORT" > "$UNTRUSTED_CONF"
+chmod 644 "$UNTRUSTED_CONF"
+(
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_RELAY
+  unset TELEMETRY_CONFIG_FILE
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL
+  emit_event "$ROOT_X" '{"type":"claim","subjectId":"exfil-x","actor":"a","at":"t"}'
+)
+sleep 1
+[[ -s "$ROOT_X/liveness/events.jsonl" ]] && pass "local write happened (untrusted-conf case, local-first intact)" || fail "local write missing (untrusted conf)"
+[[ ! -s "$RECV" ]] && pass "an untrusted (644) default-path conf naming an attacker url NEVER relays (trust gate holds, no exfil)" || fail "EXFIL: a POST reached the attacker stub from an untrusted 644 conf"
+rm -f "$UNTRUSTED_CONF"
 stop_stub
 
 echo ""

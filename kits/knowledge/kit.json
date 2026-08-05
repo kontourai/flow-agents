@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "observability_contribution": { "path": "kit-observability.contribution.json" },
   "id": "knowledge",
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",
@@ -29,7 +30,7 @@
     {
       "id": "knowledge.consolidate",
       "path": "flows/consolidate.flow.json",
-      "description": "Consolidate related compiled records into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
+      "description": "Consolidate an exact-category or explicit compiled-record source set into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
     },
     {
       "id": "knowledge.retire",
@@ -65,6 +66,11 @@
       "id": "knowledge.promote",
       "path": "flows/promote.flow.json",
       "description": "Knowledge promote sub-flow (issue #313, the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill schema-valid DRAFT decision/vocabulary/learning deltas per the decision-registry contract -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns + divergent content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: outputs land under <session>/proposals/ for the promote step to apply; the sub-flow never writes docs directly. Executable logic: promote/index.js."
+    },
+    {
+      "id": "knowledge.context-check",
+      "path": "flows/context-check.flow.json",
+      "description": "Standalone Living Context recall and reconciliation (issue #1131): bind a repository/workspace and verified raw revision, read selected git-repo Knowledge roots only with sanitized Git revision reads, return contextual current/superseded/unverifiable recall with authority and retrieval provenance, return neutral affected/requires-reconciliation for bounded path intersections unless explicit authority supplies contradiction, and emit minimal owning-source proposals only. It is not a Surface trust derivation or Builder integration. Executable logic: context-check/index.js."
     }
   ],
   "workflow_triggers": [
@@ -94,7 +100,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → exact-category or explicit-source decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -135,6 +141,11 @@
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
       "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against schemas/decision-record.schema.json before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir."
+    },
+    {
+      "id": "knowledge.context-check-runner",
+      "path": "context-check/index.js",
+      "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
     }
   ],
   "evals": [
@@ -156,7 +167,7 @@
     {
       "id": "knowledge.consolidation-suite",
       "path": "evals/consolidation/suite.test.js",
-      "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
+      "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); exact-category and explicit-source selection; supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
     },
     {
       "id": "knowledge.similarity-vector-suite",
@@ -212,6 +223,11 @@
       "id": "knowledge.promote-suite",
       "path": "promote/promote.test.js",
       "description": "Eval cases for the knowledge.promote sub-flow (issue #313): AC1 (a real-modeled completed session dir yields >=1 schema-valid draft decision delta with PR/merge-SHA/session-archive provenance, validated against the real #310 registry validator); AC2 (a seeded-contradiction registry fixture yields a duplicate-detection report naming BOTH topics + a schema-valid merge-repair proposal naming a merge target; a resolved supersede/merge pair is not re-flagged); AC3 (filesystem diff proves zero writes outside the session/proposal dir); R1 (the FlowDefinition exports every gate claim so a parent uses_flow step resolves it)."
+    },
+    {
+      "id": "knowledge.context-check-suite",
+      "path": "context-check/context-check.test.js",
+      "description": "Deterministic standalone Context Check contract suite (issue #1131): sanitized exact raw-revision reads despite a dirty working tree, Git replace and inherited GIT_DIR adversaries, current/superseded authority status, neutral bounded reconciliation with full surface intersection, explicit per-missing no-answer/not_verified behavior, owning-source-only proposals, no-follow symlink-safe proposal containment, complete input/result schemas, and diff-path handling."
     }
   ],
   "skills": [

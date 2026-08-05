@@ -33,9 +33,10 @@ The tracked `.githooks/pre-push` hook runs bounded local checks:
 ```bash
 npm run validate:repo-hooks --silent
 npm run validate:source --silent
+npm run context-map:check --silent
 ```
 
-These checks do not perform network access. They validate the repo hook setup and the source tree from the repository root. Use normal Git bypass mechanics, such as `git push --no-verify`, only when you have a reason to skip local developer checks.
+These checks do not perform network access. They validate the repo hook setup and source tree, then build once more to check the generated context map from the repository root. On a warm local install, the additional context-map check is expected to take seconds and has no provider cost. If it reports drift, regenerate the artifact with `npm run context-map` and commit the result. Use normal Git bypass mechanics, such as `git push --no-verify`, only when you have a reason to skip local developer checks.
 
 ## Product Boundary
 

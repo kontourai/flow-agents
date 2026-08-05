@@ -35,6 +35,26 @@
  * claimed-pass command CI cannot confirm blocks. Fail-closed on compile-only: if no
  * comprehensive verify is configured, exits 1.
  *
+ * Non-signal is not success, and it is not one undifferentiated outcome either (#1011).
+ * The four marker-side failure modes above are REPORTED distinctly, not collapsed into a
+ * single sentence — see reportDeclaredNonMatch(). The verdict is unchanged and still
+ * fail-closed in every one of them; only the diagnostics differ:
+ *   absent            → 'no delivery/DECLARED marker found'
+ *   malformed         → 'delivery/DECLARED marker is malformed: ...' (names the fields/parse)
+ *   present, 0 of N conditions matched on every entry
+ *                     → 'NO CONDITION MATCHED' — this change genuinely has no exemption
+ *   present, ≥1 entry matched SOME conditions but not all
+ *                     → 'STALE-SCOPE SUSPECTED' — an exemption for this change plausibly
+ *                       exists and a condition has drifted (a rotated bot actor, a renamed
+ *                       branch); the entry, the conditions that matched, the conditions that
+ *                       failed, and the resolved context value each failed against are all
+ *                       named. This is the exact #1011 signature: the release-automation
+ *                       exemption's `branch-prefix:` half kept matching while its `author:`
+ *                       half went dead when the release bot became a GitHub App, and the
+ *                       flat 'out of scope for this change' line read identically to a PR
+ *                       that simply had no exemption — so 13 days of blocked releases were
+ *                       invisible.
+ *
  * "Bundle-required" means a bundle FOR THIS CHANGE (ADR 0022 addendum §2), not merely a
  * bundle reachable at the checkout: an AUTO-DISCOVERED bundle whose trust.checkpoint.json
  * `commit_sha` neither equals nor is a git-ancestor of this change's own commit sha
@@ -73,11 +93,15 @@
  *   --commands <cmd,...> Canonical verify commands. Comma-separated.
  *                        May be specified multiple times (each appended).
  *   --repo-root <path>   Repository root. Default: TRUST_RECONCILE_REPO_ROOT or cwd.
+ *   --missing-bundle-policy <required|advisory>
+ *                        Missing current-bundle behavior. Default: required.
  *
  * Environment fallbacks:
  *   TRUST_RECONCILE_BUNDLE               Path to delivered bundle (same as --bundle).
  *   TRUST_RECONCILE_COMMANDS              Comma- or newline-separated canonical commands.
  *   TRUST_RECONCILE_REPO_ROOT             Repository root.
+ *   TRUST_RECONCILE_MISSING_BUNDLE_POLICY Missing current-bundle behavior; required
+ *                                         (default) or advisory.
  *   TRUST_RECONCILE_COMMAND_TIMEOUT_MS    Timeout (ms) for each canonical/manifest command
  *                                         run (Step 1 fresh-verify + on-demand manifest
  *                                         reconcile). Default: 600000 (10 min).
@@ -122,11 +146,9 @@
  *   "no comprehensive trust-reconcile-verify configured" — refuses to attest a
  *   compile-only check.
  *
- * NOTE: This job IS ALREADY a required status check in GitHub branch protection on
- * `main` (verified via the GitHub branch-protection API — required_status_checks.contexts
- * includes "Trust Reconcile", enforce_admins: true). Disabling or downgrading that
- * requirement is a server-side branch-protection change — it cannot be done by editing
- * this file or .github/workflows/trust-reconcile.yml.
+ * ADVISORY PHASE: this job is not currently a required status check on `main`.
+ * Arming it later is a server-side branch-protection change; editing this script or
+ * .github/workflows/trust-reconcile.yml alone cannot make it required.
  *
  * Programmatic use:
  *   const { runTrustReconcile } = require('./trust-reconcile.js');
@@ -135,7 +157,8 @@
 
 'use strict';
 
-const { spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -165,6 +188,29 @@ function normalizeCmd(cmd) {
   return String(cmd || '').replace(/\s+/g, ' ').trim();
 }
 
+/** Render a bounded, human-readable failure summary for advisory PR comments. */
+function formatFailureSummary(issues, maxIssues = 20, maxChars = 12000) {
+  const selected = issues.slice(0, maxIssues);
+  const lines = selected.map((issue) => `[${issue.type}] ${issue.message}`);
+  if (issues.length > selected.length) {
+    lines.push(`... and ${issues.length - selected.length} more issue(s); open the workflow run for the complete log.`);
+  }
+  const summary = lines.join('\n');
+  return summary.length <= maxChars
+    ? summary
+    : `${summary.slice(0, maxChars)}\n... output truncated; open the workflow run for the complete log.`;
+}
+
+/** Expose structured failure reasons to a downstream reusable comment workflow. */
+function writeFailureSummary(issues, outputPath = process.env.GITHUB_OUTPUT) {
+  if (!outputPath || issues.length === 0) return;
+  const delimiter = `trust_reconcile_${crypto.randomUUID().replace(/-/g, '')}`;
+  fs.appendFileSync(
+    outputPath,
+    `failure-summary<<${delimiter}\n${formatFailureSummary(issues)}\n${delimiter}\n`,
+  );
+}
+
 /**
  * Normalize ev.passing to a boolean.
  * Treats true / 1 / "true" / "pass" as passing.
@@ -177,6 +223,7 @@ function isPassingValue(v) {
 // hasLaunderingOperator is imported from ../lib/command-log-chain.js (above) so this
 // CI reconciler and the stop-goal-fit verifier apply the identical exit-code-mask
 // heuristic — see that module for the rules.
+
 
 /**
  * Default manifest/canonical-command execution timeout (ms). Overridable via
@@ -203,9 +250,38 @@ function resolveCommandTimeoutMs() {
  * Run a single shell command under bash, capturing exit code.
  * @returns {{ cmd, exitCode, passed, timedOut, timeoutMs, stdout, stderr }}
  */
+/**
+ * Every command whose exit code this anchor attests runs under `pipefail`.
+ *
+ * Without it a pipeline reports its RIGHT-most command's status, so `npm test | tail`
+ * exits 0 whenever `tail` succeeds and the anchor attests a PASS it never observed.
+ * That is the shape behind this workspace's repeated real incidents (`git push ... |
+ * tail -1 && echo PUSHED`, `npm run verify:static | tail`).
+ *
+ * `export SHELLOPTS` propagates pipefail into a nested BASH, so `bash -c "false |
+ * tail"` — which defeats any amount of pattern-matching on the command string,
+ * because the pipe lives inside a quoted argument the outer shell never parses as a
+ * pipeline — also reports truthfully.
+ *
+ * Known residual: this does NOT reach a nested `sh -c` on Linux, where /bin/sh is
+ * dash — dash has no pipefail and ignores SHELLOPTS. (On macOS /bin/sh is bash, so
+ * the gap is invisible locally; CI caught an earlier test that asserted otherwise.)
+ * A canonical verify command that wraps itself in `sh -c` is not a shape this repo
+ * uses, and the manifest path is unaffected because CI re-executes the manifest's
+ * own clean command string.
+ *
+ * This is deliberately a structural fix rather than another evasion pattern. ADR 0018
+ * calls pattern lists a losing race; an earlier revision of this change proved the
+ * point by shipping one that `bash -c` defeated in a single token. Making the exit
+ * code CORRECT beats enumerating the ways it can be wrong, and it does not ban a
+ * legitimate `| tail` for log trimming — it just stops that pipe from hiding a
+ * failure.
+ */
+const PIPEFAIL_PREAMBLE = 'set -o pipefail; export SHELLOPTS; ';
+
 function runCommand(cmd, repoRoot) {
   const timeoutMs = resolveCommandTimeoutMs();
-  const result = spawnSync('bash', ['-c', cmd], {
+  const result = spawnSync('bash', ['-c', PIPEFAIL_PREAMBLE + cmd], {
     cwd: repoRoot,
     encoding: 'utf8',
     timeout: timeoutMs,
@@ -270,7 +346,7 @@ function deriveClaimStatuses(bundlePath, repoRoot) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { bundle: null, commands: [], repoRoot: null, manifest: null };
+  const args = { bundle: null, commands: [], repoRoot: null, manifest: null, missingBundlePolicy: null };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = argv[i + 1];
@@ -283,6 +359,8 @@ function parseArgs(argv) {
       args.repoRoot = next; i++;
     } else if (arg === '--manifest' && next) {
       args.manifest = next; i++;
+    } else if (arg === '--missing-bundle-policy' && next) {
+      args.missingBundlePolicy = next; i++;
     }
   }
   return args;
@@ -868,12 +946,142 @@ function matchesScope(scope, ctx) {
 }
 
 /**
+ * Which resolved-context field a scope condition is compared against (#1011 reporting).
+ * Naming the field — and therefore the VALUE the condition failed against — is the whole
+ * point: "author:kontourai-releases[bot] did not match" is not actionable; "did not match
+ * actor='github-actions[bot]'" names the drift.
+ * Returns null for an unrecognized prefix (which matches nothing, by design).
+ */
+function scopeConditionField(condition) {
+  const s = typeof condition === 'string' ? condition : '';
+  if (s.startsWith('ref:') || s.startsWith('branch-prefix:')) return 'ref';
+  if (s.startsWith('commit:')) return 'sha';
+  if (s.startsWith('author:')) return 'actor';
+  return null;
+}
+
+/** Render a resolved-context value for a diagnostic — empty/absent is stated, never blank. */
+function renderCtxValue(value) {
+  return value ? `'${value}'` : '<unset>';
+}
+
+/**
+ * Evaluate a marker `scope` condition-by-condition against the resolved context, keeping the
+ * per-condition outcome instead of collapsing it to one boolean (#1011).
+ *
+ * The VERDICT is delegated to matchesScope()/matchesScopeCondition() — the single source of
+ * truth for whether a scope matches — so this can never drift into a second, looser matcher.
+ * `matched` below is asserted to equal matchesScope(scope, ctx) by construction: it is the
+ * same `every()` over the same per-condition predicate.
+ *
+ * @returns {{scope:string, matched:boolean, conditions:{condition:string, matched:boolean,
+ *   field:string|null, value:string}[], matchedCount:number, total:number, partial:boolean}}
+ *   `partial` is the stale-scope signal: at least one condition matched AND at least one did
+ *   not. A single-condition scope can never be partial (0-of-1 is indistinguishable from
+ *   "this entry is about a different change"), which is why every failed condition is
+ *   reported with its context value regardless of partiality.
+ */
+function explainScope(scope, ctx) {
+  const s = typeof scope === 'string' ? scope : '';
+  const raw = s.split(' ').map((c) => c.trim()).filter(Boolean);
+  const conditions = raw.map((condition) => {
+    const field = scopeConditionField(condition);
+    return {
+      condition,
+      matched: matchesScopeCondition(condition, ctx),
+      field,
+      value: field ? (ctx[field] || '') : '',
+    };
+  });
+  const matchedCount = conditions.filter((c) => c.matched).length;
+  const total = conditions.length;
+  return {
+    scope: s,
+    matched: total > 0 && matchedCount === total,
+    conditions,
+    matchedCount,
+    total,
+    partial: matchedCount > 0 && matchedCount < total,
+  };
+}
+
+/** Render one evaluated condition as `<condition> vs <field>=<value>` for a diagnostic. */
+function renderCondition(c) {
+  if (!c.field) return `${c.condition} (unrecognized scope-condition prefix — matches nothing, fails closed)`;
+  return `${c.condition} vs ${c.field}=${renderCtxValue(c.value)}`;
+}
+
+/**
+ * Cap on per-entry breakdown lines emitted for an unmatched delivery/DECLARED (#1011).
+ * Truncation is itself stated in the output ("+N more entr(y|ies) not shown") — a silently
+ * truncated report would reproduce the very defect this reporting change exists to fix.
+ */
+const DECLARED_BREAKDOWN_LIMIT = 20;
+
+/**
+ * Build the diagnostic + per-entry breakdown for a delivery/DECLARED marker that is present
+ * and well-formed but matched nothing (#1011 option 3).
+ *
+ * Splits the single old sentence ('delivery/DECLARED marker present but out of scope for
+ * this change') into two distinguishable outcomes, and names, for every well-formed entry,
+ * which conditions matched and which failed against which resolved context value:
+ *
+ *   STALE-SCOPE SUSPECTED — ≥1 entry matched SOME of its conditions. An exemption plausibly
+ *     covering this change exists and a condition has drifted. Partial entries are listed
+ *     first because they are the actionable ones.
+ *   NO CONDITION MATCHED  — every entry matched zero conditions. This change genuinely has
+ *     no declared exemption; nothing here is stale.
+ *
+ * The substring 'out of scope' is retained in the diagnostic: it is pinned by existing evals
+ * and by anything grepping CI logs for the unmatched-marker outcome.
+ *
+ * @returns {{diagnostic:string, details:string[]}} `details` are additional stderr lines the
+ *   caller emits alongside the (single-line) diagnostic that becomes the issue message.
+ */
+function reportDeclaredNonMatch(wellFormed, ctx) {
+  const evaluations = wellFormed.map((marker) => ({ marker, explain: explainScope(marker.scope, ctx) }));
+  const partials = evaluations.filter((e) => e.explain.partial);
+  const n = evaluations.length;
+  const plural = n === 1 ? 'entry' : 'entries';
+
+  const diagnostic = partials.length > 0
+    ? `delivery/DECLARED marker present but out of scope for this change — STALE-SCOPE SUSPECTED: ${partials.length} of ${n} well-formed ${plural} PARTIALLY matched (some conditions matched, at least one did not). An exemption covering this change plausibly exists and a condition has drifted — e.g. a rotated bot actor (#1011) — rather than this change having no exemption at all. Per-entry breakdown below.`
+    : `delivery/DECLARED marker present but out of scope for this change — NO CONDITION MATCHED: none of the ${n} well-formed ${plural} matched a single condition against this context, so this change has no declared exemption (nothing here is stale). Per-entry breakdown below.`;
+
+  const details = [
+    `delivery/DECLARED resolved context: ref=${renderCtxValue(ctx.ref)} actor=${renderCtxValue(ctx.actor)} sha=${renderCtxValue(ctx.sha)}`,
+  ];
+
+  // Partial (stale-suspect) entries first — they are the actionable ones.
+  const ordered = [...partials, ...evaluations.filter((e) => !e.explain.partial)];
+  for (const { explain } of ordered.slice(0, DECLARED_BREAKDOWN_LIMIT)) {
+    const label = explain.partial ? 'PARTIAL' : 'NO-MATCH';
+    const matched = explain.conditions.filter((c) => c.matched).map(renderCondition);
+    const failed = explain.conditions.filter((c) => !c.matched).map(renderCondition);
+    const matchedPart = matched.length > 0 ? ` matched [${matched.join('; ')}];` : '';
+    details.push(
+      `delivery/DECLARED ${label} scope '${explain.scope}' (${explain.matchedCount}/${explain.total} conditions matched):${matchedPart} failed [${failed.join('; ')}]`,
+    );
+  }
+  if (ordered.length > DECLARED_BREAKDOWN_LIMIT) {
+    details.push(`delivery/DECLARED +${ordered.length - DECLARED_BREAKDOWN_LIMIT} more ${ordered.length - DECLARED_BREAKDOWN_LIMIT === 1 ? 'entry' : 'entries'} not shown (breakdown capped at ${DECLARED_BREAKDOWN_LIMIT})`);
+  }
+
+  return { diagnostic, details };
+}
+
+/**
  * Orchestrate delivery/DECLARED resolution for the bundle-absent path: discover → parse
  * → scope-match → return {exempt, marker?, diagnostic?}. First in-scope, well-formed
  * entry wins (array form); every entry is validated regardless, and malformed entries
  * are logged individually so a bad entry never silently masks a good one.
  *
  * Diagnostic strings below are pinned (grepped by callers/evals) — do not reword.
+ *
+ * On the non-match path the returned object also carries `details` (#1011): extra stderr
+ * lines the caller emits verbatim, naming the resolved context and, per entry, which scope
+ * conditions matched and which failed against which value. `details` is advisory output
+ * only — `exempt` (the verdict) is decided by matchesScope() alone, exactly as before.
  */
 function resolveDeclaredExemption(repoRoot, ctx) {
   const markerPath = discoverDeclaredMarker(repoRoot);
@@ -907,10 +1115,8 @@ function resolveDeclaredExemption(repoRoot, ctx) {
     }
   }
 
-  return {
-    exempt: false,
-    diagnostic: 'delivery/DECLARED marker present but out of scope for this change',
-  };
+  const { diagnostic, details } = reportDeclaredNonMatch(parsed.wellFormed, ctx);
+  return { exempt: false, diagnostic, details };
 }
 
 /**
@@ -960,12 +1166,14 @@ function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
  * dependabot PR whose stale main-authored trust.checkpoint.json otherwise satisfied Step 2
  * trivially) must NOT be treated as owned by this change.
  *
- * "Attests this change" = the bundle's commit_sha equals this change's own sha, OR is an
- * ancestor of it (the bundle was sealed earlier in the SAME open PR's own linear commit
- * history, before a later delivery commit — the normal, legitimate shape; sealTrustCheckpoint
- * necessarily stamps a commit that precedes its own delivery commit, so exact equality alone
- * would reject every legitimate delivery). Reuses the same `git merge-base --is-ancestor`
- * primitive `commit:` scope ranges already use (isAncestorCommit()) rather than a new check.
+ * "Attests this change" requires exact commit equality, except for a provisional
+ * `ci-readiness` or terminal `release` checkpoint whose publication itself creates
+ * the checked revision. That narrow case requires the checkpoint commit to be an ancestor
+ * of the checked revision and either the exact fixed bundle/checkpoint/attestation/one-companion
+ * delta, or (for terminal delivery only) exactly the bundle/checkpoint/one-companion delta when
+ * the attestation descriptor's raw Git bytes are identical at both revisions. Broad ancestry and
+ * tree equivalence are not ownership proof: any source change, unrelated history, extra path, or
+ * altered checkout bytes fails closed.
  *
  * FAIL CLOSED on ambiguity: no extractable commit_sha (bundle/checkpoint carries none, or
  * this change's own sha is unresolvable) → never treated as fresh/owned.
@@ -993,8 +1201,61 @@ function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
 function bundleAttestsThisChange(repoRoot, bundlePath, bundleJson, changeSha) {
   const bundleSha = extractBundleCommitSha(repoRoot, bundlePath, bundleJson);
   if (!bundleSha || !changeSha) return { fresh: false, bundleSha };
-  const fresh = bundleSha === changeSha || isAncestorCommit(repoRoot, bundleSha, changeSha);
+  const fresh = bundleSha === changeSha
+    || provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleSha, changeSha);
   return { fresh, bundleSha };
+}
+
+function provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleSha, changeSha) {
+  try {
+    if (!isAncestorCommit(repoRoot, bundleSha, changeSha)) return false;
+    const canonicalRoot = fs.realpathSync(repoRoot);
+    const directory = path.dirname(fs.realpathSync(bundlePath));
+    const relativeDirectory = path.relative(canonicalRoot, directory).replaceAll(path.sep, '/');
+    if (!/^delivery(?:\/[^/]+)?$/.test(relativeDirectory)) return false;
+    const checkpointPath = path.join(directory, 'trust.checkpoint.json');
+    const attestationPath = path.join(directory, 'trust.checkpoint.attestation.json');
+    const checkpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
+    const attestation = JSON.parse(fs.readFileSync(attestationPath, 'utf8'));
+    const exactDeliveryCheckpoint = (checkpoint.status === 'provisional' && checkpoint.phase === 'ci-readiness')
+      || (checkpoint.status === 'delivered' && checkpoint.phase === 'release');
+    if (!exactDeliveryCheckpoint || checkpoint.commit_sha !== bundleSha) return false;
+    const companion = attestation.status === 'signed' ? 'trust.checkpoint.sig.json' : attestation.status === 'unsigned' ? 'trust.checkpoint.intoto.json' : null;
+    if (!companion || attestation.path !== companion) return false;
+    const names = fs.readdirSync(directory).sort();
+    const expectedNames = ['trust.bundle', 'trust.checkpoint.attestation.json', 'trust.checkpoint.json', companion].sort();
+    if (JSON.stringify(names) !== JSON.stringify(expectedNames)) return false;
+    const expectedPaths = expectedNames.map((name) => `${relativeDirectory}/${name}`).sort();
+    const attestationFile = `${relativeDirectory}/trust.checkpoint.attestation.json`;
+    const mutablePaths = expectedPaths.filter((file) => file !== attestationFile);
+    const changed = execFileSync('git', ['diff', '--name-only', `${bundleSha}..${changeSha}`, '--'], {
+      cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').filter(Boolean).sort();
+    const allDeliveryFilesChanged = JSON.stringify(changed) === JSON.stringify(expectedPaths);
+    const terminalMutableFilesChanged = checkpoint.status === 'delivered'
+      && JSON.stringify(changed) === JSON.stringify(mutablePaths)
+      && Buffer.from(execFileSync('git', ['show', `${bundleSha}:${attestationFile}`], {
+        cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'],
+      })).equals(Buffer.from(execFileSync('git', ['show', `${changeSha}:${attestationFile}`], {
+        cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'],
+      })));
+    if (!allDeliveryFilesChanged && !terminalMutableFilesChanged) return false;
+    for (const file of expectedPaths) {
+      const treeEntry = execFileSync('git', ['ls-tree', changeSha, '--', file], { cwd: canonicalRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (!/^100644 blob [a-f0-9]{40,64}\t/.test(treeEntry) || !treeEntry.endsWith(`\t${file}`)) return false;
+      const committed = execFileSync('git', ['show', `${changeSha}:${file}`], { cwd: canonicalRoot, encoding: null, stdio: ['ignore', 'pipe', 'ignore'] });
+      const local = path.join(canonicalRoot, file);
+      const descriptor = fs.openSync(local, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      try {
+        if (!fs.fstatSync(descriptor).isFile() || !Buffer.from(committed).equals(fs.readFileSync(descriptor))) return false;
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,10 +1275,19 @@ function bundleAttestsThisChange(repoRoot, bundlePath, bundleJson, changeSha) {
  * @param {string|null}   [opts.repoRoot]  - Repo root path. null = TRUST_RECONCILE_REPO_ROOT env or cwd.
  * @returns {number} Exit code: 0 = pass, 1 = fail/divergence.
  */
-function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, manifest = null } = {}) {
+function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, manifest = null, missingBundlePolicy = null } = {}) {
   const resolvedRepoRoot = path.resolve(
     repoRoot || process.env.TRUST_RECONCILE_REPO_ROOT || process.cwd()
   );
+  const resolvedMissingBundlePolicy = (
+    missingBundlePolicy || process.env.TRUST_RECONCILE_MISSING_BUNDLE_POLICY || 'required'
+  ).trim().toLowerCase();
+  if (!['required', 'advisory'].includes(resolvedMissingBundlePolicy)) {
+    const issue = { type: 'invalid-policy', message: `unsupported missing-bundle policy '${resolvedMissingBundlePolicy}'; expected required or advisory` };
+    process.stderr.write(`[trust-reconcile] FAILED — ${issue.message}.\n`);
+    writeFailureSummary([issue]);
+    return 1;
+  }
 
   // Resolve bundle path: explicit arg > env > auto-discovery > null. The staleness check
   // below (ADR 0022 addendum §2) applies ONLY to the auto-discovered case — an explicit
@@ -1091,6 +1361,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       '[trust-reconcile] Declare package.json scripts["trust-reconcile-verify"] or set TRUST_RECONCILE_COMMANDS.\n' +
       '[trust-reconcile] Example: add "trust-reconcile-verify": "npm run build && npm run eval:static && npm run eval:integration"\n'
     );
+    writeFailureSummary([{
+      type: 'missing-canonical-verify',
+      message: 'no comprehensive trust-reconcile-verify configured; refusing to attest a compile-only check',
+    }]);
     return 1;
   }
 
@@ -1114,6 +1388,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
     process.stdout.write(`[trust-reconcile] bundle: ${bundlePath}\n`);
   } else if (isPostMergeEvent) {
     process.stdout.write('[trust-reconcile] no bundle present — push event (post-merge run): Step 1 still runs; Step 2/delivery-DECLARED enforcement does not apply here (ADR 0022 addendum, part 4)\n');
+  } else if (resolvedMissingBundlePolicy === 'advisory') {
+    process.stdout.write('[trust-reconcile] no bundle present — advisory policy: Step 1 still runs; missing Step 2 evidence will be reported without failing if fresh verification passes\n');
   } else {
     process.stdout.write('[trust-reconcile] no bundle present — bundle-required by default (ADR 0022 §1); Step 1 still runs, then checking delivery/DECLARED for a Step-2 exemption\n');
   }
@@ -1126,12 +1402,15 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   // The canonical verify is the anchor's own truth source — it must not be
   // exit-code-laundered (e.g. `npm run build || true`). If it is, the fresh run
   // would report PASS regardless of the real result. Fail closed.
-  // (Residual: a wrapper script that exits 0 without `||` still evades — covered
-  // by the anti-gaming suite running in a required lane + CODEOWNERS on the verify
-  // config; noted honestly.)
+  // (Residual: a wrapper script that exits 0 without `||` still evades — that is
+  // covered only by CODEOWNERS on the verify config, not by an automated check.)
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
+      writeFailureSummary([{
+        type: 'canonical-command-laundering',
+        message: `canonical verify command is laundered ('${cmd}'); refusing to attest a masked exit code`,
+      }]);
       return 1;
     }
   }
@@ -1188,6 +1467,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
     } catch (err) {
       process.stderr.write(`[trust-reconcile] failed to read bundle at ${bundlePath}: ${err.message}\n`);
+      writeFailureSummary([{
+        type: 'bundle-read-failed',
+        message: `failed to read bundle at ${bundlePath}: ${err.message}`,
+      }]);
       return 1;
     }
 
@@ -1338,6 +1621,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       ? 'inherited bundle does not attest this commit'
       : 'no bundle to reconcile';
     process.stdout.write(`[trust-reconcile] push event: ${detail} — skipping Step 2 (gating happened on the PR run)\n`);
+  } else if (resolvedMissingBundlePolicy === 'advisory') {
+    process.stdout.write('[trust-reconcile] ADVISORY: no current bundle to reconcile — fresh verification passed; Step 2 evidence is missing but does not fail this adoption mode\n');
   } else {
     // Bundle absent (ADR 0022 §1) — either never discovered, or discovered-but-stale and
     // nulled out above. The ONLY exemption is a well-formed, in-scope delivery/DECLARED
@@ -1350,6 +1635,12 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       process.stdout.write(`[trust-reconcile] DECLARED (no-agent-delivery): ${scope} — ${reason} (approved by ${approved_by}, declared ${declared_at})\n`);
     } else {
       process.stderr.write(`[trust-reconcile] ${exemption.diagnostic}\n`);
+      // #1011: per-entry breakdown of WHY nothing matched (which conditions failed against
+      // which resolved context values). Reporting only — the issue below, and therefore the
+      // exit code, is identical with or without these lines.
+      for (const detail of exemption.details || []) {
+        process.stderr.write(`[trust-reconcile] ${detail}\n`);
+      }
       issues.push({
         type: 'bundle-required-no-declared-marker',
         message: exemption.diagnostic,
@@ -1379,6 +1670,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       commit_sha: process.env.GITHUB_SHA || 'unknown',
       canonical_commands: ciResultsArr,
       reconciled: bundlePath !== null,
+      reconciled_bundle: bundlePath ? {
+        path: path.relative(resolvedRepoRoot, bundlePath),
+        sha256: crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex'),
+      } : null,
       built_at: new Date().toISOString(),
     };
     try {
@@ -1396,6 +1691,7 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   for (const issue of issues) {
     process.stderr.write(`  [${issue.type}] ${issue.message}\n`);
   }
+  writeFailureSummary(issues);
   return 1;
 }
 
@@ -1410,6 +1706,7 @@ function main() {
     commands: args.commands,
     repoRoot: args.repoRoot || null,
     manifest: args.manifest || null,
+    missingBundlePolicy: args.missingBundlePolicy || null,
   }));
 }
 
@@ -1430,7 +1727,10 @@ module.exports.runBaselineManifest = runBaselineManifest;
 module.exports.normalizeManifestEntries = normalizeManifestEntries;
 module.exports.slugifyLabel = slugifyLabel;
 module.exports.normalizeCmd = normalizeCmd;
+module.exports.formatFailureSummary = formatFailureSummary;
+module.exports.writeFailureSummary = writeFailureSummary;
 module.exports.isAncestorCommit = isAncestorCommit;
+module.exports.provisionalDeliveryIsExactCheckedRevision = provisionalDeliveryIsExactCheckedRevision;
 // #356: resolveManifest's legacy fallback tier (tier 5, "legacy:fresh-verify-commands")
 // folds the CANONICAL verify commands into the manifest when no dedicated manifest source
 // resolves. Exporting resolveCanonicalCommands too so the local preflight's manifest

@@ -120,7 +120,7 @@ function walkFilesSorted(root) {
   const entries = fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const file = path.join(root, entry.name);
-    if (entry.isDirectory()) out.push(...walkFilesSorted(file));
+    if (entry.isDirectory()) for (const nested of walkFilesSorted(file)) out.push(nested);
     else if (entry.isFile()) out.push(file);
     // else: symlink, socket, fifo, etc — skip (see doc comment above).
   }

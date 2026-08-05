@@ -1,0 +1,11 @@
+# Gitleaks repo config — auto-loaded by the shared Secret Scan
+# (kontourai/.github secret-scan.yml → `gitleaks git .`).
+[extend]
+useDefault = true
+
+# Known-false-positive fingerprints only: dummy test fixtures, never live
+# credentials. Keep every entry commit+path-scoped (narrowest suppression).
+[[allowlists]]
+description = "inert Ed25519 completion-verification fixture in key-VALIDATION tests (lifecycle-authority branch); flagged by generic-api-key"
+commits = ["093dcffe26edd51b29cee9413950c061aed1c120"]
+paths = ['''src/cli/external-lifecycle-authority\.test\.mjs''']

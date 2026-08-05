@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-workitem-review-pending",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:40:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Address the flagged review findings on the bound work item."
+  },
+  "work_item_refs": ["github:kontourai/flow-agents#778"]
+}

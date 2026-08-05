@@ -219,6 +219,65 @@ else
   _fail "ACTION-PATH: a trust-verify action.yml script ref does not resolve (wrong ../ depth?)"
 fi
 
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const hasInput=/missing-bundle-policy:\s*[\s\S]*?default: "required"/.test(action);
+  const passesPolicy=/--missing-bundle-policy "\$MISSING_BUNDLE_POLICY"/.test(action);
+  const cannotSuppressFailure=!/FAIL_ON_DIVERGENCE/.test(action)
+    && !/divergence detected \(fail-on-divergence=false/.test(action)
+    && /Deprecated compatibility input/.test(action);
+  process.exit(hasInput && passesPolicy && cannotSuppressFailure ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-POLICY: missing-bundle policy is explicit and no compatibility input can suppress a red anchor"
+else
+  _fail "ACTION-POLICY: trust-verify action can suppress failure or lacks the missing-bundle contract"
+fi
+
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const action=fs.readFileSync(path.join(process.argv[1],".github/actions/trust-verify/action.yml"),"utf8");
+  const emptyDefault=/bundle:\s*[\s\S]*?default: ""/.test(action);
+  const delegatesDiscovery=!/discover-delivery-bundle\.mjs/.test(action);
+  const explicitOnly=/BUNDLE_ARG="--bundle \$BUNDLE_INPUT"/.test(action);
+  const bindsPrHead=/TRUST_RECONCILE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/.test(action);
+  const bindsEvent=/TRUST_RECONCILE_EVENT: \$\{\{ github\.event_name \}\}/.test(action);
+  process.exit(emptyDefault && delegatesDiscovery && explicitOnly && bindsPrHead && bindsEvent ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-DISCOVERY: omitted bundle and CI context stay owned by the ownership-aware reconciler"
+else
+  _fail "ACTION-DISCOVERY: wrapper must delegate discovery with PR-head and event context"
+fi
+
+if grep -A4 'name: Checkout' "$ROOT/docs/trust-anchor-adoption.md" | grep -q 'fetch-depth: 0'; then
+  _pass "ACTION-HISTORY: consumer adoption uses full history for bundle ancestry checks"
+else
+  _fail "ACTION-HISTORY: documented consumer checkout must use fetch-depth: 0"
+fi
+
+# The action checkout does not arrive with node_modules. Its ESM status-derivation helper
+# resolves @kontourai/surface from the action repository, so the composite action must install
+# the action's own locked runtime dependencies rather than relying on the consumer repo.
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const root=process.argv[1];
+  const action=fs.readFileSync(path.join(root,".github/actions/trust-verify/action.yml"),"utf8");
+  const pkg=JSON.parse(fs.readFileSync(path.join(root,"package.json"),"utf8"));
+  const lock=JSON.parse(fs.readFileSync(path.join(root,"package-lock.json"),"utf8"));
+  const installsAtActionRoot=/ACTION_REPO_ROOT="\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\."/.test(action)
+    && /npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
+  const surfaceDeclared=Boolean(pkg.optionalDependencies && pkg.optionalDependencies["@kontourai/surface"]);
+  const surfaceLocked=Boolean(lock.packages && lock.packages["node_modules/@kontourai/surface"]);
+  if(!installsAtActionRoot) console.error("trust-verify action does not install locked runtime dependencies at the action root");
+  if(!surfaceDeclared) console.error("@kontourai/surface is not a declared runtime dependency");
+  if(!surfaceLocked) console.error("@kontourai/surface is absent from package-lock.json");
+  process.exit(installsAtActionRoot && surfaceDeclared && surfaceLocked ? 0 : 1);
+' "$ROOT"; then
+  _pass "ACTION-DEPS: action installs its locked Surface dependency at the action root"
+else
+  _fail "ACTION-DEPS: trust-verify action cannot guarantee Surface is importable"
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────────"

@@ -1,6 +1,6 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://kontourai.dev/schemas/kontour.console.economics/0.1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/kontour.console.economics/0.2.json",
   "title": "kontour.console.economics",
   "description": "Per-run kit-economics record (flow-agents #349, console ADR 0003). Immutable per-run fact: cost, time, iterations, and defects caught. cost and defects are co-required (R7 Goodhart guard).",
   "type": "object",
@@ -8,8 +8,28 @@
   "required": ["schema", "version", "run_id", "cost", "time", "iterations", "defects"],
   "properties": {
     "schema": { "const": "kontour.console.economics" },
-    "version": { "const": "0.1" },
+    "version": { "enum": ["0.1", "0.2"] },
     "run_id": { "type": "string" },
+    "run_correlation": {
+      "oneOf": [
+        {
+          "$ref": "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "incomplete" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        }
+      ]
+    },
+    "observation_semantics": { "enum": ["snapshot"] },
+    "producer_authority": {
+      "enum": ["authenticated_runtime_binding", "fixture_input", "unavailable"]
+    },
     "at": { "type": ["string", "null"] },
     "task_slug": { "type": ["string", "null"] },
     "model": { "type": ["string", "null"] },
@@ -109,7 +129,6 @@
           "agent_id": { "type": ["string", "null"] },
           "role": { "type": "string" },
           "resolved_model": { "type": "string" },
-          "summary": { "type": ["string", "null"] },
           "escalated_from": { "type": "string" },
           "dispatch_count": {
             "type": "number",
@@ -131,7 +150,7 @@
         "runtime": { "type": ["string", "null"] },
         "per_delegation_tokens": {
           "type": "boolean",
-          "description": "Whether the runtime isolates per-sub-agent token usage. False on every runtime today → per-delegation cost is unavailable."
+          "description": "Whether the runtime isolates per-sub-agent token usage. DERIVED (not hardcoded, #620) from the runtime's capability declaration (build/generated/capability-declarations.json, keyed on the normalized .agent.runtime with kiro-cli→kiro): true IFF the declared per_delegation_tokens status is 'supported'. An unresolved runtime or a missing declaration JSON yields the explicit sentinel false, never a fabricated true. False on every runtime today → per-delegation cost is unavailable."
         },
         "per_delegation_outcome": {
           "type": "string",
@@ -140,6 +159,31 @@
         }
       }
     },
-    "tenant_id": { "type": ["string", "null"] }
-  }
+    "tenant_id": { "type": ["string", "null"] },
+    "install_identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Producer identity of the Flow Agents install that emitted this record (#970/#1180). The per-release effectiveness join key shared with the telemetry firehose so console#267 can segment economics by Kit version. Always present, all three fields always emitted (including the labeled unknown tuple when resolution is unavailable — never omitted, never fabricated). Resolved from scripts/telemetry/lib/install-identity.sh.",
+      "required": ["package_version", "content_fingerprint", "source"],
+      "properties": {
+        "package_version": { "type": "string" },
+        "content_fingerprint": { "type": "string" },
+        "source": {
+          "type": "string",
+          "enum": ["stamp", "git", "unknown"]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "version": { "const": "0.2" } },
+        "required": ["version"]
+      },
+      "then": {
+        "required": ["run_correlation", "observation_semantics", "producer_authority", "install_identity"]
+      }
+    }
+  ]
 }

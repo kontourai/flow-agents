@@ -151,6 +151,29 @@ run_prot() { # JSON payload on stdin, output on stderr+stdout, return exit code
   return ${PIPESTATUS[1]}
 }
 
+# Keep surface-isolated Stop-hook fixtures aligned with every required hook-local
+# dependency. These fixtures deliberately omit @kontourai/surface, not the hook's
+# own installed support files; otherwise a MODULE_NOT_FOUND masks the intended
+# surface-unavailable behavior.
+copy_isolated_goal_fit_hook() { # $1=isolated hook directory
+  local dir="$1"
+  mkdir -p "$dir/lib"
+  cp "$GATE" "$dir/stop-goal-fit.js"
+  local dependency
+  for dependency in \
+    local-artifact-paths.js \
+    actor-identity.js \
+    current-pointer.js \
+    runnable-command.js \
+    flow-recovery-fence.js \
+    effective-flow-agents-config.js \
+    unstarted-delivery.js \
+    kit-catalog.js
+  do
+    cp "$ROOT/scripts/hooks/lib/$dependency" "$dir/lib/"
+  done
+}
+
 echo ""
 echo "================================================================="
 echo " Gate Lock-Down Security Eval (Findings 2 + MEDIUM fail-opens)"
@@ -476,13 +499,15 @@ echo "--- AC1.22: CLI sidecar uses fs for state/trust files (not Write/Edit tool
 node -e "
 const fs = require('fs');
 const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
-const okState = /writeJson\(path\.join\(dir,\s*['\"]state\.json['\"]\)/.test(src);
-const okBundle = /writeJson\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
-const okWriteJson = /function writeJson.*fs\.writeFileSync/.test(src);
-if (!okState) { console.error('ERROR: writeJson(state.json) not found'); process.exit(1); }
-if (!okBundle) { console.error('ERROR: writeJson(trust.bundle) not found'); process.exit(1); }
+const okState = /path\.basename\(file\) === ['\"]state\.json['\"][\s\S]*writeStateJson\(file, payload\)/.test(src);
+const okBundle = /writeTrustBundleAtomically\(path\.join\(dir,\s*['\"]trust\.bundle['\"]\)/.test(src);
+const okWriteJson = /function writeJson[\s\S]*?fs\.writeFileSync\(file,/.test(src);
+const okAtomicBundleWriter = /function writeTrustBundleAtomically[\s\S]*fs\.writeFileSync\(descriptor,[\s\S]*fs\.renameSync\(temporary, file\)/.test(src);
+if (!okState) { console.error('ERROR: locked state.json writer route not found'); process.exit(1); }
+if (!okBundle) { console.error('ERROR: writeTrustBundleAtomically(trust.bundle) not found'); process.exit(1); }
 if (!okWriteJson) { console.error('ERROR: writeJson not using fs.writeFileSync'); process.exit(1); }
-console.log('Verified: state+trust written via writeJson->fs.writeFileSync (not agent tool)');
+if (!okAtomicBundleWriter) { console.error('ERROR: atomic trust bundle writer does not use fs.writeFileSync->fs.renameSync'); process.exit(1); }
+console.log('Verified: state+trust written via fs write paths (not agent tool)');
 " 2>&1 && _pass "CLI sidecar uses fs for state/trust — tool-path block is safe" \
           || _fail "Could not verify CLI fs write pattern for state/trust files"
 
@@ -872,21 +897,7 @@ cp "$ROOT/scripts/lib/command-log-chain.js" "$ISO_LIBDIR/"
 # Create isolated node context that can't find @kontourai/surface
 ISO_DIR="$TMP/surface-iso"
 mkdir -p "$ISO_DIR/repo/.kontourai/flow-agents/surftest"
-mkdir -p "$ISO_DIR/lib"
-cp "$GATE" "$ISO_DIR/stop-goal-fit.js"
-cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO_DIR/lib/"
-# #291: stop-goal-fit.js now also requires scripts/hooks/lib/actor-identity.js and
-# scripts/hooks/lib/current-pointer.js (the per-actor current.json compat-shim read helper)
-# -- both must be mirrored into this isolated copy too, or the isolated gate crashes on
-# MODULE_NOT_FOUND before it ever reaches the surface-unavailable fail-closed path this
-# section is testing.
-cp "$ROOT/scripts/hooks/lib/actor-identity.js" "$ISO_DIR/lib/"
-cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO_DIR/lib/"
-# #412: stop-goal-fit.js now also requires scripts/hooks/lib/runnable-command.js (the shared
-# isRunnableCommandText heuristic, single-sourced with workflow-sidecar.ts) — mirror it too, or
-# the isolated gate crashes on MODULE_NOT_FOUND before it ever reaches the surface-unavailable
-# fail-closed path this section is testing.
-cp "$ROOT/scripts/hooks/lib/runnable-command.js" "$ISO_DIR/lib/"
+copy_isolated_goal_fit_hook "$ISO_DIR"
 printf '# Repo\n' > "$ISO_DIR/repo/AGENTS.md"
 # Non-terminal session (execution phase, in_progress status)
 printf '%s' '{"schema_version":"1.0","task_slug":"surftest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
@@ -930,14 +941,7 @@ echo "--- AC3.1b: Low-impact-only bundle with unavailable surface → NOT blocke
 
 ISO2_DIR="$TMP/surface-iso2"
 mkdir -p "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest"
-mkdir -p "$ISO2_DIR/lib"
-cp "$GATE" "$ISO2_DIR/stop-goal-fit.js"
-cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO2_DIR/lib/"
-# #291: same rationale as ISO_DIR above -- mirror the two new scripts/hooks/lib dependencies.
-cp "$ROOT/scripts/hooks/lib/actor-identity.js" "$ISO2_DIR/lib/"
-cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO2_DIR/lib/"
-# #412: see the ISO_DIR mirror above — same requirement applies to this second isolated copy.
-cp "$ROOT/scripts/hooks/lib/runnable-command.js" "$ISO2_DIR/lib/"
+copy_isolated_goal_fit_hook "$ISO2_DIR"
 printf '# Repo\n' > "$ISO2_DIR/repo/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"lowtest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
   > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/state.json"

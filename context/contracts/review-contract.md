@@ -100,6 +100,10 @@ npm run workflow:sidecar -- import-critique .kontourai/flow-agents/<slug> \
   --reviewer tool-code-reviewer
 ```
 
+A security-review finding is recorded as a structured verdict + reference — `{severity, file_refs: ["path:line"], description: "<one-line weakness>"}` — not as reproduced exploit payloads or copied vulnerable-code blocks. A precise reference is sufficient evidence; the fuller remediation detail belongs in the fix pass, not the recorded finding. This keeps security findings recordable even when the reviewer runtime's provider content-filters exploit-shaped prose.
+
+Recording a review requires a reviewer identity distinct from the active implementation-assignment actor (anti-self-review). The identity is derived from the runtime actor, so an orchestrator that implemented cannot also review under the same actor: run the reviewer under a distinct actor — set `FLOW_AGENTS_ACTOR=<reviewer-id>` on the reviewing process, or run it in a separate runtime session.
+
 ## Gate Rules
 
 - Critical or high findings block delivery until fixed, accepted by the user, deferred with explicit rationale, or marked false positive.

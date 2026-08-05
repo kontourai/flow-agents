@@ -151,6 +151,8 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_ci_integration_coverage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/static/test_pr_title_validation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/static/test_validate_source_kit_asset_scope.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_declared_scope_forms_documented.sh" || result=1
@@ -160,6 +162,8 @@ run_static() {
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_model_routing_hints.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_console_board_sync_wiring.sh" || result=1
   return $result
 }
 
@@ -177,6 +181,18 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_telemetry_tool_usage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_tool_outcome.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_delegation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_action_class.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_sanitize_usage.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_task_slug.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_installed_runtime_correlation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1
@@ -190,6 +206,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_usage_feedback_global.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_hook.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_goal_fit_config.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
   echo ""
@@ -206,6 +224,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_promote_gate.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_reviewed_grounding_workflow.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
   echo ""
@@ -239,6 +259,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_economics_record.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
@@ -250,10 +272,6 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_liveness_verdict.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_conflict_injection.sh" || result=1
-  echo ""
-  bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
-  echo ""
-  bash "$EVAL_DIR/integration/test_exemption_usage_review.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1
   echo ""
@@ -307,6 +325,10 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_gate_bypass_chain.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_narrative_source_contract.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_narrative_redaction_failclosed.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
   echo ""

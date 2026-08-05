@@ -13,9 +13,9 @@
 # the intended one.
 #
 # This eval proves the negative: a reference to a FILE THAT DOES NOT EXIST, sitting in the
-# SAME directory as a real, registered kit.json asset (kits/veritas-governance/skills/
-# exemption-usage-review/, which legitimately owns a registered SKILL.md AND a registered
-# assets[] helper), IS STILL FLAGGED by validate:source as a missing source path — never
+# SAME directory as a real, registered kit.json asset (Builder Kit's plan-work skill
+# directory, which legitimately owns a registered SKILL.md), IS STILL FLAGGED by
+# validate:source as a missing source path — never
 # silently exempted just because it shares a directory with real registered assets.
 #
 # Mechanism: writes a throwaway eval-shaped fixture file (self-cleaning, removed in the
@@ -99,26 +99,23 @@ heal_stale_probes
 # Real skill directory + its two REAL registered kit.json assets (assembled from parts —
 # see the self-scan hazard note above; these ARE real, existing paths, so splitting them
 # is purely to avoid THIS descriptive assertion accidentally reading as a probe target).
-KIT_DIR="kits/veritas-governance"
-REAL_SKILL_DIR="$KIT_DIR/skills""/exemption-usage-review"
+KIT_DIR="kits/builder"
+REAL_SKILL_DIR="$KIT_DIR/skills""/plan-work"
 REAL_SKILL_MD="$REAL_SKILL_DIR/SKILL.md"
-REAL_HELPER="$REAL_SKILL_DIR/review-exemptions.mjs"
 # kit.json's own "path" fields are relative to the KIT directory, not the repo root.
 KIT_RELATIVE_SKILL_MD="${REAL_SKILL_MD#"$KIT_DIR/"}"
-KIT_RELATIVE_HELPER="${REAL_HELPER#"$KIT_DIR/"}"
 
-# --- Sanity: the real skill directory + its two REAL registered assets exist -----
-if [[ -f "$ROOT/$REAL_SKILL_MD" && -f "$ROOT/$REAL_HELPER" ]]; then
-  pass "real skill directory has both registered files present (SKILL.md, review-exemptions.mjs)"
+# --- Sanity: the real skill and its kit registration exist -----------------------
+if [[ -f "$ROOT/$REAL_SKILL_MD" ]]; then
+  pass "real skill file is present (SKILL.md)"
 else
-  fail "expected real skill directory files missing — cannot run the negative probe against real fixtures"
+  fail "expected real skill file missing — cannot run the negative probe against a real fixture"
 fi
 
-if grep -qF "\"path\": \"$KIT_RELATIVE_SKILL_MD\"" "$ROOT/$KIT_DIR/kit.json" \
-  && grep -qF "\"path\": \"$KIT_RELATIVE_HELPER\"" "$ROOT/$KIT_DIR/kit.json"; then
-  pass "both files are registered in kit.json (SKILL.md under skills[], review-exemptions.mjs under assets[])"
+if grep -qF "\"path\": \"$KIT_RELATIVE_SKILL_MD\"" "$ROOT/$KIT_DIR/kit.json"; then
+  pass "skill file is registered in kit.json"
 else
-  fail "kit.json does not register both real files under skills[]/assets[] as expected"
+  fail "kit.json does not register the real skill file as expected"
 fi
 
 # --- Positive control: validate:source passes on the clean, real tree -----------
@@ -140,7 +137,7 @@ BOGUS_FILENAME_PART2="-exist-probe.mjs"
 # the kit-relative form here to match what the scanner actually records. Built from parts
 # (never one contiguous literal in this file's own comments or code) for the same
 # self-scan-hazard reason noted at the top of this file.
-BOGUS_REF="skills""/exemption-usage-review/$BOGUS_FILENAME_PART1$BOGUS_FILENAME_PART2"
+BOGUS_REF="skills""/plan-work/$BOGUS_FILENAME_PART1$BOGUS_FILENAME_PART2"
 PROBE_FILE_NAME_PART1="${PROBE_GLOB_PREFIX}bogus"
 PROBE_FILE_NAME_PART2="_ref.sh"
 PROBE_FILE="$ROOT/evals/integration/$PROBE_FILE_NAME_PART1$PROBE_FILE_NAME_PART2"

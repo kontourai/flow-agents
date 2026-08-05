@@ -20,6 +20,12 @@ Verifiers and reviewers do not modify source code. They may run commands, inspec
 
 Verifiers write evidence and acceptance status **through** `record-evidence` (directly, or via the orchestrating skill), never by hand-authoring `evidence.json`, `acceptance.json`, or `trust.bundle`. Those bespoke sidecars were retired as the source of truth by ADR 0010 Phase 4c; the `trust.bundle` is the sole verification artifact, and only the sidecar writer performs the evidence classification (`evidenceType`/`method` derivation and manifest reconciliation) the CI trust anchor depends on (ADR 0020). `config-protection.js` blocks direct tool writes to these gate files by design. If the sidecar writer is unavailable, record the exact gap instead of writing the files by hand.
 
+### Critique Generations Across Route-Backs
+
+Each visit to a verification gate establishes a critique generation. Critiques acquired during that visit must target the current implementation snapshot, and every live reviewer slice in the generation participates in the gate decision. A disputed finding therefore cannot be hidden by adding a different reviewer.
+
+When Flow routes back and later re-enters verification, a fresh critique generation is required. Older reviewer slices remain immutable audit history in the trust bundle and evidence manifest, but their prior snapshot hashes are not reinterpreted as reviews of the new implementation. A reviewer handoff must use the public critique writer; it must never require actor impersonation or direct trust-bundle edits.
+
 ## Mutation Testing Runs In A Scratch Copy
 
 Mutation-testing tools (Stryker or equivalent) **must** run against a scratch/throwaway copy of the working tree, never the live working tree. They deliberately introduce defects to measure test-suite sensitivity; running them in place risks leaving mutated source, corrupting the checkout, or tripping the gate/anchor on injected failures. Copy the tree to a temporary directory (or a git worktree/clone) and run the mutation tool there; discard it afterward.

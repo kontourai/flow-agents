@@ -197,12 +197,22 @@ SKILLS_DIR_REAL="$(canonicalize_path "$SKILLS_DIR")"
 if ! node - "$SKILLS_DIR" <<'NODE'
 const fs = require("node:fs"); const path = require("node:path");
 const absolute = path.resolve(process.argv[2]);
+const trustedSystemAlias = (candidate) => {
+  if (process.platform !== "darwin") return false;
+  const expectedTarget = candidate === "/tmp" ? "/private/tmp" : candidate === "/var" ? "/private/var" : null;
+  if (!expectedTarget) return false;
+  try {
+    return fs.lstatSync(candidate).isSymbolicLink() && fs.realpathSync(candidate) === expectedTarget;
+  } catch {
+    return false;
+  }
+};
 let current = path.parse(absolute).root;
 for (const part of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
   current = path.join(current, part);
-  // macOS exposes /tmp as the system-managed /private/tmp symlink. Treat that
-  // mount alias as trusted while rejecting caller-controlled components.
-  if (current !== "/tmp" && fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) process.exit(1);
+  // macOS exposes /tmp and /var as fixed system-managed /private aliases.
+  // Trust only those exact canonical targets; reject caller-controlled links.
+  if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink() && !trustedSystemAlias(current)) process.exit(1);
 }
 NODE
 then
@@ -345,7 +355,7 @@ node "$BUNDLE_SOURCE/scripts/install-owned-files.js" \
 # preserve user hooks across installs while replacing Flow Agents-managed groups.
 assert_safe_dest_path "hooks.json"
 if [[ -f "$DEST/hooks.json" ]]; then
-  FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX.json)"
+  FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX)"
   cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
 fi
 
@@ -415,10 +425,10 @@ FA_MANAGED_HOOKS="$BUNDLE_SOURCE/.codex/hooks.json"
 if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
   FA_HOOKS_WORK="${FA_USER_HOOKS_STASH:-}"
   if [[ -z "$FA_HOOKS_WORK" ]]; then
-    FA_HOOKS_WORK="$(mktemp /tmp/fa-hooks-work.XXXXXX.json)"
+    FA_HOOKS_WORK="$(mktemp /tmp/fa-hooks-work.XXXXXX)"
     printf '{"hooks":{}}\n' > "$FA_HOOKS_WORK"
   fi
-  FA_INSTALL_RECORD_WORK="$(mktemp /tmp/fa-install-record.XXXXXX.json)"
+  FA_INSTALL_RECORD_WORK="$(mktemp /tmp/fa-install-record.XXXXXX)"
   node "$BUNDLE_SOURCE/scripts/install-merge.js" \
     --config "$FA_HOOKS_WORK" \
     --managed-hooks "$FA_MANAGED_HOOKS" \

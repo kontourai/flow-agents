@@ -20,6 +20,8 @@ export type ContinuationBarrier =
 export type ContinuationSnapshot = {
   run_id: string;
   definition_id: string;
+  definition_version?: string;
+  definition_digest?: string;
   status: string;
   disposition: "continue" | "waiting" | "done" | "failed";
   current_step: string;
@@ -34,12 +36,24 @@ export type ContinuationTurnRequest = {
   schema_version: "1.0";
   run_id: string;
   definition_id: string;
+  definition_version?: string;
+  definition_digest?: string;
   current_step: string;
   iteration: number;
   max_turns: number;
   next_action: Record<string, unknown> | null;
   /** Additive schema-1.0 field; older external adapters remain valid. */
   gate_action_envelope?: GateActionEnvelope;
+  /** Product-owned context routing; adapters must not infer this from model names. */
+  context_strategy?: ContinuationContextStrategy;
+};
+
+export type ContinuationContextPolicy = "warm" | "fresh";
+
+export type ContinuationContextStrategy = {
+  thread: "new" | "resume";
+  handoff: "canonical";
+  reason: "mission_start" | "configured_policy";
 };
 
 export type ContinuationTurnResult =
@@ -62,10 +76,15 @@ export type ContinuationDriverState = {
   definition_id: string;
   max_turns: number;
   adapter_command_identity: string | null;
+  /** Additive to schema 1.0. Missing legacy values mean warm. */
+  context_policy?: ContinuationContextPolicy;
   status: "active" | "waiting" | "done" | "failed" | "budget_exhausted";
   turns_started: number;
   // Added after schema 1.0 shipped. Legacy state files may omit it.
   active_turn_step?: string | null;
+  /** Exact effective Flow identity bound to the ephemeral active-turn capability. */
+  active_turn_definition_version?: string | null;
+  active_turn_definition_digest?: string | null;
   // Anchors the ephemeral signer outside active-turn.json. Legacy state files may omit it.
   active_turn_public_key_digest?: string | null;
   /** Durable recovery marker for an adapter turn without a post-turn measurement. */
@@ -154,13 +173,19 @@ export type ContinuationDriverOutcome = {
 export interface RunContinuationDriverInput {
   maxTurns: number;
   adapterCommandIdentity?: string;
+  contextPolicy?: ContinuationContextPolicy;
   runtime: ContinuationRuntimePort;
   store: ContinuationStateStore;
   waitForBarrier?: (barrier: ContinuationBarrier) => Promise<"ready" | "pending">;
   authorizeTurn?: () => Promise<void>;
   issueTurnAuthority?: (request: ContinuationTurnRequest) => Promise<ContinuationTurnAuthority>;
   preflightTurn?: (request: ContinuationTurnRequest) => void | Promise<void>;
-  onTurnAccepted?: (request: ContinuationTurnRequest, result: ContinuationTurnResult) => void | Promise<void>;
+  onTurnAccepted?: (
+    request: ContinuationTurnRequest,
+    result: ContinuationTurnResult,
+    capture: ContinuationAcceptedTurn,
+    snapshot: ContinuationSnapshot,
+  ) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -168,12 +193,18 @@ export interface DriveBuilderFlowSessionInput {
   sessionDir: string;
   maxTurns: number;
   adapterCommandIdentity?: string;
+  contextPolicy?: ContinuationContextPolicy;
   execute: ContinuationRuntimePort["execute"];
   waitForBarrier?: RunContinuationDriverInput["waitForBarrier"];
   authorizeTurn?: RunContinuationDriverInput["authorizeTurn"];
   issueTurnAuthority?: RunContinuationDriverInput["issueTurnAuthority"];
   preflightTurn?: RunContinuationDriverInput["preflightTurn"];
-  onTurnAccepted?: RunContinuationDriverInput["onTurnAccepted"];
+  onTurnAccepted?: (
+    request: ContinuationTurnRequest,
+    result: ContinuationTurnResult,
+    capture: ContinuationAcceptedTurn,
+    synchronizedSession: Awaited<ReturnType<typeof syncBuilderFlowSession>>,
+  ) => void | Promise<void>;
   now?: () => Date;
   store?: ContinuationStateStore;
 }
@@ -182,10 +213,12 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
   assertMaxTurns(input.maxTurns);
   const now = input.now ?? (() => new Date());
   const adapterCommandIdentity = input.adapterCommandIdentity ?? null;
+  const contextPolicy = input.contextPolicy ?? "warm";
   const inspected = validateSnapshot(await input.runtime.inspect());
-  let state = loadOrCreateState(input.store, inspected, input.maxTurns, adapterCommandIdentity, now);
+  let state = loadOrCreateState(input.store, inspected, input.maxTurns, adapterCommandIdentity, contextPolicy, now);
   if (state.max_turns !== input.maxTurns) throw new Error(`continuation maxTurns ${input.maxTurns} does not match the persisted mission budget ${state.max_turns}`);
   if (state.adapter_command_identity !== adapterCommandIdentity) throw new Error("continuation adapter command identity does not match the persisted mission adapter");
+  if ((state.context_policy ?? "warm") !== contextPolicy) throw new Error("continuation context policy does not match the persisted mission policy");
   let settled = await settleMissionStart(input, state, now);
   if (settled.outcome) return settled.outcome;
   ({ state } = settled);
@@ -283,17 +316,31 @@ function continuationTurnRequest(input: RunContinuationDriverInput, state: Conti
     schema_version: "1.0",
     run_id: snapshot.run_id,
     definition_id: snapshot.definition_id,
+    ...(snapshot.definition_version ? { definition_version: snapshot.definition_version } : {}),
+    ...(snapshot.definition_digest ? { definition_digest: snapshot.definition_digest } : {}),
     current_step: snapshot.current_step,
     iteration: state.turns_started + 1,
     max_turns: input.maxTurns,
     next_action: snapshot.next_action ? structuredClone(snapshot.next_action) : null,
     ...(envelope ? { gate_action_envelope: envelope } : {}),
+    context_strategy: contextStrategy(input.contextPolicy ?? "warm", state.turns_started + 1),
   });
+}
+
+function contextStrategy(policy: ContinuationContextPolicy, iteration: number): ContinuationContextStrategy {
+  const missionStart = iteration === 1;
+  return {
+    thread: missionStart || policy === "fresh" ? "new" : "resume",
+    handoff: "canonical",
+    reason: missionStart ? "mission_start" : "configured_policy",
+  };
 }
 
 function beginContinuationTurn(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, iteration: number, now: () => Date): ContinuationDriverState {
   let started = saveState(store, state, {
     status: "active", turns_started: iteration, active_turn_step: snapshot.current_step,
+    active_turn_definition_version: snapshot.definition_version ?? null,
+    active_turn_definition_digest: snapshot.definition_digest ?? null,
     active_turn_public_key_digest: null, active_turn_phase: "prepared", active_turn_progress: progressSnapshot(snapshot), active_turn_capture: null,
   }, now);
   appendEvent(store, started, snapshot, "turn_started", now);
@@ -309,9 +356,11 @@ async function captureAcceptedTurn(
   callback: NonNullable<RunContinuationDriverInput["onTurnAccepted"]>,
   request: ContinuationTurnRequest,
   result: ContinuationTurnResult,
+  capture: ContinuationAcceptedTurn,
+  snapshot: ContinuationSnapshot,
 ): Promise<void> {
   try {
-    await callback(request, result);
+    await callback(request, result, capture, snapshot);
   } catch (cause) {
     const error = new Error(boundedErrorMessage(cause)) as TurnCaptureFailure;
     error.cause = cause;
@@ -356,7 +405,7 @@ async function recordAcceptedTurn(
   let measured = await synchronizeTurnMeasurement(input, state, previous, request, result, now);
   const capture = measured.state.active_turn_capture!;
   acceptedTurnJournal(input.store)?.captureAcceptedTurn(capture);
-  if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result);
+  if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result, capture, measured.snapshot);
   if (result.status === "wait") return parkAcceptedTurn(input, measured, result, now);
   appendEvent(input.store, measured.state, measured.snapshot, "turn_completed", now, {
     summary: result.summary,
@@ -429,6 +478,8 @@ function acceptedTurnCapture(request: ContinuationTurnRequest, result: Continuat
 function clearActiveTurn(store: ContinuationStateStore, state: ContinuationDriverState, now: () => Date): ContinuationDriverState {
   return saveState(store, state, {
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -459,7 +510,7 @@ function auditAuthorityCleanup(
 
 function finishBudgetExhausted(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, now: () => Date): ContinuationDriverOutcome {
   const exhausted = saveState(store, state, {
-    status: "budget_exhausted", active_turn_step: null, active_turn_public_key_digest: null,
+    status: "budget_exhausted", active_turn_step: null, active_turn_definition_version: null, active_turn_definition_digest: null, active_turn_public_key_digest: null,
     active_turn_phase: null, active_turn_progress: null, active_turn_capture: null,
   }, now);
   appendEvent(store, exhausted, snapshot, "budget_exhausted", now);
@@ -468,23 +519,38 @@ function finishBudgetExhausted(store: ContinuationStateStore, state: Continuatio
 
 export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInput): Promise<ContinuationDriverOutcome> {
   const sessionDir = path.resolve(input.sessionDir);
+  let synchronizedSession: Awaited<ReturnType<typeof syncBuilderFlowSession>> | null = null;
   const runtime: ContinuationRuntimePort = {
     inspect: async () => builderSessionSnapshot(await inspectBuilderFlowSession({ sessionDir })),
-    synchronize: async () => builderSessionSnapshot(await syncBuilderFlowSession({ sessionDir })),
+    synchronize: async () => {
+      synchronizedSession = await syncBuilderFlowSession({ sessionDir });
+      return builderSessionSnapshot(synchronizedSession);
+    },
     execute: input.execute,
   };
   return runContinuationDriver({
-      maxTurns: input.maxTurns,
-      ...(input.adapterCommandIdentity ? { adapterCommandIdentity: input.adapterCommandIdentity } : {}),
+    maxTurns: input.maxTurns,
+    ...(input.adapterCommandIdentity ? { adapterCommandIdentity: input.adapterCommandIdentity } : {}),
+    ...(input.contextPolicy ? { contextPolicy: input.contextPolicy } : {}),
     runtime,
     store: input.store ?? createFileContinuationStore(sessionDir),
     ...(input.waitForBarrier ? { waitForBarrier: input.waitForBarrier } : {}),
     ...(input.authorizeTurn ? { authorizeTurn: input.authorizeTurn } : {}),
     ...(input.issueTurnAuthority ? { issueTurnAuthority: input.issueTurnAuthority } : {}),
     ...(input.preflightTurn ? { preflightTurn: input.preflightTurn } : {}),
-    ...(input.onTurnAccepted ? { onTurnAccepted: input.onTurnAccepted } : {}),
+    ...(input.onTurnAccepted ? { onTurnAccepted: async (request, result, capture, snapshot) => {
+      const exactSession = synchronizedSession;
+      if (!exactSession || !sameBuilderSnapshot(snapshot, builderSessionSnapshot(exactSession))) {
+        throw new Error("continuation accepted-turn callback lost its exact synchronized Builder session");
+      }
+      await input.onTurnAccepted!(request, result, capture, exactSession);
+    } } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
+}
+
+function sameBuilderSnapshot(left: ContinuationSnapshot, right: ContinuationSnapshot): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function builderSessionSnapshot(result: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): ContinuationSnapshot {
@@ -492,6 +558,8 @@ function builderSessionSnapshot(result: Awaited<ReturnType<typeof inspectBuilder
   return validateSnapshot({
     run_id: result.run.runId,
     definition_id: result.run.definitionId,
+    definition_version: result.run.definitionVersion,
+    definition_digest: result.run.definitionDigest,
     status: result.run.state.status,
     disposition: builderContinuationDisposition(result.projection.next_action),
     current_step: result.run.state.current_step,
@@ -508,6 +576,7 @@ function loadOrCreateState(
   snapshot: ContinuationSnapshot,
   maxTurns: number,
   adapterCommandIdentity: string | null,
+  contextPolicy: ContinuationContextPolicy,
   now: () => Date,
 ): ContinuationDriverState {
   const existing = store.load();
@@ -522,9 +591,12 @@ function loadOrCreateState(
     definition_id: snapshot.definition_id,
     max_turns: maxTurns,
     adapter_command_identity: adapterCommandIdentity,
+    context_policy: contextPolicy,
     status: "active",
     turns_started: 0,
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -590,6 +662,8 @@ function reconcileInterruptedTurn(
   const recovered = saveState(store, state, {
     ...(progress ? { last_progress: progress.snapshot, prior_progress: progress.delta } : {}),
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -604,11 +678,17 @@ function reconcileInterruptedTurn(
 
 function sameProgressSnapshot(left: GateActionProgressSnapshot, right: GateActionProgressSnapshot): boolean {
   return left.current_step === right.current_step
+    && compatibleIdentityField(left.definition_version, right.definition_version)
+    && compatibleIdentityField(left.definition_digest, right.definition_digest)
     && sameCanonicalStatus(left.canonical_status, right.canonical_status)
     && left.canonical_evidence.length === right.canonical_evidence.length
     && left.canonical_evidence.every((entry, index) => entry === right.canonical_evidence[index])
     && left.observed_artifacts.length === right.observed_artifacts.length
     && left.observed_artifacts.every((entry, index) => entry === right.observed_artifacts[index]);
+}
+
+function compatibleIdentityField(left: string | undefined, right: string | undefined): boolean {
+  return left === right;
 }
 
 function isTerminalCanonicalStatus(status: string | undefined): boolean {
@@ -655,7 +735,9 @@ function measureProgress(
   if (!before || !after) return null;
   const terminalStatusAdvanced = isTerminalCanonicalStatus(after.canonical_status)
     && before.canonical_status !== after.canonical_status;
-  const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced;
+  const definitionAdvanced = before.definition_version !== after.definition_version
+    || before.definition_digest !== after.definition_digest;
+  const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced || definitionAdvanced;
   const evidenceAdded = after.canonical_evidence.filter((entry) => !before.canonical_evidence.includes(entry));
   const artifactChanges = after.observed_artifacts.filter((entry) => !before.observed_artifacts.includes(entry));
   const noProgress = !stepAdvanced && evidenceAdded.length === 0 && artifactChanges.length === 0;
@@ -677,6 +759,8 @@ function finishDone(store: ContinuationStateStore, state: ContinuationDriverStat
   const done = saveState(store, state, {
     status: "done",
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -691,6 +775,8 @@ function finishFailed(store: ContinuationStateStore, state: ContinuationDriverSt
   const failed = saveState(store, state, {
     status: "failed",
     active_turn_step: null,
+    active_turn_definition_version: null,
+    active_turn_definition_digest: null,
     active_turn_public_key_digest: null,
     active_turn_phase: null,
     active_turn_progress: null,
@@ -703,7 +789,7 @@ function finishFailed(store: ContinuationStateStore, state: ContinuationDriverSt
 function saveState(
   store: ContinuationStateStore,
   current: ContinuationDriverState,
-  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "active_turn_step" | "active_turn_public_key_digest" | "active_turn_phase" | "active_turn_progress" | "active_turn_capture" | "pending_barrier" | "last_progress" | "prior_progress">>,
+  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "active_turn_step" | "active_turn_definition_version" | "active_turn_definition_digest" | "active_turn_public_key_digest" | "active_turn_phase" | "active_turn_progress" | "active_turn_capture" | "pending_barrier" | "last_progress" | "prior_progress">>,
   now: () => Date,
 ): ContinuationDriverState {
   const next = { ...current, ...patch, updated_at: now().toISOString() };

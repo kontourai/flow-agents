@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/workflow-outcome/1.0.json",
+  "title": "Flow Agents workflow outcome record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "kind",
+    "record_id",
+    "task_slug",
+    "recorded_at",
+    "run_correlation",
+    "process_status",
+    "workflow_outcome"
+  ],
+  "properties": {
+    "schema": { "const": "kontour.flow-agents.workflow-outcome" },
+    "version": { "const": "1.0" },
+    "kind": { "const": "terminal" },
+    "record_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "task_slug": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "recorded_at": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "run_correlation": {
+      "oneOf": [
+        {
+          "$ref": "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "incomplete" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        }
+      ]
+    },
+    "process_status": {
+      "enum": ["completed", "blocked", "canceled", "failed", "not_verified"]
+    },
+    "workflow_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source",
+        "flow_status",
+        "process_status",
+        "verification_status",
+        "quality_status"
+      ],
+      "properties": {
+        "schema_version": { "const": "1.0" },
+        "source": { "const": "canonical_flow_projection" },
+        "flow_status": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "process_status": {
+          "enum": ["completed", "blocked", "canceled", "failed", "not_verified"]
+        },
+        "verification_status": {
+          "enum": ["PASS", "FAIL", "NOT_VERIFIED"]
+        },
+        "quality_status": { "const": "not_independently_evaluated" }
+      }
+    }
+  }
+}

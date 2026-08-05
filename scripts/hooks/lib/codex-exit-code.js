@@ -113,10 +113,13 @@ function normalizeCallArguments(argumentsField) {
     }
   }
   if (!parsed || typeof parsed !== 'object') return null;
-  return normalizeCommandText(parsed.command);
+  // Codex records exec_command arguments under `cmd`; older shell fixtures
+  // and some adapters use `command`.
+  return normalizeCommandText(parsed.cmd) || normalizeCommandText(parsed.command);
 }
 
 const OUTPUT_FIELD_NEEDLE = '"output":"';
+const COMMAND_FUNCTION_NAMES = new Set(['exec_command', 'shell']);
 
 /**
  * parseCandidateLine(line, maxLineHeadBytes) → candidate | null
@@ -149,7 +152,15 @@ function parseCandidateLine(line, maxLineHeadBytes) {
       return { type: 'function_call_output', callId, output: payload.output };
     }
     if (payload.type === 'function_call') {
-      return { type: 'function_call', callId, command: normalizeCallArguments(payload.arguments) };
+      const name = typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim() : null;
+      const command = normalizeCallArguments(payload.arguments);
+      const commandCapable = name === null || COMMAND_FUNCTION_NAMES.has(name) || command !== null;
+      return {
+        type: 'function_call',
+        callId,
+        commandCapable,
+        command,
+      };
     }
     return null;
   }
@@ -214,13 +225,12 @@ function resolveContainedRealPath(transcriptPath) {
  * Correlation policy (Decision B, #470 iteration 2, HIGH finding #4), in
  * priority order:
  *   1. call_id match wins — authoritative.
- *   2. Absent a call_id match: take the newest `function_call_output` in the
- *      scanned window, resolve its paired `function_call` (same call_id), and
- *      compare that call's `arguments` command (normalized) to `command`. A
- *      resolved MATCH uses the newest output; a resolved MISMATCH DECLINES
- *      (`null`) rather than knowingly attribute a different call's exit code.
- *   3. If no pairing is resolvable at all (the common single-call case): fall
- *      back to the newest `function_call_output` banner.
+ *   2. Absent a call_id match: pair outputs with calls by rollout call_id and
+ *      select the only pair whose normalized arguments match `command`. Zero
+ *      matches or multiple matches DECLINE (`null`) rather than attribute a
+ *      neighboring or repeated command's exit code.
+ *   3. If no pairing is resolvable at all and the rollout contains exactly one
+ *      output with no function call, use that genuinely unpaired legacy output.
  *
  * Any failure (missing/unreadable/non-regular file, containment violation,
  * malformed JSON lines, no candidate found) yields `null` — never throws.
@@ -271,41 +281,83 @@ function readExitCodeFromRollout(transcriptPath, options) {
   }
   if (truncated && lines.length > 1) lines.shift();
 
-  let matchedByCallId = null;
+  const outputsByRequestedCallId = [];
   let newestOutputEntry = null;
-  let pairedCommand = null;
+  const outputEntries = [];
+  const commandByCallId = new Map();
+  const seenFunctionCallIds = new Set();
+  const ambiguousCallIds = new Set();
+  let functionCallCount = 0;
+  let sawUnclassifiableLine = false;
+  let sawUnresolvableFunctionCall = false;
 
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
     if (!line) continue;
     const candidate = parseCandidateLine(line, maxLineHeadBytes);
-    if (!candidate) continue; // malformed/partial/unrecognized line — skip, keep scanning
+    if (!candidate) {
+      if (Buffer.byteLength(line, 'utf8') > maxLineHeadBytes) {
+        sawUnclassifiableLine = true;
+      } else {
+        try {
+          JSON.parse(line); // valid non-candidate events do not poison correlation
+        } catch {
+          sawUnclassifiableLine = true;
+        }
+      }
+      continue; // malformed/partial/unrecognized line — skip, keep scanning
+    }
 
     if (candidate.type === 'function_call_output') {
+      outputEntries.push(candidate); // scan order is newest to oldest
       if (newestOutputEntry === null) newestOutputEntry = candidate; // first seen scanning backward = newest
       if (callId && candidate.callId === callId) {
-        matchedByCallId = candidate;
-        break; // call_id match is authoritative — stop scanning
+        outputsByRequestedCallId.push(candidate);
       }
     } else if (candidate.type === 'function_call') {
-      if (newestOutputEntry && pairedCommand === null && candidate.callId === newestOutputEntry.callId) {
-        pairedCommand = candidate.command;
+      functionCallCount += 1;
+      if (candidate.callId) {
+        if (seenFunctionCallIds.has(candidate.callId)) ambiguousCallIds.add(candidate.callId);
+        else seenFunctionCallIds.add(candidate.callId);
+      }
+      if (candidate.commandCapable && candidate.callId && candidate.command !== null) {
+        if (!commandByCallId.has(candidate.callId)) commandByCallId.set(candidate.callId, candidate.command);
+      } else if (candidate.commandCapable) {
+        sawUnresolvableFunctionCall = true;
       }
     }
   }
 
   let chosenOutput = null;
-  if (matchedByCallId) {
-    chosenOutput = matchedByCallId.output;
-  } else if (newestOutputEntry) {
-    if (pairedCommand !== null && command) {
-      if (pairedCommand === command) {
-        chosenOutput = newestOutputEntry.output;
-      } else {
-        return null; // positive command mismatch — decline rather than mis-attribute
-      }
+  if ((callId || command) && sawUnclassifiableLine) return null;
+  if (callId) {
+    if (outputsByRequestedCallId.length === 1 && !ambiguousCallIds.has(callId)) {
+      chosenOutput = outputsByRequestedCallId[0].output;
     } else {
-      chosenOutput = newestOutputEntry.output; // single-call fallback — no pairing resolvable
+      return null; // explicit call ID is unresolved, reused, or has duplicate outputs
+    }
+  } else if (newestOutputEntry) {
+    if (command) {
+      if (sawUnresolvableFunctionCall) return null;
+      const matchingCallIds = [...commandByCallId.entries()]
+        .filter(([, candidateCommand]) => candidateCommand === command)
+        .map(([candidateCallId]) => candidateCallId);
+      const matches = outputEntries.filter((entry) => commandByCallId.get(entry.callId) === command);
+      if (matchingCallIds.length === 1
+        && !ambiguousCallIds.has(matchingCallIds[0])
+        && matches.length === 1) {
+        chosenOutput = matches[0].output;
+      } else if (matchingCallIds.length > 0 || matches.length > 0 || commandByCallId.size > 0) {
+        return null; // no unique command correlation
+      } else if (!truncated && outputEntries.length === 1 && functionCallCount === 0) {
+        chosenOutput = newestOutputEntry.output; // genuinely unpaired legacy fallback
+      } else {
+        return null; // multi-call or partially paired tail
+      }
+    } else if (!truncated && outputEntries.length === 1 && functionCallCount === 0) {
+      chosenOutput = newestOutputEntry.output; // genuinely unpaired legacy fallback
+    } else {
+      return null; // no correlation signal for a paired or multi-call tail
     }
   }
 

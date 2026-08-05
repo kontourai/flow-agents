@@ -32,3 +32,4 @@ Numbered ADRs below are FROZEN immutable history (see the banner on each file). 
 | 0020 | Trust-Reconcile Manifest, Claim Classification, and Waivers | unknown | [0020-trust-reconcile-manifest-and-claim-classification.md](./0020-trust-reconcile-manifest-and-claim-classification.md) |
 | 0021 | Assignment Leases and Stale-Claim Takeover | 2026-07-02 | [0021-assignment-leases-and-stale-claim-takeover.md](./0021-assignment-leases-and-stale-claim-takeover.md) |
 | 0022 | Fail-Closed Delivery Reconciliation with Governed Exemptions | 2026-07-02 | [0022-fail-closed-delivery-reconciliation-with-governed-exemptions.md](./0022-fail-closed-delivery-reconciliation-with-governed-exemptions.md) |
+| 0023 | Declarative Kit Provisioning | 2026-07-16 | [0023-kit-provisioning.md](./0023-kit-provisioning.md) |

@@ -1,9 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
-import { durableFlowAgentsRoot } from "./lib/local-artifact-root.js";
 
 type JsonRecord = Record<string, unknown>;
 export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
@@ -11,6 +10,7 @@ export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
 export interface BuilderLifecycleAuthorization {
   schema_version: "1.0";
   operation: AuthorizedBuilderLifecycleOperation;
+  project_root: string;
   run_id: string;
   subject: string;
   assignment_actor_key: string;
@@ -21,8 +21,471 @@ export interface BuilderLifecycleAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
-export function lifecycleAuthorityKeysPath(projectRoot: string): string {
-  return path.join(durableFlowAgentsRoot(projectRoot), "lifecycle-authority-keys.json");
+export interface CritiqueResolutionAuthorization {
+  schema_version: "1.0";
+  operation: "resolve-critique";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  prior_bundle_sha256: string;
+  prior_record_id: string;
+  prior_record_hash: string;
+  resolving_record_id: string;
+  resolving_record_hash: string;
+  expected_resolver: string;
+  resolved_lane_ids: string[];
+  resolved_finding_ids: string[];
+  prior_snapshot_sha256: string;
+  resolving_snapshot_sha256: string;
+  prior_head_sha: string;
+  resolving_head_sha: string;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+export interface CritiqueResolutionHistoryRepairAuthorization {
+  schema_version: "1.0";
+  operation: "repair-critique-resolution-history";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  prior_record_id: string;
+  prior_record_hash: string;
+  resolving_record_id: string;
+  resolving_record_hash: string;
+  expected_resolver: string;
+  prior_snapshot_sha256: string;
+  resolving_snapshot_sha256: string;
+  prior_head_sha: string;
+  resolving_head_sha: string;
+  preimage_bundle_sha256: string;
+  preimage_ledger_sha256: string;
+  preimage_ledger_length: number;
+  preimage_ledger_tail_hash: string;
+  current_completion_sha256: string;
+  historical_completion_sha256: string;
+  historical_completion_request_sha256: string;
+  historical_completion_action: "resolve-critique" | "repair-critique-resolution-history";
+  historical_completion_result_core_sha256: string;
+  historical_attachment_id: string;
+  historical_manifest_entry_sha256: string;
+  historical_stored_path: string;
+  historical_stored_raw_sha256: string;
+  historical_stored_bundle_sha256: string;
+  historical_durable_operation_id: string;
+  historical_durable_completion_record_sha256: string;
+  historical_ledger_prefix_length: number;
+  historical_ledger_prefix_raw_sha256: string;
+  historical_ledger_prefix_canonical_sha256: string;
+  historical_ledger_prefix_tail_hash: string;
+  historical_critique_projection_version: "1.0";
+  historical_critique_projection_sha256: string;
+  historical_critique_projection_length: number;
+  historical_critique_projection_tail_hash: string;
+  current_critique_projection_version: "1.0";
+  current_critique_projection_sha256: string;
+  current_critique_projection_length: number;
+  current_critique_projection_tail_hash: string;
+  historical_resolution_edge_projection_sha256: string;
+  historical_resolution_edge_projection_count: number;
+  current_resolution_edge_projection_sha256: string;
+  current_resolution_edge_projection_count: number;
+  current_bundle_sha256: string;
+  current_ledger_sha256: string;
+  current_ledger_length: number;
+  current_ledger_tail_hash: string;
+  historical_bridge_sha256: string;
+  preserved_resolution_sha256: string;
+  missing_resolution_event_id: string;
+  missing_authorization_sha256: string;
+  reason_code: "coordinator-external-ledger-overwrite-v1";
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+export interface VerificationEvidenceResealAuthorization {
+  schema_version: "1.0";
+  operation: "reseal-verification-evidence";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  assignment_generation_sha256: string;
+  assignment_actor_key: string;
+  assignment_actor: ActorStruct;
+  preimage_bundle_sha256: string;
+  candidate_bundle_sha256: string;
+  candidate_transaction_id: string;
+  preimage_ledger_sha256: string;
+  preimage_ledger_length: number;
+  preimage_ledger_tail_hash: string;
+  current_completion_sha256: string;
+  current_completion_request_sha256: string;
+  current_completion_result_core_sha256: string;
+  flow_definition_id: "builder.build";
+  flow_step_id: "verify";
+  flow_gate_id: string;
+  flow_run_head: string;
+  flow_manifest_sha256: string;
+  critique_projection_sha256: string;
+  target_expectation_id: string;
+  predecessor_claim_id: string;
+  predecessor_claim_status: string;
+  predecessor_claim_sha256: string;
+  predecessor_claim_index: number;
+  current_claim_id: string;
+  current_claim_status: string;
+  current_claim_sha256: string;
+  current_claim_index: number;
+  claim_delta: "replace";
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+/** Signed only by the external lifecycle authority registry. The package may
+ * construct this request but deliberately never verifies its signature. */
+export interface ProvisionalDeliveryAuthorization {
+  schema_version: "1.0";
+  operation: "publish-provisional-delivery";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  work_item: string;
+  assignment_actor_key: string;
+  assignment_generation: string;
+  published_head_sha: string;
+  provider_record_id: string;
+  provider_observation_sha256: string;
+  flow_definition_id: "builder.build";
+  flow_definition_version: string;
+  flow_definition_digest: string;
+  flow_run_head: string;
+  flow_gate_id: string;
+  flow_gate_visit: string;
+  workspace_snapshot: Record<string, unknown>;
+  checkpoint_slug: string;
+  checkpoint_commit_sha: string;
+  checkpoint_sha256: string;
+  bundle_sha256: string;
+  attestation_sha256: string;
+  companions: Array<{ path: string; sha256: string }>;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+export function provisionalDeliveryAuthorizationPayload(value: Omit<ProvisionalDeliveryAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedProvisionalDeliveryAuthorization(fields: Omit<ProvisionalDeliveryAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<ProvisionalDeliveryAuthorization, "signature">; signingPayload: string;
+} {
+  const unsigned = { schema_version: "1.0", operation: "publish-provisional-delivery", ...fields } as const;
+  return { unsigned, signingPayload: provisionalDeliveryAuthorizationPayload(unsigned) };
+}
+
+/** A signed, completion-only refresh after legitimate later public evidence. */
+export interface ExactCurrentCompletionRecoveryAuthorization {
+  schema_version: "1.0";
+  operation: "recover-exact-current-completion";
+  project_root: string;
+  run_id: string;
+  subject: string;
+  permitted_transition: "exact-current-completion-only";
+  stale_completion_sha256: string;
+  stale_completion_action: "resolve-critique" | "repair-critique-resolution-history" | "reseal-verification-evidence" | "recover-exact-current-completion";
+  stale_completion_request_sha256: string;
+  stale_completion_result_core_sha256: string;
+  stale_completion_coordinator_runtime_sha256: string;
+  current_bundle_sha256: string;
+  current_ledger_sha256: string;
+  current_ledger_length: number;
+  current_ledger_tail_hash: string;
+  critique_projection_sha256: string;
+  resolution_edge_projection_sha256: string;
+  resolution_edge_projection_count: number;
+  flow_definition_id: "builder.build";
+  flow_definition_sha256: string;
+  flow_step_id: "verify";
+  flow_gate_id: string;
+  flow_gate_policy_sha256: string;
+  flow_run_head: string;
+  flow_manifest_sha256: string;
+  nonce: string;
+  expires_at: string;
+  requested_at: string;
+  signature: { algorithm: "ed25519"; key_id: string; value: string };
+}
+
+type SignedBuilderAuthorization = BuilderLifecycleAuthorization | CritiqueResolutionAuthorization | CritiqueResolutionHistoryRepairAuthorization | VerificationEvidenceResealAuthorization | ExactCurrentCompletionRecoveryAuthorization;
+
+const EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "permitted_transition",
+  "stale_completion_sha256", "stale_completion_action", "stale_completion_request_sha256", "stale_completion_result_core_sha256", "stale_completion_coordinator_runtime_sha256",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+  "critique_projection_sha256", "resolution_edge_projection_sha256", "resolution_edge_projection_count",
+  "flow_definition_id", "flow_definition_sha256", "flow_step_id", "flow_gate_id", "flow_gate_policy_sha256", "flow_run_head", "flow_manifest_sha256",
+  "nonce", "expires_at", "requested_at", "signature",
+] as const;
+
+export function exactCurrentCompletionRecoveryAuthorizationPayload(value: Omit<ExactCurrentCompletionRecoveryAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedExactCurrentCompletionRecoveryAuthorization(
+  fields: Omit<ExactCurrentCompletionRecoveryAuthorization, "schema_version" | "operation" | "signature">,
+): { unsigned: Omit<ExactCurrentCompletionRecoveryAuthorization, "signature">; signingPayload: string } {
+  const unsigned = { schema_version: "1.0", operation: "recover-exact-current-completion", ...fields } as const;
+  return { unsigned, signingPayload: exactCurrentCompletionRecoveryAuthorizationPayload(unsigned) };
+}
+
+export function validateExactCurrentCompletionRecoveryAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): ExactCurrentCompletionRecoveryAuthorization {
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS].sort())) {
+    throw new Error("exact-current completion recovery authorization contains unexpected or missing fields");
+  }
+  if (value.schema_version !== "1.0" || value.operation !== "recover-exact-current-completion") throw new Error("exact-current completion recovery authorization identity is invalid");
+  if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("exact-current completion recovery authorization does not bind the canonical project, run, and subject");
+  if (value.permitted_transition !== "exact-current-completion-only") throw new Error("exact-current completion recovery authorization transition is invalid");
+  if (!["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(String(value.stale_completion_action))) throw new Error("exact-current completion recovery authorization stale completion action is invalid");
+  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("exact-current completion recovery authorization must bind the builder.build verify gate");
+  for (const field of EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`exact-current completion recovery authorization ${field} must be a SHA-256 digest`);
+  }
+  for (const field of ["current_ledger_length", "resolution_edge_projection_count"]) {
+    if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`exact-current completion recovery authorization ${field} must be a non-negative safe integer`);
+  }
+  for (const field of ["flow_gate_id", "nonce"]) boundedText(value[field], `authorization.${field}`, 4096);
+  for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`exact-current completion recovery authorization ${field} does not match the current preimage`);
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt || (now > expiresAt && !expected.allowExpired) || requestedAt > now + 5 * 60_000) throw new Error("exact-current completion recovery authorization time window is invalid");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as ExactCurrentCompletionRecoveryAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, exactCurrentCompletionRecoveryAuthorizationPayload);
+  return authorization;
+}
+
+const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject",
+  "assignment_generation_sha256", "assignment_actor_key", "assignment_actor",
+  "preimage_bundle_sha256", "candidate_bundle_sha256", "candidate_transaction_id",
+  "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash",
+  "current_completion_sha256", "current_completion_request_sha256", "current_completion_result_core_sha256",
+  "flow_definition_id", "flow_step_id", "flow_gate_id", "flow_run_head", "flow_manifest_sha256", "critique_projection_sha256",
+  "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index",
+  "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
+  "nonce", "expires_at", "requested_at", "signature",
+] as const;
+
+export function verificationEvidenceResealAuthorizationPayload(value: Omit<VerificationEvidenceResealAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedVerificationEvidenceResealAuthorization(
+  fields: Omit<VerificationEvidenceResealAuthorization, "schema_version" | "operation" | "signature">,
+): { unsigned: Omit<VerificationEvidenceResealAuthorization, "signature">; signingPayload: string } {
+  const unsigned = { schema_version: "1.0", operation: "reseal-verification-evidence", ...fields } as const;
+  return { unsigned, signingPayload: verificationEvidenceResealAuthorizationPayload(unsigned) };
+}
+
+export function validateVerificationEvidenceResealAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): VerificationEvidenceResealAuthorization {
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS].sort())) {
+    throw new Error("verification evidence reseal authorization contains unexpected or missing fields");
+  }
+  if (value.schema_version !== "1.0" || value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
+  if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("verification evidence reseal authorization does not bind the canonical project, run, and subject");
+  if (typeof value.assignment_actor_key !== "string" || !value.assignment_actor_key
+      || typeof value.assignment_actor !== "object" || value.assignment_actor === null || Array.isArray(value.assignment_actor)) {
+    throw new Error("verification evidence reseal authorization assignment binding is invalid");
+  }
+  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("verification evidence reseal authorization must bind the builder.build verify gate");
+  if (value.claim_delta !== "replace") throw new Error("verification evidence reseal authorization claim delta is invalid");
+  for (const field of VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`verification evidence reseal authorization ${field} must be a SHA-256 digest`);
+  }
+  if (!/^[a-f0-9]{32}$/.test(String(value.candidate_transaction_id))) throw new Error("verification evidence reseal candidate transaction identity is invalid");
+  if (!Number.isSafeInteger(value.preimage_ledger_length) || Number(value.preimage_ledger_length) < 0) throw new Error("verification evidence reseal ledger length is invalid");
+  for (const field of ["predecessor_claim_index", "current_claim_index"]) {
+    if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`verification evidence reseal authorization ${field} is invalid`);
+  }
+  for (const field of ["flow_gate_id", "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "current_claim_id", "current_claim_status"]) {
+    boundedText(value[field], `authorization.${field}`, 4096);
+  }
+  for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`verification evidence reseal authorization ${field} does not match the current preimage`);
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt || (now > expiresAt && !expected.allowExpired) || requestedAt > now + 5 * 60_000) throw new Error("verification evidence reseal authorization time window is invalid");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as VerificationEvidenceResealAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, verificationEvidenceResealAuthorizationPayload);
+  return authorization;
+}
+
+export function critiqueResolutionAuthorizationPayload(value: Omit<CritiqueResolutionAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+export function buildUnsignedCritiqueResolutionAuthorization(fields: Omit<CritiqueResolutionAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<CritiqueResolutionAuthorization, "signature">; signingPayload: string;
+} {
+  const unsigned = { schema_version: "1.0", operation: "resolve-critique", ...fields } as const;
+  return { unsigned, signingPayload: critiqueResolutionAuthorizationPayload(unsigned) };
+}
+
+export function critiqueResolutionHistoryRepairAuthorizationPayload(value: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">): string {
+  return JSON.stringify(value);
+}
+
+const HISTORY_REPAIR_BRIDGE_FIELDS = [
+  "historical_completion_sha256", "historical_completion_request_sha256", "historical_completion_action", "historical_completion_result_core_sha256",
+  "historical_attachment_id", "historical_manifest_entry_sha256", "historical_stored_path", "historical_stored_raw_sha256", "historical_stored_bundle_sha256",
+  "historical_durable_operation_id", "historical_durable_completion_record_sha256",
+  "historical_ledger_prefix_length", "historical_ledger_prefix_raw_sha256", "historical_ledger_prefix_canonical_sha256", "historical_ledger_prefix_tail_hash",
+  "historical_critique_projection_version", "historical_critique_projection_sha256", "historical_critique_projection_length", "historical_critique_projection_tail_hash",
+  "current_critique_projection_version", "current_critique_projection_sha256", "current_critique_projection_length", "current_critique_projection_tail_hash",
+  "historical_resolution_edge_projection_sha256", "historical_resolution_edge_projection_count",
+  "current_resolution_edge_projection_sha256", "current_resolution_edge_projection_count",
+  "current_bundle_sha256", "current_ledger_sha256", "current_ledger_length", "current_ledger_tail_hash",
+] as const;
+
+export type CritiqueResolutionHistoryRepairBridgeBindings = Pick<
+  CritiqueResolutionHistoryRepairAuthorization,
+  typeof HISTORY_REPAIR_BRIDGE_FIELDS[number] | "historical_bridge_sha256"
+>;
+
+export function critiqueResolutionHistoryBridgeDigest(value: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(Object.fromEntries(HISTORY_REPAIR_BRIDGE_FIELDS.map((field) => [field, value[field]])))).digest("hex");
+}
+
+export function buildUnsignedCritiqueResolutionHistoryRepairAuthorization(fields: Omit<CritiqueResolutionHistoryRepairAuthorization, "schema_version" | "operation" | "signature">): {
+  unsigned: Omit<CritiqueResolutionHistoryRepairAuthorization, "signature">; signingPayload: string;
+} {
+  if (!HISTORY_REPAIR_BRIDGE_FIELDS.every((field) => Object.hasOwn(fields, field)) || !Object.hasOwn(fields, "historical_bridge_sha256")) {
+    throw new Error("history repair authorization requires every historical bridge field");
+  }
+  if (fields.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(fields)) {
+    throw new Error("history repair authorization historical_bridge_sha256 does not bind the exact bridge fields");
+  }
+  const unsigned = { schema_version: "1.0", operation: "repair-critique-resolution-history", ...fields } as const;
+  return { unsigned, signingPayload: JSON.stringify(unsigned) };
+}
+
+const HISTORY_REPAIR_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash",
+  "expected_resolver", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha",
+  "preimage_bundle_sha256", "preimage_ledger_sha256", "preimage_ledger_length", "preimage_ledger_tail_hash", "current_completion_sha256",
+  ...HISTORY_REPAIR_BRIDGE_FIELDS, "historical_bridge_sha256",
+  "preserved_resolution_sha256", "missing_resolution_event_id", "missing_authorization_sha256", "reason_code",
+  "nonce", "expires_at", "requested_at", "signature",
+] as const;
+
+export function loadCritiqueResolutionHistoryRepairAuthorization(fileInput: string, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): CritiqueResolutionHistoryRepairAuthorization {
+  return validateCritiqueResolutionHistoryRepairAuthorization(readRegularJson(fileInput, "critique resolution history repair authorization", true), expected);
+}
+
+export function validateCritiqueResolutionHistoryRepairAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
+}): CritiqueResolutionHistoryRepairAuthorization {
+  const observed = Object.keys(value).sort();
+  const required = [...HISTORY_REPAIR_AUTHORIZATION_FIELDS].sort();
+  if (JSON.stringify(observed) !== JSON.stringify(required)) throw new Error("critique resolution history repair authorization contains unexpected or missing fields");
+  if (value.schema_version !== "1.0" || value.operation !== "repair-critique-resolution-history") throw new Error("critique resolution history repair authorization identity is invalid");
+  if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("critique resolution history repair authorization does not bind the canonical project, run, and subject");
+  if (!["resolve-critique", "repair-critique-resolution-history"].includes(String(value.historical_completion_action))) throw new Error("historical completion action is invalid");
+  if (value.historical_critique_projection_version !== "1.0" || value.current_critique_projection_version !== "1.0") throw new Error("critique projection version is invalid");
+  for (const field of HISTORY_REPAIR_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash"))) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`critique resolution history repair authorization ${field} must be a SHA-256 digest`);
+  }
+  for (const field of HISTORY_REPAIR_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_length") || field.endsWith("_count"))) {
+    if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`critique resolution history repair authorization ${field} must be a non-negative safe integer`);
+  }
+  for (const field of ["project_root", "run_id", "subject", "prior_record_id", "resolving_record_id", "expected_resolver", "historical_attachment_id", "historical_stored_path", "historical_durable_operation_id", "missing_resolution_event_id", "reason_code", "nonce"]) {
+    boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 4096);
+  }
+  if (value.reason_code !== "coordinator-external-ledger-overwrite-v1") throw new Error("history repair authorization reason is invalid");
+  if (value.historical_bridge_sha256 !== critiqueResolutionHistoryBridgeDigest(value)) throw new Error("history repair authorization bridge digest is invalid");
+  for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`history repair authorization ${field} does not match the expected bridge`);
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt) throw new Error("critique resolution history repair authorization expires before it was requested");
+  if (now > expiresAt && !expected.allowExpired) throw new Error("critique resolution history repair authorization is expired");
+  if (requestedAt > now + 5 * 60_000) throw new Error("critique resolution history repair authorization request time is in the future");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(HISTORY_REPAIR_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionHistoryRepairAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, critiqueResolutionHistoryRepairAuthorizationPayload);
+  return authorization;
+}
+
+export function loadCritiqueResolutionAuthorization(fileInput: string, expected: {
+  projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
+  priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
+  resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
+  priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
+  now?: string; allowExpired?: boolean;
+}): CritiqueResolutionAuthorization {
+  const value = readRegularJson(fileInput, "critique resolution authorization", true);
+  return validateCritiqueResolutionAuthorization(value, expected);
+}
+
+export function validateCritiqueResolutionAuthorization(value: JsonRecord, expected: {
+  projectRoot: string; runId: string; subject: string; priorBundleSha256: string;
+  priorRecordId: string; priorRecordHash: string; resolvingRecordId: string;
+  resolvingRecordHash: string; resolvedLaneIds?: string[]; resolvedFindingIds?: string[];
+  priorSnapshotSha256?: string; resolvingSnapshotSha256?: string; priorHeadSha?: string; resolvingHeadSha?: string;
+  now?: string; allowExpired?: boolean;
+}): CritiqueResolutionAuthorization {
+  const fields = ["schema_version", "operation", "project_root", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "resolved_lane_ids", "resolved_finding_ids", "prior_snapshot_sha256", "resolving_snapshot_sha256", "prior_head_sha", "resolving_head_sha", "nonce", "expires_at", "requested_at", "signature"];
+  assertExactKeys(value, fields, "authorization");
+  if (value.schema_version !== "1.0" || value.operation !== "resolve-critique") throw new Error("critique resolution authorization identity is invalid");
+  const exact: Array<[keyof typeof expected, string]> = [["runId", "run_id"], ["subject", "subject"], ["priorBundleSha256", "prior_bundle_sha256"], ["priorRecordId", "prior_record_id"], ["priorRecordHash", "prior_record_hash"], ["resolvingRecordId", "resolving_record_id"], ["resolvingRecordHash", "resolving_record_hash"]];
+  if (value.project_root !== expected.projectRoot) throw new Error("critique resolution authorization project_root does not match the canonical project");
+  for (const [expectedKey, field] of exact) if (value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the current resolution preimage`);
+  const semantic: Array<[keyof typeof expected, string]> = [["resolvedLaneIds", "resolved_lane_ids"], ["resolvedFindingIds", "resolved_finding_ids"]];
+  for (const [expectedKey, field] of semantic) {
+    const actual = boundedStringArray(value[field], `authorization.${field}`);
+    if (expected[expectedKey] && JSON.stringify(actual) !== JSON.stringify(expected[expectedKey])) throw new Error(`critique resolution authorization ${field} does not match the intended resolution edge`);
+  }
+  for (const [expectedKey, field] of [["priorSnapshotSha256", "prior_snapshot_sha256"], ["resolvingSnapshotSha256", "resolving_snapshot_sha256"], ["priorHeadSha", "prior_head_sha"], ["resolvingHeadSha", "resolving_head_sha"]] as const) {
+    boundedText(value[field], `authorization.${field}`, 256);
+    if (expected[expectedKey] && value[field] !== expected[expectedKey]) throw new Error(`critique resolution authorization ${field} does not match the intended resolution edge`);
+  }
+  for (const field of ["project_root", "run_id", "subject", "prior_bundle_sha256", "prior_record_id", "prior_record_hash", "resolving_record_id", "resolving_record_hash", "expected_resolver", "nonce", "expires_at", "requested_at"]) boundedText(value[field], `authorization.${field}`, field === "subject" ? 2048 : 4096);
+  for (const field of ["prior_bundle_sha256", "prior_record_hash", "resolving_record_hash", "prior_snapshot_sha256", "resolving_snapshot_sha256"]) {
+    if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`critique resolution authorization ${field} must be a SHA-256 digest`);
+  }
+  const requestedAt = dateTime(value.requested_at, "requested_at");
+  const expiresAt = dateTime(value.expires_at, "expires_at");
+  const now = Date.parse(expected.now ?? new Date().toISOString());
+  if (expiresAt < requestedAt) throw new Error("critique resolution authorization expires before it was requested");
+  if (now > expiresAt && !expected.allowExpired) throw new Error("critique resolution authorization is expired");
+  if (requestedAt > now + 5 * 60_000) throw new Error("critique resolution authorization request time is in the future");
+  const signature = validateSignature(value.signature);
+  const authorization = { ...Object.fromEntries(fields.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as CritiqueResolutionAuthorization;
+  verifySignedAuthorization(authorization, expected.projectRoot, critiqueResolutionAuthorizationPayload);
+  return authorization;
+}
+
+function boundedStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length > 256) throw new Error(`lifecycle authorization ${field} must be an array`);
+  const result = value.map((entry, index) => boundedText(entry, `${field}[${index}]`, 256));
+  if (new Set(result).size !== result.length || JSON.stringify(result) !== JSON.stringify([...result].sort())) throw new Error(`lifecycle authorization ${field} must contain unique sorted ids`);
+  return result;
 }
 
 export function loadBuilderLifecycleAuthorization(
@@ -30,9 +493,10 @@ export function loadBuilderLifecycleAuthorization(
   expected: { projectRoot: string; operation: AuthorizedBuilderLifecycleOperation; runId: string; subject: string; actorKey: string; now?: string; allowExpired?: boolean },
 ): BuilderLifecycleAuthorization {
   const value = readRegularJson(fileInput, "lifecycle authorization");
-  assertExactKeys(value, ["schema_version", "operation", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
+  assertExactKeys(value, ["schema_version", "operation", "project_root", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"], "authorization");
   if (value.schema_version !== "1.0") throw new Error("lifecycle authorization schema_version must be 1.0");
   assertEqual(value.operation, expected.operation, "operation");
+  assertEqual(value.project_root, expected.projectRoot, "project_root");
   assertEqual(value.run_id, expected.runId, "run_id");
   assertEqual(value.subject, expected.subject, "subject");
   assertEqual(value.assignment_actor_key, expected.actorKey, "assignment_actor_key");
@@ -49,6 +513,7 @@ export function loadBuilderLifecycleAuthorization(
   const authorization = {
     schema_version: "1.0",
     operation: expected.operation,
+    project_root: expected.projectRoot,
     run_id: expected.runId,
     subject: expected.subject,
     assignment_actor_key: expected.actorKey,
@@ -58,7 +523,7 @@ export function loadBuilderLifecycleAuthorization(
     request,
     signature,
   } satisfies BuilderLifecycleAuthorization;
-  verifyAuthorizationSignature(authorization, lifecycleAuthorityKeysPath(expected.projectRoot));
+  verifySignedAuthorization(authorization, expected.projectRoot, builderLifecycleAuthorizationPayload);
   return authorization;
 }
 
@@ -66,73 +531,64 @@ export function builderLifecycleAuthorizationPayload(value: Omit<BuilderLifecycl
   return JSON.stringify(value);
 }
 
-export function assertAuthorizationUnused(artifactRoot: string, authorization: BuilderLifecycleAuthorization): void {
-  if (!readAuthorizationConsumption(artifactRoot, authorization)) return;
-  throw new Error("lifecycle authorization nonce has already been consumed");
-}
-
-export function readAuthorizationConsumption(artifactRoot: string, authorization: BuilderLifecycleAuthorization): JsonRecord | null {
-  const file = consumedAuthorizationPath(artifactRoot, authorization);
-  if (!pathExistsNoFollow(file)) return null;
-  const record = readRegularJson(file, "consumed lifecycle authorization record");
-  if (record.run_id !== authorization.run_id
-    || record.operation !== authorization.operation
-    || record.nonce !== authorization.nonce
-    || record.key_id !== authorization.signature.key_id
-    || record.authorization_sha256 !== authorizationDigest(authorization)) {
-    throw new Error("consumed lifecycle authorization record does not match its integrity key");
+/**
+ * Build the canonical UNSIGNED authorization for a lifecycle operation, plus the
+ * exact bytes an operator must sign (#659 Slice C — "friendly cancel").
+ *
+ * The whole point is signing-payload parity: `verifyAuthorizationSignature`
+ * recomputes the signed bytes from the *loaded* authorization, after normalizing
+ * `assignment_actor`/`request` through `validateActor`/`validateRequest` and
+ * re-assembling the top-level keys in a fixed order. So we build the unsigned
+ * object here through the *same* validators and the *same* key order, and derive
+ * `signingPayload` from it — guaranteeing that a signature produced over
+ * `signingPayload` will verify. (The validators are idempotent, so re-running
+ * them on this already-canonical object at load time yields identical bytes.)
+ */
+export function buildUnsignedLifecycleAuthorization(fields: {
+  operation: AuthorizedBuilderLifecycleOperation;
+  project_root: string;
+  run_id: string;
+  subject: string;
+  assignment_actor_key: string;
+  assignment_actor: unknown;
+  nonce: string;
+  expires_at: string;
+  request: unknown;
+}): { unsigned: Omit<BuilderLifecycleAuthorization, "signature">; signingPayload: string } {
+  boundedText(fields.project_root, "project_root", 4096);
+  boundedText(fields.run_id, "run_id", 256);
+  boundedText(fields.subject, "subject", 2048);
+  boundedText(fields.assignment_actor_key, "assignment_actor_key", 256);
+  boundedText(fields.nonce, "nonce", 256);
+  const assignment_actor = validateActor(fields.assignment_actor);
+  const request = validateRequest(fields.request);
+  const expiresAt = dateTime(fields.expires_at, "expires_at");
+  const requestedAt = Date.parse(request.authority.requested_at);
+  if (expiresAt < requestedAt) {
+    throw new Error("lifecycle authorization expires_at must not precede request.authority.requested_at");
   }
-  return record;
+  const unsigned = {
+    schema_version: "1.0",
+    operation: fields.operation,
+    project_root: fields.project_root,
+    run_id: fields.run_id,
+    subject: fields.subject,
+    assignment_actor_key: fields.assignment_actor_key,
+    assignment_actor,
+    nonce: fields.nonce,
+    expires_at: fields.expires_at,
+    request,
+  } satisfies Omit<BuilderLifecycleAuthorization, "signature">;
+  return { unsigned, signingPayload: builderLifecycleAuthorizationPayload(unsigned) };
 }
 
-export function recordAuthorizationConsumed(artifactRoot: string, authorization: BuilderLifecycleAuthorization, at = new Date().toISOString()): void {
-  const file = consumedAuthorizationPath(artifactRoot, authorization);
-  const directory = path.dirname(file);
-  fs.mkdirSync(directory, { recursive: true });
-  const stat = fs.lstatSync(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !pathIsWithin(fs.realpathSync(directory), fs.realpathSync(artifactRoot))) throw new Error("lifecycle authorization registry directory is unsafe");
-  const temporary = path.join(directory, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
-  const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-  try {
-    fs.writeFileSync(descriptor, `${JSON.stringify({ run_id: authorization.run_id, operation: authorization.operation, nonce: authorization.nonce, key_id: authorization.signature.key_id, authorization_sha256: authorizationDigest(authorization), at })}\n`);
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  try {
-    fs.linkSync(temporary, file);
-    const directoryDescriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
-}
-
-function consumedAuthorizationPath(artifactRoot: string, authorization: BuilderLifecycleAuthorization): string {
-  const integrityKey = createHash("sha256").update(authorization.run_id).update("\0").update(authorization.nonce).digest("hex");
-  return path.join(artifactRoot, "lifecycle-authority", "consumed", `${integrityKey}.json`);
-}
-
-function authorizationDigest(authorization: BuilderLifecycleAuthorization): string {
+export function authorizationDigest(authorization: SignedBuilderAuthorization): string {
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
-function verifyAuthorizationSignature(authorization: BuilderLifecycleAuthorization, keysFile: string): void {
-  const registry = readRegularJson(keysFile, "lifecycle authority key registry", true);
-  assertExactKeys(registry, ["schema_version", "keys"], "key registry");
-  if (registry.schema_version !== "1.0" || !Array.isArray(registry.keys)) throw new Error("lifecycle authority key registry must contain schema_version 1.0 and keys[]");
-  const key = registry.keys.find((candidate) => isRecord(candidate) && candidate.id === authorization.signature.key_id);
-  if (!isRecord(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || key.public_key_pem.trim().length === 0) {
-    throw new Error(`lifecycle authorization key ${authorization.signature.key_id} is not trusted`);
-  }
-  const { signature: _signature, ...unsigned } = authorization;
-  let verified = false;
-  try {
-    verified = verify(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), createPublicKey(key.public_key_pem), Buffer.from(authorization.signature.value, "base64"));
-  } catch {
-    verified = false;
-  }
-  if (!verified) throw new Error("lifecycle authorization signature is invalid");
+function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
+  void authorization; void projectRoot; void payload;
+  throw new Error("lifecycle authorization is NOT_VERIFIED by package-side validation; the external authority must own the complete transition");
 }
 
 function readRegularJson(fileInput: string, label: string, requireProtected = false): JsonRecord {
@@ -154,9 +610,10 @@ function readRegularJson(fileInput: string, label: string, requireProtected = fa
 function validateActor(value: unknown): ActorStruct {
   if (!isRecord(value)) throw new Error("lifecycle authorization assignment_actor must be an object");
   assertExactKeys(value, ["runtime", "session_id", "host", "human"], "assignment_actor");
-  if (!Object.prototype.hasOwnProperty.call(value, "human")) throw new Error("lifecycle authorization assignment_actor.human is required");
   for (const field of ["runtime", "session_id", "host"] as const) boundedText(value[field], `assignment_actor.${field}`, 256);
   if (value.human !== undefined && value.human !== null) boundedText(value.human, "assignment_actor.human", 256);
+  // Claims persisted before explicit-null canonicalization omit `human`. Keep
+  // that record untouched, but sign the canonical semantic identity.
   return { runtime: value.runtime as string, session_id: value.session_id as string, host: value.host as string, human: value.human == null ? null : value.human as string };
 }
 
@@ -206,13 +663,4 @@ function nonEmpty(value: unknown): value is string {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function pathExistsNoFollow(candidate: string): boolean {
-  try { fs.lstatSync(candidate); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
-}
-
-function pathIsWithin(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }

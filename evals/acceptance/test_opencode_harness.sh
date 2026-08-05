@@ -60,7 +60,7 @@ ACCEPT_PROMPT="You MUST call the read tool before replying — answering from me
 run_output=""
 provider_error=0
 for _attempt in 1 2; do
-  run_output="$(opencode run "${MODEL_ARGS[@]}" "$ACCEPT_PROMPT" 2>&1 || true)"
+  run_output="$(opencode run --format json "${MODEL_ARGS[@]}" "$ACCEPT_PROMPT" 2>&1 || true)"
   if echo "$run_output" | grep -qi "error"; then
     provider_error=1
     break
@@ -79,7 +79,8 @@ done
 # and which opencode does not reliably surface to its log file — a stale-assertion
 # false failure (#75). The factory runs regardless of provider, so this load
 # signal is independent of whether a model turn completes.
-if [[ -f "$TMP_WORK/.telemetry/opencode-plugin.loaded" ]]; then
+if [[ -f "$TMP_WORK/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$TMP_WORK/.telemetry/opencode-plugin.loaded" ]]; then
   _pass "flow-agents plugin loaded (factory marker present)"
 else
   _fail "flow-agents plugin did not load (factory marker absent)"

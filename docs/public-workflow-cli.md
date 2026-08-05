@@ -47,8 +47,118 @@ provider identity from a GitHub-shaped string. Pass the resolved `--assignment-p
 providers also pass their standard assignment status result through `--effective-state-json`.
 Flow Agents verifies that the current actor is the confirmed holder, retains that provider result
 as selected-work evidence, and creates a local runtime lease mirror for atomic session mutation.
+A provider-backed Builder session also takes its branch only from the validated
+`AssignmentStatus.assignment.record.branch`. That branch is copied unchanged into the immutable
+provider snapshot, local assignment mirror, delivery artifact, state, and current-session
+projections; the public command deliberately has no caller branch override. Re-running `start`
+for the same Work Item resumes only when every existing projection still agrees with the current
+provider-authorized branch. A missing, malformed, or conflicting provider branch fails closed
+before session mutation. Do not repair such a contradiction by editing runtime artifacts: retain
+the conflicting session for evidence, release or supersede the provider assignment through its
+normal provider workflow, and begin a fresh provider-backed Work Item/session. This is the safe
+recovery boundary until a transactionally recoverable branch-reconciliation protocol exists.
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
+
+## Approved cross-repository rollouts
+
+An approved portfolio or retrofit initiative does not authorize a retroactive Builder run. Before
+editing each target repository, create or select that target's provider-backed Work Item, link it
+to the portfolio approval, and complete its normal `pull-work` selection and ownership preflight.
+Then bind the target Work Item through the public command:
+
+```bash
+flow_agents workflow start \
+  --flow builder.build \
+  --work-item kontourai/target-repository#123 \
+  --assignment-provider github \
+  --effective-state-json .kontourai/flow-agents/target-assignment-status.json
+```
+
+The provider status must confirm the calling actor holds that exact Work Item. `start` retains the
+provider result as selected-work evidence and begins at the canonical Builder entry step. A
+portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
+the work has already been changed without a bound run, record the gap and create a follow-up Work
+Item; do not manufacture a prior session, use a private writer, or use a `delivery/DECLARED`
+exemption for agent-delivered work.
+
+Follow the reported public `next_action` through planning, implementation, review, verification,
+and release readiness. A repository may make CI reconciliation of the session's delivery bundle
+a required pull-request check. In that case, publish a **provisional** delivery after the pull
+request is open and before recording `ci-merge-readiness`:
+
+```bash
+flow_agents workflow publish-provisional-delivery-request \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  > provisional-delivery-request.json
+
+# Sign provisional-delivery-request.json.authorization exactly as serialized with a
+# configured lifecycle-operator Ed25519 key. Add only the signature block and store
+# the resulting authorization outside the project checkout.
+flow_agents workflow publish-provisional-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --authorization-file /absolute/outside-project/provisional-delivery.authorization.json \
+  --json
+```
+
+This command is available only to the active bound `builder.build` run at `merge-ready-ci`. It
+first seals the already-reviewed and verified source checkpoint with `status: "provisional"` and
+`phase: "ci-readiness"`. The request binds the exact project/session/Work Item, live assignment
+generation, canonical definition version and digest, Flow head and gate visit, authenticated
+publish-change provider record and immutable head, source snapshot, checkpoint, bundle,
+attestation, and mutually exclusive companion digests. Publication transports those exact bytes;
+the root-owned coordinator rechecks every binding, appends a signed-authorization event under the
+Flow run lock, and installs a purpose-specific signed completion before the package records the
+delivery. It then writes only that session's `delivery/<slug>/` transport. Commit
+and push those companion files before provider checks and before recording `ci-merge-readiness`,
+so the provider's Trust Verify check can reconcile the PR revision. It is not a release decision,
+does not add a `ci-merge-readiness` claim, and cannot complete or declare the run.
+`delivery/DECLARED` remains unavailable to agent work.
+
+After those provider checks, record the explicit readiness decision and complete learning. Only
+when the canonical `builder.build` run has advanced through `learn` to completed `done`, publish
+the terminal CI-visible delivery evidence through the primary public CLI, commit that superseding
+delivery output, and push the resulting head:
+
+```bash
+flow_agents workflow publish-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --json
+```
+
+This command derives the repository and session from the bound artifact; it does not accept a
+caller-selected output repository or private-writer escape hatch. It refuses a missing bundle, a
+partial Builder run, an unreconciled bundle shape, a stale or non-holder actor, and a positively
+identified checkpoint/checkout mismatch. Public test verification stamps the canonical Git
+workspace snapshot alongside its successful command observations. Before sealing, publishing
+requires both that stamped verification snapshot and the canonical live review graph to match the
+exact current workspace. The one supported continuation is a checkpoint-bound provisional
+delivery: terminal publication permits it only when the verification base is an ancestor of the
+current checkout, every committed and uncommitted change since that base is confined to the same
+`delivery/<slug>/` transport, and the provisional bundle and checkpoint still match their
+session-local digests. A missing, altered, stale, unrelated, or concurrent-session delivery fails
+closed; re-run review and verification instead of borrowing its evidence. Sessions whose older
+test evidence lacks this snapshot also fail closed. The publisher holds the session subject lock
+and rechecks the identical snapshot after sealing, immediately before copying, and after the
+copy. A post-copy source change restores the exact prior `delivery/<session>/` destination (if
+any) and leaves every sibling delivery untouched before failing. It then seals against the derived
+target checkout's current `HEAD`, replaces stale companions with one newly emitted signed or
+in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
+bundle before copying the set into `delivery/<session>/`. Trust Verify accepts a provisional
+candidate only when the checked PR revision differs from the authenticated published head by
+exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory.
+
+At terminal publication, the Git delta may contain all four transport files, or exactly the three
+mutable files: `trust.bundle`, `trust.checkpoint.json`, and the signed or in-toto companion selected
+by the attestation descriptor. The three-file form is permitted only when
+`trust.checkpoint.attestation.json` is raw-byte identical in the terminal revision and the
+checkpoint revision. Even when Git omits that descriptor from the delta, Trust Verify still treats
+it as one of the validated four transport files at the checked revision and compares its raw bytes
+with the checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
+changes, altered or missing companions, and unrelated session bundles cannot satisfy the check.
+
+Terminal publication is unavailable while `learn` is active, even when a release decision is
+positive; provisional publication is the only CI-transport path before learning closes.
 
 `builder.shape` uses a caller-supplied, safe slug. Derive it from a selected
 title using lowercase ASCII words separated by single hyphens. Never inject raw
@@ -81,7 +191,154 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
-The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, and `archive`. Pause,
+`--criterion-json` supplies the complete, verified evidence for the accepted criteria during this
+public verification transaction. It is intentionally distinct from `acceptance.json`: that file
+remains the planning contract and can retain an incomplete planner reference such as
+`{"kind":"source","summary":"Locate the implementation source before verification."}`.
+The successful `workflow evidence --expectation tests-evidence` command validates the complete
+criterion objects and records them in authoritative `trust.bundle`; it does not rewrite the
+planning artifact. Do not edit `acceptance.json` to repair a planned placeholder or invoke the
+package-private `workflow:sidecar record-evidence` writer for that purpose. Generic/private
+evidence writes continue to validate their final refs and fail closed on incomplete source refs.
+
+An embedding host whose current runtime identity cannot reproduce the active
+assignment actor must establish an expiring recovery-capable session binding,
+then authorize each ordinary evidence mutation separately. Run
+`evidence-request` with the exact evidence arguments, sign the emitted
+`signing_payload` with a registered lifecycle-authority key, add that signature
+to the emitted `authorization`, and pass the protected signed file to the
+otherwise identical evidence command:
+
+```bash
+flow_agents workflow evidence-request \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  > evidence-request.json
+
+flow_agents workflow evidence \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation implementation-scope \
+  --status pass \
+  --summary "Implementation remained inside the accepted scope." \
+  --authorization-file /absolute/outside-project/evidence-authorization.json
+```
+
+The authorization binds the exact assignment generation, assignment actor key and struct,
+the independently named host routing key and routing-binding generation, Flow head and manifest, Trust Bundle, evidence
+arguments, canonical project/run/subject, nonce, and expiry. The external
+coordinator verifies and durably redeems it before the normal evidence
+transaction runs. A pointer alone is routing metadata, never bearer authority;
+replay, binding retirement/replacement, assignment takeover, or changed Flow,
+trust, or evidence arguments fail closed before another mutation.
+
+When a current root-signed lifecycle completion already binds a Trust Bundle and its external
+resolution ledger, ordinary `workflow evidence` correctly refuses to invalidate that completion.
+If a legitimate later public critique or gate claim has already made that receipt stale, do not
+rewrite or delete it, append a resolution event, or use history repair. First request and sign the
+completion-only refresh (the authorization file must remain outside the project):
+
+```bash
+flow_agents workflow recover-exact-current-completion-request \
+  --session-dir .kontourai/flow-agents/example > completion-recovery-request.json
+
+# Sign completion-recovery-request.json.authorization with the configured operator key.
+flow_agents workflow recover-exact-current-completion \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/completion-recovery-authorization.json
+```
+
+This narrow action is available only at the one open `builder.build` `verify` gate. It binds an
+authenticated stale same-run root completion, the raw current bundle and ledger bytes, complete
+cross-reviewer resolution coverage, critique and edge projections, subject, raw Flow definition
+and canonical ordered gate-policy digests, Flow head/manifest,
+fixed transition, nonce, and expiry. It writes no claim, ledger event, bundle, or stale receipt;
+the coordinator first durably stages and root-signs an exact five-artifact Flow-only publication
+plan. It activates Flow's native recovery fence before the first postimage and keeps that exact
+generation active through root completion/nonce persistence and receipt installation. Prepared
+retry uses the matching recovery lock, accepts exact all-new state, rolls exact all-old or mixed
+old/new state forward from the staged postimages, and rejects unknown or mismatched state without
+restoring foreign bytes. Finalization verifies the exact receipt, postimages, and fence generation,
+opens the fence through Flow, and then removes the plan and stages. The plan only hashes the bundle,
+ledger, and stale receipt; it never snapshots or restores them.
+
+The canonical attachment ID and stored filename include the signed authorization digest in addition
+to the unchanged request-envelope digest. Reusing the same authorization-file path for a later,
+distinct signed recovery therefore creates a distinct attachment while the durable completion still
+binds the request digest. Replaying the same signed authorization returns the immutable completion
+without another attachment. Use it only after all final independent critique/resolution work is
+complete, and then use reseal for the final verification evidence.
+
+Use the two-stage reseal only for the final `builder.build` verify evidence after critique
+resolution:
+
+```bash
+flow_agents workflow reseal-verification-evidence-request \
+  --session-dir .kontourai/flow-agents/example \
+  --expectation tests-evidence \
+  --status pass \
+  --command "npm test" \
+  --summary "Final verification passed after the resolved review." \
+  --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Final substantive verification command."}' \
+  --criterion-json '{"id":"<criterion-id>","status":"pass","evidence_refs":[{"kind":"command","excerpt":"npm test","summary":"Final verification command for this criterion."}]}' \
+  > reseal-request.json
+
+# Sign reseal-request.json.authorization using the configured lifecycle operator key,
+# write the signature block into a protected file outside the project, then:
+flow_agents workflow reseal-verification-evidence \
+  --session-dir .kontourai/flow-agents/example \
+  --authorization-file /absolute/outside-project/reseal-authorization.json
+```
+
+The request executes the existing evidence writer once into a retained transaction candidate; it
+does not attach or publish that candidate. Its unsigned authorization binds the current raw bundle,
+candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
+raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
+expiry. It also binds the exact target verify expectation and the predecessor/current claim
+id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
+requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
+that does not match the current expectation's step, claim type, and subject type. It acquires
+Flow's native run-mutation lock before capturing a closed transaction plan over exactly six
+artifact identities: session bundle, Flow manifest, Flow state, request-keyed stored attachment,
+JSON report, and Markdown report. The root-signed plan contains no artifact paths; it binds the
+request, authorization key and nonce, pinned reducer identity, result core, and exact pre/post
+presence, mode, size, and digest for each fixed identity. Old and new images are durably staged
+in fixed siblings and reread before publication. It permits
+replacement of only that one ordered target claim; every other claim, including other verify-gate
+claims, must remain byte-identical and in the same order. It requires a byte-identical critique
+projection, attaches the candidate to the `builder.build` verify gate, commits the exact candidate
+bytes without appending a sixth ledger event, and installs a new root-signed exact-current
+completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
+remains active through durable root completion and exact receipt installation; all canonical
+readers and ordinary Flow mutations fail closed while active. Flow's native writer assigns a
+unique generation and durably publishes it; the dedicated finalizer requires that exact
+generation before reopening. Consumers bind the generation, file bytes, and run-directory
+identity across their complete supported reads and reject symlinked fixed Flow ancestry.
+Before root records a nonce or any plan/stage exists, the helper preflights the installed
+mutation lock, recovery lock, active writer, and generation-bound finalizer APIs. Recovery
+accepts only an exact
+all-old or all-new generation. Mixed, malformed, or unknown generations are quarantined with the
+fence left active for offline recovery. An active legacy recursive reseal journal is never
+auto-restored.
+Publication also preflights the fixed, protected
+`verification-reseal-atomic-replace.cjs` host capability. That administrator-supplied capability
+must implement `kontourai.atomic-expected-preimage-replace.v1`: atomically compare the named leaf's
+exact preimage and install or delete only the authorized postimage. It receives a pinned parent
+descriptor and basename, while the coordinator independently rechecks the parent and postimage.
+Root validates its fixed protected artifact; only the caller-identity worker executes its code.
+The reference coordinator ships no pathname or descriptor-only fallback and refuses on every
+platform before coordinator state, nonce, plan, stage, fence, or artifact mutation when the
+capability is absent or invalid. Portable request creation and external signing remain available.
+After reopening, the signed plan remains the cleanup recovery marker until every fixed stage is
+removed; replay validates the exact receipt/postimages and safely finishes interrupted cleanup.
+Stale, altered, replay-mismatched, or wrong-gate requests fail closed; durable
+nonce/completion and transaction recovery make an exact completed retry a replay.
+
+The public lifecycle verbs are `pause`, `resume`, `release`, `cancel`, `archive`,
+`resolve-critique`, `repair-critique-resolution-history`, and
+`reseal-verification-evidence`. Pause,
 resume, and release require the current assignment actor and an explicit reason. `critique`
 records the `clean-critique` claim but does not independently attach it to Flow or advance a gate. Cancel and
 archive require a signed user/operator authorization file. Flow owns the canonical run
@@ -101,6 +358,158 @@ Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
+
+## Resolving repaired critique history
+
+`workflow resolve-critique` closes a historical failing or not-verified review
+without deleting it or borrowing the earlier reviewer's identity. It is only
+available during `builder.build` verification. It requires an Ed25519-signed
+user/operator authorization handled by an externally provisioned lifecycle-authority helper.
+Administrators provision protocol v1 at the immutable path
+`/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1`; callers cannot select another
+executable. The helper must be outside the project, package, and worktree, OS-owned, executable, and
+non-writable by the runtime user, group, or world through every path component. Platforms without
+a supported ownership adapter fail closed. The helper—not package JavaScript—owns signature and
+registry verification, locking, nonce replay protection, preimage CAS, atomic bundle/history writes,
+canonical evidence attachment, and any Flow synchronization for the authorized transition.
+The authorization binds
+the exact canonical project root, run, subject, pre-mutation bundle digest, critique IDs and hashes,
+expected resolving reviewer, nonce, request time, and expiry. Ambient runtime
+identity and actor overrides do not authorize this operation.
+
+Requests and responses use strict single-line JSON envelopes. A response is accepted only when its
+protocol version, action, canonical request SHA-256 digest, status, and exact action-specific result
+match the request. Empty, multi-line, malformed, or extended responses fail closed. The helper must
+independently reject unknown fields/actions, canonicalize and constrain every received path, derive
+the run/project/artifact roots rather than trusting claimed relationships, and perform mutation only
+after its own locked precondition and compare-and-swap checks.
+Package-side graph validation never invokes a live verification subprocess or treats a helper
+response as authorization. It verifies the coordinator's pinned Ed25519 completion receipt and
+requires its result digest to bind the exact resolved graph before Builder consumes the transition.
+
+For a signed critique resolution, the coordinator accepts up to 16 MiB only for the canonical
+Flow evidence manifest. The protected descriptor, `O_NOFOLLOW`, regular-file, group/world-mode,
+and mandatory JSON checks remain in force. Definitions, state, trust bundles, authorizations,
+journals, keys, and responses retain their smaller existing limits; this is not a general
+input-size increase.
+
+Completion verification always reads the fixed public key at
+`/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem`; no command,
+authorization, or environment setting can choose another key. On Darwin only, the standard
+protected `/etc` alias resolving exactly to `/private/etc` is accepted. Every resolved component
+and the final `O_NOFOLLOW` Ed25519 key descriptor are validated as protected. Different alias
+targets, deeper or writable symlinks, non-root-owned components, all non-Darwin symlinks, and all
+helper-path symlinks are rejected. The helper itself remains pinned and symlink-free.
+
+Administrators upgrade the direct source
+`packaging/lifecycle-authority/coordinator.mjs` through the privileged installer. They verify the
+installed coordinator's bytes and SHA-256 separately from the signed runtime digest, which
+continues to identify `runtime-v1.mjs`; the installer preserves its prior coordinator/runtime/pin/
+reducer set for rollback. This operational path is administrator-owned and cannot be selected or
+overridden by package callers.
+
+The helper and its provider-neutral key registry are deployed and configured by runtime
+administrators outside source control. Flow Agents ships neither helper configuration nor keys.
+Missing, untrusted, repository-local, or writable helpers fail closed. The privileged
+coordinator only verifies authority, serializes and records the operation, then gives a
+one-use signed capability to a worker running as the invoking non-root user; repository
+artifacts are read and written only by that unprivileged worker.
+
+Use immutable `metadata.critique_record_id` values from the two trust-bundle
+critique records. The resolving critique must be verified, current against the
+workspace, later in the writer-issued predecessor hash chain, and cover every
+failed or not-verified lane plus every open finding from the earlier critique.
+When both reviews target Git worktrees, the resolving commit must descend from
+the earlier reviewed commit. The explicit per-lane and per-finding edges are
+the policy-defined relationship between the two reviews.
+
+```bash
+flow_agents workflow resolve-critique \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  --authorization-file critique-resolution.authorization.json
+```
+
+The earlier record remains in `trust.bundle` with its original reviewer,
+findings, timestamps, `superseded_by` reference, and `critique_resolution`
+audit record. Repeating the identical valid request is a no-op. Missing,
+ambiguous, circular, stale, equal-snapshot, wrong-subject, or unauthorized
+requests fail without changing the bundle.
+
+The signed authorization is consumed once under the subject lock. Resolution
+also appends a separately hashed event binding the authorization digest and
+exact edge. The local event chain is tamper-evident; deployments requiring
+non-repudiation should additionally retain the signed authorization and anchor
+the resulting state in their provider-neutral durable audit store.
+
+### Repairing an irrecoverable legacy authority-history gap
+
+`workflow repair-critique-resolution-history-request` and
+`workflow repair-critique-resolution-history` are deliberately distinct from
+ordinary resolution. They are available only for an already-superseded,
+cross-reviewer edge whose original `resolve-critique` event is absent from the
+external `lifecycle-authority.resolution-events.json` ledger. They do not
+reconstruct that original event, signature, timestamp, reviewer, or Trust
+Bundle claim. Instead, a newly signed repair authorization records the missing
+original event ID and authorization digest with the fixed disclosure reason
+`coordinator-external-ledger-overwrite-v1`.
+
+The request binds the exact protected Trust Bundle bytes, external-ledger
+digest/length/tail, current signed completion digest, preserved edge digest,
+both critique records and hashes, reviewer, snapshots/heads, project/run/
+subject, nonce, request time, and expiry. Changing any of those values, finding
+the original event, or finding a prior repair rejects without mutation. A
+successful repair appends exactly one `repair-critique-resolution-history`
+event, writes a new root-signed completion and Flow attachment, and leaves
+`trust.bundle` byte-identical. The strict graph accepts exactly one authority
+proof per cross-reviewer edge: either its original event or one repair for a
+missing original. Zero, both, duplicates, unmatched events, altered edge data,
+or an invalid event chain fail validation.
+
+The historical bridge has three jointly required anchors: the root-signed
+historical completion; the canonical Flow manifest entry selected by that
+completion request SHA-256 plus its protected stored Trust Bundle snapshot; and
+the request-keyed root-only durable operation, completion, and applied nonce
+records. The coordinator accepts only one ledger prefix that reproduces the
+historical completion core with that stored snapshot. A missing or tampered
+durable record, attachment, snapshot, critique/edge projection, or an
+ambiguous prefix fails closed.
+
+An old completion proves continuity for this repair request; it is never a
+current completion. Builder synchronization, artifact validation, ordinary
+resolution, and final gates continue to require an exact-current receipt and
+must reject it. This remains true when a later critique is appended without a
+new completion. Only a successful bridge produces the one new exact-current
+completion and Flow attachment those strict consumers can use.
+
+The root-owned helper verifies both durable-state and historical anchors before
+it grants a one-use worker capability, then verifies them again immediately
+before mutation. The worker performs raw Trust Bundle and ledger compare-and-
+swap checks during preparation and again before publication. The request lock
+serializes operator actions: an exact completed request replays without
+overwriting a newer receipt; prepared recovery repeats the checks; and any
+session/Flow fault rolls back both artifact trees without a partial event or
+attachment. The serialized operator flow is read-only request generation,
+external Ed25519 signing, one helper invocation, then retention of the
+root-signed completion; neither a repository file nor package caller is a
+durable authority root.
+
+```bash
+# Read-only: emit the precise payload that an external operator must sign.
+flow_agents workflow repair-critique-resolution-history-request \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  > critique-history-repair.request.json
+
+# After the operator adds the Ed25519 signature outside the worktree:
+flow_agents workflow repair-critique-resolution-history \
+  --session-dir .kontourai/flow-agents/example \
+  --prior-record-id '<earlier-critique-record-id>' \
+  --resolving-record-id '<later-passing-critique-record-id>' \
+  --authorization-file critique-history-repair.authorization.json
+```
 
 ```bash
 flow_agents workflow pause --reason "Waiting for a decision"
@@ -142,6 +551,7 @@ flow_agents workflow drive \
   --session-dir .kontourai/flow-agents/example \
   --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
   --evidence-signing-key-file /absolute/protected/one-time-ed25519-private.pem \
+  --evidence-checkpoint-dir /absolute/protected/empty-checkpoint-directory \
   --max-turns 6 \
   --json
 ```
@@ -152,7 +562,37 @@ before any adapter starts, retains the key only in driver memory, and adds an
 payload containing the canonical outcome and ordered adapter requests/results, and an Ed25519
 signature over the exact payload bytes. Consumers must compare the public key with the key they
 pinned before launch, verify the signature, and then validate any evidence-specific schema. Without
-this optional flag, the released outcome shape and behavior are unchanged.
+this optional flag, the outcome is not externally authenticated.
+
+An evidence checkpoint directory is optional and requires both the signing-key and JSON flags. It
+must be an absolute canonical, non-symlink, empty directory provisioned by the caller outside the
+model's writable workspace. After each accepted adapter result is canonically synchronized and
+measured, the driver publishes one bounded signed checkpoint there. Each checkpoint binds the exact
+accepted-turn journal record, the canonical gate projection at that point, its sequence, and the
+digest of its predecessor. Its machine-readable `evidence_scope: accepted_prefix` and
+`drive_completion: not_attested` fields prevent an accepted adapter result from being interpreted
+as proof that the drive returned. Publication uses an unpredictable same-directory staging file, fsync,
+and an atomic no-replace link to `checkpoint-NNNNNN.json`. Incomplete staging files are ignored.
+Consumers must pin the launch public key and verify the directory with the package's
+`verifyContinuationEvidenceCheckpoints` export. Hosts can derive the required pinned
+`expectedAdapterCommandIdentity` from the exact command file before launch with the package-root
+`continuationAdapterCommandIdentity(commandFile)` export. It applies the same executable,
+regular-file, and integrity binding used by `workflow drive`; consumers should not reconstruct
+that identity algorithm.
+
+A verified checkpoint proves only the ordered accepted prefix and canonical state measured at its
+publication time. It does not prove that the whole drive completed. A later timeout or process
+termination may prevent a final aggregate attestation while leaving earlier checkpoints valid.
+Malformed final files, gaps, reordering, key mismatch, cross-run substitution, and signature or
+chain failures are rejected rather than projected as partial success.
+
+Every JSON outcome also carries `canonical_gate_projection`, a compact observation copied from the
+final synchronized Flow state while the continuation lock is still held. It identifies the run and
+definition, current status and step, evaluated gate statuses, matched evidence ids, trust diagnostic
+codes, and accepted exceptions. This projection is final-output telemetry only: it is not included in
+continuation snapshots, adapter requests, or model context. When `--evidence-signing-key-file` is
+used, the projection is inside the signed outcome bytes; otherwise consumers may display it but must
+not treat it as authenticated proof.
 
 An adapter may instead park on a process or deadline. A pending barrier is persisted and does not
 consume another turn when `workflow drive` is invoked again:
@@ -165,11 +605,20 @@ consume another turn when `workflow drive` is invoked again:
 flow_agents workflow drive \
   --session-dir .kontourai/flow-agents/example \
   --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
+  --context-policy fresh \
   --max-turns 6 \
   --turn-timeout-ms 900000 \
   --barrier-wait-ms 300000 \
   --json
 ```
+
+`--context-policy warm` remains the default and requests one new adapter context for the mission,
+then resumes it. `--context-policy fresh` requests a new context for every bounded Flow action. Both
+policies pass the same canonical gate-action handoff and preserve the same Flow gates, evidence rules,
+mission budget, and adapter authority. The selected policy is persisted with the mission and cannot be
+changed on resume. Adapters must honor the request's `context_strategy.thread` value and must not infer
+context routing from model names. This is a context-management capability, not permission to drop gates,
+invent evidence, or replay a prior transcript into a nominally fresh context.
 
 Driver state and its append-only event stream live under
 `.kontourai/flow-agents/<slug>/continuation-driver/`. The mission turn count survives reinvocation;
@@ -195,14 +644,75 @@ state rollback or deletion is rejected when its append-only event history proves
 started. These local coordination records detect accidental or in-process rollback; they are not a
 cryptographic boundary against a process that can rewrite the entire artifact directory.
 
-An operation mutation is a structured product protocol, not necessarily a directly executable CLI
-command. In particular, `publish-change` identifies the provider capability `pull_request.create`,
-its bounded parameters, the required provider result, and `publish-change.result.json` as its dedicated
-result artifact. This release has no authenticated ChangeProvider executor. The operation therefore
-reports `external_capability_required` and `external_verification_required`, exposes no completion
-mutation, and parks the continuation. A locally authored result is not provider evidence. The installed
-`flow-agents publish-change` helper renders and validates publish artifacts and provider checks; it does
-not create a pull request and must not be treated as the operation executor.
+### Authenticated `publish-change`
+
+`publish-change` is a provider-neutral product operation with a GitHub `gh`-CLI adapter as
+the first implementation. It is not a generic operation runner and it is not a generic evidence
+interface. A configured status projects the executable argv beginning with:
+
+```bash
+flow-agents publish-change execute --session-dir .kontourai/flow-agents/<slug>
+```
+
+The status projection supplies this operation only when its effective ChangeProvider is
+configured and compatible. It then describes the bounded `--title`, `--body`, `--head-ref`,
+`--base-ref`, and optional `--draft` inputs. The command accepts those named flags only; it
+does not accept a result JSON, a caller-selected expectation or operation id, or a private-writer
+switch. It derives the repository, immutable head SHA, current assignment actor, canonical run,
+and current gate-visit identity from the active session rather than trusting caller copies.
+
+Configuration is explicit. Project settings live at
+`<repo-path>/context/settings/change-provider-settings.json`; optional machine-global settings live at
+`$HOME/.config/flow-agents/change-provider-settings.json`. Resolve and inspect the effective
+settings without running a mutation:
+
+```bash
+flow-agents effective-change-provider-settings --repo-path . --json
+```
+
+Settings are deep-merged in this order, where each later value wins:
+
+1. global defaults
+2. matching global project entry
+3. project defaults
+4. matching project entry
+
+The currently supported configured provider declares role `ChangeProvider`, kind `github`,
+capabilities `change.create` and `change.observe`, and executor `gh-cli`; credentials remain in
+the authenticated `gh` environment, never in these settings. An absent configuration remains
+`external_capability_required`; an invalid or incompatible configuration remains unavailable
+with its compatibility reason. Neither state exposes an executable completion claim, and both
+must remain an explicit external capability/verification gap rather than a successful publish.
+
+For a configured provider, the GitHub adapter resolves `gh` only from fixed trusted absolute
+locations (never caller-controlled `PATH`), authenticates it, queries pull
+requests by configured repository, base ref, head ref, and immutable head SHA, and verifies the
+title, body, and draft intent before returning a result. It creates only when no exact match
+exists. If creation has an ambiguous failure (for example, a timeout after GitHub accepted it),
+it queries again and recovers exactly one matching published pull request. An exact open record
+supports the normal path; an exact merged record supports truthful reconciliation when provider
+work completed before the local workflow caught up. Multiple candidates, wrong
+repository/base/head/SHA/intent, a closed-but-unmerged record, malformed output, or an
+unauthenticated provider fail rather than selecting or creating another record.
+
+The durable result is bounded to 65,536 bytes and is written only by the Flow-owned completion
+transaction as `publish-change.result.json`. It records the bound run/definition/step/gate visit,
+provider kind/configuration/adapter, repository, provider record id and number, HTTPS URL, normalized
+published state (`open` or `merged`), base ref, head ref and SHA, the bound `assignment_actor`, the authenticated GitHub
+`provider_actor`, and observation time. Title, body, and draft are
+authenticated request intent rather than free-form result fields. Before persistence, Flow
+reacquires the subject lock and revalidates assignment ownership, active gate visit, exact request
+binding, and effective provider configuration; it then re-observes the provider record, attaches
+only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
+and projects the resulting state.
+
+A caller-authored `publish-change.result.json`, generic adapter JSON/evidence, or a package
+internal/private writer cannot complete this gate. Provider/authentication failures leave the
+gate unresolved; retry the public operation after correcting the provider condition, relying on
+the exact-match recovery protocol rather than a blind second create. Provider stdout/stderr and
+authentication material are deliberately excluded from result artifacts, trust bundles,
+diagnostics, logs, and test snapshots. Local deterministic coverage does not itself prove a live
+provider operation; privileged live recovery remains a separate verification activity.
 
 Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
 `active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,
@@ -263,6 +773,9 @@ its recovery marker. Evidence-free canonical gate evaluation is limited to accep
 gates whose effective expectations are all optional; ordinary missing-required gates remain unevaluated.
 Signed drives reserve aggregate attestation capacity before adapter execution when another bounded
 signed result cannot fit.
+When a protected checkpoint directory is supplied, each accepted turn is also signed and published
+atomically after canonical measurement. These records prove an accepted prefix only; canonical
+terminality still comes from the final synchronized outcome.
 The complete serialized adapter result is capped at 74,000 bytes, and preflight reserves that exact
 maximum plus the actual request and JSON structure. Accepted request/result pairs and measured progress
 are journaled durably before the active marker is cleared. Restart idempotently completes missing audit
@@ -285,3 +798,9 @@ that preserves the recorded runtime and active Kits.
 The package may use lower-level writer modules internally. They are not a
 supported consumer or skill surface. Consumer guidance and Builder skills use
 `flow-agents workflow` exclusively.
+
+## Sealed workload execution
+
+`workflow execute-sealed-workload-request` emits the readable unsigned `authorization` and an exact compact canonical-JSON `signing_payload` for a separately registered Ed25519 signer. The signer signs the `signing_payload` bytes verbatim and attaches that signature to the authorization. The command derives the subject from the bound one-work-item session (an optional `--subject` must match it), binds the canonical project/run/session identity and exact workload digest, and requires every finite budget flag explicitly. It never grants coordinator maxima by default. The public execute command rereads the exact signed authorization, computes request and authorization digests, and prints only a completion verified against that exact safe result.
+
+The root coordinator stages the signed closure under a root-owned per-operation leaf of a non-listable execution root, clears supplementary groups in its fixed native privilege-drop launcher, and removes and awaits the process group on every terminal outcome or forwarded cancellation before leaf cleanup. The signed controller/closure, local signing principal, and invoking OS account are trusted local TCB. Staging provides exact-byte integrity and replay control; it is not a secrecy boundary against another process already running as the invoking UID. Deliberate `setsid` escape by a hostile signed controller is likewise outside this proportional local threat model. The public command never returns raw provider material: retained artifacts are closed structured values only—booleans, finite numbers, hashes, and a fixed status vocabulary. Tracking: #1146.

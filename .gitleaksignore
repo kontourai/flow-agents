@@ -1,0 +1,2 @@
+# Deliberate test canary in the narrative fail-closed redaction suite (never a real credential).
+efb977c87fdbc6a3841ee6f0f74ce9ed1dd9c8ed:evals/integration/test_narrative_redaction_failclosed.sh:generic-api-key:28

@@ -1,0 +1,12 @@
+name: Veritas Advisory Governance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    uses: kontourai/.github/.github/workflows/veritas-advisory.yml@main

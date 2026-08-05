@@ -249,11 +249,20 @@ console_telemetry_emit() {
   [[ -z "$endpoint_url" ]] && return
 
   # Sanitize backstop runs before anything else so labeling/redaction/POST all
-  # see the already-bounded event; a failed/empty sanitize pass (bad JSON)
-  # falls back to the original event unchanged (never blocks relay).
+  # see the already-bounded event. FAIL CLOSED: console_telemetry_sanitize_usage
+  # yields empty output only when it cannot produce a sanitized event — an
+  # unparseable (non-JSON) event, or the degenerate case of a bare non-object
+  # top-level JSON (`42`, `[]`) which no real call path constructs. Every event
+  # relayed here is a JSON *object* built via jq `. + {…}` merges, and a JSON
+  # object always sanitizes to *something* (at worst `.usage` nulled), so a
+  # well-formed event is never dropped. Relaying the raw, unsanitized original
+  # on empty output would defeat the backstop and is exactly the fail-OPEN hole
+  # the function's own docstring says must never exist — so drop instead of
+  # leaking. Losing one unsanitizable event is the safe failure mode.
   local sanitized_event
   sanitized_event=$(console_telemetry_sanitize_usage "$event") || sanitized_event=""
-  [[ -n "$sanitized_event" ]] && event="$sanitized_event"
+  [[ -z "$sanitized_event" ]] && return
+  event="$sanitized_event"
 
   # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
   # so the console buckets by project consistently across developers. The full context.cwd is still

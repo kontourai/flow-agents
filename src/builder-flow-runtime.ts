@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { flowAgentsPackageVersion } from "./lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
@@ -9,20 +10,38 @@ import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapsho
 import {
   evaluateGate,
   expectationsForGate,
-  lifecycleRequestMatches,
+  flowRunHead,
   openGates,
+  withRunMutationLock,
   type FlowGate,
   type FlowExpectation,
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "./builder-lifecycle-authority.js";
-import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
+import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
+import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
+import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
+import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
+import type { ChangeProviderRequest } from "./cli/change-provider.js";
+import type { ChangeProviderSettings } from "./cli/public-contracts.js";
+import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+import {
+  assertAuthenticatedPublishChangeObservation,
+  assertIssuedPublishChangeAction,
+  issuePublishChangeAction,
+  type AuthenticatedPublishChangeObservation,
+  type IssuedPublishChangeAction,
+  type PublishChangeIntent,
+} from "./publish-change-operation-authority.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
-  cancelBuilderFlowRun,
   evaluateBuilderFlowRun,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
@@ -30,17 +49,35 @@ import {
   startBuilderFlowRun,
   type BuilderFlowRunResult,
 } from "./builder-flow-run-adapter.js";
+import { createBuilderRunCorrelation } from "./builder-run-correlation.js";
+import {
+  deriveWorkflowOutcome,
+  verificationStatusFromFlowGateOutcomes,
+} from "./workflow-outcome.js";
+import { retireHostWorkflowSession } from "./lib/host-workflow-binding.js";
+import { atomicWriteFile } from "./lib/fs.js";
+import { replaceStateIfUnchanged } from "./lib/state-file-lock.js";
 
 type AnyRecord = Record<string, any>;
 
 export interface BuilderFlowSessionInput {
   sessionDir: string;
   flowId?: BuilderFlowId;
+  /** Exact canonical Flow state authorized for a subsequent evidence attachment. */
+  expectedRunHead?: string;
+  /** Internal staged evidence source. Omission preserves canonical trust.bundle behavior. */
+  stagedTrustBundle?: {
+    file: string;
+    descriptor: number;
+    identity: { dev: number; ino: number };
+    expectedSha256: string;
+  };
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
   authorizationFile: string;
 }
+
 
 export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput {
   reason: string;
@@ -56,6 +93,25 @@ export interface BuilderFlowSessionResult {
   /** Canonical progress observation, retained even when terminal runs emit no action envelope. */
   progressSnapshot: GateActionProgressSnapshot;
   attached: boolean;
+  /** Exact expectation set supplied to Flow for this attachment, when one occurred. */
+  attachmentExpectationIds?: string[];
+}
+
+export interface ExecutePublishChangeOperationInput extends BuilderFlowSessionInput {
+  intent: PublishChangeIntent;
+}
+
+export interface CompletePublishChangeOperationInput extends BuilderFlowSessionInput {
+  /**
+   * An action previously derived by issuePublishChangeOperation. This is not a
+   * caller-authored result: the transaction re-derives it under the subject lock.
+   */
+  action: IssuedPublishChangeAction;
+}
+
+export interface CompletePublishChangeOperationResult extends BuilderFlowSessionResult {
+  action: IssuedPublishChangeAction;
+  observation: AuthenticatedPublishChangeObservation;
 }
 
 type SessionContext = {
@@ -72,6 +128,12 @@ type SidecarSnapshot = {
   raw: string;
 };
 
+type BuilderActorBinding = {
+  actor: ActorStruct;
+  actorKey: string;
+  bindingId: string;
+};
+
 type ProjectionTargetSnapshot = {
   file: string;
   raw: string | null;
@@ -82,7 +144,11 @@ type ProjectionTargetSnapshot = {
 type PreparedProjectionWrites = {
   targets: ProjectionTargetSnapshot[];
   actorEntries: string[] | null;
-  writes: Array<{ file: string; content: string }>;
+  writes: Array<{
+    file: string;
+    content: string;
+    pointerReplacement?: { expectedRaw: string | null; payload: AnyRecord };
+  }>;
 };
 
 type TrustBundleSnapshot = {
@@ -93,32 +159,42 @@ type TrustBundleSnapshot = {
 
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
-  const sidecarSnapshot = readSidecarSnapshot(context);
-  const subject = workflowSubject(sidecarSnapshot.state);
-  const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
-  let run: BuilderFlowRunResult;
-  try {
-    run = await loadBuilderFlowRun({
-      cwd: context.projectRoot,
-      runId: context.slug,
-    });
-    if (run.definitionId !== requestedFlowId) {
-      throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
-    }
-  } catch (error) {
-    if (!isRunNotFound(error)) throw error;
-    run = await startBuilderFlowRun({
-      cwd: context.projectRoot,
-      runId: context.slug,
-      subject,
-      flowId: requestedFlowId,
-      params: {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    const sidecarSnapshot = readSidecarSnapshot(context);
+    const subject = workflowSubject(sidecarSnapshot.state);
+    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
+    let run: BuilderFlowRunResult;
+    try {
+      run = await loadBuilderFlowRun({
+        cwd: context.projectRoot,
+        runId: context.slug,
+      });
+      if (run.definitionId !== requestedFlowId) {
+        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
+      }
+    } catch (error) {
+      if (!isRunNotFound(error)) throw error;
+      const correlationActor = resolveBuilderCorrelationActor(context, subject);
+      run = await startBuilderFlowRun({
+        cwd: context.projectRoot,
+        runId: context.slug,
         subject,
-      },
-    });
-  }
-  assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot);
+        flowId: requestedFlowId,
+        correlation: createBuilderRunCorrelation({
+          runId: context.slug,
+          workItemRef: subject,
+          actor: correlationActor.actor,
+          actorKey: correlationActor.actorKey,
+        }),
+        params: {
+          subject,
+        },
+      });
+    }
+    assertRunSubjectBinding(run, subject);
+    const binding = resolveBuilderActorBinding(context, subject, run);
+    return syncAndProject(context, run, sidecarSnapshot, undefined, undefined, binding);
+  });
 }
 
 export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -130,7 +206,171 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle);
+}
+
+/**
+ * Private operation issuance seam for the Wave 3 command. It derives the full
+ * action from canonical state and effective configuration; no public workflow
+ * writer or caller-provided result is involved.
+ */
+async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
+}
+
+/**
+ * The sole production publish-change mutation surface. The caller supplies
+ * intent, never an adapter or a provider-shaped observation. Configuration and
+ * authenticated provider identity are resolved inside the operation.
+ */
+export async function executePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> {
+  resolveTrustedGithubExecutable();
+  const context = resolveSessionContext(input.sessionDir);
+  const trustedHeadSha = resolveTrustedLocalGitCommit(context.projectRoot, input.intent.head_ref);
+  if (trustedHeadSha !== input.intent.head_sha.toLowerCase()) {
+    throw new BuilderBuildRunInputError("publish-change.intent.head_sha", "does not match the trusted local head ref");
+  }
+  const action = await issuePublishChangeOperation(input);
+  const effective = resolveEffectiveChangeProviderSettings(
+    context.projectRoot,
+    path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
+    throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
+  }
+  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
+  return await completePublishChangeOperation({ sessionDir: input.sessionDir, action }, async (issued) => {
+    const { action_id: _actionId, ...request } = issued;
+    return await provider.createOrRecover(request as ChangeProviderRequest);
+  });
+}
+
+async function completePublishChangeOperation(
+  input: CompletePublishChangeOperationInput,
+  observe: (request: IssuedPublishChangeAction) => AuthenticatedPublishChangeObservation | Promise<AuthenticatedPublishChangeObservation>,
+): Promise<CompletePublishChangeOperationResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const issued = assertIssuedPublishChangeAction(input.action);
+  // Validate before invoking a mutating provider, but never retain the subject
+  // lock across network I/O. The commit phase revalidates after observation.
+  await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    await assertPublishChangeActionCurrentOrRecoverable(context, issued);
+  });
+  const observation = assertAuthenticatedPublishChangeObservation(issued, await observe(structuredClone(issued)));
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    const trustedHeadSha = resolveTrustedLocalGitCommit(context.projectRoot, issued.head_ref);
+    if (trustedHeadSha !== issued.head_sha.toLowerCase()) {
+      throw new BuilderBuildRunInputError("publish-change.action.head_sha", "does not match the trusted local head ref during commit");
+    }
+    const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
+    if (recovery) return recovery;
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
+    if (!isDeepStrictEqual(current, issued)) {
+      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
+    }
+    const persisted = persistPublishChangeResult(context, issued, observation);
+    const run = await advancePublishChangeGate(context, issued, observation, persisted.sha256);
+    return projectCompletedPublishChange(context, issued, observation, run);
+  });
+}
+
+/** Reject stale actions before they can reach a mutating provider. */
+async function assertPublishChangeActionCurrentOrRecoverable(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+): Promise<void> {
+  try {
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
+    if (!isDeepStrictEqual(current, issued)) {
+      throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
+    }
+    return;
+  } catch (error) {
+    if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) throw error;
+  }
+}
+
+async function recoverPublishChangeIfCommitted(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): Promise<CompletePublishChangeOperationResult | null> {
+  if (!await hasCommittedPublishChangeRecoveryReceipt(context, issued)) return null;
+  return await recoverCommittedPublishChange(context, issued, observation);
+}
+
+function publishChangeIntentFromAction(action: IssuedPublishChangeAction): PublishChangeIntent {
+  return {
+    title: action.intent.title,
+    body: action.intent.body,
+    ...(action.intent.draft === undefined ? {} : { draft: action.intent.draft }),
+    base_ref: action.base_ref,
+    head_ref: action.head_ref,
+    head_sha: action.head_sha,
+  };
+}
+
+/** Phase 3: attach exactly the operation-bound claim and require gate advance. */
+async function advancePublishChangeGate(
+  context: SessionContext,
+  issued: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  resultSha256: string,
+): Promise<BuilderFlowRunResult> {
+  const evidenceFile = await writePublishChangeEvidence(context, issued, observation, resultSha256);
+  try {
+    const run = await evaluateBuilderFlowRun({
+      cwd: context.projectRoot,
+      runId: context.slug,
+      evidence: {
+        gate: issued.binding.gate_ids[0]!,
+        file: path.relative(context.projectRoot, evidenceFile.file),
+        expectedSha256: evidenceFile.sha256,
+        expectationIds: ["pull-request-opened"],
+        producer: "publish-change-operation-authority",
+        authorityTrace: issued.action_id,
+      },
+    });
+    if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
+      throw new BuilderBuildRunInputError("publish-change", "authenticated provider observation did not advance the bound Flow gate");
+    }
+    return run;
+  } finally {
+    removeTemporaryFile(evidenceFile.file);
+  }
+}
+
+/** Phase 4: project only a successfully advanced canonical Flow run. */
+function projectCompletedPublishChange(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  run: BuilderFlowRunResult,
+): CompletePublishChangeOperationResult {
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "publish-change completion");
+  return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection, gateActionEnvelope, progressSnapshot, attached: true, action, observation };
+}
+
+async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
+  const bytes = readPublishChangeResultBytes(context);
+  if (!bytes) return false;
+  try {
+    const persisted = JSON.parse(bytes.toString("utf8")) as AnyRecord;
+    if (persisted.operation_action_id !== action.action_id) return false;
+  } catch {
+    return false;
+  }
+  const resultDigest = createHash("sha256").update(bytes).digest("hex");
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+    && entry.producer === "publish-change-operation-authority"
+    && entry.authority_trace === action.action_id
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
+    && entry.expectation_ids[0] === "pull-request-opened"
+    && publishChangeEvidenceCarriesDigest(entry, resultDigest));
 }
 
 export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -173,6 +413,34 @@ export async function inspectBuilderFlowSession(input: BuilderFlowSessionInput):
   };
 }
 
+export async function withBuilderFlowProjectionCurrent<T>(
+  input: BuilderFlowSessionInput,
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  const context = resolveSessionContext(input.sessionDir);
+  return withRunMutationLock(context.slug, context.projectRoot, async () => {
+    const sidecarSnapshot = readSidecarSnapshot(context);
+    const subject = workflowSubject(sidecarSnapshot.state);
+    const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+    assertRunSubjectBinding(run, subject);
+    const projectedHead = sidecarSnapshot.state.flow_run?.run_head;
+    if (typeof projectedHead !== "string"
+        || projectedHead !== flowRunHead(run.state)
+        || sidecarSnapshot.state.flow_run?.status !== run.state.status
+        || sidecarSnapshot.state.flow_run?.current_step !== run.state.current_step) {
+      throw new BuilderBuildRunInputError(
+        "state.json.flow_run",
+        "is stale relative to the canonical Flow run; recover the Builder session before recording correlated facts",
+      );
+    }
+    return operation();
+  });
+}
+
+export async function assertBuilderFlowProjectionCurrent(input: BuilderFlowSessionInput): Promise<void> {
+  await withBuilderFlowProjectionCurrent(input, () => undefined);
+}
+
 export async function pauseBuilderFlowSession(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult> {
   return changeBuilderFlowSessionLifecycle(input, "pause");
 }
@@ -181,79 +449,162 @@ export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleI
   return changeBuilderFlowSessionLifecycle(input, "resume");
 }
 
-export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
+export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-    const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
-    assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
-    const changed = await cancelBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
-    const released = performLocalReleaseUnderLock(prepared.context.artifactRoot, prepared.context.slug, prepared.authorization.assignment_actor, {
-      actorKey: prepared.authorization.assignment_actor_key,
-      reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
-      tolerateNoActiveClaim: true,
-    });
-    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
-    writeProjection(prepared.context, projection, prepared.sidecarSnapshot.raw, "cancellation projection");
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, progressSnapshot, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
+  const result = invokeExternalLifecycleAuthority({ action: "cancel", project_root: context.projectRoot, session_dir: context.sessionDir, authorization_file: path.resolve(input.authorizationFile) });
+  try {
+    await recoverBuilderFlowSession({ sessionDir: context.sessionDir });
+  } catch (error) {
+    throw new Error(
+      `lifecycle authority ${result.operation_status} cancel for ${result.run_id}, but the Flow Agents projection requires recovery`,
+      { cause: error },
+    );
+  }
+  return result;
+}
+
+export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
+  /** Free-text reason recorded in the authorization request. */
+  reason?: string;
+  /** Human/operator identity recorded as request.authority.actor. */
+  requestActor?: string;
+  /** Validity window for the emitted authorization (default 24h). */
+  expiresInHours?: number;
+  /** Override the request timestamp (tests); defaults to now. */
+  now?: string;
+  /** Override the nonce (tests); defaults to a fresh unique value. */
+  nonce?: string;
+}
+
+export interface BuilderCancelRequestResult {
+  runId: string;
+  subject: string;
+  runStatus: string;
+  /** True when the run is already terminal (cancel would be idempotent/no-op). */
+  alreadyTerminal: boolean;
+  /** The unsigned, ready-to-sign authorization (schema-valid, canonical order). */
+  authorization: Omit<BuilderLifecycleAuthorization, "signature">;
+  /** The exact bytes the operator must sign; a signature over these verifies. */
+  signingPayload: string;
+  /** Where the CLI writes the unsigned authorization by default. */
+  suggestedOutFile: string;
+}
+
+/**
+ * Generate a ready-to-sign cancel authorization for a run (#659 Slice C).
+ *
+ * READ-ONLY: this mints the *unsigned* payload (correct run identity, active
+ * assignment holder, fresh nonce/expiry) so an operator no longer has to
+ * hand-assemble the JSON. It does NOT sign, cancel, or mutate anything — the
+ * ed25519 signature lock is fully preserved; the operator still signs
+ * `signingPayload` with their key, and `builder-run cancel --authorization-file`
+ * verifies it as before.
+ */
+export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInput): Promise<BuilderCancelRequestResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  const terminalStatuses = ["canceled", "completed", "archived"];
+  const alreadyTerminal = terminalStatuses.includes(canonicalRun.state.status);
+
+  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
+  const persistedAssignment = pathExistsNoFollow(assignmentFile)
+    ? JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord
+    : null;
+  // When the run is already canceled, its assignment is released — accept the
+  // persisted holder so an operator can still mint a (recovery) authorization.
+  // Mirror prepareAuthorizedLifecycleChange's redemption gate EXACTLY so we never
+  // mint an authorization the real cancel would reject: a cancel may reuse a
+  // released assignment only when the run is already `canceled` (idempotent
+  // recovery) and the persisted record's status is `released`. A completed or
+  // archived run with no active holder is not cancel-redeemable, so refuse.
+  const acceptsReleasedAssignment = canonicalRun.state.status === "canceled";
+  const assignment = activeAssignment
+    ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
+  if (!assignment || !assignment.actor_key || !assignment.actor) {
+    throw new BuilderBuildRunInputError("assignment", "the run has no assignment holder to authorize a cancel against");
+  }
+
+  const now = input.now ? new Date(input.now) : new Date();
+  if (!Number.isFinite(now.getTime())) throw new BuilderBuildRunInputError("now", "must be a valid date-time");
+  const requestedAt = now.toISOString();
+  const hours = input.expiresInHours && input.expiresInHours > 0 ? input.expiresInHours : 24;
+  const expiresAt = new Date(now.getTime() + hours * 3_600_000).toISOString();
+  const nonce = input.nonce ?? `cancel-request-${context.slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`;
+
+  const { unsigned, signingPayload } = buildUnsignedLifecycleAuthorization({
+    operation: "cancel",
+    project_root: context.projectRoot,
+    run_id: context.slug,
+    subject,
+    assignment_actor_key: assignment.actor_key as string,
+    assignment_actor: assignment.actor,
+    nonce,
+    expires_at: expiresAt,
+    request: {
+      reason: (input.reason && input.reason.trim()) || `Operator-requested cancellation of run ${context.slug}.`,
+      authority: {
+        kind: "user_request",
+        actor: (input.requestActor && input.requestActor.trim()) || "operator",
+        request_ref: `flow-agents://cancel-request/${context.slug}/${now.getTime()}`,
+        requested_at: requestedAt,
+      },
+    },
   });
+
+  return {
+    runId: context.slug,
+    subject,
+    runStatus: canonicalRun.state.status,
+    alreadyTerminal,
+    authorization: unsigned,
+    signingPayload,
+    suggestedOutFile: path.join(context.sessionDir, "cancel.authorization.unsigned.json"),
+  };
 }
 
 export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean }> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-    const prepared = prepareAgentLifecycleChange(input, context);
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
+    const prepared = prepareAssignmentRelease(input, context);
     const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
-    const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
+    const released = prepared.alreadyReleased
+      ? null
+      : performLocalReleaseUnderLock(
+          context.artifactRoot,
+          context.slug,
+          prepared.actor,
+          { actorKey: prepared.actorKey, reason: input.reason },
+        );
+    retireHostWorkflowSession({
+      artifactRoot: context.artifactRoot,
+      artifactDir: context.sessionDir,
+      actorKey: prepared.actorKey,
+      bindingId: runCorrelationId(run),
+      reason: "assignment_released",
+    });
     const { progressSnapshot } = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
-    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, progressSnapshot, attached: false, assignmentReleased: released !== null };
+    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, progressSnapshot, attached: false, assignmentReleased: released !== null || prepared.alreadyReleased };
   });
 }
 
-export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
-  const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
-  const prepared = await prepareAuthorizedLifecycleChange(input, "archive", context);
-  const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
-  const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
-  if (priorConsumption && !recoveringPreparedArchive) throw new Error("lifecycle authorization nonce has already been consumed");
-  const run = await loadBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
-  if (run.state.status !== "completed" && run.state.status !== "canceled") {
-    throw new BuilderBuildRunInputError("flow_run.status", "must be completed or canceled before archival");
+export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<ExternalLifecycleMutationResult> {
+  const sessionDir = path.resolve(input.sessionDir);
+  const artifactRoot = path.dirname(sessionDir);
+  const kontouraiRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) !== "flow-agents"
+      || path.basename(kontouraiRoot) !== ".kontourai"
+      || !path.basename(sessionDir)
+      || [".", ".."].includes(path.basename(sessionDir))) {
+    throw new BuilderBuildRunInputError("sessionDir", "must be .kontourai/flow-agents/<slug>");
   }
-  const archiveRoot = path.join(prepared.context.artifactRoot, "archive");
-  const archiveDir = path.join(archiveRoot, prepared.context.slug);
-  if (pathExistsNoFollow(archiveDir)) throw new BuilderBuildRunInputError("archive", "destination already exists");
-  fs.mkdirSync(archiveRoot, { recursive: true });
-  assertSafeDirectory(archiveRoot, prepared.context.artifactRoot, "archive root");
-  assertSafeDirectory(prepared.context.sessionDir, prepared.context.artifactRoot, "sessionDir");
-  if (!recoveringPreparedArchive && fs.readFileSync(prepared.context.stateFile, "utf8") !== prepared.sidecarSnapshot.raw) {
-    throw new BuilderBuildRunInputError("state.json", "changed during archive preparation");
-  }
-  const archivedState = recoveringPreparedArchive ? prepared.sidecarSnapshot.state : {
-    ...prepared.sidecarSnapshot.state,
-    status: "archived",
-    phase: "done",
-    updated_at: new Date().toISOString(),
-    next_action: { status: "done", summary: "Builder session archived; canonical Flow artifacts remain retained." },
-  };
-  if (!recoveringPreparedArchive) {
-    writeExistingFileNoFollow(prepared.context.stateFile, `${JSON.stringify(archivedState, null, 2)}\n`);
-    clearCurrentPointers(prepared.context.artifactRoot, prepared.context.slug);
-    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-  }
-  const { progressSnapshot } = projectFlowRun(prepared.context, run, prepared.sidecarSnapshot.state);
-  fs.renameSync(prepared.context.sessionDir, archiveDir);
-  return {
-    sessionDir: archiveDir,
-    projectRoot: prepared.context.projectRoot,
-    run,
-    projection: archivedState,
-    gateActionEnvelope: null,
-    progressSnapshot,
-    attached: false,
-    archiveDir,
-  };
+  return invokeExternalLifecycleAuthority({
+    action: "archive",
+    project_root: path.dirname(kontouraiRoot),
+    session_dir: sessionDir,
+    authorization_file: path.resolve(input.authorizationFile),
   });
 }
 
@@ -262,7 +613,7 @@ async function changeBuilderFlowSessionLifecycle(
   operation: "pause" | "resume",
 ): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
   const prepared = prepareAgentLifecycleChange(input, context);
   const change = operation === "pause" ? pauseBuilderFlowRun : resumeBuilderFlowRun;
   const at = new Date().toISOString();
@@ -285,48 +636,6 @@ async function changeBuilderFlowSessionLifecycle(
   });
 }
 
-async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLifecycleInput, operation: "cancel" | "archive", context: SessionContext): Promise<{
-  context: SessionContext;
-  sidecarSnapshot: SidecarSnapshot;
-  authorization: ReturnType<typeof loadBuilderLifecycleAuthorization>;
-}> {
-  const sidecarSnapshot = readSidecarSnapshot(context);
-  const subject = workflowSubject(sidecarSnapshot.state);
-  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
-  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
-  const persistedAssignment = pathExistsNoFollow(assignmentFile)
-    ? (assertSafeFile(assignmentFile, context.artifactRoot, "assignment record"), JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord)
-    : null;
-  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
-  const acceptsReleasedAssignment = (operation === "cancel" && canonicalRun.state.status === "canceled") || operation === "archive";
-  const assignment = activeAssignment ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
-  if (!assignment || (assignment.status !== "claimed" && !acceptsReleasedAssignment) || !assignment.actor_key) {
-    throw new BuilderBuildRunInputError("assignment", "must be actively held by a canonical actor before a lifecycle change");
-  }
-  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
-    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
-  }
-  const authorization = loadBuilderLifecycleAuthorization(input.authorizationFile, {
-    projectRoot: context.projectRoot,
-    operation,
-    runId: context.slug,
-    subject,
-    actorKey: assignment.actor_key,
-    ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
-    ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
-  });
-  if (operation === "cancel" && canonicalRun.state.status === "canceled") {
-    const terminalEvent = canonicalRun.state.lifecycle?.at(-1);
-    if (!terminalEvent || terminalEvent.action !== "cancel" || !lifecycleRequestMatches(terminalEvent, authorization.request)) {
-      throw new BuilderBuildRunInputError("authorization.request", "does not match the canonical cancellation being recovered");
-    }
-  }
-  if (!sameActor(authorization.assignment_actor, assignment.actor)) {
-    throw new BuilderBuildRunInputError("authorization.assignment_actor", "must match the active assignment holder");
-  }
-  return { context, sidecarSnapshot, authorization };
-}
-
 function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, context: SessionContext): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string } {
   if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
   const resolved = resolveCurrentAssignmentActor();
@@ -340,47 +649,106 @@ function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, cont
   return { sidecarSnapshot, actor: resolved.actor, actorKey: resolved.actorKey };
 }
 
+function prepareAssignmentRelease(
+  input: BuilderFlowAgentLifecycleInput,
+  context: SessionContext,
+): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string; alreadyReleased: boolean } {
+  if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
+  const resolved = resolveCurrentAssignmentActor();
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const assignment = readLocalRecord(context.artifactRoot, context.slug);
+  if (
+    !assignment
+    || !["claimed", "released"].includes(assignment.status)
+    || assignment.actor_key !== resolved.actorKey
+    || !sameActor(assignment.actor, resolved.actor)
+  ) {
+    throw new BuilderBuildRunInputError("assignment", "must be held or previously released by the current workflow actor");
+  }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
+    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  }
+  return {
+    sidecarSnapshot,
+    actor: resolved.actor,
+    actorKey: resolved.actorKey,
+    alreadyReleased: assignment.status === "released",
+  };
+}
+
 function sameActor(left: ActorStruct, right: ActorStruct): boolean {
   return isDeepStrictEqual({ ...left, human: left.human ?? null }, { ...right, human: right.human ?? null });
 }
 
-function clearCurrentPointers(artifactRoot: string, slug: string): void {
-  const candidates = [path.join(artifactRoot, "current.json")];
-  const actorRoot = path.join(artifactRoot, "current");
-  if (pathExistsNoFollow(actorRoot)) {
-    assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    candidates.push(...fs.readdirSync(actorRoot).filter((name) => name.endsWith(".json")).map((name) => path.join(actorRoot, name)));
+function resolveBuilderCorrelationActor(
+  context: SessionContext,
+  subject: string,
+): { actor: ActorStruct; actorKey: string } {
+  const resolved = resolveCurrentAssignmentActor();
+  const assignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  if (!assignment || assignment.status !== "claimed") {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by the current workflow actor");
   }
-  for (const file of candidates) {
-    if (!pathExistsNoFollow(file) || !fs.lstatSync(file).isFile()) continue;
-    const root = file === candidates[0] ? artifactRoot : actorRoot;
-    if (root === actorRoot) assertSafeDirectory(actorRoot, artifactRoot, "current directory");
-    assertSafeFile(file, root, "current pointer");
-    let pointer: AnyRecord;
-    try {
-      pointer = JSON.parse(fs.readFileSync(file, "utf8")) as AnyRecord;
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-      // Archival retains malformed unrelated pointers for explicit repair.
-      continue;
-    }
-    if (pointer.active_slug === slug) fs.unlinkSync(file);
+  if (!assignment.actor_key || !assignment.actor) {
+    throw new BuilderBuildRunInputError("assignment", "the active assignment must carry canonical actor identity");
   }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
+    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  }
+  if (assignment.actor_key !== resolved.actorKey || !sameActor(assignment.actor, resolved.actor)) {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by the current workflow actor");
+  }
+  return { actor: assignment.actor, actorKey: assignment.actor_key };
+}
+
+function resolveBuilderActorBinding(
+  context: SessionContext,
+  subject: string,
+  run: BuilderFlowRunResult,
+): BuilderActorBinding {
+  const actor = resolveBuilderCorrelationActor(context, subject);
+  if (run.correlation.status !== "present") {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must contain a canonical correlation envelope before binding the authenticated actor",
+    );
+  }
+  const envelope = run.correlation.envelope;
+  if (
+    envelope.identities.agent.status !== "present"
+    || envelope.identities.agent.value !== actor.actorKey
+    || (
+      envelope.identities.runtime_session.status === "present"
+      && envelope.identities.runtime_session.value !== actor.actor.session_id
+    )
+  ) {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must remain bound to the authenticated assignment actor",
+    );
+  }
+  return { ...actor, bindingId: envelope.correlation_id };
 }
 
 async function syncAndProject(
   context: SessionContext,
   initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
+  expectedRunHead?: string,
+  stagedTrustBundle?: BuilderFlowSessionInput["stagedTrustBundle"],
+  binding?: BuilderActorBinding,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
+  assertLifecycleResolutionAttestation(context, run);
   let attached = false;
+  let attachmentExpectationIds: string[] | null = null;
   const gates = openGatesForResult(run);
   if (run.state.status === "active" && gates.length !== 1) {
     throw new BuilderBuildRunInputError("flow_run.open_gates", `expected exactly one gate for active step ${run.state.current_step}, found ${gates.length}`);
   }
-  if (gates.length === 1 && fs.existsSync(context.bundleFile)) {
-    const snapshot = stageTrustBundleSnapshot(context);
+  if (gates.length === 1 && (stagedTrustBundle || fs.existsSync(context.bundleFile))) {
+    const snapshot = stagedTrustBundle ? verifiedStagedTrustBundleSnapshot(context, stagedTrustBundle) : stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
       const gateEvidence = await bundleGateEvidence(
@@ -389,6 +757,7 @@ async function syncAndProject(
         run.state,
         run.state.subject,
         context.projectRoot,
+        context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
       );
@@ -407,6 +776,7 @@ async function syncAndProject(
           run = await evaluateBuilderFlowRun({
             cwd: context.projectRoot,
             runId: context.slug,
+            ...(expectedRunHead ? { expectedRunHead } : {}),
             evidence: {
               gate: gates[0]!.id,
               file: path.relative(context.projectRoot, snapshot.file),
@@ -418,17 +788,19 @@ async function syncAndProject(
             },
           });
           attached = true;
+          attachmentExpectationIds = [...gateEvidence.expectationIds];
         }
       }
     } finally {
-      removeTrustBundleSnapshot(snapshot);
+      if (!stagedTrustBundle) removeTrustBundleSnapshot(snapshot);
     }
   }
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
+  assertLifecycleResolutionAttestation(context, run);
   const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
-  writeProjection(context, projection, sidecarSnapshot.raw, "projection");
+  writeProjection(context, projection, sidecarSnapshot.raw, "projection", binding);
   return {
     sessionDir: context.sessionDir,
     projectRoot: context.projectRoot,
@@ -437,13 +809,69 @@ async function syncAndProject(
     gateActionEnvelope,
     progressSnapshot,
     attached,
+    ...(attachmentExpectationIds ? { attachmentExpectationIds } : {}),
   };
 }
 
+function verifiedStagedTrustBundleSnapshot(
+  context: SessionContext,
+  staged: NonNullable<BuilderFlowSessionInput["stagedTrustBundle"]>,
+): TrustBundleSnapshot {
+  const file = path.resolve(staged.file);
+  const relative = path.relative(context.sessionDir, file);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle.file", "must be retained beneath the exact workflow session");
+  }
+  const opened = fs.fstatSync(staged.descriptor);
+  const current = fs.lstatSync(file);
+  if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
+    || opened.dev !== staged.identity.dev || opened.ino !== staged.identity.ino
+    || current.dev !== staged.identity.dev || current.ino !== staged.identity.ino) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle", "descriptor and pathname must identify the same retained regular candidate");
+  }
+  const raw = readDescriptorBuffer(staged.descriptor);
+  const sha256 = createHash("sha256").update(raw).digest("hex");
+  if (sha256 !== staged.expectedSha256.toLowerCase()) {
+    throw new BuilderBuildRunInputError("stagedTrustBundle.expectedSha256", "does not match the descriptor bytes");
+  }
+  return { file, raw, sha256 };
+}
+
+function readDescriptorBuffer(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new BuilderBuildRunInputError("stagedTrustBundle", "must be a readable regular file");
+  const raw = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < raw.length) {
+    const count = fs.readSync(descriptor, raw, offset, raw.length - offset, offset);
+    if (count === 0) throw new BuilderBuildRunInputError("stagedTrustBundle", "descriptor reread ended early");
+    offset += count;
+  }
+  return raw;
+}
+
+function assertLifecycleResolutionAttestation(context: SessionContext, run: BuilderFlowRunResult): void {
+  const attachments = manifestEvidence(run.manifest).filter((entry) => typeof entry.id === "string" && entry.id.startsWith("lifecycle-authority:") && typeof entry.superseded_by !== "string");
+  if (attachments.length === 0) return;
+  if (attachments.length !== 1) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must have exactly one live lifecycle resolution attachment");
+  const storedPath = attachments[0]!.stored_path;
+  if (typeof storedPath !== "string") throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must identify its immutable Flow evidence");
+  const evidenceFile = path.resolve(run.dir, storedPath);
+  assertSafeFile(evidenceFile, run.dir, "lifecycle authority Flow evidence");
+  const evidenceBytes = fs.readFileSync(evidenceFile);
+  if (typeof attachments[0]!.sha256 !== "string" || createHash("sha256").update(evidenceBytes).digest("hex") !== attachments[0]!.sha256) {
+    throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "immutable Flow evidence digest does not match its manifest");
+  }
+  const bundle = JSON.parse(evidenceBytes.toString("utf8"));
+  if (!isRecord(bundle) || !Array.isArray(bundle.claims)) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", "must attach a trust bundle");
+  const authority = verifiedResolutionAuthority(bundle, context.sessionDir);
+  const graph = validateCritiqueResolutionGraph(bundle.claims as AnyRecord[], run.state.subject, authority.events, context.projectRoot, authority.verified);
+  if (!graph.valid) throw new BuilderBuildRunInputError("flow_run.lifecycle_authority", graph.errors.join("; "));
+}
+
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(definition, run.state, run.manifest, gate.id, run.config);
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -456,6 +884,215 @@ function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): vo
     && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
     && run.state.params.subject !== subject) {
     throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
+  }
+  if (run.correlation.status === "present") {
+    const workItem = run.correlation.envelope.identities.work_item;
+    if (workItem.status !== "present" || workItem.value !== subject) {
+      throw new BuilderBuildRunInputError("flow_run.state.params.run_correlation.identities.work_item", "must match the selected Work Item");
+    }
+  }
+}
+
+async function currentPublishChangeAction(context: SessionContext, intent: PublishChangeIntent): Promise<IssuedPublishChangeAction> {
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  assertRunSubjectBinding(run, subject);
+  const gates = openGatesForResult(run);
+  if (run.state.status !== "active" || gates.length !== 1) throw new BuilderBuildRunInputError("publish-change", "requires exactly one active canonical gate");
+  const envelope = deriveBuilderGateActionEnvelope({ sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, definition: JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")) as AnyRecord });
+  const operation = envelope.public_interfaces.mutations.find((mutation): mutation is Extract<GateActionEnvelope["public_interfaces"]["mutations"][number], { interface: "operation" }> => mutation.interface === "operation" && mutation.operation === "publish-change");
+  if (!operation || operation.expectation_id !== "pull-request-opened" || operation.protocol.availability.status !== "configured") {
+    throw new BuilderBuildRunInputError("publish-change", "requires the configured canonical publish-change operation at pull-request-opened");
+  }
+  const effective = resolveEffectiveChangeProviderSettings(
+    context.projectRoot,
+    path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
+  );
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
+    throw new BuilderBuildRunInputError("publish-change.provider", "is not configured for this project");
+  }
+  const assignment = readLocalAssignmentStatus(context.artifactRoot, context.slug);
+  const actor = resolveCurrentAssignmentActor();
+  if (!assignment.record || assignment.record.status !== "claimed" || (assignment.record.actor_key ?? assignment.assignee) !== actor.actorKey) {
+    throw new BuilderBuildRunInputError("publish-change.assignment", "is no longer held by the current actor");
+  }
+  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, assignment_actor: actor.actorKey, intent });
+}
+
+function persistPublishChangeResult(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): { file: string; sha256: string } {
+  const file = path.join(context.sessionDir, "publish-change.result.json");
+  const payload = Buffer.from(`${JSON.stringify({ ...observation, operation_action_id: action.action_id }, null, 2)}\n`);
+  if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
+  const existing = readPublishChangeResultBytes(context);
+  if (existing) {
+    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
+      throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
+    }
+    if (existing.equals(payload)) return { file, sha256: createHash("sha256").update(existing).digest("hex") };
+    // An interrupted attempt may have fsynced a valid observation before Flow
+    // committed its evidence. Never retain those unauthenticated local bytes:
+    // atomically replace them with this attempt's fresh provider observation.
+    const temporary = path.join(context.sessionDir, `.publish-change.result-${randomBytes(16).toString("hex")}.tmp`);
+    const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    try {
+      fs.writeFileSync(descriptor, payload);
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    try {
+      fs.renameSync(temporary, file);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+    assertSafeFile(file, context.sessionDir, "publish-change.result.json");
+    return { file, sha256: createHash("sha256").update(payload).digest("hex") };
+  }
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, payload);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertSafeFile(file, context.sessionDir, "publish-change.result.json");
+  return { file, sha256: createHash("sha256").update(payload).digest("hex") };
+}
+
+function readPublishChangeResultBytes(context: SessionContext): Buffer | null {
+  const result = path.join(context.sessionDir, "publish-change.result.json");
+  if (!pathExistsNoFollow(result)) return null;
+  assertSafeFile(result, context.sessionDir, "publish-change.result.json");
+  const descriptor = fs.openSync(result, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile()) throw new BuilderBuildRunInputError("publish-change.result", "must be a regular file");
+    if (stat.size > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
+    return fs.readFileSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+/** A retry must re-observe the provider, but observation timestamps naturally differ. */
+function sameObservedPublishChangeResult(existing: Buffer, current: Buffer, actionId: string): boolean {
+  try {
+    const left = JSON.parse(existing.toString("utf8")) as AnyRecord;
+    const right = JSON.parse(current.toString("utf8")) as AnyRecord;
+    if (left.operation_action_id !== actionId || right.operation_action_id !== actionId) return false;
+    delete left.observed_at;
+    delete right.observed_at;
+    return isDeepStrictEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
+function publishChangeEvidenceCarriesDigest(entry: AnyRecord, digest: string): boolean {
+  if (!isRecord(entry.bundle) || !Array.isArray(entry.bundle.claims)) return false;
+  return entry.bundle.claims.some((claim: unknown) => {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || !Array.isArray(claim.metadata.artifact_refs)) return false;
+    return claim.metadata.artifact_refs.some((ref: unknown) => isRecord(ref)
+      && ref.kind === "provider"
+      && typeof ref.sha256 === "string"
+      && ref.sha256.toLowerCase() === digest);
+  });
+}
+
+async function recoverCommittedPublishChange(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+): Promise<CompletePublishChangeOperationResult | null> {
+  const bytes = readPublishChangeResultBytes(context);
+  if (!bytes) return null;
+  const resultDigest = createHash("sha256").update(bytes).digest("hex");
+  const currentBytes = Buffer.from(`${JSON.stringify({ ...observation, operation_action_id: action.action_id }, null, 2)}\n`);
+  if (!sameObservedPublishChangeResult(bytes, currentBytes, action.action_id)) return null;
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  const attached = manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
+    && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1 && entry.expectation_ids[0] === "pull-request-opened"
+    && isRecord(entry.bundle) && Array.isArray(entry.bundle.claims)
+    && publishChangeEvidenceCarriesDigest(entry, resultDigest)
+    && entry.bundle.claims.some((claim: unknown) => isRecord(claim)
+      && claim.fieldOrBehavior === `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`));
+  if (!attached) return null;
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "publish-change recovery projection");
+  return {
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    projection,
+    gateActionEnvelope,
+    progressSnapshot,
+    attached: false,
+    action,
+    observation,
+  };
+}
+
+async function writePublishChangeEvidence(
+  context: SessionContext,
+  action: IssuedPublishChangeAction,
+  observation: AuthenticatedPublishChangeObservation,
+  resultSha256: string,
+): Promise<{ file: string; sha256: string }> {
+  const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
+  const timestamp = observation.observed_at;
+  const check = {
+    id: `publish-change-${action.action_id}`,
+    kind: "external",
+    status: "pass",
+    summary: `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`,
+    _gate_claim_expectation_id: "pull-request-opened",
+    _gate_claim_identity_version: 2,
+    _gate_claim_recorded_at: timestamp,
+    _producer: "publish-change-operation-authority",
+    _recorded_by: action.assignment_actor,
+    artifact_refs: [{ kind: "provider", url: observation.change_ref.url, summary: `Authenticated ${observation.provider.kind} observation by ${observation.provider_actor}`, sha256: resultSha256 }],
+  };
+  const bundle = await buildTrustBundle(
+    context.slug,
+    timestamp,
+    [check],
+    [],
+    [],
+    [],
+    context.artifactRoot,
+    action.assignment_actor,
+    { flowId: action.binding.definition_id, stepId: action.binding.step_id },
+  );
+  if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
+  const validation = await validateTrustBundle(bundle);
+  if (validation.available && !validation.valid) throw new BuilderBuildRunInputError("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
+  const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
+  if (bytes.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change", "operation-bound evidence exceeds the 65,536 byte bound");
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertSafeFile(file, context.sessionDir, "publish-change temporary evidence");
+  return { file, sha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
+function removeTemporaryFile(file: string): void {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new BuilderBuildRunInputError("publish-change temporary evidence", "was replaced before cleanup");
+    fs.unlinkSync(file);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return;
+    throw error;
   }
 }
 
@@ -514,10 +1151,7 @@ function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
 }
 
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(
-    JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")),
-    run.state,
-  ) as Array<FlowGate & { id: string }>;
+  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
 async function bundleGateEvidence(
@@ -526,6 +1160,7 @@ async function bundleGateEvidence(
   state: FlowRunState,
   subject: string,
   projectRoot: string,
+  sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
@@ -577,10 +1212,31 @@ async function bundleGateEvidence(
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
     });
   });
+  const currentGateClaimsForTrust = mergeGateClaimsWithCritiqueHistory(relevant, bundle.claims, claimIsCurrent);
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
   }
+  if (relevant.some((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (!metadata) return true;
+    if (metadata.origin === "check") return false;
+    if (metadata.origin === "critique") {
+      return claim.claimType !== "workflow.critique.review" || claim.subjectType !== "workflow-critique";
+    }
+    if (metadata.origin === "acceptance") {
+      return claim.claimType !== "workflow.acceptance.criterion" || claim.subjectType !== "flow-step";
+    }
+    return true;
+  })) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.origin", "must match a supported current-gate evidence producer type and subject");
+  }
+  const headBoundGateClaims = relevant.filter((claim) => {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    return gateClaim !== null || metadata?.origin === "check";
+  });
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
@@ -596,7 +1252,12 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "must agree across current-gate claims");
   }
   const routeReason = routeReasons[0] ?? null;
-  if (failed && !routeReason) return null;
+  if (failed && !routeReason) {
+    if (String((gate as AnyRecord).id) === "execute-gate") {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "is required for failed current-gate evidence");
+    }
+    return null;
+  }
   // Passing evidence waits for the complete expectation set. A failing
   // snapshot is complete only when a gate producer explicitly declares its
   // route reason; report-only disputed critique state remains pending.
@@ -609,17 +1270,212 @@ async function bundleGateEvidence(
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
-    await assertVerifiedTestsTrust(bundle.claims, projectRoot);
+    const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
 
-function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {
+const GATE_CLAIM_HEAD_FIELD = "evidence.claims.metadata.gate_claim.flow_run_head";
+const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized when the gate claim was recorded";
+
+/**
+ * #1170 (PR1): freshness for current-gate claims whose subject is repository content.
+ *
+ * `flow_run_head` is `sha256(canonicalJson(run.state))` — a hash of workflow *position*, not of
+ * the code the claim is about. Requiring every current-gate claim to carry the head that is
+ * canonical *right now* made any intervening state mutation terminal, which is the mechanism
+ * behind #1164 (a sidecar `record-evidence` write at `verify` permanently rejects every later
+ * public `workflow evidence` write).
+ *
+ * The predicate is now per-claim rather than cross-claim:
+ *
+ * - Recorded head equals the current head → current (unchanged fast path; healthy runs never
+ *   capture a workspace snapshot and see zero behavior change).
+ * - Otherwise the claim may re-establish freshness with the binding that actually describes its
+ *   subject: a Git workspace snapshot (HEAD sha + tracked diff + untracked bytes) that still
+ *   deep-equals a freshly captured snapshot of the current tree. A stamped
+ *   `gate_claim.step_id` must additionally name the step the run is on now.
+ * - Head mismatch and snapshot mismatch → hard stale, naming the claim, its recorded head and
+ *   the current head (#1164 ask 1).
+ * - No head and no snapshot → hard stale with a re-record remedy. This deliberately does not
+ *   loosen anything for unstamped, snapshot-less checks (#270 anti-smuggling posture).
+ *
+ * Cross-visit replay of an old pass claim over a byte-identical tree is blocked upstream, not
+ * here: every claim reaching this function already passed `claimIsCurrent`, which requires a
+ * claim/evidence timestamp inside the *current* visit window of this gate's step and excludes
+ * every claim id already shipped in a prior visit's manifest entry. That is why a plain
+ * `record-evidence` check — which carries no `gate_claim` at all, and therefore no `step_id`
+ * (workflow-sidecar.ts stamps `gate_claim` only when an expectation id is supplied) — is still
+ * step-bound: the visit window is the binding. Where a `step_id` *is* stamped it is checked, as
+ * a consistency assertion over the frozen typing.
+ *
+ * Only `kind: "git-worktree"` snapshots are accepted. A `reviewed-files` snapshot digests a
+ * writer-declared file list, so honoring it here would let a claim carry an empty list and
+ * declare itself permanently current.
+ */
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
+  if (headBoundGateClaims.length === 0) return;
+  const currentHead = flowRunHead(state);
+  const currentStep = state.current_step;
+  let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
+  for (const claim of headBoundGateClaims) {
+    const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
+    if (recordedHead === currentHead) continue;
+    const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
+    const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
+    if (recordedSnapshot === null) {
+      throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
+    }
+    currentWorkspace ??= captureCurrentGitWorkspaceSnapshot(projectRoot);
+    const recordedStep = gateClaim && typeof gateClaim.step_id === "string" ? gateClaim.step_id : null;
+    const treeUnchanged = currentWorkspace.snapshot !== null && isDeepStrictEqual(recordedSnapshot, currentWorkspace.snapshot);
+    const stepMatches = recordedStep === null || recordedStep === currentStep;
+    if (treeUnchanged && stepMatches) continue;
+    const detail = treeUnchanged
+      ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
+      : currentWorkspace.error !== null
+        ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
+        : "its recorded Git workspace snapshot no longer matches the current tree";
+    throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText}, the current head is ${currentHead}, and ${detail}. Re-record this check at the current head.`);
+  }
+}
+
+/**
+ * The snapshot a claim may re-establish freshness against.
+ *
+ * `metadata.verification_workspace_snapshot` is the general channel. `review_target.
+ * workspace_snapshot` is accepted ONLY for a genuinely critique-origin claim: that field is a
+ * critique's own review binding (`workflow-sidecar.ts` recordCritique), and honoring it on any
+ * claim that merely carries a `review_target`-shaped blob would let a non-critique producer
+ * supply its own freshness anchor under a field nothing else on this path validates.
+ *
+ * The discriminator is the (origin, claimType, subjectType) tuple rather than `origin` alone.
+ * `origin` on its own is a writer-supplied string; the tuple is not, because `bundleGateEvidence`
+ * has already rejected any relevant claim whose `origin: "critique"` is not backed by
+ * `claimType: "workflow.critique.review"` + `subjectType: "workflow-critique"` (the producer-type
+ * validation above, covered by the existing "cannot bypass head binding by impersonating exempt
+ * producer origins" test). Re-asserting the tuple here keeps this helper correct on its own terms
+ * rather than dependent on caller ordering. It is the narrowest signal available at this layer:
+ * the critique hash chain (`critique_record_hash`) is equally writer-computed and is validated
+ * downstream by `validateCritiqueResolutionGraph`, not here.
+ *
+ * Note on reachability: the sidecar never stamps `metadata.gate_claim` onto a critique claim
+ * (`workflow-sidecar.ts` critMeta), so a critique-origin claim is not head-bound today and this
+ * branch is currently unreachable in production. It is retained deliberately — #1170's PR2
+ * broadens gate-claim capture, at which point critiques become head-bound and this is the only
+ * snapshot they carry. Gated now so it cannot arrive ungated later.
+ */
+function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+  if (!metadata) return null;
+  if (isGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (!isCritiqueOriginClaim(claim, metadata)) return null;
+  const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
+  if (reviewTarget && isGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
+  return null;
+}
+
+function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
+  return metadata.origin === "critique"
+    && claim.claimType === "workflow.critique.review"
+    && claim.subjectType === "workflow-critique";
+}
+
+function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
+  return isRecord(value)
+    && value.kind === "git-worktree"
+    && typeof value.digest === "string"
+    && typeof value.head_sha === "string";
+}
+
+function captureCurrentGitWorkspaceSnapshot(projectRoot: string): { snapshot: AnyRecord | null; error: string | null } {
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return { snapshot: isGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
+  } catch (error) {
+    return { snapshot: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function mergeGateClaimsWithCritiqueHistory(
+  relevant: AnyRecord[],
+  bundleClaims: unknown[],
+  claimIsCurrent: (claim: AnyRecord) => boolean,
+): AnyRecord[] {
+  const relevantById = new Map(relevant.filter(isRecord).map((claim) => [String(claim.id), claim]));
+  const critiqueByHash = new Map<string, AnyRecord>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim) || !isRecord(claim.metadata) || claim.metadata.origin !== "critique") continue;
+    if (typeof claim.metadata.critique_record_hash === "string") critiqueByHash.set(claim.metadata.critique_record_hash, claim);
+  }
+  // A same-reviewer recheck can be current while the critique it supersedes predates the
+  // current gate visit. Project the authenticated predecessor closure as audit history so the
+  // resolution validator sees the writer-issued chain rather than an invalid sequence suffix.
+  // Missing or forged links are deliberately not repaired here: graph validation reports the
+  // first unresolved sequence/hash edge and continues to fail closed.
+  const requiredCritiqueHashes = new Set<string>();
+  const pendingCritiqueHashes = relevant.filter((claim) => isRecord(claim.metadata) && claim.metadata.origin === "critique")
+    .map((claim) => String(claim.metadata.critique_record_hash ?? ""))
+    .filter(Boolean);
+  while (pendingCritiqueHashes.length > 0) {
+    const hash = pendingCritiqueHashes.pop()!;
+    if (requiredCritiqueHashes.has(hash)) continue;
+    requiredCritiqueHashes.add(hash);
+    const claim = critiqueByHash.get(hash);
+    const predecessor = isRecord(claim?.metadata) ? claim.metadata.critique_predecessor_hash : null;
+    if (typeof predecessor === "string" && predecessor !== CRITIQUE_CHAIN_GENESIS) pendingCritiqueHashes.push(predecessor);
+  }
+  const merged: AnyRecord[] = [];
+  const seen = new Set<string>();
+  const seenCritiques = new Set<string>();
+  for (const claim of bundleClaims) {
+    if (!isRecord(claim)) continue;
+    const id = String(claim.id);
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (metadata?.origin === "critique" && (claimIsCurrent(claim) || requiredCritiqueHashes.has(String(metadata.critique_record_hash)))) {
+      const recordId = String(metadata.critique_record_id);
+      if (!seenCritiques.has(recordId)) merged.push(claim);
+      seenCritiques.add(recordId);
+      seen.add(id);
+      continue;
+    }
+    const selected = relevantById.get(id) ?? null;
+    if (!selected || seen.has(id)) continue;
+    merged.push(selected);
+    seen.add(id);
+  }
+  for (const claim of relevant) {
+    const id = String(claim.id);
+    if (!seen.has(id)) merged.push(claim);
+  }
+  return merged;
+}
+
+/**
+ * Canonical boundary for the current visit to a Flow step.
+ *
+ * This is intentionally exported only from the internal runtime module so
+ * orchestration code can bind receipts to Flow's persisted transition history
+ * without reconstructing that history itself.
+ */
+export interface CurrentGateVisit {
+  enteredAt: number;
+  initial: boolean;
+}
+
+export function currentGateVisit(state: FlowRunState, step: string): CurrentGateVisit {
   let enteredAt: number | null = null;
   for (const transition of state.transitions ?? []) {
     if (transition.to_step !== step) continue;
     const parsed = parseTimestamp(transition.at);
-    if (parsed !== null) enteredAt = parsed;
+    if (parsed === null) {
+      throw new BuilderBuildRunInputError("flow_run.state.transitions.at", "must establish the current gate visit boundary");
+    }
+    enteredAt = parsed;
   }
   const initial = parseTimestamp(state.updated_at);
   if (enteredAt !== null) return { enteredAt, initial: false };
@@ -638,31 +1494,71 @@ function timestampAtOrAfter(value: unknown, boundary: number): boolean {
   return parsed !== null && parsed >= boundary;
 }
 
-async function assertVerifiedTestsTrust(claims: unknown[], projectRoot: string): Promise<void> {
-  const testClaims = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { events: AnyRecord[]; verified: boolean } {
+  const eventsFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
+  if (!fs.existsSync(eventsFile)) return { events: [], verified: false };
+  assertSafeFile(eventsFile, sessionDir, "lifecycle-authority.resolution-events.json");
+  const payload = JSON.parse(fs.readFileSync(eventsFile, "utf8"));
+  const events = isRecord(payload) && Array.isArray(payload.events) ? payload.events as AnyRecord[] : [];
+  const completionFile = path.join(sessionDir, "lifecycle-authority.completion.json");
+  assertSafeFile(completionFile, sessionDir, "lifecycle-authority.completion.json");
+  const completion = verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, "utf8")));
+  if (!lifecycleAuthorityCompletionBindsExactState(completion, path.basename(sessionDir), bundle, events)) {
+    throw new BuilderBuildRunInputError("evidence.critique.authority_completion", "must bind the exact resolved critique graph and session");
+  }
+  return { events, verified: true };
+}
+
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
+  const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && claim.claimType === "builder.verify.tests"
     && claim.value === "pass"
     && isRecord(claim.metadata)
     && isRecord(claim.metadata.gate_claim)
     && claim.metadata.gate_claim.expectation_id === "tests-evidence");
   if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
-  const liveCritiques = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+  // A route-back starts a new gate visit and therefore a new critique generation. Historical
+  // reviewer slices remain in the bundle and manifest for audit, but only critiques acquired
+  // during this visit describe the implementation snapshot currently being verified. Within a
+  // visit every live reviewer slice still participates, so changing reviewers cannot bury a
+  // disputed finding.
+  const graph = validateCritiqueResolutionGraph(currentGateClaims, typeof testClaims[0]?.metadata?.workflow_subject_ref === "string" ? testClaims[0].metadata.workflow_subject_ref : undefined, resolutionEvents, projectRoot, externalCompletionVerified);
+  if (!graph.valid) throw new BuilderBuildRunInputError("evidence.critique.resolution_graph", graph.errors.join("; "));
+  const liveRecordIds = new Set(graph.live.map((record) => record.critique_record_id));
+  const liveCritiques = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
-    && typeof claim.metadata.superseded_by !== "string");
+    && liveRecordIds.has(claim.metadata.critique_record_id));
   if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
     throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
   }
+  const critiqueCandidates = await Promise.all(liveCritiques.map(async (claim) => {
+    const artifacts = reviewedArtifacts(claim);
+    try {
+      assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
+      await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
+      return { current: { claim, artifacts }, staleError: null };
+    } catch (error) {
+      if (error instanceof BuilderBuildRunInputError && [
+        "evidence.critique.review_target.workspace_snapshot.digest",
+        "evidence.critique.review_target.workspace_snapshot.head_sha",
+        "evidence.critique.review_target.artifacts.sha256",
+      ].includes(error.field)) return { current: null, staleError: error };
+      throw error;
+    }
+  }));
+  const currentCritiques = critiqueCandidates.flatMap((candidate) => candidate.current ? [candidate.current] : []);
+  if (currentCritiques.length === 0) {
+    const artifactError = critiqueCandidates.find((candidate) =>
+      candidate.staleError?.field === "evidence.critique.review_target.artifacts.sha256")?.staleError;
+    if (artifactError) throw artifactError;
+    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a clean critique of the current implementation workspace");
+  }
   const implementationActors = new Set(testClaims.map((claim) => claim.metadata.recorded_by).filter((actor): actor is string => typeof actor === "string" && actor.length > 0));
-  if (implementationActors.size !== 1 || liveCritiques.some((claim) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
+  if (implementationActors.size !== 1 || currentCritiques.some(({ claim }) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
     throw new BuilderBuildRunInputError("evidence.critique.reviewer", "must identify a reviewer distinct from the tests-evidence implementation actor");
   }
-  await Promise.all(liveCritiques.flatMap(async (claim) => {
-    const artifacts = reviewedArtifacts(claim);
-    await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
-    assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
-  }));
-  const criteria = claims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
+  const criteria = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
   if (criteria.length === 0 || criteria.some((claim) => {
     const criterion = isRecord(claim.metadata.criterion) ? claim.metadata.criterion : null;
     return claim.value !== "pass" || !criterion || !Array.isArray(criterion.evidence_refs) || criterion.evidence_refs.length === 0;
@@ -703,7 +1599,7 @@ function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]
 }
 
 function isSubstantivePassingCritique(claim: AnyRecord): boolean {
-  if (claim.value !== "pass" || (Array.isArray(claim.metadata.findings) && claim.metadata.findings.some((finding: unknown) => isRecord(finding) && finding.status === "open"))) return false;
+  if (claim.value !== "pass" || claim.status !== "verified" || (Array.isArray(claim.metadata.findings) && claim.metadata.findings.some((finding: unknown) => isRecord(finding) && finding.status === "open"))) return false;
   const lanes = claim.metadata.lanes;
   return Array.isArray(lanes)
     && lanes.length > 0
@@ -745,46 +1641,6 @@ function assertReviewedWorkspaceSnapshot(claim: AnyRecord, artifacts: AnyRecord[
   }
 }
 
-function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
-  const root = fs.realpathSync(projectRoot);
-  const hasGitMarker = fs.existsSync(path.join(root, ".git"));
-  try {
-    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
-    }
-    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
-    const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] })
-      .toString("utf8").split("\0").filter(Boolean).sort();
-    const hash = createHash("sha256");
-    hash.update("flow-agents:git-worktree:v1\0");
-    hash.update(headSha).update("\0");
-    hash.update(trackedDiff).update("\0");
-    for (const file of untracked) {
-      const absolute = path.resolve(root, file);
-      if (!pathIsWithin(absolute, root)) throw new Error("untracked file escapes repository root");
-      const stat = fs.lstatSync(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("untracked entry is not a regular file");
-      hash.update(file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-    }
-    return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: headSha };
-  } catch (error) {
-    if (hasGitMarker || error instanceof BuilderBuildRunInputError) {
-      if (error instanceof BuilderBuildRunInputError) throw error;
-      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", `could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return null;
-  }
-}
-
-export function captureReviewWorkspaceSnapshot(
-  projectRoot: string,
-  reviewedFiles: Array<{ file: string; sha256: string }>,
-): AnyRecord {
-  return gitWorktreeSnapshot(projectRoot) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
-}
-
 function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha256: string }> {
   if (!Array.isArray(snapshot.files) || snapshot.files.length === 0
     || !snapshot.files.every((file) => isRecord(file) && typeof file.file === "string" && /^[a-f0-9]{64}$/i.test(String(file.sha256)))) {
@@ -797,22 +1653,26 @@ function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha2
   return files;
 }
 
-function reviewedFilesSnapshot(projectRoot: string, reviewedFiles: Array<{ file: string; sha256: string }>): AnyRecord {
-  const files = reviewedFiles.map((file) => ({ ...file }));
-  const hash = createHash("sha256");
-  hash.update("flow-agents:reviewed-files:v1\0");
-  for (const artifact of files) {
-    const absolute = safeReviewedArtifactPath(projectRoot, artifact.file);
-    hash.update(artifact.file).update("\0").update(fs.readFileSync(absolute)).update("\0");
-  }
-  return { version: 1, kind: "reviewed-files", algorithm: "sha256", digest: hash.digest("hex"), files };
-}
-
 async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {
   const canonicalArtifact = safeReviewedArtifactPath(projectRoot, artifact.file);
   if (createHash("sha256").update(fs.readFileSync(canonicalArtifact)).digest("hex") !== artifact.sha256) {
     throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", `does not match ${artifact.file}`);
   }
+}
+
+/** Revalidate the current substantive PASS represented by one persisted critique claim. */
+export async function assertCurrentCritiqueClaim(claim: AnyRecord, projectRoot: string): Promise<void> {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : {};
+  if (claim.value !== "pass" || claim.status !== "verified"
+    || !Array.isArray(metadata.lanes) || metadata.lanes.length === 0 || metadata.lanes.some((lane: AnyRecord) => lane.status !== "pass")
+    || (Array.isArray(metadata.findings) && metadata.findings.some((finding: AnyRecord) => finding.status === "open"))) {
+    throw new BuilderBuildRunInputError("evidence.critique", "must remain a substantive current PASS");
+  }
+  const target = isRecord(metadata.review_target) ? metadata.review_target : {};
+  const artifacts = Array.isArray(target.artifacts) ? target.artifacts : [];
+  if (artifacts.length === 0) throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts", "must not be empty");
+  await Promise.all(artifacts.map((artifact: AnyRecord) => assertReviewedArtifactDigest(artifact, projectRoot)));
+  assertReviewedWorkspaceSnapshot({ metadata }, artifacts, projectRoot);
 }
 
 function safeReviewedArtifactPath(projectRoot: string, file: string): string {
@@ -887,7 +1747,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 }
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
-  const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
+  const definition = run.definition;
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
@@ -954,8 +1814,13 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
         command: syncCommand,
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
+  const verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes);
   return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
+    run_correlation: run.correlation.status === "present"
+      ? run.correlation.envelope
+      : { status: "incomplete", reason: run.correlation.reason },
+    workflow_outcome: deriveWorkflowOutcome(run.state.status, verificationStatus),
     status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
@@ -963,6 +1828,8 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       run_id: run.runId,
       definition_id: run.definitionId,
       definition_version: run.definitionVersion,
+      definition_digest: run.definitionDigest,
+      run_head: flowRunHead(run.state),
       status: run.state.status,
       current_step: run.state.current_step,
       run_ref: path.relative(context.projectRoot, run.dir),
@@ -974,10 +1841,158 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   } };
 }
 
-function writeProjection(context: SessionContext, projection: AnyRecord, expectedStateRaw: string, operation: string): void {
-  const prepared = prepareProjectionWrites(context, projection, expectedStateRaw, operation);
+function writeProjection(
+  context: SessionContext,
+  projection: AnyRecord,
+  expectedStateRaw: string,
+  operation: string,
+  binding?: BuilderActorBinding,
+): void {
+  const prepared = prepareProjectionWrites(context, projection, expectedStateRaw, operation, binding);
   assertProjectionTargetsUnchanged(context, prepared, operation);
-  for (const write of prepared.writes) writeExistingFileNoFollow(write.file, write.content);
+  const stateWrite = prepared.writes.find((write) => write.file === context.stateFile);
+  const pointerWrites = prepared.writes.filter((write) => write.pointerReplacement);
+  if (!stateWrite) {
+    throw new BuilderBuildRunInputError("state.json", `was not prepared during ${operation}`);
+  }
+  const globalFile = path.join(context.artifactRoot, "current.json");
+  const globalTarget = prepared.targets.find((target) => target.file === globalFile);
+  const outcomeFile = path.join(context.sessionDir, "workflow-outcome.json");
+  const outcomeTarget = isTerminalWorkflowProjection(projection)
+    ? readOptionalProjectionTarget(outcomeFile, context.sessionDir, "workflow-outcome.json")
+    : null;
+  const outcomeContent = outcomeTarget
+    ? `${JSON.stringify(workflowOutcomeRecord(context, projection), null, 2)}\n`
+    : null;
+  const result = currentPointerHelper().replaceCurrentPointersIfUnchanged(
+    context.artifactRoot,
+    pointerWrites.map((write) => ({
+      file: write.file,
+      expectedRaw: write.pointerReplacement!.expectedRaw,
+      payload: write.pointerReplacement!.payload,
+    })),
+    {
+      expectedGlobalRaw: globalTarget?.raw ?? null,
+      expectedActorEntries: prepared.actorEntries,
+    },
+    () => {
+      if (!replaceStateIfUnchanged(
+        context.stateFile,
+        expectedStateRaw,
+        stateWrite.content,
+      )) {
+        throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
+      }
+      try {
+        if (outcomeTarget && outcomeContent) {
+          atomicWriteFile(context.sessionDir, outcomeFile, outcomeContent);
+        }
+      } catch (error) {
+        try {
+          rollbackProjectionCommit(
+            context,
+            expectedStateRaw,
+            stateWrite.content,
+            outcomeTarget,
+            outcomeContent,
+          );
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "terminal projection write and rollback failed",
+          );
+        }
+        throw error;
+      }
+      return () => rollbackProjectionCommit(
+        context,
+        expectedStateRaw,
+        stateWrite.content,
+        outcomeTarget,
+        outcomeContent,
+      );
+    },
+  );
+  if (result !== "updated") {
+    throw new BuilderBuildRunInputError("projection target", `changed during ${operation}`);
+  }
+}
+
+function rollbackProjectionCommit(
+  context: SessionContext,
+  expectedStateRaw: string,
+  writtenStateRaw: string,
+  outcomeTarget: ProjectionTargetSnapshot | null,
+  writtenOutcomeRaw: string | null,
+): void {
+  const errors: unknown[] = [];
+  if (outcomeTarget && writtenOutcomeRaw) {
+    try {
+      const current = readOptionalProjectionTarget(
+        outcomeTarget.file,
+        context.sessionDir,
+        "workflow-outcome.json",
+      );
+      if (current.raw !== outcomeTarget.raw) {
+        if (current.raw !== writtenOutcomeRaw) {
+          throw new BuilderBuildRunInputError(
+            "workflow-outcome.json",
+            "changed before projection rollback",
+          );
+        }
+        if (outcomeTarget.raw === null) {
+          fs.unlinkSync(outcomeTarget.file);
+        } else {
+          atomicWriteFile(context.sessionDir, outcomeTarget.file, outcomeTarget.raw);
+        }
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  try {
+    if (!replaceStateIfUnchanged(context.stateFile, writtenStateRaw, expectedStateRaw)) {
+      const current = fs.readFileSync(context.stateFile, "utf8");
+      if (current !== expectedStateRaw) {
+        throw new BuilderBuildRunInputError("state.json", "changed before projection rollback");
+      }
+    }
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "projection commit rollback failed");
+  }
+}
+
+function isTerminalWorkflowProjection(projection: AnyRecord): boolean {
+  const status = isRecord(projection.flow_run) ? projection.flow_run.status : null;
+  return status === "completed"
+    || status === "canceled"
+    || status === "failed"
+    || status === "archived";
+}
+
+function workflowOutcomeRecord(context: SessionContext, projection: AnyRecord): AnyRecord {
+  const correlation = projection.run_correlation;
+  const outcome = projection.workflow_outcome;
+  if (!isRecord(correlation) || !isRecord(outcome)) {
+    throw new BuilderBuildRunInputError("workflow_outcome", "requires the projected run correlation and outcome");
+  }
+  const recordIdentity = typeof correlation.correlation_id === "string"
+    ? correlation.correlation_id
+    : context.slug;
+  return {
+    schema: "kontour.flow-agents.workflow-outcome",
+    version: "1.0",
+    kind: "terminal",
+    record_id: `workflow-outcome:${recordIdentity}`,
+    task_slug: context.slug,
+    recorded_at: projection.updated_at,
+    run_correlation: correlation,
+    process_status: outcome.process_status,
+    workflow_outcome: outcome,
+  };
 }
 
 function prepareProjectionWrites(
@@ -985,16 +2000,44 @@ function prepareProjectionWrites(
   projection: AnyRecord,
   expectedStateRaw: string,
   operation: string,
+  binding?: BuilderActorBinding,
 ): PreparedProjectionWrites {
-  const targets: ProjectionTargetSnapshot[] = [];
-  const writes: Array<{ file: string; content: string }> = [];
   const stateTarget = readProjectionTarget(context.stateFile, context.sessionDir, "state.json");
-  targets.push(stateTarget);
   if (stateTarget.raw !== expectedStateRaw) {
     throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
   }
-  writes.push({ file: context.stateFile, content: `${JSON.stringify(projection, null, 2)}\n` });
+  const discovered = discoverProjectionPointers(context, binding);
+  const writes: PreparedProjectionWrites["writes"] = [
+    { file: context.stateFile, content: `${JSON.stringify(projection, null, 2)}\n` },
+  ];
+  for (const file of discovered.pointerFiles) {
+    const target = discovered.targets.find((candidate) => candidate.file === file)!;
+    const write = buildPointerProjectionWrite(
+      context,
+      projection,
+      target,
+      discovered.boundActorFile,
+      binding,
+    );
+    if (write) writes.push(write);
+  }
+  return {
+    targets: [stateTarget, ...discovered.targets],
+    actorEntries: discovered.actorEntries,
+    writes,
+  };
+}
 
+function discoverProjectionPointers(
+  context: SessionContext,
+  binding?: BuilderActorBinding,
+): {
+  targets: ProjectionTargetSnapshot[];
+  pointerFiles: string[];
+  actorEntries: string[] | null;
+  boundActorFile: string | null;
+} {
+  const targets: ProjectionTargetSnapshot[] = [];
   const pointerFiles: string[] = [];
   const globalPointer = path.join(context.artifactRoot, "current.json");
   const globalTarget = readOptionalProjectionTarget(globalPointer, context.artifactRoot, "current.json");
@@ -1005,7 +2048,9 @@ function prepareProjectionWrites(
   let actorEntries: string[] | null = null;
   if (pathExistsNoFollow(actorRoot)) {
     assertSafeDirectory(actorRoot, context.artifactRoot, "current directory");
-    actorEntries = fs.readdirSync(actorRoot).sort();
+    actorEntries = fs.readdirSync(actorRoot)
+      .filter((name) => name !== ".actor-pointers.lockdir")
+      .sort();
     for (const name of actorEntries) {
       const file = path.join(actorRoot, name);
       const stat = fs.lstatSync(file);
@@ -1021,20 +2066,80 @@ function prepareProjectionWrites(
       pointerFiles.push(file);
     }
   }
-
-  for (const file of pointerFiles) {
-    const target = targets.find((candidate) => candidate.file === file)!;
-    const pointer = parseProjectionTarget(target);
-    if (!isRecord(pointer) || pointer.active_slug !== context.slug) continue;
-    const output = {
-      ...pointer,
-      active_flow_id: projection.flow_run.definition_id,
-      active_step_id: projection.flow_run.current_step,
-      updated_at: projection.updated_at,
-    };
-    writes.push({ file, content: `${JSON.stringify(output, null, 2)}\n` });
+  const boundActorFile = binding
+    ? currentPointerHelper().perActorCurrentFile(context.artifactRoot, binding.actorKey)
+    : null;
+  if (boundActorFile && !pointerFiles.includes(boundActorFile)) {
+    targets.push({
+      file: boundActorFile,
+      raw: null,
+      root: actorRoot,
+      field: `current/${path.basename(boundActorFile)}`,
+    });
+    pointerFiles.push(boundActorFile);
   }
-  return { targets, actorEntries, writes };
+  return { targets, pointerFiles, actorEntries, boundActorFile };
+}
+
+function buildPointerProjectionWrite(
+  context: SessionContext,
+  projection: AnyRecord,
+  target: ProjectionTargetSnapshot,
+  boundActorFile: string | null,
+  binding?: BuilderActorBinding,
+): PreparedProjectionWrites["writes"][number] | null {
+  const pointer = target.raw === null ? null : parseProjectionTarget(target);
+  const isGlobalPointer = target.file === path.join(context.artifactRoot, "current.json");
+  const relativeDir = path.relative(context.artifactRoot, context.sessionDir);
+  if (binding && !isGlobalPointer && target.file !== boundActorFile) return null;
+  const isAuthenticatedActorRebind = Boolean(
+    binding
+    && !isGlobalPointer
+    && target.file === boundActorFile,
+  );
+  if (
+    isRecord(pointer)
+    && pointer.artifact_dir !== relativeDir
+    && !isAuthenticatedActorRebind
+  ) return null;
+  if (!isRecord(pointer) && target.file !== boundActorFile) return null;
+  if (isRecord(pointer) && pointer.binding_status === "retired") return null;
+  const projectedBindingId = isRecord(projection.run_correlation)
+    && typeof projection.run_correlation.correlation_id === "string"
+    ? projection.run_correlation.correlation_id
+    : null;
+  const terminal = ["completed", "canceled", "failed", "archived"].includes(projection.flow_run.status);
+  if (
+    terminal
+    && !binding
+    && isRecord(pointer)
+    && (
+      projectedBindingId
+        ? pointer.binding_id !== projectedBindingId
+        : typeof pointer.binding_id === "string"
+    )
+  ) return null;
+  const { binding_status: _status, binding_reason: _reason, ...active } = isRecord(pointer) ? pointer : {};
+  const output = {
+    ...active,
+    schema_version: "1.0",
+    active_slug: context.slug,
+    artifact_dir: relativeDir,
+    owner: isRecord(pointer) && typeof pointer.owner === "string" ? pointer.owner : "flow-agents",
+    source: isRecord(pointer) && typeof pointer.source === "string" ? pointer.source : "builder-start",
+    active_agents: isRecord(pointer) && Array.isArray(pointer.active_agents) ? pointer.active_agents : [],
+    active_flow_id: projection.flow_run.definition_id,
+    active_step_id: projection.flow_run.current_step,
+    ...(typeof projection.branch === "string" ? { branch: projection.branch } : {}),
+    ...(binding ? { binding_id: binding.bindingId } : {}),
+    updated_at: projection.updated_at,
+    ...(terminal ? { binding_status: "retired", binding_reason: `flow_${projection.flow_run.status}` } : {}),
+  };
+  return {
+    file: target.file,
+    content: `${JSON.stringify(output, null, 2)}\n`,
+    pointerReplacement: { expectedRaw: target.raw, payload: output },
+  };
 }
 
 function assertProjectionTargetsUnchanged(
@@ -1044,7 +2149,12 @@ function assertProjectionTargetsUnchanged(
 ): void {
   const actorRoot = path.join(context.artifactRoot, "current");
   const currentActorEntries = pathExistsNoFollow(actorRoot)
-    ? (assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"), fs.readdirSync(actorRoot).sort())
+    ? (
+      assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"),
+      fs.readdirSync(actorRoot)
+        .filter((name) => name !== ".actor-pointers.lockdir")
+        .sort()
+    )
     : null;
   if (JSON.stringify(currentActorEntries) !== JSON.stringify(prepared.actorEntries)) {
     throw new BuilderBuildRunInputError("current", `directory changed during ${operation}`);
@@ -1126,13 +2236,38 @@ function pathIsWithin(candidate: string, root: string): boolean {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
-function writeExistingFileNoFollow(file: string, content: string): void {
-  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW);
-  try {
-    fs.writeFileSync(descriptor, content);
-  } finally {
-    fs.closeSync(descriptor);
+function currentPointerHelper(): {
+  perActorCurrentFile(flowAgentsDir: string, actorKey: string): string;
+  replaceCurrentPointersIfUnchanged(
+    flowAgentsDir: string,
+    replacements: Array<{
+      file: string;
+      expectedRaw: string | null;
+      payload: AnyRecord;
+    }>,
+    options?: {
+      expectedGlobalRaw?: string | null;
+      expectedActorEntries?: string[] | null;
+    },
+    commit?: () => void | (() => void),
+  ): "updated" | "changed";
+} {
+  const require = createRequire(import.meta.url);
+  const helperPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../scripts/hooks/lib/current-pointer.js",
+  );
+  return require(helperPath);
+}
+
+function runCorrelationId(run: BuilderFlowRunResult): string {
+  if (run.correlation.status !== "present") {
+    throw new BuilderBuildRunInputError(
+      "flow_run.state.params.run_correlation",
+      "must contain a canonical correlation envelope for binding retirement",
+    );
   }
+  return run.correlation.envelope.correlation_id;
 }
 
 function phaseForStep(phaseMap: unknown, stepId: string): string | null {

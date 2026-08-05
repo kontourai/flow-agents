@@ -2,24 +2,44 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
-import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
+import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
+import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
+import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
-import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
+import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
+import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
+import { validateRunCorrelationPresence } from "../run-correlation.js";
+import {
+  EVIDENCE_REF_FIELD_SCHEMAS,
+  EVIDENCE_REF_KINDS,
+  EVIDENCE_REF_RULES,
+  NARRATIVE_PROMOTE_OPERATION,
+  WORKFLOW_ACCEPTANCE_STATUSES,
+  WORKFLOW_CRITIQUE_STATUSES,
+} from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
+import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 
 type AnyObj = Record<string, any>;
 
@@ -43,7 +63,102 @@ function readRegularFileNoFollow(file: string, label: string): Buffer {
     fs.closeSync(fd);
   }
 }
-export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
+export function writeJson(file: string, payload: AnyObj): void {
+  if (path.basename(file) === "state.json") {
+    writeStateJson(file, payload);
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function quarantineTrustBundle(file: string): void {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("trust.bundle changed to a non-regular file while quarantining an unflushed write");
+  const quarantine = path.join(path.dirname(file), `.trust.bundle.failed-${process.pid}-${Date.now()}`);
+  fs.renameSync(file, quarantine);
+}
+
+export type TrustBundleWriterTarget = {
+  file: string;
+  descriptor: number;
+  identity: { dev: number; ino: number };
+  parentDescriptor: number;
+  parentIdentity: { dev: number; ino: number };
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+};
+
+function writeBufferFully(descriptor: number, bytes: Buffer, write: typeof fs.writeSync = fs.writeSync): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = write(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (!Number.isSafeInteger(count) || count <= 0) throw new Error("trust.bundle candidate write returned zero or an invalid byte count");
+    offset += count;
+  }
+}
+
+function assertTrustBundleWriterTarget(target: TrustBundleWriterTarget): void {
+  const opened = fs.fstatSync(target.descriptor);
+  const current = fs.lstatSync(target.file);
+  const parent = fs.fstatSync(target.parentDescriptor);
+  if (!opened.isFile() || current.isSymbolicLink() || !current.isFile()
+    || opened.dev !== target.identity.dev || opened.ino !== target.identity.ino
+    || current.dev !== target.identity.dev || current.ino !== target.identity.ino
+    || !parent.isDirectory() || parent.dev !== target.parentIdentity.dev || parent.ino !== target.parentIdentity.ino) {
+    throw new Error("trust.bundle candidate target identity changed");
+  }
+}
+
+function writeTrustBundleAtomically(file: string, payload: AnyObj, target?: TrustBundleWriterTarget): void {
+  const bytes = Buffer.from(`${JSON.stringify(payload, null, 2)}\n`);
+  if (target) {
+    assertTrustBundleWriterTarget(target);
+    writeBufferFully(target.descriptor, bytes, target.write);
+    fs.ftruncateSync(target.descriptor, bytes.length);
+    fs.fsyncSync(target.descriptor);
+    target.beforeReread?.(target.descriptor);
+    assertTrustBundleWriterTarget(target);
+    const reread = readRegularFileDescriptor(target.descriptor);
+    if (!reread.equals(bytes)) throw new Error("trust.bundle candidate reread did not match the staged bytes");
+    fs.fsyncSync(target.parentDescriptor);
+    assertTrustBundleWriterTarget(target);
+    return;
+  }
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true });
+  const temporary = path.join(directory, `.trust.bundle.${process.pid}.${Date.now()}.tmp`);
+  const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+  } finally { fs.closeSync(descriptor); }
+  let renamed = false;
+  try {
+    fs.renameSync(temporary, file);
+    renamed = true;
+    const directoryDescriptor = fs.openSync(directory, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+  } catch (error) {
+    if (renamed) quarantineTrustBundle(file);
+    throw error;
+  } finally {
+    try { fs.rmSync(temporary, { force: true }); } catch { /* rename completed or cleanup best effort */ }
+  }
+}
+
+function readRegularFileDescriptor(descriptor: number): Buffer {
+  const stat = fs.fstatSync(descriptor);
+  if (!stat.isFile() || stat.size > Number.MAX_SAFE_INTEGER) throw new Error("trust.bundle candidate is not a readable regular file");
+  const bytes = Buffer.alloc(Number(stat.size));
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) throw new Error("trust.bundle candidate reread ended early");
+    offset += count;
+  }
+  return bytes;
+}
 // Single-line but readable "key": "value" form. Built by collapsing the
 // structural whitespace from an indented stringify — corruption-proof, unlike a
 // regex that would also rewrite ":"/"," sequences inside string values.
@@ -57,40 +172,161 @@ export function appendJsonl(file: string, payload: AnyObj): void {
   const line = spacedLine(payload, Object.keys(payload).sort());
   fs.appendFileSync(file, `${line}\n`);
 }
-function die(message: string): never { throw new Error(message); }
-function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
-/** Derives a deterministic, filesystem-safe slug from a canonical work-item ref like `kontourai/flow-agents#161`.
- * Format: `<owner>-<repo>-<id>` e.g. `kontourai-flow-agents-161`.
- * Reuses slugify() for normalization. Validates that the id is a numeric GitHub issue number. */
-function workItemSlug(ref: string): string {
-  const hashIdx = ref.indexOf("#");
-  if (hashIdx < 0) {
-    if (!/^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes("..")) {
-      die("--work-item must be a provider-neutral provider:id ref or owner/repo#numeric-id");
+
+function stageAnchoredAgentEvent(
+  agentDir: string,
+  identity: fs.Stats,
+  payload: AnyObj,
+): { commit: () => void; rollback: () => void } {
+  const coordinationDir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-jsonl-stage-"));
+  fs.chmodSync(coordinationDir, 0o700);
+  fs.writeFileSync(path.join(coordinationDir, "payload"), `${spacedLine(payload)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  const helper = path.join(flowAgentsPackageRoot(), "scripts", "hooks", "lib", "anchored-jsonl-stage.js");
+  const child = spawn(process.execPath, [
+    helper,
+    String(identity.dev),
+    String(identity.ino),
+    coordinationDir,
+  ], {
+    cwd: agentDir,
+    stdio: "ignore",
+  });
+  child.on("error", () => {
+    // The synchronous marker protocol below reports startup failure as a timeout.
+  });
+  const cleanup = (): void => {
+    fs.rmSync(coordinationDir, { recursive: true, force: true });
+  };
+  const waitFor = (target: "ready" | "done", timeoutMs = 5000): void => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(path.join(coordinationDir, "error"))) {
+        die(`anchored agent event append failed: ${read(path.join(coordinationDir, "error")).trim()}`);
+      }
+      if (fs.existsSync(path.join(coordinationDir, target))) return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
-    return slugify(ref, "work-item");
+    try { child.kill(); } catch {}
+    die(`anchored agent event append timed out waiting for ${target}`);
+  };
+  const decide = (decision: "commit" | "rollback"): void => {
+    try {
+      fs.writeFileSync(path.join(coordinationDir, decision), "", { flag: "wx", mode: 0o600 });
+      waitFor("done");
+    } finally {
+      cleanup();
+    }
+  };
+  try {
+    waitFor("ready");
+  } catch (error) {
+    try {
+      fs.writeFileSync(path.join(coordinationDir, "rollback"), "", { flag: "wx", mode: 0o600 });
+    } catch {}
+    try { child.kill(); } catch {}
+    cleanup();
+    throw error;
   }
-  if (hashIdx === ref.length - 1) die("--work-item must be in owner/repo#numeric-id format");
-  const repoPath = ref.slice(0, hashIdx);
-  const id = ref.slice(hashIdx + 1);
-  if (!/^\d+$/.test(id)) die("--work-item id must be a numeric issue number");
-  const parts = repoPath.split("/");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) die("--work-item repo must be owner/repo format");
-  const [owner, repo] = parts;
-  return slugify(`${owner}-${repo}-${id}`, "work-item");
+  return {
+    commit: () => decide("commit"),
+    rollback: () => decide("rollback"),
+  };
 }
+function die(message: string): never { throw new Error(message); }
+export class FlowProjectionRegenerationRequiredError extends Error {
+  readonly code = "flow_projection_regeneration_required";
+  constructor(sessionDir: string) {
+    super(`current Flow projection is missing a valid run_head; regenerate it and re-record evidence with: flow-agents workflow evidence --session-dir ${JSON.stringify(sessionDir)} <evidence options>; inspect the recovered result with: flow-agents workflow status --session-dir ${JSON.stringify(sessionDir)} --json`);
+    this.name = "FlowProjectionRegenerationRequiredError";
+  }
+}
+
+/**
+ * #783: sanctioned fixture authoring. `fixture write <dir> [--from-json <file> | --malformed
+ * --content <string|@file>]` writes a state.json fixture for TESTS — never real session state.
+ *
+ * Contract (mirrors the config-protection hook's scoping, same fail-closed resolver):
+ * - The target dir must be PROVABLY OUTSIDE every declared artifact root
+ *   (isProvablyOutsideDeclaredRoots; ambiguity refuses). A fixture writer that disagreed with
+ *   the hook about root containment would let an agent forge real sidecar state by routing
+ *   through this command, so the refusal is non-negotiable.
+ * - Default (--from-json) validates against schemas/workflow-state.schema.json with the SAME
+ *   validator the artifact validator uses (mini-json-schema), so a "valid fixture" here is
+ *   valid everywhere.
+ * - --malformed writes the provided content VERBATIM (negative-test fixtures: corrupt JSON,
+ *   schema-violating shapes). Allowed only because the outside-roots proof already succeeded.
+ */
+function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
+  const action = p.positional[0] || die("fixture requires an action: write");
+  if (action !== "write") die(`unknown fixture action: ${action} (only "write" is supported)`);
+  const dirArg = p.positional[1] || die("fixture write requires a target directory");
+  const dir = path.resolve(dirArg);
+  const cwd = process.cwd();
+  if (!isProvablyOutsideDeclaredRoots(dir, cwd)) {
+    die(
+      `fixture write refused: ${dir} is inside — or cannot be proven outside — the declared ` +
+        `artifact roots (repo/workspace .kontourai/flow-agents, .flow-agents, delivery/). ` +
+        `Fixtures belong in a scratch or temp directory. Root detection fails closed by design.`,
+    );
+  }
+  const malformed = p.flags.has("malformed") || p.opts["malformed"] !== undefined;
+  const target = path.join(dir, "state.json");
+  let mode: string;
+  if (malformed) {
+    const contentArg = opt(p, "content") || die("fixture write --malformed requires --content <string|@file>");
+    const content = contentArg.startsWith("@") ? read(contentArg.slice(1)) : contentArg;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, content);
+    mode = "malformed (verbatim, schema deliberately NOT enforced)";
+  } else {
+    const fromJson = opt(p, "from-json") || die("fixture write requires --from-json <file> (or --malformed --content)");
+    const value = loadJsonInputFile(fromJson);
+    const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "schemas", "workflow-state.schema.json");
+    const schema = JSON.parse(read(schemaPath));
+    const correlationSchema = JSON.parse(read(path.join(path.dirname(schemaPath), "run-correlation-envelope.schema.json")));
+    const issues: SchemaIssue[] = [];
+    validateSchemaValue(
+      "state.json",
+      value,
+      schema,
+      "state",
+      issues,
+      schema,
+      { "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json": correlationSchema },
+    );
+    const fixtureValue = value && typeof value === "object" && !Array.isArray(value)
+      ? value as AnyObj
+      : {};
+    if (fixtureValue.run_correlation) {
+      try {
+        validateRunCorrelationPresence(fixtureValue.run_correlation);
+      } catch (error) {
+        issues.push({
+          path: "state.json",
+          message: error instanceof Error ? error.message : "state.run_correlation is invalid",
+        });
+      }
+    }
+    if (issues.length > 0) {
+      die(`fixture write refused: content does not satisfy workflow-state.schema.json:\n${issues.map((i) => `  - ${i.message}`).join("\n")}\n(use --malformed --content to author an intentionally-invalid fixture)`);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`);
+    mode = "schema-valid";
+  }
+  process.stdout.write(
+    `${JSON.stringify({ written: target, mode, allowed_because: "target is provably outside every declared artifact root" }, null, 2)}\n`,
+  );
+  return 0;
+}
+function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
 
 function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
   if (ref === `local:${slug}`) return true;
   try { return workItemSlug(ref) === slug; } catch { return false; }
-}
-
-function githubWorkItemIdentity(ref: string): { owner: string; name: string; issueNumber: number } {
-  const match = ref.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9]\d*)$/);
-  if (!match) die("GitHub assignment ownership requires an exact owner/repo#numeric-id Work Item reference");
-  const issueNumber = Number(match[3]);
-  if (!Number.isSafeInteger(issueNumber)) die("GitHub Work Item issue number exceeds the safe integer range");
-  return { owner: match[1], name: match[2], issueNumber };
 }
 
 type SessionWorkItem = {
@@ -200,9 +436,9 @@ function sanitizeBranchSegment(value: string, helper: { sanitizeSegment: (v: unk
  * check is skipped silently and the lexical checks above remain the sole authority. Dies with
  * remediation, or with git's own rejection message; never mutates any artifact before this check
  * runs (resolveSessionBranch calls this before any file write). */
-function validateExplicitBranch(value: string): void {
-  const remediation = `Pass a --branch value matching [A-Za-z0-9_./-], with no leading/trailing "/", no "//", no leading ".", no ".." sequence, and no trailing "." or ".lock" (got: ${JSON.stringify(value)}).`;
-  const fail = (reason: string): never => die(`ensure-session --branch value is not a valid git ref: ${reason}. ${remediation}`);
+function validateBranchValue(value: string, source: string): void {
+  const remediation = `Use a branch matching [A-Za-z0-9_./-], with no leading/trailing "/", no "//", no leading ".", no ".." sequence, and no trailing "." or ".lock" (got: ${JSON.stringify(value)}).`;
+  const fail = (reason: string): never => die(`ensure-session ${source} is not a valid git ref: ${reason}. ${remediation}`);
   if (/[\x00-\x1F\x7F]/.test(value)) fail("contains a control character or newline");
   if (/ /.test(value)) fail("contains a space");
   if (value.startsWith("/") || value.endsWith("/")) fail('must not start or end with "/"');
@@ -244,6 +480,10 @@ function validateExplicitBranch(value: string): void {
     const gitMessage = String(result.stderr ?? "").trim();
     fail(gitMessage ? `git check-ref-format rejected the value: ${gitMessage}` : "git check-ref-format rejected the value");
   }
+}
+
+function validateExplicitBranch(value: string): void {
+  validateBranchValue(value, "--branch value");
 }
 
 /**
@@ -321,15 +561,27 @@ function resolveReadActorKey(p: ReturnType<typeof parseArgs>): string {
 
 /** Resolve the branch to seed a brand-new session with. Only called from ensureSession's
  * `if (!md)` fresh-creation branch — an existing session's already-recorded branch is never
- * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). Precedence: explicit
- * --branch (strictly validated, then honored verbatim — see F2) > derived agent/<actor>/<slug>.
+ * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). A validated provider
+ * branch is authoritative when present; otherwise precedence is explicit --branch (strictly
+ * validated, then honored verbatim — see F2) > derived agent/<actor>/<slug>.
  * Never hard-fails session creation on actor-resolution ambiguity (Design Decision 4) — only a
  * garbage explicit --actor, or a garbage explicit --branch, dies. */
-function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string): string {
+function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string, providerBranch?: string): string {
   // Deliberately NOT trimmed before validation (unlike the pre-F2 baseline): a leading/trailing
   // space must be REJECTED, not silently trimmed away — silent trimming would let a
   // caller-supplied value differ from what gets recorded without any diagnostic (F2).
   const explicitBranch = opt(p, "branch");
+  // A provider-backed Builder start has already authenticated its ownership result before it
+  // reaches this point. Its claim record is therefore the sole branch authority: accepting a
+  // caller branch here would fork a session away from the provider's durable assignment. Reject
+  // a disagreement loudly instead of silently choosing either value. Local/ad-hoc sessions keep
+  // the established explicit-then-derived behavior below.
+  if (providerBranch) {
+    if (explicitBranch && explicitBranch !== providerBranch) {
+      die(`ensure-session --branch cannot override the validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+    }
+    return providerBranch;
+  }
   if (explicitBranch) { validateExplicitBranch(explicitBranch); return explicitBranch; }
   const helper = loadActorIdentityHelper();
   // #291 Wave 2 Task 2.1: actor resolution is now single-sourced via resolveEnsureSessionActor()
@@ -374,53 +626,22 @@ export async function validateTrustBundle(bundle: unknown): Promise<{ valid: boo
     return { valid: false, errors: [message], available: true };
   }
 }
-// Validate a single InquiryRecord against the hachure inquiry-record.schema.json.
-// Uses a separate AJV instance compiled against that schema (not the trust-bundle schema).
-let _hachureInquiryRecordValidator: ((record: unknown) => { valid: boolean; errors: string[] }) | null | undefined;
-function getHachureInquiryRecordValidator(): ((record: unknown) => { valid: boolean; errors: string[] }) | null {
-  if (_hachureInquiryRecordValidator !== undefined) return _hachureInquiryRecordValidator;
-  try {
-    const _require = createRequire(import.meta.url);
-    const hachureDir = path.dirname(_require.resolve("hachure"));
-    const schemasDir = path.join(hachureDir, "schemas");
-    const Ajv = _require("ajv/dist/2020");
-    const schemas: Record<string, any> = {};
-    for (const file of fs.readdirSync(schemasDir)) {
-      if (!file.endsWith(".schema.json")) continue;
-      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
-    }
-    const inquiryRecordSchema = schemas["inquiry-record.schema.json"];
-    if (!inquiryRecordSchema) { _hachureInquiryRecordValidator = null; return null; }
-    const ajv = new Ajv({ strict: false, allErrors: true });
-    for (const [filename, schema] of Object.entries(schemas)) {
-      if (filename === "inquiry-record.schema.json") continue;
-      ajv.addSchema(schema, filename);
-    }
-    const validate = ajv.compile(inquiryRecordSchema);
-    _hachureInquiryRecordValidator = (record: unknown) => {
-      const valid = validate(record);
-      if (valid) return { valid: true, errors: [] };
-      const errors = ((validate as any).errors ?? []).map((err: any) => {
-        const loc = err.instancePath || err.schemaPath || "";
-        return `${loc} ${err.message ?? "invalid"}`.trim();
-      });
-      return { valid: false, errors };
-    };
-    return _hachureInquiryRecordValidator;
-  } catch {
-    _hachureInquiryRecordValidator = null;
-    return null;
-  }
-}
 /**
- * Validate a record against the canonical hachure inquiry-record.schema.json
- * (https://kontourai.io/schemas/surface/inquiry-record.schema.json).
- * Returns `{ valid, errors, available }`. Fail-open when hachure is not installed.
+ * Validate a record against the canonical InquiryRecord schema via
+ * @kontourai/surface's `validateInquiryRecord` (symmetric to `validateTrustBundle`).
+ * Returns `{ valid, errors, available }`. Fail-open when Surface is unavailable.
  */
-export function validateInquiryRecord(record: unknown): { valid: boolean; errors: string[]; available: boolean } {
-  const validate = getHachureInquiryRecordValidator();
-  if (!validate) return { valid: true, errors: [], available: false };
-  return { ...validate(record), available: true };
+export async function validateInquiryRecord(record: unknown): Promise<{ valid: boolean; errors: string[]; available: boolean }> {
+  const m = await tryLoadSurface();
+  if (!m || typeof (m as { validateInquiryRecord?: unknown }).validateInquiryRecord !== "function") {
+    return { valid: true, errors: [], available: false };
+  }
+  try {
+    (m as unknown as { validateInquiryRecord: (r: unknown) => unknown }).validateInquiryRecord(record);
+    return { valid: true, errors: [], available: true };
+  } catch (err) {
+    return { valid: false, errors: [err instanceof Error ? err.message : String(err)], available: true };
+  }
 }
 // ─── @kontourai/surface status derivation ────────────────────────────────────
 // Surface is ESM-only; this module builds to CJS. Load Surface via a fail-open
@@ -471,8 +692,12 @@ type SurfaceModule = {
   ) => SurfaceInquiryRecord;
   buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
   buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
+  /** #171: consumer-ready claim explanation (Surface >=2.10); composes the drilldown internally, fail-soft. */
+  explainClaim: (report: Record<string, unknown>, claimId: string) => import("@kontourai/surface").ClaimExplanation;
   /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
   validateTrustBundle: (input: unknown) => Record<string, unknown>;
+  /** Canonical InquiryRecord validator from @kontourai/surface. Throws on invalid input; returns InquiryRecord on success. */
+  validateInquiryRecord: (input: unknown) => Record<string, unknown>;
   /** Freeze a derivation checkpoint from a report. */
   checkpointFromReport: (report: Record<string, unknown>) => Record<string, unknown>;
   /** Diff two derivations (prior checkpoint → later report) and emit freshness transition events. */
@@ -532,6 +757,18 @@ function criterionStatusToEventStatus(status: string): string | null {
   if (status === "fail") return "disputed";
   if (status === "accepted_gap") return "assumed";
   return null; // pending / not_verified → no event → Surface returns "unknown"
+}
+
+const ACCEPTANCE_CRITERION_STATUSES = new Set<string>(WORKFLOW_ACCEPTANCE_STATUSES);
+const CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA = new WeakSet<object>();
+
+function markCanonicallyObservedCriterion<T extends AnyObj>(criterion: T): T {
+  CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.add(criterion);
+  return criterion;
+}
+
+function normalizeCriterionStatus(status: unknown): string {
+  return typeof status === "string" && ACCEPTANCE_CRITERION_STATUSES.has(status) ? status : "pending";
 }
 /**
  * WS8 (ADR 0020): Derive Surface evidence classification (evidenceType + method)
@@ -635,10 +872,40 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
       else if (prev.observedResult === "pass" || result === "pass") merged = "pass";
       else merged = "ambiguous";
     }
-    const mergedExitCode = exitCode !== null ? exitCode : (prev ? prev.exitCode : null);
+    // #634 review finding: the exit code must travel with the WINNING status, never a
+    // losing entry's — [hook fail exit 1, writer pass exit 0] must fold to fail/1, not
+    // fail/0 (contradictory isError:true, exitCode:0 evidence). When both entries carry
+    // the winning status, prefer the newer non-null code.
+    let mergedExitCode: number | null;
+    if (!prev) {
+      mergedExitCode = exitCode;
+    } else if (merged === result && merged === prev.observedResult) {
+      mergedExitCode = exitCode !== null ? exitCode : prev.exitCode;
+    } else if (merged === result) {
+      mergedExitCode = exitCode;
+    } else {
+      mergedExitCode = prev.exitCode;
+    }
     captureByCommand.set(key, { observedResult: merged, exitCode: mergedExitCode });
   }
   return captureByCommand;
+}
+
+/**
+ * Combine a caller's requested gate verdict with an independently observed command result.
+ *
+ * A command observation can prevent an unearned pass, but it must never upgrade or replace an
+ * explicitly reported failure or uncertainty.  The observation remains separately persisted in
+ * the claim metadata and command log for reviewers.
+ */
+export function composeGateVerdict(
+  requestedStatus: "pass" | "fail" | "not_verified",
+  observedResult?: "pass" | "fail" | "ambiguous",
+): "pass" | "fail" | "not_verified" {
+  if (requestedStatus !== "pass") return requestedStatus;
+  if (observedResult === "fail") return "fail";
+  if (observedResult === "ambiguous") return "not_verified";
+  return "pass";
 }
 
 /**
@@ -654,7 +921,7 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
  * @param critiques  Critique objects reconstructed from trust.bundle claims
  * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents: AnyObj[] = [], capturedWorkflowSubjectRef?: string | null): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -691,7 +958,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       return null;
     }
   })();
-  const workflowSubjectRef: string | null = (() => {
+  const workflowSubjectRef: string | null = capturedWorkflowSubjectRef !== undefined ? capturedWorkflowSubjectRef : (() => {
     if (!flowAgentsDir) return null;
     try {
       const state = loadJson(path.join(flowAgentsDir, slug, "state.json"));
@@ -830,8 +1097,6 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   //     "flow-step". Fallback: first non-decision, non-acceptance entry.
   //   check (kind=policy)     → expects[] entry whose claimType contains
   //     "compliance" or "policy". Fallback: same as non-policy.
-  //   acceptance criterion    → expects[] entry whose subjectType is "flow-step"
-  //     OR claimType contains "tests" OR "compliance". Fallback: first entry.
   //   critique                → expects[] entry whose claimType contains "policy"
   //     OR "compliance" AND subjectType is "artifact". Fallback: last entry.
   //
@@ -841,7 +1106,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // Surface from that evidence (never hand-set).
   //
   // Per-gate producibility (ADR 0016 P-d):
-  //   (a) Already handled via subjectType=flow-step preference:
+  //   (a) Already handled via subjectType=flow-step preference for checks:
   //       builder.verify.tests       (verify-gate, subjectType=flow-step)
   //       builder.verify.policy-compliance (verify-gate, kind=policy match)
   //   (b) Producible via fallback (non-decision, non-acceptance, first match):
@@ -858,7 +1123,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   //       builder.learn.evidence            (learn-gate, subjectType=release)
   //   For category (c): record-gate-claim subcommand allows skills to target a specific
   //   expects[] entry by --expectation <id>, bypassing this semantic match entirely.
-  function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
+  //
+  // Acceptance criteria do not participate in this matching table. They are durable Work Item
+  // facts with invariant workflow.acceptance.criterion/flow-step identity across every gate.
+  function matchExpectsEntry(kind: "check" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
     if (!activeStep || activeStep.gateExpects.length === 0) return null;
     const expects = activeStep.gateExpects;
     if (kind === "check") {
@@ -891,14 +1159,6 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       if (fallback) return { claimType: fallback.bundle_claim.claimType, subjectType: fallback.bundle_claim.subjectType };
       return null;
     }
-    if (kind === "acceptance") {
-      const match = expects.find((e) => {
-        const ct = e.bundle_claim.claimType.toLowerCase();
-        return e.bundle_claim.subjectType === "flow-step" || ct.includes("tests") || ct.includes("compliance");
-      });
-      if (match) return { claimType: match.bundle_claim.claimType, subjectType: match.bundle_claim.subjectType };
-      return { claimType: expects[0]!.bundle_claim.claimType, subjectType: expects[0]!.bundle_claim.subjectType };
-    }
     if (kind === "critique") {
       const match = expects.find((e) => {
         const ct = e.bundle_claim.claimType.toLowerCase();
@@ -911,6 +1171,32 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     return null;
   }
   // ────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * #1170 (PR2): the workspace snapshot stamped onto a FRESHLY-recorded kit-typed gate claim.
+   *
+   * Captured at most once per bundle write (the Git diff is whole-tree) and only if some check
+   * actually needs it.
+   *
+   * ONLY fresh writes are stamped — see `_fresh_record_write`, set by the recording verb on the
+   * checks supplied in THIS invocation. Every writer in this file rebuilds the whole bundle from
+   * `checksFromBundle` + its own new checks, so stamping unconditionally would re-anchor a check
+   * recorded against an OLD tree to the CURRENT one on every unrelated later write (a
+   * record-critique or record-learning call would silently refresh a stale verifier check).
+   * That is precisely the evidence laundering PR1's read-time predicate is built to prevent:
+   * "no path re-stamps a snapshot". A previously-recorded snapshot round-trips untouched through
+   * `checksFromBundle`'s `_verification_workspace_snapshot` restoration, so a rebuild preserves
+   * the original binding rather than renewing it.
+   */
+  let capturedFreshWorkspaceSnapshot: AnyObj | null | undefined;
+  const freshWorkspaceSnapshot = (): AnyObj | null => {
+    if (capturedFreshWorkspaceSnapshot === undefined) {
+      capturedFreshWorkspaceSnapshot = flowAgentsDir
+        ? tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(path.join(flowAgentsDir, slug)))
+        : null;
+    }
+    return capturedFreshWorkspaceSnapshot;
+  };
 
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
   for (const check of Array.isArray(checks) ? checks : []) {
@@ -944,7 +1230,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // checkStatusToEventStatus("not_verified") returns null — no verification event, and the
     // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
     // not an error).
-    const effectiveStatus = captured ? (captured.observedResult === "ambiguous" ? "not_verified" : captured.observedResult) : String(check.status ?? "");
+    const requestedStatus = String(check.status ?? "");
+    const effectiveStatus = ["pass", "fail", "not_verified"].includes(requestedStatus)
+      ? composeGateVerdict(requestedStatus as "pass" | "fail" | "not_verified", captured?.observedResult)
+      : requestedStatus;
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
@@ -975,6 +1264,16 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
         .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
       : null;
+    const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
+      && typeof check._verification_workspace_snapshot === "object"
+      && !Array.isArray(check._verification_workspace_snapshot)
+      ? check._verification_workspace_snapshot as AnyObj
+      : null;
+    const acceptanceContractMeta = check._acceptance_contract
+      && typeof check._acceptance_contract === "object"
+      && !Array.isArray(check._acceptance_contract)
+      ? check._acceptance_contract as AnyObj
+      : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -985,6 +1284,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
+    const gateClaimFlowRunHead = typeof check._gate_claim_flow_run_head === "string" ? check._gate_claim_flow_run_head : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1003,16 +1303,19 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimMetadata: AnyObj = {
       origin: "check",
       check_kind: String(check.kind ?? "external"),
-      ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
+      ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(typeof check._producer === "string" ? { expected_producer: check._producer } : {}),
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
       ...(Array.isArray(check._producer_self_produced_trust_slices) ? { self_produced_trust_slices: check._producer_self_produced_trust_slices } : {}),
       ...(waiver ? { waiver } : {}),
+      ...(Array.isArray(check._waiver_history) && check._waiver_history.length ? { waiver_history: check._waiver_history } : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
+      ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
+      ...(acceptanceContractMeta ? { acceptance_contract: acceptanceContractMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -1074,9 +1377,31 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
-      const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+      // #1170 (PR2) producer completeness: a check that resolves to a kit-typed gate claim is a
+      // CURRENT-GATE claim — `builder-flow-runtime.ts` classifies every `origin: "check"` claim as
+      // head-bound. A sidecar `record-evidence` check carries no `metadata.gate_claim` (that stamp
+      // is minted only by record-gate-claim), so it contributes a NULL head and, before PR1, made
+      // every later public `workflow evidence` write fail forever — #1164.
+      //
+      // PR1 lets such a claim re-establish freshness from a Git workspace snapshot instead. This is
+      // the producer half: stamp that snapshot at record time, so a live #1164-shaped run recovers
+      // in the field on an unchanged tree with no operator intervention.
+      //
+      // Only the snapshot is stamped here, deliberately NOT a `flow_run_head`. A fresh
+      // record-evidence check has no `gate_claim` object to carry a head (`_gate_claim_expectation_id`
+      // is minted only by record-gate-claim and restored only from a prior write), and synthesizing
+      // one from `matchExpectsEntry`'s heuristic would freeze a guessed expectation binding into
+      // the #270 anti-smuggling surface. Stamping a head onto a RESTORED claim would be worse
+      // still: it would let a stale claim pass the head fast path without any tree comparison at
+      // all. The snapshot is the whole producer gap, and it is the binding that actually describes
+      // a claim whose subject is repository content.
+      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta ?? (check._fresh_record_write === true ? freshWorkspaceSnapshot() : null);
+      const declaredBaseMetadata: AnyObj = declaredWorkspaceSnapshot
+        ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
+      const declaredMetadata: AnyObj = gateClaimExpectationId
+        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+        : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
@@ -1093,33 +1418,74 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!criterion.id) continue;
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
+    const normalizedCriterionStatus = normalizeCriterionStatus(criterion.status);
     const criterionIdentityVersion = criterion.identity_version === 2 ? 2 : 1;
     const criterionVerifiedAt = criterionIdentityVersion === 2 && typeof criterion.verified_at === "string" ? criterion.verified_at : null;
+    const criterionEvidenceRefs = Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [];
+    const commandRefs = criterionEvidenceRefs
+      .filter((ref: AnyObj) => ref?.kind === "command")
+      .map((ref: AnyObj) => commandFromEvidenceRef(ref))
+      .filter((command: string) => command.length > 0);
+    const rawObservedCommands = Array.isArray(criterion._observed_commands) ? criterion._observed_commands as AnyObj[] : [];
+    const observedCommands = rawObservedCommands.filter((observation: AnyObj) =>
+      typeof observation?.command === "string"
+      && commandRefs.includes(observation.command)
+      && observation.exit_code === 0
+      && typeof observation.output_sha256 === "string"
+      && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
+      && Number.isSafeInteger(observation.test_count)
+      && observation.test_count > 0
+      && ["local-process-exit", "coordinated-command-receipt"].includes(String(observation.execution_proof?.kind)),
+    );
+    const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
+      && criterionIdentityVersion === 2
+      && criterionVerifiedAt !== null
+      && Number.isFinite(Date.parse(criterionVerifiedAt))
+      && observedCommands.length === rawObservedCommands.length
+      && observedCommands.length > 0
+      && commandRefs.every((command: string) => observedCommands.some((observation: AnyObj) => observation.command === command));
+    const criterionStatus = normalizedCriterionStatus === "pass" && !hasObservedCommandProvenance
+      ? "pending"
+      : normalizedCriterionStatus;
+    const criterionClaimTimestamp = criterionStatus === "pass" && criterionVerifiedAt ? criterionVerifiedAt : ts;
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", criterionVerifiedAt ? `${fieldOrBehavior}::verified::${criterionVerifiedAt}` : fieldOrBehavior);
-    const legacyClaimType = "workflow.acceptance.criterion";
-    const policy = ensurePolicy(legacyClaimType, "high", []);
-    const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
+    const claimType = "workflow.acceptance.criterion";
+    const criterionEvidenceIds: string[] = [];
+    if (criterionStatus === "pass") {
+      for (const observation of observedCommands) {
+        const evidenceId = `ev:${claimId}:${createHash("sha256").update(observation.command).digest("hex").slice(0, 16)}`;
+        criterionEvidenceIds.push(evidenceId);
+        evidenceItems.push({
+          id: evidenceId,
+          claimId,
+          evidenceType: "test_output",
+          method: "validation",
+          sourceRef: `${slug}/observed-command`,
+          excerptOrSummary: observation.command,
+          observedAt: criterionVerifiedAt,
+          collectedBy: "flow-agents/workflow-sidecar",
+          passing: true,
+          execution: { runner: "bash", label: observation.command, isError: false, exitCode: 0 },
+        });
+      }
+    }
+    const policy = ensurePolicy(claimType, "high", criterionEvidenceIds.length > 0 ? ["test_output"] : []);
+    const evStatus = criterionStatusToEventStatus(criterionStatus);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: criterionEvidenceIds, createdAt: criterionClaimTimestamp, verifiedAt: criterionClaimTimestamp };
       events.push(evt);
       claimEvents.push(evt);
     }
 
-    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
-    const declared = matchExpectsEntry("acceptance");
-    if (declared) {
-      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
-      const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [], ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
-      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
-      claims.push({ ...declaredClaimObj, status: declaredStatus });
-    } else {
-      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [] } } };
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-      claims.push({ ...claimObj, status: derivedStatus });
-    }
+    // Acceptance criteria are durable Work Item facts. Their identity must not change when a
+    // bundle is rebuilt at a different active gate. Missing or invalid status is conservatively
+    // projected as pending so direct artifact edits can never manufacture a pass or invalidate
+    // the Hachure claim shape.
+    const claimObj: AnyObj = { id: claimId, subjectType: "flow-step", subjectId, facet: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterionStatus, createdAt: criterionClaimTimestamp, updatedAt: criterionClaimTimestamp, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterionStatus, evidence_refs: criterionEvidenceRefs, ...(observedCommands.length > 0 ? { observed_commands: observedCommands } : {}), ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
+    const criterionEvidence = evidenceItems.filter((evidence) => evidence.claimId === claimId);
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: criterionEvidence as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+    claims.push({ ...claimObj, status: derivedStatus });
   }
 
   // Critique entries → claims + events
@@ -1135,18 +1501,31 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
-    const critMeta: AnyObj = {
+    const reconstructedMetadata = c._source_claim_metadata
+      && typeof c._source_claim_metadata === "object"
+      && !Array.isArray(c._source_claim_metadata)
+      ? { ...c._source_claim_metadata }
+      : null;
+    const critMeta: AnyObj = reconstructedMetadata ?? {
       origin: "critique",
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
       ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
+      critique_sequence: c.critique_sequence,
+      critique_predecessor_hash: c.critique_predecessor_hash,
+      critique_record_hash: c.critique_record_hash,
       findings: Array.isArray(c.findings) ? c.findings : [],
       lanes: Array.isArray(c.lanes) ? c.lanes : [],
       review_target: c.review_target && typeof c.review_target === "object" ? c.review_target : { artifacts: [] },
       // Keep the legacy field for consumers that still render a flat artifact list.
       artifact_refs: Array.isArray(c.artifact_refs) ? c.artifact_refs : [],
-      ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
+      ...((typeof c.workflow_subject_ref === "string" && c.workflow_subject_ref.length > 0) || workflowSubjectRef
+        ? { workflow_subject_ref: c.workflow_subject_ref ?? workflowSubjectRef }
+        : {}),
       ...(supersededBy ? { superseded_by: supersededBy } : {}),
+      ...(c.critique_resolution && typeof c.critique_resolution === "object" && !Array.isArray(c.critique_resolution)
+        ? { critique_resolution: c.critique_resolution }
+        : {}),
     };
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
     // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
@@ -1154,7 +1533,21 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimIdSalt = critiqueIdentityVersion === 2
       ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
       : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
+    // Existing critique claims are reconstructed from trust.bundle before a
+    // compose-safe rebuild. Preserve their physical claim identity exactly:
+    // an externally resolved critique acquires supersession metadata without
+    // changing its claim id, and recomputing the historical salt here would
+    // make an unrelated gate-claim write drift the resolved critique.
+    const claimId = typeof c.claim_id === "string" && c.claim_id.length > 0
+      ? c.claim_id
+      : generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
+    // A critique claim's physical id changes when it becomes history because its supersession
+    // metadata is part of the claim identity. Preserve an immutable logical record id so an
+    // authenticated resolver can refer to the original review without relying on a mutable
+    // physical claim id.
+    critMeta.critique_record_id = typeof c.critique_record_id === "string" && c.critique_record_id.length > 0
+      ? c.critique_record_id
+      : claimId;
     const legacyClaimType = "workflow.critique.review";
     const policy = ensurePolicy(legacyClaimType, "medium", []);
     // A superseded write emits NO verification event (its status is "superseded" directly).
@@ -1168,7 +1561,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
 
     // Critique is intentionally report-only. It must never inherit a Flow gate expectation,
     // even while a run is positioned at a gate-bearing step.
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id, metadata: critMeta };
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: c.created_at ?? critiqueReviewedAt, updatedAt: c.updated_at ?? critiqueReviewedAt, impactLevel: "medium", verificationPolicyId: policy.id, metadata: critMeta };
     if (supersededBy) {
       // History: status is "superseded" directly (no verification event); excluded from evaluation.
       claims.push({ ...claimObj, status: "superseded" });
@@ -1185,6 +1578,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     evidence: evidenceItems,
     policies: [...policies.values()],
     events,
+    ...(resolutionEvents.length ? { critique_resolution_events: resolutionEvents } : {}),
   };
 }
 
@@ -1201,7 +1595,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -1234,14 +1628,21 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
         }
       } catch { /* current.json absent or unreadable — no scoping */ }
     }
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext);
+    let effectiveResolutionEvents = resolutionEvents;
+    if (effectiveResolutionEvents === undefined) {
+      try {
+        const prior = loadJson(path.join(dir, "trust.bundle"));
+        effectiveResolutionEvents = Array.isArray(prior.critique_resolution_events) ? prior.critique_resolution_events : [];
+      } catch { effectiveResolutionEvents = []; }
+    }
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, effectiveResolutionEvents, capturedWorkflowSubjectRef);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
     }
-    writeJson(path.join(dir, "trust.bundle"), bundle);
+    writeTrustBundleAtomically(path.join(dir, "trust.bundle"), bundle, writerTarget);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1355,6 +1756,39 @@ function requireArtifactDirUnderRoot(dir: string, root: string): void {
   if (!dir || !fs.existsSync(dir)) die("artifact directory does not exist");
   if (fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
   if (!isUnderDir(dir, root)) die(`artifact directory must be under artifact root: ${dir} is outside ${root}`);
+}
+
+function assertRegularDirectoryNoFollow(
+  dir: string,
+  parent: string,
+  label: string,
+  expected?: fs.Stats,
+): fs.Stats {
+  const parentIdentity = fs.lstatSync(parent);
+  const identity = fs.lstatSync(dir);
+  if (!parentIdentity.isDirectory() || parentIdentity.isSymbolicLink()) {
+    die(`${label} parent must be a regular directory: ${parent}`);
+  }
+  if (!identity.isDirectory() || identity.isSymbolicLink()) {
+    die(`${label} must be a regular directory: ${dir}`);
+  }
+  if (expected && (identity.dev !== expected.dev || identity.ino !== expected.ino)) {
+    die(`${label} changed identity before the event append: ${dir}`);
+  }
+  const relative = path.relative(fs.realpathSync(parent), fs.realpathSync(dir));
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    die(`${label} escaped its expected parent: ${dir}`);
+  }
+  return identity;
+}
+
+function ensureRegularDirectoryNoFollow(dir: string, parent: string, label: string): fs.Stats {
+  try {
+    fs.mkdirSync(dir, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return assertRegularDirectoryNoFollow(dir, parent, label);
 }
 
 function isPermissionDeniedLockError(error: NodeJS.ErrnoException): boolean {
@@ -1617,6 +2051,15 @@ function loadCurrentPointerHelper(): {
   readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+  publishCurrentPointers: (flowAgentsDir: string, actorKey: string | undefined, payload: AnyObj) => void;
+  updateCurrentPointersForBinding: (
+    flowAgentsDir: string,
+    actorKey: string | undefined,
+    artifactDir: string,
+    update: (payload: AnyObj) => AnyObj,
+    stage?: () => { commit: () => void; rollback: () => void },
+    expectedBindingId?: string | null,
+  ) => number;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/current-pointer.js");
@@ -1625,6 +2068,15 @@ function loadCurrentPointerHelper(): {
     readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+    publishCurrentPointers: (flowAgentsDir: string, actorKey: string | undefined, payload: AnyObj) => void;
+    updateCurrentPointersForBinding: (
+      flowAgentsDir: string,
+      actorKey: string | undefined,
+      artifactDir: string,
+      update: (payload: AnyObj) => AnyObj,
+      stage?: () => { commit: () => void; rollback: () => void },
+      expectedBindingId?: string | null,
+    ) => number;
   };
 }
 
@@ -1678,7 +2130,17 @@ function validateRunnableCheckCommand(check: AnyObj, context: string): void {
  * byte-identical to this function's pre-#291 behavior — with a stderr note mirroring the existing
  * unresolved-actor branch-naming diagnostic.
  */
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, actorKey?: string): void {
+function writeCurrent(
+  root: string,
+  dir: string,
+  timestamp: string,
+  owner: string,
+  source: string,
+  flowId?: string,
+  stepId?: string,
+  actorKey?: string,
+  requireActorProjection = false,
+): void {
   // #289: mirror the active session's already-recorded branch (state.json.branch) into
   // current.json so consumers of current.json (which has no schema of its own — not one of the
   // 9 schemas under schemas/) see the routing branch without re-reading state.json separately.
@@ -1698,18 +2160,24 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     ...(flowId ? { active_flow_id: flowId } : {}),
     ...(stepId ? { active_step_id: stepId } : {}),
   };
-  writeJson(path.join(root, "current.json"), payload);
   if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
     try {
-      loadCurrentPointerHelper().writePerActorCurrent(root, actorKey, payload);
+      loadCurrentPointerHelper().publishCurrentPointers(root, actorKey, payload);
+      return;
     } catch (err) {
-      // Best-effort projection only — the legacy file above is already durable and authoritative;
-      // a failure here must never affect ensure-session's own exit code (fail-open, visible).
+      if (requireActorProjection) {
+        throw new Error(`failed to write required per-actor current pointer: ${err instanceof Error ? err.message : String(err)}`);
+      }
       process.stderr.write(`[ensure-session] failed to write per-actor current pointer: ${err instanceof Error ? err.message : String(err)}\n`);
+      loadCurrentPointerHelper().publishCurrentPointers(root, undefined, payload);
+      return;
     }
+  } else if (requireActorProjection) {
+    throw new Error("canonical Builder start requires a resolved actor-scoped current pointer");
   } else {
     process.stderr.write("[ensure-session] actor unresolved or not provided; per-actor current.json projection skipped (legacy current.json remains authoritative)\n");
   }
+  loadCurrentPointerHelper().publishCurrentPointers(root, undefined, payload);
 }
 function loadCurrent(root: string): AnyObj | null {
   const file = path.join(root, "current.json");
@@ -1748,33 +2216,32 @@ export function currentWorkflowSessionDir(root: string): string | null {
  * The two checks are independent: either, both, or neither may fire depending on which
  * pointer(s) currently reference `dir`.
  */
-function updateCurrentAgent(root: string, dir: string, agentId: string, status: string, timestamp: string, actorKey?: string): void {
+function updateCurrentAgent(
+  root: string,
+  dir: string,
+  agentId: string,
+  status: string,
+  timestamp: string,
+  actorKey?: string,
+  stageEvent?: () => { commit: () => void; rollback: () => void },
+  expectedBindingId?: string | null,
+): number {
   const applyAgentUpdate = (payload: AnyObj): AnyObj => {
     const active = Array.isArray(payload.active_agents) ? payload.active_agents.filter((a: AnyObj) => a.agent_id !== agentId) : [];
     if (status === "active" || status === "blocked") active.push({ agent_id: agentId, status, updated_at: timestamp });
     return { ...payload, active_agents: active, updated_at: timestamp };
   };
 
-  const cur = loadCurrent(root);
-  if (cur && path.resolve(root, cur.artifact_dir ?? "") === path.resolve(dir)) {
-    writeJson(path.join(root, "current.json"), applyAgentUpdate(cur));
-  }
-
-  if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
-    const helper = loadCurrentPointerHelper();
-    // #440 fix-wave 3: read through the legacy-aware path (readOwnCurrentPointer tries the new
-    // collision-resistant filename first, then falls back to the pre-fix-wave-2 legacy filename)
-    // instead of a direct fs read of perActorCurrentFile() alone — a direct read of ONLY the new
-    // filename would silently skip this active_agents/updated_at projection for a pointer a
-    // still-running pre-fix-wave-2 sidecar wrote under the old name. The write below always goes
-    // through writePerActorCurrent (new filename only), so the pointer migrates to the new name
-    // on first touch.
-    const pointer = helper.readOwnCurrentPointer(root, actorKey);
-    const perActor = pointer.payload;
-    if (perActor && path.resolve(root, perActor.artifact_dir ?? "") === path.resolve(dir)) {
-      helper.writePerActorCurrent(root, actorKey, applyAgentUpdate(perActor));
-    }
-  }
+  return loadCurrentPointerHelper().updateCurrentPointersForBinding(
+    root,
+    actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)
+      ? actorKey
+      : undefined,
+    path.relative(root, dir),
+    applyAgentUpdate,
+    stageEvent,
+    expectedBindingId,
+  );
 }
 
 function initSidecars(
@@ -1807,31 +2274,43 @@ function initSidecars(
   //      the deliver markdown itself as the init-plan artifact).
   // This makes the branch survive every subsequent initSidecars call (init-plan, or a resumed
   // ensure-session) at this single choke point, without patching every other writer.
-  const existingState = loadJson(path.join(dir, "state.json"));
-  const existingBranch = existingState.branch;
   const deliverMdPath = path.join(dir, `${slug}--deliver.md`);
   const deliverBranch = fs.existsSync(deliverMdPath) ? markdownField(read(deliverMdPath), "branch") : "";
-  const branch = existingBranch || deliverBranch || (markdown ? markdownField(markdown, "branch") : "");
   // #309 (scope addition): created_at is write-once, same class as the branch-drop bug above —
   // initSidecars fully rewrites state.json on every call (including a repair/backfill re-run of
   // init-plan against an already-existing session), so naively re-stamping created_at from the
   // current call's timestamp silently rewrites a session's original creation time. Preserve the
   // existing state.json's created_at when present; stamp only on true first-creation.
   // updated_at still reflects "now" on every call — that field is intentionally mutable.
-  const retainedWorkItemRefs = workItemRefs.length > 0 ? workItemRefs : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
   const nextActionSummary = typeof nextAction === "string" ? nextAction : String(nextAction.summary ?? summary);
   const nextActionPayload = typeof nextAction === "string"
     ? { status: "continue", summary: nextAction || summary }
     : { status: "continue", ...nextAction, summary: nextActionSummary };
-  writeJson(path.join(dir, "state.json"), {
-    ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
-    ...(branch ? { branch } : {}),
-    ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
-    ...(existingState.flow_run && typeof existingState.flow_run === "object" && !Array.isArray(existingState.flow_run)
-      ? { flow_run: existingState.flow_run }
-      : {}),
-    artifact_paths: relArtifacts(dir),
-    next_action: nextActionPayload,
+  updateStateJson(path.join(dir, "state.json"), (existingState) => {
+    const branch = existingState.branch || deliverBranch || (markdown ? markdownField(markdown, "branch") : "");
+    const retainedWorkItemRefs = workItemRefs.length > 0
+      ? workItemRefs
+      : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
+    if (
+      existingState.run_correlation
+      && typeof existingState.run_correlation === "object"
+      && !Array.isArray(existingState.run_correlation)
+    ) {
+      validateRunCorrelationPresence(existingState.run_correlation);
+    }
+    return {
+      ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
+      ...(branch ? { branch } : {}),
+      ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
+      ...(existingState.run_correlation && typeof existingState.run_correlation === "object" && !Array.isArray(existingState.run_correlation)
+        ? { run_correlation: existingState.run_correlation }
+        : {}),
+      ...(existingState.flow_run && typeof existingState.flow_run === "object" && !Array.isArray(existingState.flow_run)
+        ? { flow_run: existingState.flow_run }
+        : {}),
+      artifact_paths: relArtifacts(dir),
+      next_action: nextActionPayload,
+    };
   });
   writeJson(path.join(dir, "acceptance.json"), {
     ...sidecarBase(slug), source_request: sourceRequest,
@@ -1841,6 +2320,81 @@ function initSidecars(
   writeJson(path.join(dir, "handoff.json"), {
     ...sidecarBase(slug), summary, current_state_ref: "state.json", next_steps: nextActionSummary ? [nextActionSummary] : [], blockers: [], warnings: [],
   });
+}
+
+/**
+ * Provider-backed Builder sessions have one branch authority: the branch embedded in the
+ * AssignmentStatus record whose holder identity was just validated. Before a new local lease is
+ * mirrored, reject an existing session that points somewhere else. This is deliberately a
+ * read-only preflight so a bad resume cannot "fix" evidence by overwriting it.
+ */
+function assertExistingProviderBranchAgreement(
+  root: string,
+  slug: string,
+  dir: string,
+  providerBranch: string,
+  actorKey: string,
+): void {
+  const fail = (surface: string, observed: unknown): never => die(
+    `ensure-session refused: ${surface} branch ${JSON.stringify(observed)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`,
+  );
+  const deliverPath = path.join(dir, `${slug}--deliver.md`);
+  if (fs.existsSync(deliverPath)) {
+    const branch = markdownField(readRegularFileNoFollow(deliverPath, "ensure-session delivery branch").toString("utf8"), "branch");
+    if (branch !== providerBranch) fail("delivery", branch || "missing");
+  }
+  const statePath = path.join(dir, "state.json");
+  if (fs.existsSync(statePath)) {
+    const state = JSON.parse(readRegularFileNoFollow(statePath, "ensure-session state branch").toString("utf8")) as AnyObj;
+    if (state.branch !== providerBranch) fail("state", state.branch ?? "missing");
+  }
+
+  const relativeDir = path.relative(root, dir) || ".";
+  const checkCurrent = (payload: AnyObj | null, label: string): void => {
+    if (!payload || (payload.active_slug !== slug && payload.artifact_dir !== relativeDir)) return;
+    if (payload.branch !== providerBranch) fail(label, payload.branch ?? "missing");
+  };
+  const currentPath = path.join(root, "current.json");
+  if (fs.existsSync(currentPath)) {
+    checkCurrent(JSON.parse(readRegularFileNoFollow(currentPath, "ensure-session current branch").toString("utf8")) as AnyObj, "current");
+  }
+  checkCurrent(loadCurrentPointerHelper().readOwnCurrentPointer(root, actorKey).payload, "actor current");
+
+  const localMirror = readLocalAssignmentStatus(root, slug).record;
+  if (localMirror && localMirror.branch !== providerBranch) fail("assignment mirror", localMirror.branch ?? "missing");
+}
+
+function assertProviderBranchAgreement(
+  root: string,
+  slug: string,
+  dir: string,
+  providerBranch: string,
+  actorKey: string,
+): void {
+  assertExistingProviderBranchAgreement(root, slug, dir, providerBranch, actorKey);
+  const localMirror = readLocalAssignmentStatus(root, slug).record;
+  if (!localMirror || localMirror.status !== "claimed" || localMirror.branch !== providerBranch) {
+    die(`ensure-session refused: assignment mirror does not retain validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+  }
+}
+
+function assertCurrentProviderWorktreeBranch(root: string, providerBranch: string): void {
+  const projectRoot = path.dirname(path.dirname(root));
+  let actualBranch: string;
+  try {
+    actualBranch = execFileSync("git", ["-C", projectRoot, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    die("ensure-session requires a named Git worktree branch for a provider-backed AssignmentStatus record");
+  }
+  if (!actualBranch || actualBranch === "HEAD") {
+    die("ensure-session requires a named Git worktree branch for a provider-backed AssignmentStatus record");
+  }
+  if (actualBranch !== providerBranch) {
+    die(`ensure-session refused: actual Git worktree branch ${JSON.stringify(actualBranch)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+  }
 }
 
 /** Read a `--*-json` flag's value as a file path (or `-` for stdin), mirroring
@@ -1883,7 +2437,7 @@ function enforceEnsureSessionOwnership(
   dir: string,
   resolution: { actorStruct: ActorStruct; actorKey: string; branchActorKey: string; unresolved: boolean },
   workItemRef?: string,
-): { assignmentFile: string; actorKey: string; providerEvidenceFile?: string; providerEvidenceBytes?: Buffer } | null {
+): { assignmentFile: string; actorKey: string; providerBranch?: string; providerEvidenceFile?: string; providerEvidenceBytes?: Buffer } | null {
   if (p.flags.has("skip-ownership-guard")) {
     process.stderr.write("[ensure-session] ownership guard skipped via --skip-ownership-guard\n");
     return null;
@@ -1893,6 +2447,9 @@ function enforceEnsureSessionOwnership(
   // under, so the guard is skipped entirely (documented scope boundary, not a silent hole) rather
   // than claiming under a synthetic/unstable identity.
   if (resolution.unresolved) {
+    if (workItemRef && opt(p, "assignment-provider", "local-file") !== "local-file") {
+      die("ensure-session requires a resolved runtime actor to validate a provider-backed AssignmentStatus record and preserve its branch");
+    }
     process.stderr.write("[ensure-session] ownership guard not evaluated: actor is unresolved (set --actor or FLOW_AGENTS_ACTOR, or run inside a supported runtime) — proceeding without a durable claim, exactly as ensure-session behaved before #291\n");
     return null;
   }
@@ -1919,6 +2476,7 @@ function enforceEnsureSessionOwnership(
   type EffectiveResult = { effective_state: EffectiveState; reason: string; holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } };
   let effective: EffectiveResult;
   let providerEvidenceBytes: Buffer | undefined;
+  let providerBranch: string | undefined;
 
   const effectiveStateJsonFlag = opt(p, "effective-state-json");
   if (effectiveStateJsonFlag) {
@@ -1953,6 +2511,7 @@ function enforceEnsureSessionOwnership(
       || record?.status !== "claimed"
       || record?.subject_id !== slug
       || record?.work_item_ref !== workItemRef
+      || (assignmentProviderKind !== "local-file" && (typeof record?.branch !== "string" || record.branch.length === 0))
       || record?.actor_key !== resolution.branchActorKey
       || !record.actor || typeof record.actor !== "object"
       || record.actor.runtime !== resolution.actorStruct.runtime
@@ -1963,6 +2522,26 @@ function enforceEnsureSessionOwnership(
       || candidate.reason !== "self_is_holder"
       || candidate.holder?.actor !== resolution.branchActorKey)) {
       die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime");
+    }
+    if (assignmentProviderKind !== "local-file" && workItemRef) {
+      providerBranch = record!.branch as string;
+      validateBranchValue(providerBranch, "validated provider assignment branch");
+      // The provider claim authenticates a branch, but the checkout is the source mutation
+      // authority. Compare them before any local mirror, session, or current-pointer write.
+      assertCurrentProviderWorktreeBranch(root, providerBranch);
+      // The immutable provider snapshot is part of the read-only resume preflight, not the
+      // later session-artifact staging phase. If it already exists, compare its exact bytes
+      // before performLocalClaim can create a local assignment mirror. A conflicting retry must
+      // leave no new durable ownership or session projection behind.
+      const stagedProviderEvidence = path.join(dir, "assignment-provider-state.json");
+      if (fs.existsSync(stagedProviderEvidence)
+        && !readRegularFileNoFollow(stagedProviderEvidence, "ensure-session immutable provider state evidence").equals(providerEvidenceBytes)) {
+        die("ensure-session provider state evidence conflicts with the existing immutable snapshot");
+      }
+      // Check every existing durable projection before mirroring or changing anything. A resume
+      // must continue the provider-authorized branch, never repair a conflicting session by
+      // overwriting its branch metadata.
+      assertExistingProviderBranchAgreement(root, slug, dir, providerBranch, resolution.branchActorKey);
     }
     effective = candidate as EffectiveResult;
   } else if (assignmentProviderKind === "local-file") {
@@ -2013,6 +2592,7 @@ function enforceEnsureSessionOwnership(
     return {
       assignmentFile: assignmentFilePath(root, slug),
       actorKey: resolution.branchActorKey,
+      ...(providerBranch ? { providerBranch } : {}),
       ...(effectiveStateJsonFlag ? { providerEvidenceFile: path.resolve(effectiveStateJsonFlag) } : {}),
       ...(providerEvidenceBytes ? { providerEvidenceBytes } : {}),
     };
@@ -2020,6 +2600,12 @@ function enforceEnsureSessionOwnership(
 
   const resolveBranchForClaim = (): string => {
     const existingBranch = fs.existsSync(path.join(dir, "state.json")) ? (loadJson(path.join(dir, "state.json")).branch as string | undefined) : undefined;
+    if (providerBranch) {
+      if (existingBranch && existingBranch !== providerBranch) {
+        die(`ensure-session refused: state branch ${JSON.stringify(existingBranch)} disagrees with validated provider assignment branch ${JSON.stringify(providerBranch)}`);
+      }
+      return providerBranch;
+    }
     return existingBranch || resolveSessionBranch(p, slug);
   };
 
@@ -2210,6 +2796,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     ? workItem.ref
     : undefined;
   let selectedWorkEvidence = enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution, selectionWorkItemRef);
+  if (selectedWorkEvidence?.providerBranch) {
+    // The provider-owned branch has been validated before this point; once the local assignment
+    // mirror exists it must agree before we create any session artifact around it.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   ensureSafeDirectory(root, dir);
   if (selectedWorkEvidence?.providerEvidenceBytes) {
     const staged = path.join(dir, "assignment-provider-state.json");
@@ -2231,12 +2822,24 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     // An existing session's already-recorded `branch:` line is never touched — that whole branch
     // of code is skipped on a resumed/taken-over session, which is what makes ADR 0021 §5
     // takeover continuity true by construction (see Design Decision 3 in the plan).
-    const branch = resolveSessionBranch(p, slug);
+    const branch = resolveSessionBranch(p, slug, selectedWorkEvidence?.providerBranch);
     const initialMarkdownStatus = entry.flowId ? "new" : "planning";
     const acceptanceCriteria = opts(p, "criterion");
     if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
     md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${acceptanceCriteria.map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
+    // #793 ENSURE-SESSION notice: every session ensure-session creates is deliver-type
+    // (the "type: deliver" markdown header above, always), and terminal states
+    // (accepted/archived) plus the learn-gate (stop-goal-fit.js's #793 STOP-GATE rule,
+    // and advance-state's terminal_jump_rejected guard) are only reachable/meaningful for a
+    // session bound to a canonical Flow run. Without --flow-id (or a subsequent
+    // `builder.build` binding), this session can advance through delivered/release but can
+    // never legally reach accepted/archived, and has no learn-gate at all — make that gap
+    // loud at creation instead of silently discoverable only much later. Full default-binding
+    // is tracked as a follow-up (see #793); this is the smallest defensible fix: a notice.
+    if (!entry.flowId) {
+      process.stderr.write(`[ensure-session] NOTICE: session ${JSON.stringify(slug)} has no canonical Flow bound — terminal states (accepted/archived) are unreachable and the learn-gate is absent; pass --flow-id <flow> (e.g. builder.build) to bind one now, or run builder.build later to bind it.\n`);
+    }
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
@@ -2275,6 +2878,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
       initialPhase ? { status: "new", phase: initialPhase } : undefined,
     );
   }
+  if (selectedWorkEvidence?.providerBranch) {
+    // initSidecars is the state.json writer. Recheck immediately after it so a legacy/malformed
+    // sidecar cannot cause the current pointer to advertise a different branch.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   // ADR 0016 Abstraction A (P-a): optional --flow-id / --step-id flags persist FlowDefinition
   // routing keys into current.json for the producer (P-b) and enforcer (P-c) to consume.
   // When absent, behavior is unchanged — the workflow.* claim type path is used as before.
@@ -2289,7 +2897,22 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     && typeof persistedCurrent?.active_step_id === "string"
     ? persistedCurrent.active_step_id
     : entry.stepId;
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", entry.flowId || undefined, resumedStep || undefined, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
+  writeCurrent(
+    root,
+    dir,
+    timestamp,
+    "workflow-sidecar",
+    "ensure-session",
+    entry.flowId || undefined,
+    resumedStep || undefined,
+    actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
+    entry.flowId === "builder.build" || entry.flowId === "builder.shape",
+  );
+  if (selectedWorkEvidence?.providerBranch) {
+    // current.json and the actor-scoped projection are both derived from state.json. Verify that
+    // both projections retained the exact provider branch before the canonical Builder run starts.
+    assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
+  }
   if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
@@ -2381,44 +3004,125 @@ function current(p: ReturnType<typeof parseArgs>): number {
   return 0;
 }
 
-function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
-  const hasExplicitRoot = !!opt(p, "artifact-root");
+function resolveAgentEventTarget(p: ReturnType<typeof parseArgs>): {
+  root: string;
+  dir: string;
+  actorKey: string;
+  ownPointer: AnyObj;
+  expectedBindingId: string | null;
+} {
+  if (opt(p, "actor")) {
+    die("record-agent-event does not accept --actor; actor identity comes from the authenticated runtime");
+  }
   const root = explicitArtifactRoot(p);
   const explicit = opt(p, "artifact-dir");
+  if (explicit && !opt(p, "artifact-root")) {
+    die("record-agent-event --artifact-dir requires --artifact-root for containment");
+  }
   const actorKey = resolveReadActorKey(p);
+  if (!actorKey || loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
+    die("record-agent-event requires a resolved authenticated runtime actor");
+  }
   const dir = explicit ? path.resolve(explicit) : currentDir(root, actorKey);
   if (!dir || !fs.existsSync(dir)) die("artifact directory does not exist");
   if (explicit && fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
-  if (hasExplicitRoot || !explicit) requireArtifactDirUnderRoot(dir, root);
-  const timestamp = opt(p, "timestamp", now());
-  const agent = validateAgentId(opt(p, "agent-id"));
-  // #376 model routing: optionally stamp the delegate role/model resolved from
-  // .datum/config.json onto the event so a downstream economics record (#349)
-  // can price role assignments per delegation, and so an escalate-on-gate-failure
-  // re-dispatch records which tier it climbed FROM. Fully additive/optional: when
-  // no routing flag is passed the event shape is byte-identical to before.
-  // These live as TOP-LEVEL event fields (not nested) on purpose: appendJsonl's
-  // serializer (spacedLine) uses the top-level key list as a JSON.stringify array
-  // replacer, which is an allowlist applied at every nesting level — a nested
-  // routing object would have its inner keys stripped. Flat keeps the shape a
-  // simple per-event routing record a JSONL economics feed can read directly.
-  const role = opt(p, "role");
-  const model = opt(p, "model");
-  const escalatedFrom = opt(p, "escalated-from");
-  const event = {
-    timestamp,
-    agent_id: agent,
-    kind: opt(p, "kind", "note"),
-    status: opt(p, "status", "info"),
-    summary: opt(p, "summary"),
-    ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}),
-    ...(role ? { role } : {}),
-    ...(model ? { model } : {}),
-    ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
+  requireArtifactDirUnderRoot(dir, root);
+  const ownPointer = loadCurrentPointerHelper().readOwnCurrentPointer(root, actorKey).payload;
+  if (!ownPointer || ownPointer.artifact_dir !== path.relative(root, dir)) {
+    die("record-agent-event requires the current actor binding to match the artifact directory");
+  }
+  const expectedBindingId = typeof ownPointer.binding_id === "string"
+    ? ownPointer.binding_id
+    : null;
+  return { root, dir, actorKey, ownPointer, expectedBindingId };
+}
+
+function agentEventCorrelation(root: string, dir: string, ownPointer: AnyObj | null): AnyObj {
+  const incomplete = {
+    status: "incomplete",
+    reason: "the agent event was not written through an authenticated Builder binding",
   };
-  appendJsonl(path.join(dir, "agents", agent, "events.jsonl"), event);
-  updateCurrentAgent(root, dir, agent, event.status, timestamp, actorKey);
-  return 0;
+  try {
+    const state = JSON.parse(readRegularFileNoFollow(path.join(dir, "state.json"), "agent event state").toString("utf8"));
+    const presence = validateRunCorrelationPresence(state.run_correlation);
+    if (
+      presence.status === "present"
+      && ownPointer
+      && ownPointer.artifact_dir === path.relative(root, dir)
+      && ownPointer.binding_id === presence.envelope.correlation_id
+      && state.task_slug === path.basename(dir)
+      && state.flow_run?.run_id === path.basename(dir)
+    ) {
+      return presence.envelope;
+    }
+  } catch {
+    // Legacy sessions retain local progress, but cannot become authenticated economics facts.
+  }
+  return incomplete;
+}
+
+function persistAgentEvent(
+  target: ReturnType<typeof resolveAgentEventTarget>,
+  agent: string,
+  event: AnyObj,
+): void {
+  const { root, dir, actorKey, expectedBindingId } = target;
+  const agentsDir = path.join(dir, "agents");
+  const agentDir = path.join(agentsDir, agent);
+  const agentsIdentity = ensureRegularDirectoryNoFollow(agentsDir, dir, "agent event directory");
+  const agentIdentity = ensureRegularDirectoryNoFollow(agentDir, agentsDir, "agent event actor directory");
+  const updatedPointers = updateCurrentAgent(
+    root,
+    dir,
+    agent,
+    event.status,
+    event.timestamp,
+    actorKey,
+    () => {
+      assertRegularDirectoryNoFollow(agentsDir, dir, "agent event directory", agentsIdentity);
+      assertRegularDirectoryNoFollow(agentDir, agentsDir, "agent event actor directory", agentIdentity);
+      return stageAnchoredAgentEvent(agentDir, agentIdentity, event);
+    },
+    expectedBindingId,
+  );
+  if (updatedPointers === 0) {
+    die("record-agent-event requires a current pointer bound to the artifact directory");
+  }
+}
+
+async function recordAgentEvent(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const initial = resolveAgentEventTarget(p);
+  const record = (): number => {
+    const target = resolveAgentEventTarget(p);
+    if (target.root !== initial.root
+        || target.dir !== initial.dir
+        || target.actorKey !== initial.actorKey
+        || target.expectedBindingId !== initial.expectedBindingId) {
+      die("record-agent-event authenticated binding changed while waiting for the canonical Flow lock; retry against the current binding");
+    }
+    const timestamp = opt(p, "timestamp", now());
+    const agent = validateAgentId(opt(p, "agent-id"));
+    const role = opt(p, "role");
+    const model = opt(p, "model");
+    const escalatedFrom = opt(p, "escalated-from");
+    const event = {
+      timestamp,
+      agent_id: agent,
+      kind: opt(p, "kind", "note"),
+      status: opt(p, "status", "info"),
+      summary: opt(p, "summary"),
+      run_correlation: agentEventCorrelation(target.root, target.dir, target.ownPointer),
+      ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}),
+      ...(role ? { role } : {}),
+      ...(model ? { model } : {}),
+      ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
+    };
+    persistAgentEvent(target, agent, event);
+    return 0;
+  };
+  return initial.expectedBindingId === null
+    ? record()
+    : withBuilderFlowProjectionCurrent({ sessionDir: initial.dir }, record);
 }
 
 function initPlan(p: ReturnType<typeof parseArgs>): number {
@@ -2443,28 +3147,40 @@ function hasNonEmptyString(value: unknown): boolean {
 function hasPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && Number(value) >= 1;
 }
-export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
-  if (!["source", "command", "artifact", "provider", "external"].includes(ref.kind)) die(`${label} entry kind must be one of: source, command, artifact, provider, external`);
-  for (const key of Object.keys(ref)) if (!["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"].includes(key)) die(`${label} entries contain unsupported field: ${key}`);
+export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
+  if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
+  for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
   if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
   if (ref.file !== undefined && !hasNonEmptyString(ref.file)) die(`${label} entry file must be a non-empty string`);
   if (ref.excerpt !== undefined && !hasNonEmptyString(ref.excerpt)) die(`${label} entry excerpt must be a non-empty string`);
   if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
   if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
   if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
-  if (ref.kind === "source" && (!hasNonEmptyString(ref.file) || !hasPositiveInteger(ref.line_start) || !hasPositiveInteger(ref.line_end) || !hasNonEmptyString(ref.excerpt))) die(`${label} source refs require file, line_start, line_end, and excerpt`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.file) && !hasNonEmptyString(ref.url))) die(`${label} artifact refs require file or url`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt))) die(`${label} artifact refs require summary or excerpt`);
-  if (ref.kind === "command" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt) && !hasNonEmptyString(ref.url))) die(`${label} command refs require summary, excerpt, or url`);
-  if ((ref.kind === "provider" || ref.kind === "external") && !hasNonEmptyString(ref.url)) die(`${label} ${ref.kind} refs require url`);
+  rejectNarrativeReference(projectRoot, ref.file, `${label} entry file`);
+  rejectNarrativeReference(projectRoot, ref.url, `${label} entry url`);
+  rejectNarrativeReference(projectRoot, ref.excerpt, `${label} entry excerpt`);
+  const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
+  for (const rule of rules) {
+    const present = (field: string): boolean => field === "line_start" || field === "line_end"
+      ? hasPositiveInteger(ref[field])
+      : hasNonEmptyString(ref[field]);
+    const valid = rule.mode === "all" ? rule.fields.every(present) : rule.fields.some(present);
+    if (!valid) {
+      const separator = rule.fields.length > 2 ? ", " : " ";
+      const joined = rule.fields.length > 1
+        ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
+        : rule.fields[0];
+      die(`${label} ${ref.kind} refs require ${rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined}`);
+    }
+  }
   return ref;
 }
-export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
+export function normalizeEvidenceRefs(raw: unknown, label: string, projectRoot = process.cwd()): AnyObj[] {
   if (!Array.isArray(raw)) die(`${label} must be an array`);
   return raw.map((ref) => {
     if (typeof ref === "string") die(`${label} entries must be structured evidence reference objects; legacy string refs are not supported`);
     if (!ref || typeof ref !== "object" || Array.isArray(ref)) die(`${label} entries must be objects`);
-    return validateEvidenceRef({ ...ref as AnyObj }, label);
+    return validateEvidenceRef({ ...ref as AnyObj }, label, projectRoot);
   });
 }
 
@@ -2478,14 +3194,196 @@ function canonicalProjectRootForSession(dir: string): string {
   return projectRoot;
 }
 
+/**
+ * #1170 (PR2): the canonical project root for a session, or null when the session is not a
+ * canonical `.kontourai/flow-agents/<slug>` layout.
+ *
+ * `canonicalProjectRootForSession` dies on a non-canonical layout, which is correct where a
+ * canonical root is a precondition (observed commands, passing public tests evidence). The
+ * broadened workspace-snapshot capture below is *additive provenance* — a legacy or tmp session
+ * layout must keep recording claims exactly as it does today rather than becoming unrecordable.
+ */
+function tryCanonicalProjectRootForSession(dir: string): string | null {
+  try {
+    return canonicalProjectRootForSession(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #1170 (PR2): best-effort Git worktree snapshot for gate-claim provenance.
+ *
+ * Returns a snapshot ONLY when a canonical Git worktree resolves. Two deliberate exclusions:
+ *
+ * - `null` root / capture failure / non-Git tree → null. The claim degrades to today's legacy
+ *   semantics (no snapshot recorded, nothing rejected at record time). Snapshot capture is a
+ *   freshness *affordance*; failing to obtain one must never make a recordable claim unrecordable.
+ * - A `reviewed-files` snapshot → null, never stamped. `captureReviewWorkspaceSnapshot` falls back
+ *   to digesting the supplied reviewed-file list when the tree is not Git-backed; with the empty
+ *   list passed here that digest is a constant, so stamping it would mint a claim that is
+ *   permanently self-current. The consumer (`builder-flow-runtime.ts` `isGitWorktreeSnapshot`)
+ *   already refuses to honor that shape — this keeps the producer from writing it at all.
+ */
+function tryCaptureGitWorktreeSnapshot(projectRoot: string | null): AnyObj | null {
+  if (!projectRoot) return null;
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return snapshot.kind === "git-worktree" && typeof snapshot.head_sha === "string" ? snapshot as AnyObj : null;
+  } catch {
+    return null;
+  }
+}
+
+// #619: the narrative isolation guard must run for EVERY session layout (canonical,
+// tmp, or legacy .flow-agents/) without imposing the canonical-session requirement that
+// canonicalProjectRootForSession enforces. It only needs a best-effort project root to
+// resolve relative evidence paths; the namespace regex and content-shape checks are
+// location-independent. It mirrors canonicalProjectRootForSession's path computation for a
+// canonical .kontourai/flow-agents/<slug> session (project root is three levels up), handles
+// the legacy .flow-agents/<slug> layout (two levels up), and never dies on any layout.
+function narrativeGuardRoot(dir: string): string {
+  const artifactRoot = path.dirname(dir);
+  const parentRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) === "flow-agents" && path.basename(parentRoot) === ".kontourai") {
+    return path.dirname(parentRoot);
+  }
+  if (path.basename(artifactRoot) === ".flow-agents") {
+    return parentRoot;
+  }
+  // Unknown/tmp layout: best-effort. Relative-path resolution may be imperfect, but the
+  // namespace regex and content-shape checks are location-independent, so the isolation
+  // guarantee holds regardless.
+  return artifactRoot;
+}
+
 function pathIsWithinRoot(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+export const NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC = "narrative trust isolation (#619): narrative namespace artifacts cannot be used as workflow evidence";
+
+function decodeNarrativeReference(value: string): string {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function realpathWithExistingPrefix(candidate: string): string {
+  let cursor = path.resolve(candidate);
+  const suffix: string[] = [];
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    suffix.unshift(path.basename(cursor));
+    cursor = parent;
+  }
+  let canonical = cursor;
+  try { canonical = (fs.realpathSync.native ?? fs.realpathSync)(cursor); } catch { /* resolved lexical prefix is the fallback */ }
+  return path.resolve(canonical, ...suffix);
+}
+
+export function isNarrativeNamespacePath(projectRoot: string, resolvedPath: string): boolean {
+  const decoded = decodeNarrativeReference(resolvedPath);
+  const normalized = decoded.replaceAll("\\", "/").toLowerCase();
+  if (/(?:^|[^a-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(normalized)) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decoded) && !decoded.toLowerCase().startsWith("file://")) return false;
+  let local = decoded;
+  if (decoded.toLowerCase().startsWith("file://")) {
+    try { local = fileURLToPath(decoded); } catch { return false; }
+  }
+  const canonicalRoot = realpathWithExistingPrefix(path.resolve(projectRoot, NARRATIVE_NAMESPACE_ROOT)).toLowerCase();
+  const candidate = realpathWithExistingPrefix(path.resolve(projectRoot, local)).toLowerCase();
+  return pathIsWithinRoot(candidate, canonicalRoot);
+}
+
+export function isNarrativeArtifactContent(fileBytes: Buffer | string): boolean {
+  const text = Buffer.isBuffer(fileBytes) ? fileBytes.toString("utf8") : fileBytes;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const value = parsed as AnyObj;
+    if (value.schema_version === "grounded-execution-narrative/v1") return true;
+    if (value.schema_version === "grounded-runtime-projection/v1") return true;
+    if (value.schema_version === "1.0"
+      && hasNonEmptyString(value.narrative_id)
+      && hasNonEmptyString(value.captured_at)
+      && value.compiler && typeof value.compiler === "object"
+      && value.capture_completeness && typeof value.capture_completeness === "object"
+      && Array.isArray(value.sources)) return true;
+    return false;
+  } catch {
+    return /(?:^|\r?\n)# Grounded Execution Narrative(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)## Authority provenance(?:\r?\n|$)/.test(text)
+      && /(?:^|\r?\n)- Narrative composer:\s*flow-agents-narrative-composer(?:\s|$)/.test(text);
+  }
+}
+
+function localPathTokens(value: string): string[] {
+  const decoded = decodeNarrativeReference(value);
+  const tokens = decoded.match(/(?:file:\/\/[^\s"'`]+)|(?:[A-Za-z]:[\\/][^\s"'`]+)|(?:\.{0,2}[\\/][^\s"'`]+)|(?:[^\s"'`]+[\\/][^\s"'`]+)/g) ?? [];
+  return tokens.map((token) => token.replace(/^[([{<]+/, "").replace(/[\])}>;,]+$/, ""));
+}
+
+function referencesComposedNarrativePath(projectRoot: string, value: string): boolean {
+  const decoded = decodeNarrativeReference(value);
+  const folded = decoded.replaceAll("\\", "/").toLowerCase();
+  if (folded.includes(".kontourai/narrative")) return true;
+
+  // Static shell inspection cannot decide arbitrary runtime variable composition such as
+  // `base=.kontourai; test -f "$base/narrative/..."`. The compensating invariant is that a
+  // command check persists only its command plus exit/observed-output digest; it never reads file
+  // bytes into trust.bundle. Every channel that DOES materialize a file is independently guarded
+  // by canonical path and narrative content shape. Keep that invariant covered end-to-end.
+  const cdPattern = /(?:^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&([\s\S]*)/gi;
+  for (const match of decoded.matchAll(cdPattern)) {
+    const cdTarget = match[1] ?? match[2] ?? match[3] ?? "";
+    const remainder = (match[4] ?? "").replaceAll("\\", "/").toLowerCase();
+    if (!/(?:^|[^a-z0-9._-])narrative\//.test(remainder)) continue;
+    const canonicalTarget = realpathWithExistingPrefix(path.resolve(projectRoot, decodeNarrativeReference(cdTarget)))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    const canonicalKontourai = realpathWithExistingPrefix(path.resolve(projectRoot, ".kontourai"))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    if (canonicalTarget === canonicalKontourai
+      || canonicalTarget.startsWith(`${canonicalKontourai}/`)
+      || /(?:^|\/)\.kontourai(?:\/|$)/.test(canonicalTarget)) return true;
+  }
+  return false;
+}
+
+function narrativeCandidateFile(projectRoot: string, raw: string): string | null {
+  let decoded = decodeNarrativeReference(raw);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decoded)) {
+    if (!decoded.toLowerCase().startsWith("file://")) return null;
+    try { decoded = fileURLToPath(decoded); } catch { return null; }
+  }
+  const candidate = path.isAbsolute(decoded) ? decoded : path.resolve(projectRoot, decoded);
+  try {
+    const canonical = (fs.realpathSync.native ?? fs.realpathSync)(candidate);
+    const stat = fs.statSync(canonical);
+    return stat.isFile() ? canonical : null;
+  } catch { return null; }
+}
+
+function rejectNarrativeReference(projectRoot: string, value: unknown, label: string): void {
+  if (typeof value !== "string") return;
+  const decoded = decodeNarrativeReference(value);
+  if (referencesComposedNarrativePath(projectRoot, decoded)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+  const candidates = [decoded, ...localPathTokens(decoded)];
+  for (const candidate of new Set(candidates)) {
+    if (isNarrativeNamespacePath(projectRoot, candidate)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+    const file = narrativeCandidateFile(projectRoot, candidate);
+    if (file && isNarrativeArtifactContent(fs.readFileSync(file))) {
+      die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+    }
+  }
+}
+
 function validateLocalEvidenceFile(projectRoot: string, raw: string, label: string): string {
   const candidate = path.resolve(projectRoot, raw);
   if (!pathIsWithinRoot(candidate, projectRoot)) die(`${label} must remain inside the canonical project root`);
+  rejectNarrativeReference(projectRoot, raw, label);
   let stat: fs.Stats;
   try { stat = fs.lstatSync(candidate); } catch { die(`${label} does not exist`); }
   if (stat.isSymbolicLink() || !stat.isFile()) die(`${label} must be a non-symlink regular file`);
@@ -2500,6 +3398,13 @@ function globMatches(pattern: string, relative: string): boolean {
 
 type GateProducer = { id: string; artifactPatterns: string[]; selfProducedTrustSlices: string[] };
 
+export function rejectOperationBoundExpectation(expectationId: string, operation: string): never {
+  const completion = operation === NARRATIVE_PROMOTE_OPERATION
+    ? "authenticated external narrative provider completion"
+    : "authenticated external ChangeProvider completion";
+  die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires ${completion}`);
+}
+
 function expectedGateProducer(flowId: string, stepId: string, expectationId: string): GateProducer {
   const manifest = loadJson(path.join(flowAgentsPackageRoot(), "kits", "builder", "kit.json"));
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
@@ -2510,7 +3415,7 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
     : undefined;
   if (binding?.interface === "operation") {
     const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
-    die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires authenticated external ChangeProvider completion`);
+    rejectOperationBoundExpectation(expectationId, operation);
   }
   const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
   const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
@@ -2571,11 +3476,12 @@ function resolvesExplicitTestTarget(projectRoot: string, token: string): boolean
 }
 
 /** Validate test-evidence command shape without executing it. */
-type TestExecutionProof = {
+type LocalTestExecutionProof = {
   kind: "local-process-exit";
   runner: string;
   static_test_units: number;
 };
+type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
 
 function staticTestUnits(file: string, executable: string): number {
   try {
@@ -2622,6 +3528,18 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       const units = target ? staticTestUnits(path.resolve(projectRoot, target), "bun") : 0;
       return units > 0 ? { kind: "local-process-exit", runner: "bun test", static_test_units: units } : null;
     }
+    // A coordinator is admitted only when its exact public command is declared
+    // in the reconcile manifest and its observed receipt proves a complete,
+    // stable, committed test result. The resolver names no product or filename.
+    if (resolveCoordinatedCommandBinding(normalized, projectRoot)) {
+      return {
+        kind: "coordinated-command-receipt",
+        protocol: "flow-agents.coordinated-command-receipt/v1",
+        request_key: "pending-observation",
+        receipt_sha256: "pending-observation",
+        receipt_commit_sha256: "pending-observation",
+      };
+    }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
     if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
     try {
@@ -2658,6 +3576,27 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       .flatMap((token) => /[*?\[]/.test(token) ? fs.globSync(token, { cwd: projectRoot }) : [token]);
     const units = targets.reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), runner), 0);
     return units > 0 ? { kind: "local-process-exit", runner: `npx ${runner}`, static_test_units: units } : null;
+  }
+  // `playwright test` discovers specs through playwright.config.*, so a bare invocation is the
+  // norm (kontourai/flow-agents#826). With no explicit target, the proof comes from spec files in
+  // the conventional test directories — anchored on a config actually existing at the root: no
+  // config means the runner would discover nothing, so there is no proof to grant.
+  // Bare token only — `npx ./vendored/playwright test` would re-open the binary-substitution
+  // channel the direct form's `executable === executableName` guard closes (review finding H1).
+  const npxPlaywright = executableName === "npx" && tokens[1] === "playwright" && tokens[2] === "test";
+  if ((executableName === "playwright" && executable === executableName && tokens[1] === "test") || npxPlaywright) {
+    if (tokens.some((token) => /pass.?with.?no.?tests/i.test(token))) return null;
+    const configNames = ["js", "cjs", "mjs", "ts", "cts", "mts"].map((ext) => `playwright.config.${ext}`);
+    if (!configNames.some((name) => fs.existsSync(path.join(projectRoot, name)))) return null;
+    const explicit = tokens.slice(npxPlaywright ? 3 : 2)
+      .filter((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token))
+      .flatMap((token) => /[*?\[]/.test(token) ? fs.globSync(token, { cwd: projectRoot }) : [token]);
+    const discovered = ["tests", "test", "e2e", "specs"]
+      .flatMap((dir) => [`${dir}/**/*.spec.*`, `${dir}/**/*.test.*`])
+      .flatMap((pattern) => fs.globSync(pattern, { cwd: projectRoot, exclude: ["node_modules/**", ".git/**"] }));
+    const files = explicit.length > 0 ? explicit : discovered;
+    const units = [...new Set(files)].reduce((total, target) => total + staticTestUnits(path.resolve(projectRoot, target), "playwright"), 0);
+    return units > 0 ? { kind: "local-process-exit", runner: npxPlaywright ? "npx playwright test" : "playwright test", static_test_units: units } : null;
   }
   if (executableName === "node" && tokens.includes("--test")) {
     const testFlag = tokens.indexOf("--test");
@@ -2701,42 +3640,271 @@ export function observedExecutedTestCount(output: string): number {
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
-  if (!proof) return 0;
+  if (!proof || proof.kind !== "local-process-exit") return 0;
   const observed = observedExecutedTestCount(output);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
 
 type ObservedCommand = { command: string; exit_code: number; output_sha256: string; test_count?: number; execution_proof?: TestExecutionProof };
 
+function observedCommandReference(commands: readonly string[], command: string, observation?: { exit_code: number | null; output_sha256: string }): string {
+  const ordinal = commands.indexOf(command) + 1;
+  const commandDigest = createHash("sha256").update(command).digest("hex");
+  const result = `command #${ordinal > 0 ? ordinal : "?"} (sha256:${commandDigest})`;
+  return observation ? `${result}; exit ${observation.exit_code}; outcome ${observation.exit_code === 0 ? "pass" : "fail"}; output_sha256:${observation.output_sha256}` : result;
+}
+
 async function normalizeObservedCommands(commands: string[], projectRoot: string, requireTestIntent: boolean, expectedStatus: string): Promise<ObservedCommand[]> {
   if (commands.length === 0) die("record-gate-claim requires at least one --command for observed command evidence");
   if (new Set(commands).size !== commands.length) die("record-gate-claim --command values must be unique");
   for (const command of commands) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
-    if (!isRunnableCommandText(command)) die(`record-gate-claim --command "${command}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
+    if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
     if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
   }
   // Passing test evidence is always executed exactly once by this canonical
   // writer. Caller-supplied observations remain available for non-test
   // attestations but can never stand in for locally observed test execution.
-  const observed = await Promise.all(commands.map(async (command) => {
+  const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
+    const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
+    if (coordinated) {
+      const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
+      return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...receipt };
+    }
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
     return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
-  }));
+  };
+  // Sequential, never concurrent: evidence commands are test runs against one working tree, so
+  // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
+  // race and one fails, turning a green tree into an unrecordable claim (#974).
+  // Mirrors observeCommand's return rather than ObservedCommand[]: runObservedCommand yields a
+  // null exit_code on the timeout/kill path, which the runtime guard below rejects before any
+  // claim is persisted. Narrowing here instead would just fail to compile.
+  const observed: Awaited<ReturnType<typeof observeCommand>>[] = [];
+  for (const command of commands) observed.push(await observeCommand(command));
   if (observed.length !== commands.length) die("record-gate-claim requires exactly one --observed-command-json for every --command");
   const byCommand = new Map<string, ObservedCommand>();
   for (const entry of observed) {
     if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
     if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
-    if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence command failed (exit ${entry.exit_code}): ${entry.command}`);
-    if (expectedStatus === "fail" && entry.exit_code === 0) die(`record-gate-claim failing evidence command unexpectedly passed: ${entry.command}`);
-    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence command did not produce a local execution proof: ${entry.command}`);
+    if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
+    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || !["local-process-exit", "coordinated-command-receipt"].includes(String(entry.execution_proof.kind)))) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
     if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
   if (commands.some((command) => !byCommand.has(command))) die("every --command requires a corresponding --observed-command-json");
   return commands.map((command) => byCommand.get(command)!);
+}
+
+// #634: the canonical writer's own execution is a first-class observation. On hosts whose
+// PostToolUse capture never surfaces exit codes, every hook-captured entry is "ambiguous",
+// the independent capture can never confirm a pass, and the verify gate dead-ends. The writer
+// just ran the command itself — a real process exit, not an inference — so it appends that
+// observation to the SAME hash-chained command-log, under the SAME lock protocol the capture
+// hook uses, visibly attributed via source: "canonical-writer-execution". Precedence stays
+// honest in the fold (reduceCaptureLogByCommand): any observed fail beats any pass, so a
+// writer pass can lift ambiguity but can never bury a hook-observed failure. The append is
+// fail-open with a stderr note: losing the supplementary observation must never fail the
+// gate-claim write itself. Decision record: docs/decisions/writer-observed-execution.md.
+export const WRITER_OBSERVATION_SOURCE = "canonical-writer-execution";
+const WRITER_LOCK_RETRY_MS = 5;
+const WRITER_LOCK_MAX_TRIES = 2000;
+
+type CommandLogGenerationLock = { fd: number; file: string; generation: number; nonce: string; identity: { dev: number; ino: number } };
+type CommandLogChain = {
+  CHAIN_GENESIS: string;
+  computeChainHash: (prevHash: string, record: AnyObj) => string;
+  verifyCommandLogRaw: (raw: string) => { status: "legacy" | "ok" | "forked" | "broken"; append: { seq: number; hash: string } | null };
+  readDescriptorFully: (descriptor: number) => string;
+  writeDescriptorFully: (descriptor: number, bytes: Buffer, position: number | null, write?: typeof fs.writeSync) => void;
+  acquireGenerationLock: (base: string, options?: { wait?: boolean; attempts?: number; retryMs?: number }) => CommandLogGenerationLock | null;
+  releaseGenerationLock: (lock: CommandLogGenerationLock) => boolean;
+};
+
+function loadCommandLogChain(): CommandLogChain {
+  const _req = createRequire(import.meta.url);
+  const chainPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/command-log-chain.js");
+  return _req(chainPath) as CommandLogChain;
+}
+
+export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string, transactionId?: string): void {
+  if (observed.length === 0) return;
+  try {
+    const chain = loadCommandLogChain();
+    const logFile = path.join(dir, "command-log.jsonl");
+    const lockFile = `${logFile}.lock`;
+    const lock = chain.acquireGenerationLock(lockFile, { wait: true, attempts: WRITER_LOCK_MAX_TRIES, retryMs: WRITER_LOCK_RETRY_MS });
+    if (lock === null) {
+      process.stderr.write("[record-gate-claim] writer observation authority unavailable; command log left unchanged\n");
+      return;
+    }
+    try {
+      let raw = "";
+      try { raw = fs.readFileSync(logFile, "utf8"); } catch { /* absent log has genesis authority */ }
+      const authority = chain.verifyCommandLogRaw(raw).append;
+      if (authority === null) throw new Error("command-log has no safe append authority");
+      let { seq, hash: prevHash } = authority;
+      const lines: string[] = [];
+      for (const entry of observed) {
+        const record: AnyObj = {
+          command: entry.command,
+          observedResult: entry.exit_code === 0 ? "pass" : "fail",
+          exitCode: entry.exit_code,
+          capturedAt: timestamp,
+          source: WRITER_OBSERVATION_SOURCE,
+          writer: {
+            output_sha256: entry.output_sha256,
+            ...(transactionId ? { transaction_id: transactionId } : {}),
+            ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
+            ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
+          },
+        };
+        seq += 1;
+        const hashValue = chain.computeChainHash(prevHash, record);
+        record._chain = { seq, prevHash, hash: hashValue };
+        prevHash = hashValue;
+        lines.push(JSON.stringify(record));
+      }
+      fs.appendFileSync(logFile, `${lines.join("\n")}\n`);
+    } finally {
+      if (!chain.releaseGenerationLock(lock)) {
+        process.stderr.write("[record-gate-claim] writer observation generation release uncertain; later capture may require operator recovery\n");
+      }
+    }
+  } catch (error) {
+    process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+/**
+ * Journal an abandoned public-evidence transaction without rewriting the append-only capture
+ * log.  Unlike the ordinary writer append this fails closed: callers use the return value to
+ * decide whether they may honestly report a safe rollback.
+ */
+type WriterDirectoryIdentity = { dev: number; ino: number; realpath: string };
+export interface WriterTransactionAbortCapability {
+  readonly directory: string;
+  readonly parent: WriterDirectoryIdentity;
+  readonly session: WriterDirectoryIdentity;
+}
+
+/** Test-only fault boundary for the fail-closed abort journal. */
+export let writerTransactionAbortTestHooks: {
+  beforeExclusiveCreate?: () => void;
+  write?: typeof fs.writeSync;
+  beforeReread?: (descriptor: number) => void;
+  beforeLockRelease?: (lockFile: string) => void;
+} | undefined;
+export function setWriterTransactionAbortTestHooksForTest(hooks: typeof writerTransactionAbortTestHooks): void {
+  writerTransactionAbortTestHooks = hooks;
+}
+
+function writerDirectoryIdentity(directory: string, label: string): WriterDirectoryIdentity {
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} must be a non-symlink directory`);
+  return { dev: stat.dev, ino: stat.ino, realpath: fs.realpathSync.native(directory) };
+}
+
+function sameWriterDirectoryIdentity(left: WriterDirectoryIdentity, right: WriterDirectoryIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.realpath === right.realpath;
+}
+
+export function createWriterTransactionAbortCapability(directory: string): WriterTransactionAbortCapability {
+  const session = writerDirectoryIdentity(directory, "workflow evidence session directory");
+  const parent = writerDirectoryIdentity(path.dirname(directory), "workflow evidence artifact root");
+  if (path.dirname(session.realpath) !== parent.realpath) throw new Error("workflow evidence session directory is not canonically contained by its artifact root");
+  return { directory, parent, session };
+}
+
+function assertWriterTransactionAbortCapability(capability: WriterTransactionAbortCapability): void {
+  const current = createWriterTransactionAbortCapability(capability.directory);
+  if (!sameWriterDirectoryIdentity(current.parent, capability.parent) || !sameWriterDirectoryIdentity(current.session, capability.session)) {
+    throw new Error("workflow evidence abort journal refused: artifact-root or session-directory identity changed");
+  }
+}
+
+function writerOpenAbortLog(logFile: string): { fd: number; created: boolean; identity: { dev: number; ino: number } } | null {
+  let prior: fs.Stats | null = null;
+  try { prior = fs.lstatSync(logFile); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null; }
+  if (prior && (prior.isSymbolicLink() || !prior.isFile())) return null;
+  try {
+    if (prior) {
+      const fd = fs.openSync(logFile, fs.constants.O_RDWR | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.dev !== prior.dev || stat.ino !== prior.ino) { fs.closeSync(fd); return null; }
+      return { fd, created: false, identity: { dev: stat.dev, ino: stat.ino } };
+    }
+    writerTransactionAbortTestHooks?.beforeExclusiveCreate?.();
+    const fd = fs.openSync(logFile, fs.constants.O_RDWR | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) { fs.closeSync(fd); return null; }
+    return { fd, created: true, identity: { dev: stat.dev, ino: stat.ino } };
+  } catch { return null; }
+}
+
+function writerAssertAbortLogIdentity(logFile: string, identity: { dev: number; ino: number }): boolean {
+  try {
+    const current = fs.lstatSync(logFile);
+    return !current.isSymbolicLink() && current.isFile() && current.dev === identity.dev && current.ino === identity.ino;
+  } catch { return false; }
+}
+
+export function appendWriterTransactionAbort(capability: WriterTransactionAbortCapability, transactionId: string, timestamp: string): boolean {
+  try {
+    assertWriterTransactionAbortCapability(capability);
+    const chain = loadCommandLogChain();
+    const logFile = path.join(capability.directory, "command-log.jsonl");
+    const lockFile = `${logFile}.lock`;
+    const lock = chain.acquireGenerationLock(lockFile, { wait: false });
+    if (lock === null) return false;
+    let appendResult = false;
+    let releaseResult = false;
+    try {
+      appendResult = (() => {
+        const log = writerOpenAbortLog(logFile);
+        if (log === null) return false;
+        try {
+          assertWriterTransactionAbortCapability(capability);
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          const priorChain = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd)).append;
+          if (priorChain === null) return false;
+          const { seq, hash: prevHash } = priorChain;
+          const record: AnyObj = {
+            source: "workflow-evidence-transaction",
+            capturedAt: timestamp,
+            transaction: { id: transactionId, outcome: "aborted" },
+          };
+          const hash = chain.computeChainHash(prevHash, record);
+          record._chain = { seq: seq + 1, prevHash, hash };
+          const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
+          chain.writeDescriptorFully(log.fd, bytes, null, writerTransactionAbortTestHooks?.write);
+          fs.fsyncSync(log.fd);
+          writerTransactionAbortTestHooks?.beforeReread?.(log.fd);
+          const reread = chain.verifyCommandLogRaw(chain.readDescriptorFully(log.fd));
+          if (reread.append?.hash !== hash) return false;
+          assertWriterTransactionAbortCapability(capability);
+          if (!writerAssertAbortLogIdentity(logFile, log.identity)) return false;
+          if (log.created) {
+            const directoryDescriptor = fs.openSync(capability.directory, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+            try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+            assertWriterTransactionAbortCapability(capability);
+          }
+          return true;
+        } finally { fs.closeSync(log.fd); }
+      })();
+    } finally {
+      writerTransactionAbortTestHooks?.beforeLockRelease?.(lock.file);
+      releaseResult = chain.releaseGenerationLock(lock);
+      if (!releaseResult) {
+        process.stderr.write("[record-gate-claim] transaction abort generation release uncertain; operator recovery required\n");
+      }
+    }
+    return appendResult && releaseResult;
+  } catch {
+    return false;
+  }
 }
 
 function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
@@ -2751,7 +3919,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>, verifiedAt: string): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -2764,20 +3932,23 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
     die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
+  const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
   return incoming.map((criterion, index) => {
     if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
     if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`);
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommands, `criterion ${ids[index]}`);
-    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt };
+    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+    const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
+    const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
+    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
 }
 
 const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
 const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
 
-function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
+function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
   const lanes = raw.map((value, index) => {
     const lane = parseJson(value, "--lane-json");
@@ -2786,7 +3957,7 @@ function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
     if (!safeCritiqueId.test(String(lane.id ?? ""))) die(`--lane-json ${index} id must be a unique safe identifier`);
     if (!critiqueStatuses.has(String(lane.status ?? ""))) die(`--lane-json ${index} status must be one of: pass, fail, not_verified`);
     if (!hasNonEmptyString(lane.summary)) die(`--lane-json ${index} summary must be non-empty`);
-    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`);
+    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot);
     if (evidenceRefs.length === 0) die(`--lane-json ${index} requires structured reviewable evidence_refs`);
     return { id: lane.id, status: lane.status, summary: lane.summary, evidence_refs: evidenceRefs };
   });
@@ -2804,6 +3975,13 @@ function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): 
 }
 
 function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean {
+  if (reviewTarget && typeof reviewTarget === "object" && !Array.isArray(reviewTarget)) {
+    const projectRoot = narrativeGuardRoot(dir);
+    const artifacts = (reviewTarget as AnyObj).artifacts;
+    if (Array.isArray(artifacts)) {
+      artifacts.forEach((artifact, index) => rejectNarrativeReference(projectRoot, artifact?.file, `critique review_target artifact ${index}`));
+    }
+  }
   try {
     if (!reviewTarget || typeof reviewTarget !== "object" || Array.isArray(reviewTarget)) return false;
     const artifacts = (reviewTarget as AnyObj).artifacts;
@@ -2824,10 +4002,97 @@ function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean
 }
 
 function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
-  if (critique.verdict !== "pass") return false;
+  if (!critiqueIsSubstantivePass(critique)) return false;
+  return reviewTargetArtifactsMatch(dir, critique.review_target);
+}
+
+function critiqueIsSubstantivePass(critique: AnyObj): boolean {
+  if (critique.verdict !== "pass" || critique.claim_status !== "verified") return false;
   if (!Array.isArray(critique.lanes) || critique.lanes.length === 0 || critique.lanes.some((lane: AnyObj) => lane.status !== "pass")) return false;
   if (Array.isArray(critique.findings) && critique.findings.some((finding: AnyObj) => finding.status === "open")) return false;
-  return reviewTargetArtifactsMatch(dir, critique.review_target);
+  const artifacts = critique.review_target?.artifacts;
+  return Array.isArray(artifacts) && artifacts.length > 0
+    && artifacts.every((artifact: AnyObj) => hasNonEmptyString(artifact?.file) && /^[a-f0-9]{64}$/i.test(String(artifact?.sha256)));
+}
+
+function critiqueWorkspaceSnapshotIsCurrent(dir: string, critique: AnyObj): boolean {
+  if (!reviewTargetArtifactsMatch(dir, critique.review_target)) return false;
+  const reviewTarget = critique.review_target;
+  if (!reviewTarget || typeof reviewTarget !== "object" || Array.isArray(reviewTarget)) return false;
+  const expected = (reviewTarget as AnyObj).workspace_snapshot;
+  const artifacts = (reviewTarget as AnyObj).artifacts;
+  if (!expected || typeof expected !== "object" || Array.isArray(expected) || !Array.isArray(artifacts) || artifacts.length === 0) return false;
+  try {
+    const projectRoot = canonicalProjectRootForSession(dir);
+    const reviewedFiles = artifacts.map((artifact: AnyObj) => ({ file: String(artifact.file), sha256: String(artifact.sha256) }));
+    return isDeepStrictEqual(expected, captureReviewWorkspaceSnapshot(projectRoot, reviewedFiles));
+  } catch { return false; }
+}
+
+/** A current review is required, but older live PASS anchors need not be recaptured. */
+export function liveCritiqueFreshnessSatisfied(live: AnyObj[], byRecordId: Map<string, AnyObj>, isCurrent: (critique: AnyObj) => boolean): boolean {
+  return live.every((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique));
+  }) && live.some((record) => {
+    const critique = byRecordId.get(record.critique_record_id);
+    return Boolean(critique && critiqueIsSubstantivePass(critique) && isCurrent(critique));
+  });
+}
+
+/**
+ * Critique resolution authority is intentionally outside the Hachure bundle.
+ * Read it through a no-follow descriptor and accept it only alongside the
+ * root-signed completion that binds the exact external-ledger snapshot.
+ */
+export function externalCritiqueAuthorityForGate(dir: string, bundle: AnyObj): { events: AnyObj[]; completionVerified: boolean } {
+  const ledgerFile = path.join(dir, "lifecycle-authority.resolution-events.json");
+  const completionFile = path.join(dir, "lifecycle-authority.completion.json");
+  const crossReviewerEdge = Array.isArray(bundle.claims) && bundle.claims.some((claim: AnyObj) =>
+    claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer",
+  );
+  if (!fs.existsSync(ledgerFile)) return { events: [], completionVerified: !crossReviewerEdge };
+  let events: AnyObj[];
+  try {
+    const descriptor = fs.openSync(ledgerFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > 4 * 1024 * 1024 || (stat.mode & 0o022) !== 0) return { events: [], completionVerified: false };
+      bytes = fs.readFileSync(descriptor);
+    } finally { fs.closeSync(descriptor); }
+    const ledger = JSON.parse(bytes.toString("utf8"));
+    if (!ledger || typeof ledger !== "object" || Array.isArray(ledger) || ledger.schema_version !== "1.0" || !Array.isArray(ledger.events)) return { events: [], completionVerified: false };
+    events = ledger.events;
+  } catch { return { events: [], completionVerified: false }; }
+  if (events.length === 0 && !crossReviewerEdge) return { events, completionVerified: true };
+  try {
+    const completionDescriptor = fs.openSync(completionFile, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    let bytes: Buffer;
+    try {
+      const stat = fs.fstatSync(completionDescriptor);
+      if (!stat.isFile() || stat.size > 256 * 1024 || (stat.mode & 0o022) !== 0) return { events, completionVerified: false };
+      bytes = fs.readFileSync(completionDescriptor);
+    } finally { fs.closeSync(completionDescriptor); }
+    const completion = verifyLifecycleAuthorityCompletion(JSON.parse(bytes.toString("utf8")));
+    return {
+      events,
+      completionVerified: ["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence"].includes(String(completion.action))
+        && completion.run_id === path.basename(dir)
+        && completion.result_core_sha256 === lifecycleAuthorityResultDigest({ ...bundle, critique_resolution_events: events }),
+    };
+  } catch { return { events, completionVerified: false }; }
+}
+
+function critiqueSnapshotDigest(critique: AnyObj): string | null {
+  const target = critique.review_target;
+  const snapshot = target && typeof target === "object" && !Array.isArray(target)
+    ? (target as AnyObj).workspace_snapshot
+    : null;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    && typeof (snapshot as AnyObj).digest === "string" && /^[a-f0-9]{64}$/i.test((snapshot as AnyObj).digest)
+    ? (snapshot as AnyObj).digest
+    : null;
 }
 // #270 HIGH fix (iteration 3): the `gate-claim-` check-id prefix is RESERVED for
 // record-gate-claim's own internally-constructed ids (`id: \`gate-claim-${checkId}\`` — see
@@ -2869,8 +4134,17 @@ function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
 // BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
 // enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
 // before, and superseding a STAMPED existing id is now rejected too.
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>): AnyObj {
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd(), allowSkipLearningStamp = false): AnyObj {
   const check = { ...raw };
+  // Codex verify round 3/4: the _waiver.skip_learning stamp is minted ONLY by
+  // advance-state's --skip-learning path (which passes allowSkipLearningStamp). Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json)
+  // flows through here — scrubbing at this single choke point makes the stamp
+  // unforgeable regardless of ingestion route.
+  if (!allowSkipLearningStamp && check._waiver && typeof check._waiver === "object" && (check._waiver as AnyObj).skip_learning !== undefined) {
+    check._waiver = { ...(check._waiver as AnyObj) };
+    delete (check._waiver as AnyObj).skip_learning;
+  }
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -2879,13 +4153,17 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
   }
   if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
+  rejectNarrativeReference(projectRoot, check.command, `check ${String(check.id)} command`);
   validateRunnableCheckCommand(check, `check ${String(check.id)}`);
-  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
-  if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs");
-  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs);
+  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) {
+    if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
+    rejectNarrativeReference(projectRoot, ref.ref, `check ${String(check.id)} standard_ref`);
+  }
+  if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs", projectRoot);
+  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs, projectRoot);
   return check;
 }
-function normalizeSurfaceRefs(refs: any): AnyObj[] {
+function normalizeSurfaceRefs(refs: any, projectRoot: string): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
   // Use the cached @kontourai/surface module for advisory inline validation of referenced
   // trust.bundle files. Fail-open when surface is not yet loaded (surface loads on first
@@ -2895,6 +4173,7 @@ function normalizeSurfaceRefs(refs: any): AnyObj[] {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
+    rejectNarrativeReference(projectRoot, out.artifact_ref, "surface trust artifact_ref");
     // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
     if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
     // When surface is loaded, validate the referenced trust artifact if it is a local file.
@@ -2973,23 +4252,25 @@ export function kitIdentityFromBundle(
   // 3. Genuinely unknown — never fallback to "builder".
   return { claimType: "unknown.trust.bundle", kitId: "unknown", subject: "unknown-kit", gateId: "unknown.trust.bundle" };
 }
-function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
-  const raw = JSON.parse(read(file));
+function surfaceCheckFromArtifact(file: string, index: number, projectRoot = process.cwd()): AnyObj {
+  rejectNarrativeReference(projectRoot, file, `--surface-trust-json ${index}`);
+  const resolvedFile = path.isAbsolute(file) ? file : path.resolve(projectRoot, decodeNarrativeReference(file));
+  const raw = JSON.parse(read(resolvedFile));
   const lower = JSON.stringify(raw).toLowerCase();
   // Structurally read kit identity from the bundle — never hardcode "builder".
-  const { claimType: bundleClaimType, subject: bundleSubject, gateId: bundleGateId } = kitIdentityFromBundle(raw, file);
+  const { claimType: bundleClaimType, subject: bundleSubject, gateId: bundleGateId } = kitIdentityFromBundle(raw, resolvedFile);
   let ref: AnyObj;
   if (lower.includes("provider") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "provider.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: "provider.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
   } else if (lower.includes("artifact") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: "artifact.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
   } else {
     const claimStatus = lower.includes("rejected") ? "rejected" : "accepted";
     const freshness = lower.includes("stale") ? "stale" : "fresh";
     const producer = lower.includes("missing-authority") ? "unknown" : "surface-local";
     const integrity = lower.includes("mismatch") ? "mismatch" : "matched";
     // Use trust.bundle as the canonical Hachure-aligned artifact_kind for all trust-backed evidence refs
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: bundleGateId, claim_type: bundleClaimType, claim_status: claimStatus, subject: bundleSubject, freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: bundleGateId, claim_type: bundleClaimType, claim_status: claimStatus, subject: bundleSubject, freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
     ref.status = deriveSurfaceStatus(ref);
     ref.summary = ref.status === "pass" ? "accepted" : ref.status === "not_verified" ? "not currently verifiable" : (claimStatus === "rejected" ? "rejected" : producer === "unknown" ? "missing authority" : "integrity mismatch");
   }
@@ -3008,9 +4289,10 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
  * not the first thing an agent reaches for.
  */
 function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parseArgs>): void {
-  if (p?.flags.has("skip-evidence-ref-runnability-guard")) {
+  const projectRoot = narrativeGuardRoot(dir);
+  const skipRunnabilityGuard = p?.flags.has("skip-evidence-ref-runnability-guard") ?? false;
+  if (skipRunnabilityGuard) {
     process.stderr.write("[record-evidence] evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard\n");
-    return;
   }
   const file = path.join(dir, "acceptance.json");
   if (!fs.existsSync(file)) return;
@@ -3019,7 +4301,8 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   const { isRunnableCommandText, isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
   data.criteria.forEach((criterion: AnyObj, index: number) => {
     if (criterion.evidence_refs === undefined) return;
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`, projectRoot);
+    if (skipRunnabilityGuard) return;
     // #412 (AC8): a kind:"command" ref's command source (excerpt, falling back to url when that
     // is where the command string lives) must be a literally runnable shell command, not prose
     // describing a manual verification step — reject at RECORD time instead of letting it reach
@@ -3047,7 +4330,15 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   });
 }
 export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
-  writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
+  updateStateJson(path.join(dir, "state.json"), (state) => ({
+    ...state,
+    ...sidecarBase(slug),
+    status,
+    phase,
+    updated_at: timestamp,
+    artifact_paths: relArtifacts(dir),
+    next_action: { status: next, summary },
+  }));
 }
 // ─── Phase 4c: bundle-only helpers ───────────────────────────────────────────
 // After 4c, evidence.json and critique.json are no longer written.
@@ -3089,8 +4380,19 @@ function requireStampedClaim(claim: AnyObj, dir: string): string {
   }
   return origin;
 }
+
+function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
+  return withFlowSessionRecoveryFenceRead(dir, () => {
+    const bundleFile = path.join(dir, "trust.bundle");
+    if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
+      die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
+    }
+    return loadJson(bundleFile);
+  });
+}
+
 function checksFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
@@ -3135,6 +4437,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
     return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
   };
+  const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    const snapshot = md && typeof md === "object" ? md.verification_workspace_snapshot : undefined;
+    return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as AnyObj : undefined;
+  };
   const applyProducerStamp = (check: AnyObj, claim: AnyObj): void => {
     const md = claim.metadata as AnyObj;
     if (md && typeof md.expected_producer === "string") check._producer = md.expected_producer;
@@ -3160,6 +4467,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
+    if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
+    const md = claim.metadata as AnyObj;
+    if (md && typeof md.acceptance_contract === "object" && !Array.isArray(md.acceptance_contract)) {
+      check._acceptance_contract = md.acceptance_contract;
+    }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -3213,11 +4525,17 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3233,11 +4551,17 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    {
+      const _md = claim && typeof (claim as AnyObj).metadata === "object" ? (claim as AnyObj).metadata as AnyObj : null;
+      if (_md && Array.isArray(_md.waiver_history) && _md.waiver_history.length) check._waiver_history = _md.waiver_history;
+    }
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
     const observedCommands = observedCommandsOf(claim);
     if (observedCommands) check._observed_commands = observedCommands;
+    const verificationWorkspaceSnapshot = verificationWorkspaceSnapshotOf(claim);
+    if (verificationWorkspaceSnapshot) check._verification_workspace_snapshot = verificationWorkspaceSnapshot;
     applyProducerStamp(check, claim);
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
@@ -3271,19 +4595,50 @@ function existingCheckStampMap(checks: AnyObj[]): Map<string, boolean> {
  * exactly what caused #270's 21-claims-to-1 wipe. Generalizes the pattern recordLearning already
  * used inline; behavior-neutral for recordLearning itself.
  */
+function acceptanceContract(criteria: AnyObj[]): AnyObj {
+  const snapshot = criteria.map((criterion) => ({ id: criterion.id, description: criterion.description }));
+  return {
+    version: 1,
+    algorithm: "sha256",
+    digest: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"),
+    criteria: snapshot,
+  };
+}
+
 function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
   const acceptedCriteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
+  if (acceptedCriteria.some((criterion) => !hasNonEmptyString(criterion?.id) || !hasNonEmptyString(criterion?.description))) {
+    die("acceptance.json contains a criterion without a non-empty id and description — refusing to rebuild trust.bundle without durable acceptance identity");
+  }
+  const acceptedIds = acceptedCriteria.map((criterion) => String(criterion.id));
+  if (new Set(acceptedIds).size !== acceptedIds.length) {
+    die("acceptance.json criterion ids must be unique — refusing to rebuild trust.bundle with ambiguous acceptance identity");
+  }
+  const checks = checksFromBundle(dir);
+  const plannedContract = checks.find((check) => check._gate_claim_expectation_id === "implementation-plan")?._acceptance_contract;
+  if (plannedContract) {
+    const currentContract = acceptanceContract(acceptedCriteria);
+    if (plannedContract.version !== currentContract.version
+      || plannedContract.algorithm !== currentContract.algorithm
+      || plannedContract.digest !== currentContract.digest
+      || !isDeepStrictEqual(plannedContract.criteria, currentContract.criteria)) {
+      die("acceptance.json no longer matches the criterion contract anchored by the implementation-plan claim — direct post-plan criterion mutation is not authorized; revise criteria through a provenance-bearing planning operation before recording later evidence");
+    }
+  }
   const contractSignature = (criteria: AnyObj[]): string => JSON.stringify(criteria.map((criterion) => ({
     id: criterion.id ?? null,
     description: criterion.description ?? null,
   })));
+  // Planning may establish or refine a valid criterion contract after session startup. Once the
+  // signatures agree, the bundle remains authoritative for verified status and observed-command
+  // provenance; artifact status edits alone cannot manufacture completion.
   const criteria = acceptedCriteria.length > 0 && contractSignature(acceptedCriteria) !== contractSignature(bundledCriteria)
     ? acceptedCriteria
     : (bundledCriteria.length > 0 ? bundledCriteria : acceptedCriteria);
   return {
-    checks: checksFromBundle(dir),
+    checks,
     criteria,
     critiques: critiquesFromBundle(dir),
   };
@@ -3301,8 +4656,12 @@ function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
   for (const c of incoming) if (c && c.id) byId.set(c.id, c);
   return [...byId.values()];
 }
-function critiquesFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+// Exported for src/cli/console-process-projection.ts (issue #778 review finding 1): the
+// Console interactive-session review_pending projection must read the AUTHORITATIVE
+// trust.bundle critique state (this function), not the retired critique.json sidecar —
+// critique.json is no longer written (see the Phase 4c comment above readBundleState).
+export function critiquesFromBundle(dir: string): AnyObj[] {
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const c of bundle.claims) requireStampedClaim(c, dir);
   // A claim is a CRITIQUE when its origin is "critique" (authoritative — see requireStampedClaim
@@ -3311,8 +4670,9 @@ function critiquesFromBundle(dir: string): AnyObj[] {
   const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && claimOrigin(c) === "critique");
   return critiqueClaims.map((c: AnyObj) => {
     const md = (c.metadata && typeof c.metadata === "object") ? c.metadata as AnyObj : {};
-    return {
+    const critique = {
       id: String(c.subjectId || "").split("/").pop() || c.id,
+      claim_id: c.id,
       verdict: c.value ?? "not_verified",
       summary: c.fieldOrBehavior || "",
       findings: Array.isArray(md.findings) ? md.findings : [],
@@ -3321,14 +4681,36 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
+      critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
+      critique_sequence: md.critique_sequence,
+      critique_predecessor_hash: md.critique_predecessor_hash,
+      critique_record_hash: md.critique_record_hash,
+      claim_status: c.status,
+      created_at: c.createdAt,
+      updated_at: c.updatedAt,
       artifact_refs: Array.isArray(md.artifact_refs) ? md.artifact_refs : [],
+      ...(typeof md.workflow_subject_ref === "string" ? { workflow_subject_ref: md.workflow_subject_ref } : {}),
       ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
+      ...(md.critique_resolution && typeof md.critique_resolution === "object" && !Array.isArray(md.critique_resolution)
+        ? { critique_resolution: md.critique_resolution }
+        : {}),
     };
+    // Compose-safe writes may update an unrelated gate claim. Retain the
+    // original metadata insertion order privately so rebuilding that untouched
+    // critique is byte-stable even when an external resolution appended
+    // supersession metadata in a different order.
+    Object.defineProperty(critique, "_source_claim_metadata", {
+      value: md,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+    return critique;
   });
 }
 
 function criteriaFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const claim of bundle.claims) requireStampedClaim(claim, dir);
   return bundle.claims
@@ -3336,14 +4718,28 @@ function criteriaFromBundle(dir: string): AnyObj[] {
     .map((claim: AnyObj) => {
       const md = claim.metadata && typeof claim.metadata === "object" && !Array.isArray(claim.metadata) ? claim.metadata as AnyObj : {};
       const saved = md.criterion && typeof md.criterion === "object" && !Array.isArray(md.criterion) ? md.criterion as AnyObj : {};
-      return {
+      const criterion = {
         id: typeof saved.id === "string" ? saved.id : String(claim.subjectId || "").split("/").pop(),
         description: typeof saved.description === "string" ? saved.description : (claim.fieldOrBehavior || ""),
         status: typeof saved.status === "string" ? saved.status : (claim.value ?? "not_verified"),
         evidence_refs: Array.isArray(saved.evidence_refs) ? saved.evidence_refs : [],
+        ...(Array.isArray(saved.observed_commands) ? { _observed_commands: saved.observed_commands } : {}),
         ...(typeof saved.verified_at === "string" ? { verified_at: saved.verified_at } : {}),
         ...(saved.identity_version === 2 ? { identity_version: 2 } : {}),
       };
+      const observedCommands = Array.isArray(saved.observed_commands) ? saved.observed_commands as AnyObj[] : [];
+      const evidence = Array.isArray(bundle.evidence) ? bundle.evidence.filter((item: AnyObj) => item?.claimId === claim.id) : [];
+      const event = Array.isArray(bundle.events) ? bundle.events.find((item: AnyObj) => item?.claimId === claim.id && item.status === "verified") : null;
+      const evidenceIds = new Set(evidence.map((item: AnyObj) => item.id));
+      const hasCanonicalEvidence = claim.value === "pass"
+        && claim.status === "verified"
+        && observedCommands.length > 0
+        && evidence.length === observedCommands.length
+        && evidence.every((item: AnyObj) => item.evidenceType === "test_output" && item.passing === true && observedCommands.some((observation: AnyObj) => observation.command === item.execution?.label))
+        && Array.isArray(event?.evidenceIds)
+        && event.evidenceIds.length === evidenceIds.size
+        && event.evidenceIds.every((id: string) => evidenceIds.has(id));
+      return hasCanonicalEvidence ? markCanonicallyObservedCriterion(criterion) : criterion;
     })
     .filter((criterion: AnyObj) => typeof criterion.id === "string" && criterion.id.length > 0);
 }
@@ -3378,7 +4774,18 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   // (not re-read) as _existingState for the compose-safe merge — one readBundleState call.
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
-  const _checksRaw = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById)), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
+  const projectRoot = narrativeGuardRoot(dir);
+  // #1170 (PR2): `_fresh_record_write` marks the checks supplied in THIS invocation, so
+  // buildTrustBundle stamps a workspace snapshot onto them and onto nothing else. Every check
+  // restored from the existing bundle by the mergeChecksById call below keeps whatever snapshot
+  // it was originally recorded with; only a genuinely new (or re-recorded, same-id superseding)
+  // check gets bound to the tree as it is right now. The marker is transient — buildTrustBundle
+  // projects an explicit allowlist of `_`-prefixed fields into claim metadata and this is not one
+  // of them, so it never reaches the bundle and never round-trips through checksFromBundle.
+  const _checksRaw = [
+    ...opts(p, "check-json").map((v) => ({ ...normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot), _fresh_record_write: true })),
+    ...opts(p, "surface-trust-json").map((file, index) => ({ ...surfaceCheckFromArtifact(file, index, projectRoot), _fresh_record_write: true })),
+  ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
   // classifies as test_output (build/types/lint/test/command, and security/browser/runtime
@@ -3470,6 +4877,7 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   if (commandArgv?.length && commandString) die("record-check: pass the command via EITHER `-- <command...>` OR --command, not both");
 
   const repoRoot = findRepoRootFromDir(dir);
+  rejectNarrativeReference(repoRoot, commandArgv?.join(" ") ?? commandString, "record-check command");
   let displayCommand: string;
   let exitCode: number | null;
   let stdout = "";
@@ -3548,7 +4956,7 @@ ${stderr}` : ""}`.trim());
     status,
     summary,
     command: displayCommand,
-  }, false, _existingCheckStampById);
+  }, false, _existingCheckStampById, repoRoot);
   if (outputSha256) check._output_sha256 = outputSha256;
 
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
@@ -3602,7 +5010,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   - Multiple expects[] entries and --expectation omitted → die
  *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
  */
-async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAuthority = false, writerTransactionId?: string, writerTarget?: TrustBundleWriterTarget): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", new Date().toISOString());
@@ -3611,8 +5019,10 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const summary = opt(p, "summary") || die("--summary is required");
   const expectationId = opt(p, "expectation");
   const routeReason = opt(p, "route-reason");
+  const requestedFlowRunHead = opt(p, "flow-run-head");
   if (routeReason && statusVal !== "fail") die("--route-reason is only valid with --status fail");
   if (routeReason && !/^[a-z][a-z0-9_-]*$/.test(routeReason)) die("--route-reason must be a lowercase classifier identifier");
+  if (requestedFlowRunHead && !/^[a-f0-9]{64}$/i.test(requestedFlowRunHead)) die("--flow-run-head must be a SHA-256 hex digest");
 
   // Prefer the exact session's canonical Flow projection. Actor/global current pointers are
   // ambient navigation state and may legitimately point at another run or lag this run.
@@ -3620,9 +5030,22 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const flowAgentsDir = path.dirname(dir);
   const gateClaimActorKey = resolveReadActorKey(p);
   const sidecarState = loadJson(path.join(dir, "state.json"));
+  const capturedWorkflowSubjectRef = Array.isArray(sidecarState.work_item_refs) && sidecarState.work_item_refs.length === 1 && typeof sidecarState.work_item_refs[0] === "string"
+    ? sidecarState.work_item_refs[0]
+    : null;
   const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
     ? sidecarState.flow_run as AnyObj
     : null;
+  const projectedFlowRunHead = projectedRun && typeof projectedRun.run_head === "string" && /^[a-f0-9]{64}$/i.test(projectedRun.run_head)
+    ? projectedRun.run_head.toLowerCase()
+    : null;
+  if ((projectedRun && !projectedFlowRunHead) || (requestedFlowRunHead && !projectedFlowRunHead)) {
+    throw new FlowProjectionRegenerationRequiredError(dir);
+  }
+  if (requestedFlowRunHead && projectedFlowRunHead && requestedFlowRunHead.toLowerCase() !== projectedFlowRunHead) {
+    die("--flow-run-head must match the exact session Flow projection");
+  }
+  const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
@@ -3655,12 +5078,26 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
   const observedCommandRaw = opts(p, "observed-command-json");
   if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
-  const projectRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
+  // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
+  // completePassingCriteria) need a non-null, location-independent project root that never
+  // dies on a non-canonical session. normalizeObservedCommands still requires the strict
+  // canonical root, but only when there are commands to normalize.
+  const projectRoot = narrativeGuardRoot(dir);
+  const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
+  for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
   const observedCommands = gateCommands.length > 0
-    ? await normalizeObservedCommands(gateCommands, projectRoot!, mustRunTests, statusVal)
+    ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
+  // #634: persist the writer's real executions into the hash-chained command-log so the
+  // capture fold has a deterministic observation even on exit-code-blind hosts.
+  appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
   const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
   let outputSha256: string | null = null;
+  // Note: commands have already executed by this point (normalizeObservedCommands above), and
+  // evals/integration/test_evidence_command_serialization.sh relies on that ordering to observe
+  // the writer's real execution interleaving. Moving this shape check earlier is defensible
+  // (do not run commands for a claim we will reject) but will fail that eval — update it in the
+  // same change rather than treating the failure as an unrelated regression.
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
   if (gateCommands.length === 0 && observedCommandRaw.length > 0) die("--observed-command-json requires --command");
   if (!mustRunTests && gateCommand && observedCommandRaw.length === 0) {
@@ -3684,10 +5121,16 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
+    ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
   };
+  if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
+    const acceptance = loadJson(path.join(dir, "acceptance.json"));
+    const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
+    check._acceptance_contract = acceptanceContract(criteria);
+  }
 
   // Include structured evidence refs if provided
-  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json"));
+  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
   const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
   if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
   if (mustRunTests) requireObservedCommandRefs(evidenceRefs, observedCommandNames, "a passing tests-evidence claim", true);
@@ -3708,8 +5151,33 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   if (gateCommand) check.command = gateCommand;
   if (observedCommands.length > 0) check._observed_commands = observedCommands;
 
-  const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true);
+  const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
+  if (mustRunTests && publicWorkflowAuthority) {
+    // Unchanged strict path: a passing public tests-evidence claim REQUIRES a Git-backed
+    // snapshot and dies without one. `canonicalRoot` is non-null here because mustRunTests
+    // already required at least one --command above.
+    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
+    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
+      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
+    }
+    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  } else {
+    // #1170 (PR2) producer completeness: capture the workspace snapshot for EVERY gate claim
+    // recorded while a canonical Git root resolves, not only the passing-public-tests case.
+    //
+    // `flow_run_head` hashes workflow POSITION, so a claim recorded before any state movement is
+    // stranded by the head predicate even though the code it attests to never changed (#1164).
+    // PR1 taught the consumer to re-establish freshness from a Git workspace snapshot; without
+    // this capture that tolerance is unreachable for the claims that actually need it, because
+    // nothing but the tests-evidence path ever produced a snapshot to reconcile against.
+    //
+    // Strictly additive: absent a Git root this records exactly what it recorded before (no
+    // snapshot, no failure — legacy semantics), and a claim whose head still matches never
+    // consults the snapshot at all.
+    const snapshot = tryCaptureGitWorktreeSnapshot(canonicalRoot ?? tryCanonicalProjectRootForSession(dir));
+    if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
+  }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
@@ -3721,16 +5189,17 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
   const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames, ts) : _existingState.criteria;
+  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
-    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
+    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
+    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
       die("a passing tests-evidence claim requires a current clean critique first");
     }
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
   return 0;
 }
 
@@ -3759,6 +5228,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
  *       An explicit, auditable no-residue promotion (R3).
  */
 async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
+  if (p.flags.has("publish")) die("promote --publish is disabled; use `flow-agents workflow publish-delivery` so canonical Builder lifecycle and learning gates are enforced");
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const ts = opt(p, "timestamp", now());
@@ -3778,6 +5248,7 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   // repo-relative paths when the ref lives under the repo, so the claim is portable.
   const targets: string[] = [];
   for (const raw of rawPaths) {
+    rejectNarrativeReference(repoRoot, raw, "promote --evidence-path");
     const abs = path.isAbsolute(raw) ? raw : path.resolve(repoRoot, raw);
     if (!fs.existsSync(abs)) die(`promote --evidence-path does not exist on disk: ${raw} (resolved: ${abs}). Promotion evidence refs must point at durable docs that were actually written.`);
     const rel = path.relative(repoRoot, abs);
@@ -3840,7 +5311,55 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (!phases.includes(phase)) die(`phase must be one of: ${phases.join(", ")}`);
   if (target && !phases.includes(target)) die(`target phase must be one of: ${phases.join(", ")}`);
   const prev = loadJson(path.join(dir, "state.json"));
-  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+  if ((status === "archived" || status === "accepted") && prev.phase !== "learning") {
+    // #793: --skip-learning <reason> is the ONLY way past this guard without a real
+    // phase:learning transition, and it never bypasses silently — it first records a loud,
+    // reviewable accepted-gap check into the session's trust.bundle, then permits the
+    // transition. Absent the flag, behavior is byte-for-byte unchanged (still rejected).
+    const skipLearningProvided = p.flags.has("skip-learning") || opts(p, "skip-learning").length > 0;
+    const skipLearningReason = opt(p, "skip-learning").trim();
+    if (skipLearningProvided && !skipLearningReason) die('--skip-learning requires a non-empty reason, e.g. --skip-learning "customer escalation; learning-review deferred to next sprint"');
+    // Review-hardened (#798): ADR 0020's convention makes the approver a SEPARATE, mandatory
+    // argument (parseWaiver requires --waived-by distinct from --accepted-gap-reason). Mirror
+    // that forcing function here instead of silently deriving the approver from the invoking
+    // actor — the actor performing the skip must still name who approved it.
+    const skipWaivedBy = opt(p, "waived-by").trim();
+    if (skipLearningReason && !skipWaivedBy) die('--skip-learning also requires --waived-by <actor> (ADR 0020 accepted-gap convention: the approver is named explicitly, not derived from the invoking actor)');
+    if (!skipLearningReason) diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
+    // Mirrors the repo's existing accepted-gap convention (ADR 0020, parseWaiver/
+    // --accepted-gap-reason/--waived-by): kind:"external" (session-local attestation — a
+    // command-backed check reconciles against CI and can never be waived), status:"not_verified"
+    // (the check-level status a waived gap carries), plus a _waiver record so no reviewer or
+    // reconciler can mistake it for a genuine pass. The check id ("learning-evidence-skip")
+    // deliberately contains "learning-evidence" so stop-goal-fit.js's hasLearningEvidence()
+    // (#793 STOP-GATE) recognizes it as satisfying the learning-gate requirement.
+    const _skipTs = opt(p, "timestamp", now());
+    const _skipSlug = taskSlugFor(dir, opt(p, "task-slug"));
+    const _skipActor = resolveReadActorKey(p);
+    const _skipExistingState = readBundleState(dir);
+    // Codex-review-hardened (#798): "learning-evidence-skip" is a RESERVED id. If a check
+    // with that id already exists and is not itself a skip-waiver, refuse — mergeChecksById
+    // is last-writer-wins and would destroy genuine evidence. Repeated skips supersede the
+    // gate-facing check but preserve every prior waiver in an append-only history so the
+    // audit trail (each reason, approver, recorder) survives.
+    const _skipPrior = (_skipExistingState.checks as any[]).find((c) => c && c.id === "learning-evidence-skip");
+    // Codex verify round 2: an existing check carrying an ORDINARY accepted-gap waiver is
+    // still genuine evidence — only a check stamped as a prior learning-skip may be
+    // superseded. Skip waivers are self-identified via _waiver.skip_learning below.
+    if (_skipPrior && !(_skipPrior._waiver && _skipPrior._waiver.skip_learning === true)) die('refusing --skip-learning: an existing trust.bundle check already uses the reserved id "learning-evidence-skip" and is not a prior learning-skip waiver — resolve that collision instead of overwriting evidence');
+    const _skipHistory = [...(Array.isArray(_skipPrior?._waiver_history) ? _skipPrior._waiver_history : []), ...(_skipPrior?._waiver ? [_skipPrior._waiver] : [])];
+    const skipCheck = normalizeCheck({
+      id: "learning-evidence-skip",
+      kind: "external",
+      status: "not_verified",
+      summary: `Learning gate explicitly skipped via advance-state --skip-learning (status ${status}, phase ${prev.phase ?? "unknown"} -> ${phase}): ${skipLearningReason}`,
+      _waiver: { reason: skipLearningReason, approved_by: skipWaivedBy, approved_at: _skipTs, recorded_by: _skipActor, skip_learning: true },
+      ...(_skipHistory.length ? { _waiver_history: _skipHistory } : {}),
+    }, false, existingCheckStampMap(_skipExistingState.checks), narrativeGuardRoot(dir), true);
+    const _skipMergedChecks = mergeChecksById(_skipExistingState.checks, [skipCheck]);
+    assertBundleWritten(await writeTrustBundle(dir, _skipSlug, _skipTs, _skipMergedChecks, _skipExistingState.criteria, _skipExistingState.critiques));
+    process.stderr.write(`[advance-state] --skip-learning: recorded an accepted-gap "learning-evidence-skip" check (kind:external status:not_verified, approved by ${skipWaivedBy}, recorded by ${_skipActor}) — NOT a silent skip. Reason: ${skipLearningReason}\n`);
+  }
   const flow = opt(p, "flow-definition");
   // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).
   // Fires when the active flow's gate for prev.phase declares a route_back_policy
@@ -3884,39 +5403,29 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Trust checkpoint: when advancing to a terminal delivered status, seal the checkpoint.
   if (status === "delivered") {
     await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
-    // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-    // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
-    // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir
-    // with no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures
-    // are visible (stderr warning), not silently swallowed.
-    // #356 AC6: an InvalidBundleShapeError refusal is NOT one of those best-effort failure
-    // modes — it must be LOUD and cause advance-state itself to fail (rethrown here so the
-    // outer command surfaces a non-zero exit), never silently swallowed alongside a genuine
-    // repo-root-resolution/I-O failure.
-    const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
-    await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
-      if (err instanceof InvalidBundleShapeError) throw err;
-      if (err instanceof NotFreshHolderError) throw err;
-      if (err instanceof RepoHeadMismatchError) throw err;
-      process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
-    });
+    process.stderr.write("[advance-state] delivery publication is disabled on the sidecar surface; use `flow-agents workflow publish-delivery` after canonical Builder learning completes.\n");
   }
   return 0;
 }
 
-export function normalizeFinding(raw: AnyObj): AnyObj {
+export function normalizeFinding(raw: AnyObj, projectRoot = process.cwd()): AnyObj {
   if (raw.file_refs !== undefined && !Array.isArray(raw.file_refs)) die("file_refs must be an array");
+  for (const ref of raw.file_refs ?? []) {
+    if (typeof ref !== "string") die("file_refs entries must be strings");
+    rejectNarrativeReference(projectRoot, ref, "finding file_ref");
+  }
   return raw;
 }
 
 async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const projectRoot = canonicalProjectRootForSession(dir);
   const verdict = opt(p, "verdict");
   if (!critiqueStatuses.has(verdict)) die("record-critique requires --verdict pass, fail, or not_verified");
   const summary = opt(p, "summary");
   if (!hasNonEmptyString(summary)) die("record-critique requires --summary");
-  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"));
+  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"), projectRoot);
   const reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
   if (verdict === "pass" && (lanes.some((lane) => lane.status !== "pass") || reviewArtifacts.length === 0)) {
     die("a passing critique requires every lane to pass and at least one local reviewed --artifact-ref");
@@ -3935,7 +5444,16 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const bundleCritiques = _critiqueState.critiques;
   const critiqueId = opt(p, "id", "review");
   if (!safeCritiqueId.test(critiqueId)) die("record-critique --id must be a safe identifier");
-  const critique = {
+  const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
+  const workflowSubjectRef = workItemRefs.length === 1 && hasNonEmptyString(workItemRefs[0])
+    ? String(workItemRefs[0])
+    : `flow-agents://session/${slug}`;
+  const sequence = bundleCritiques.length + 1;
+  const predecessor = sequence === 1 ? null : bundleCritiques.find((entry) => entry.critique_sequence === sequence - 1);
+  if (bundleCritiques.length > 0 && (!predecessor || predecessor.critique_record_hash !== critiqueRecordHash(predecessor))) {
+    die("record-critique requires an intact writer-issued critique hash chain");
+  }
+  const critique: AnyObj = {
     id: critiqueId,
     reviewer: opt(p, "reviewer", "tool-code-reviewer"),
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
@@ -3946,13 +5464,22 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     review_target: {
       artifacts: reviewArtifacts,
       workspace_snapshot: captureReviewWorkspaceSnapshot(
-        canonicalProjectRootForSession(dir),
+        projectRoot,
         reviewArtifacts.map((artifact) => ({ file: String(artifact.file), sha256: String(artifact.sha256) })),
       ),
     },
     artifact_refs: reviewArtifacts.map((artifact) => artifact.file),
-    findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))),
+    findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"), projectRoot)),
+    workflow_subject_ref: workflowSubjectRef,
+    critique_sequence: sequence,
+    critique_predecessor_hash: predecessor?.critique_record_hash ?? CRITIQUE_CHAIN_GENESIS,
+    created_at: opt(p, "timestamp", ""),
+    updated_at: opt(p, "timestamp", ""),
   };
+  critique.created_at = critique.created_at || critique.reviewed_at;
+  critique.updated_at = critique.updated_at || critique.reviewed_at;
+  critique.critique_record_hash = critiqueRecordHash(critique);
+  critique.critique_record_id = `critique:${critique.critique_record_hash}`;
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   // #267/#282: supersede-by-critique-id. The latest write for a critique id wins for
   // reconcile / status / validator purposes; each prior LIVE write for the same id is RETAINED as
@@ -3964,11 +5491,43 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // distinction yet — that lands with the runtime actor-identity slice (#287/#290). Same-reviewer-
   // string scoping is the strongest honest enforcement available today and matches the granularity
   // the critique record already has.
-  const _supersedeMarker = `${critique.id}@${critique.reviewed_at}`;
+  const _supersedeMarker = critique.critique_record_id;
+  const resolvingLaneStatus = new Map((Array.isArray(critique.lanes) ? critique.lanes : [])
+    .map((lane: AnyObj) => [lane.id, lane.status]));
+  const resolvingFindingStatus = new Map((Array.isArray(critique.findings) ? critique.findings : [])
+    .map((finding: AnyObj) => [finding.id, finding.status]));
+  const sameReviewerResolution = (prior: AnyObj): AnyObj => {
+    const resolvedLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : [])
+      .filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
+    const resolvedFindingIds = (Array.isArray(prior.findings) ? prior.findings : [])
+      .filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+    if (resolvedLaneIds.some((laneId: string) => resolvingLaneStatus.get(laneId) !== "pass")) {
+      die(`record-critique recheck must pass every previously failed lane before superseding ${prior.id}`);
+    }
+    if (resolvedFindingIds.some((findingId: string) =>
+      !["fixed", "accepted", "deferred", "false_positive"].includes(String(resolvingFindingStatus.get(findingId))))) {
+      die(`record-critique recheck must resolve every previously open finding before superseding ${prior.id}`);
+    }
+    return {
+      schema_version: "1.0", kind: "same-reviewer-recheck", prior_record_id: prior.critique_record_id,
+      resolving_record_id: critique.critique_record_id, resolver: critique.reviewer,
+      resolved_lane_ids: resolvedLaneIds, resolved_finding_ids: resolvedFindingIds, resolved_at: critique.reviewed_at,
+    };
+  };
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
     const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
     const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
-    if (e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) return { ...e, superseded_by: _supersedeMarker };
+    if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
+      return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
+    }
+    const resolution = e.critique_resolution;
+    if (critique.verdict === "pass"
+      && e.id === critique.id
+      && eSuperseded
+      && eReviewer === critique.reviewer
+      && resolution?.kind === "same-reviewer-recheck") {
+      return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
+    }
     return e;
   });
   const critiques = [..._mergedCritiques, critique];
@@ -3978,6 +5537,153 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // already exists to share; recordLearning uses it directly (see below) and recordCritique
   // previously duplicated it by hand for no reason.
   assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques, undefined, exactFlowContext));
+  return 0;
+}
+
+function requiredResolutionRecordId(p: ReturnType<typeof parseArgs>, flag: string): string {
+  const value = opt(p, flag);
+  if (!/^[A-Za-z0-9._:-]{1,256}$/.test(value)) die(`resolve-critique requires a safe --${flag}`);
+  return value;
+}
+
+function critiqueByRecordId(critiques: AnyObj[], recordId: string, label: string): AnyObj {
+  const matches = critiques.filter((critique) => critique.critique_record_id === recordId);
+  if (matches.length !== 1) die(`resolve-critique ${label} critique record ${recordId} is missing or ambiguous`);
+  return matches[0]!;
+}
+
+async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const priorRecordId = requiredResolutionRecordId(p, "prior-record-id");
+  const resolvingRecordId = requiredResolutionRecordId(p, "resolving-record-id");
+  const resolver = opt(p, "resolver");
+  const authorizationDigest = requiredResolutionRecordId(p, "authorization-digest");
+  const authorizationKeyId = requiredResolutionRecordId(p, "authorization-key-id");
+  const authorizationNonce = requiredResolutionRecordId(p, "authorization-nonce");
+  const preimageDigest = requiredResolutionRecordId(p, "preimage-digest");
+  const bundleFile = path.join(dir, "trust.bundle");
+  const bundleDescriptor = fs.openSync(bundleFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let lockedPreimage: Buffer;
+  try { lockedPreimage = fs.readFileSync(bundleDescriptor); } finally { fs.closeSync(bundleDescriptor); }
+  if (createHash("sha256").update(lockedPreimage).digest("hex") !== preimageDigest) {
+    die("resolve-critique preimage changed before the locked mutation");
+  }
+  let signedAuthorization: AnyObj;
+  try { signedAuthorization = JSON.parse(Buffer.from(opt(p, "authorization-base64"), "base64").toString("utf8")); }
+  catch { die("resolve-critique requires the verified signed authorization payload"); }
+  if (!hasNonEmptyString(resolver)) die("resolve-critique requires an authenticated resolver");
+  if (priorRecordId === resolvingRecordId) die("resolve-critique rejects circular prior and resolving critique references");
+  const sidecarState = loadJson(path.join(dir, "state.json"));
+  const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
+  if (workItemRefs.length !== 1 || !hasNonEmptyString(workItemRefs[0])) die("resolve-critique requires one bound workflow subject");
+  const workflowSubjectRef = String(workItemRefs[0]);
+  const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
+    ? sidecarState.flow_run as AnyObj
+    : null;
+  const exactFlowContext = projectedRun
+    && typeof projectedRun.definition_id === "string"
+    && typeof projectedRun.current_step === "string"
+    ? { flowId: projectedRun.definition_id, stepId: projectedRun.current_step }
+    : undefined;
+  const existing = readBundleState(dir);
+  existing.critiques = normalizeCritiqueChainRecords(existing.critiques).records;
+  const rawBundle = loadJson(path.join(dir, "trust.bundle"));
+  const resolutionEvents = Array.isArray(rawBundle.critique_resolution_events) ? rawBundle.critique_resolution_events : [];
+  const prior = critiqueByRecordId(existing.critiques, priorRecordId, "prior");
+  const resolving = critiqueByRecordId(existing.critiques, resolvingRecordId, "resolving");
+  if (prior.superseded_by) {
+    const priorResolution = prior.critique_resolution;
+    if (prior.superseded_by === resolvingRecordId
+      && priorResolution && typeof priorResolution === "object"
+      && priorResolution.resolver === resolver
+      && priorResolution.resolving_record_id === resolvingRecordId) return 0;
+    die("resolve-critique prior critique is already superseded by a different resolution");
+  }
+  if (prior.verdict === "pass") die("resolve-critique prior critique must be a live failing or not-verified critique");
+  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || !critiqueIsCleanAndCurrent(dir, resolving) || !critiqueWorkspaceSnapshotIsCurrent(dir, resolving)) {
+    die("resolve-critique resolving critique must be a verified, current passing critique");
+  }
+  if (resolving.reviewer !== resolver) die("resolve-critique resolver must match the authenticated resolving critique reviewer");
+  if (prior.reviewer === resolver) die("resolve-critique cross-reviewer resolution requires a distinct reviewer");
+  if (prior.workflow_subject_ref !== workflowSubjectRef || resolving.workflow_subject_ref !== workflowSubjectRef) {
+    die("resolve-critique critiques must be bound to this session's workflow subject");
+  }
+  const priorSnapshot = critiqueSnapshotDigest(prior);
+  const resolvingSnapshot = critiqueSnapshotDigest(resolving);
+  if (!priorSnapshot || !resolvingSnapshot || priorSnapshot === resolvingSnapshot) {
+    die("resolve-critique resolving critique must reference a newer immutable workspace snapshot");
+  }
+  if (!Number.isSafeInteger(prior.critique_sequence) || !Number.isSafeInteger(resolving.critique_sequence)
+    || resolving.critique_sequence <= prior.critique_sequence) {
+    die("resolve-critique resolving critique must be newer in the writer-issued critique sequence");
+  }
+  const chainByHash = new Map(existing.critiques.map((critique) => [critique.critique_record_hash, critique]));
+  let chainCursor: AnyObj | undefined = resolving;
+  let descendsFromPrior = false;
+  const visitedHashes = new Set<string>();
+  while (chainCursor && !visitedHashes.has(chainCursor.critique_record_hash)) {
+    visitedHashes.add(chainCursor.critique_record_hash);
+    if (chainCursor.critique_predecessor_hash === prior.critique_record_hash) { descendsFromPrior = true; break; }
+    chainCursor = chainByHash.get(chainCursor.critique_predecessor_hash);
+  }
+  if (!descendsFromPrior) die("resolve-critique resolving critique must be a hash-chain descendant of the prior critique");
+  const priorWorkspace = prior.review_target?.workspace_snapshot;
+  const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
+  if (priorWorkspace?.kind === "git-worktree" && resolvingWorkspace?.kind === "git-worktree") {
+    try {
+      assertTrustedGitAncestor(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
+    } catch { die("resolve-critique resolving Git snapshot must descend from the prior reviewed commit"); }
+  }
+  const requiredLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
+  const resolvingLaneStatus = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : []).map((lane: AnyObj) => [lane.id, lane.status]));
+  if (requiredLaneIds.length === 0 || requiredLaneIds.some((laneId: string) => resolvingLaneStatus.get(laneId) !== "pass")) {
+    die("resolve-critique requires the resolving critique to cover every failed or not-verified review lane");
+  }
+  const requiredFindingIds = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
+  const resolvingFindingStatus = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyObj) => [finding.id, finding.status]));
+  if (requiredFindingIds.some((findingId: string) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolvingFindingStatus.get(findingId)))) {
+    die("resolve-critique requires the resolving critique to cover every open finding");
+  }
+  const resolvedAt = now();
+  const resolution = {
+    schema_version: "1.0",
+    kind: "cross-reviewer",
+    prior_record_id: priorRecordId,
+    resolving_record_id: resolvingRecordId,
+    resolver,
+    resolved_lane_ids: requiredLaneIds,
+    resolved_finding_ids: requiredFindingIds,
+    resolved_at: resolvedAt,
+    authorization_sha256: authorizationDigest,
+    resolution_event_id: `critique-resolution:${authorizationDigest}`,
+  };
+  const critiques = existing.critiques.map((critique) => critique.critique_record_id === priorRecordId
+    ? { ...critique, superseded_by: resolvingRecordId, critique_resolution: resolution }
+    : critique);
+  const candidateBundle = await buildTrustBundle(slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, path.dirname(dir), undefined, exactFlowContext);
+  if (!candidateBundle) die("resolve-critique could not build the candidate trust bundle");
+  const eventWithoutHash = {
+    schema_version: "1.0", sequence: resolutionEvents.length + 1,
+    predecessor_hash: resolutionEvents.length ? resolutionEvents.at(-1)?.event_hash : CRITIQUE_CHAIN_GENESIS,
+    event_id: resolution.resolution_event_id, operation: "resolve-critique", run_id: slug, subject: workflowSubjectRef,
+    preimage_bundle_sha256: preimageDigest, prior_record_id: priorRecordId, prior_record_hash: prior.critique_record_hash,
+    resolving_record_id: resolvingRecordId, resolving_record_hash: resolving.critique_record_hash,
+    resolver, authorization_sha256: authorizationDigest, authorization_key_id: authorizationKeyId,
+    authorization_nonce: authorizationNonce, edge: resolution, resulting_core_sha256: critiqueResolutionResultCoreDigest(prior, resolving, resolution),
+    signed_authorization: signedAuthorization,
+  };
+  const resolutionEvent = { ...eventWithoutHash, event_hash: createHash("sha256").update(JSON.stringify(eventWithoutHash)).digest("hex") };
+  const nextResolutionEvents = [...resolutionEvents, resolutionEvent];
+  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir));
+  // Multiple independent reviewers may have live failures after a route-back. Each signed
+  // authorization binds one exact edge/preimage, so resolution is intentionally sequential.
+  // Permit only the intermediate "other live critiques remain" condition here; every other
+  // graph defect still fails, and Builder/runtime/artifact consumers remain blocked until the
+  // final signed edge makes the complete graph valid.
+  const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
+  if (blockingGraphErrors.length) die(`resolve-critique rejected invalid critique graph: ${blockingGraphErrors.join("; ")}`);
+  assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, nextResolutionEvents));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -4020,35 +5726,49 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (verdict !== "pass") die("required critique must pass");
   return result;
 }
+
+function rejectNarrativeReleaseReferences(projectRoot: string, value: unknown, label: string, referenceField = false): void {
+  if (typeof value === "string") {
+    if (referenceField) rejectNarrativeReference(projectRoot, value, label);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) rejectNarrativeReleaseReferences(projectRoot, entry, label, referenceField);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value as AnyObj)) {
+    const isReferenceField = /^(?:refs?|files?|paths?|(?:evidence|artifact|source)_(?:refs?|files?|paths?))$/.test(key);
+    rejectNarrativeReleaseReferences(projectRoot, entry, `${label}.${key}`, isReferenceField);
+  }
+}
+
 async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const projectRoot = narrativeGuardRoot(dir);
   const decision = opt(p, "decision");
   if (!["merge", "release", "deploy", "hold", "rollback_required"].includes(decision)) die("decision must be one of: merge, release, deploy, hold, rollback_required");
   const gates = opts(p, "gate-json").map((v) => parseJson(v, "--gate-json"));
   if (["merge", "release", "deploy"].includes(decision) && !gates.some((g) => g.name === decision && g.status === "pass")) die(`positive release decision requires ${decision} gate to pass`);
-  const payload = { ...sidecarBase(slug), decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: opt(p, "evidence-ref"), gates: opts(p, "gate-json").map((v) => parseJson(v, "--gate-json")), rollback_plan: parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json"), observability_plan: parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json"), post_deploy_checks: opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json")), docs: parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json") };
+  const evidenceRef = opt(p, "evidence-ref");
+  const rollbackPlan = parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json");
+  const observabilityPlan = parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json");
+  const postDeployChecks = opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json"));
+  const docs = parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json");
+  rejectNarrativeReference(projectRoot, evidenceRef, "release evidence_ref");
+  rejectNarrativeReleaseReferences(projectRoot, gates, "release gates");
+  rejectNarrativeReleaseReferences(projectRoot, rollbackPlan, "release rollback_plan");
+  rejectNarrativeReleaseReferences(projectRoot, observabilityPlan, "release observability_plan");
+  rejectNarrativeReleaseReferences(projectRoot, postDeployChecks, "release post_deploy_checks");
+  rejectNarrativeReleaseReferences(projectRoot, docs, "release docs");
+  const payload = { ...sidecarBase(slug), decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: evidenceRef, gates, rollback_plan: rollbackPlan, observability_plan: observabilityPlan, post_deploy_checks: postDeployChecks, docs };
   const stateSummary = opt(p, "summary").trim() || `Release readiness recorded for ${decision}.`;
   writeJson(path.join(dir, "release.json"), payload);
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
   // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
   await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
-  // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-  // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
-  // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir with
-  // no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures are
-  // visible (stderr warning), not silently swallowed.
-  // #356 AC6: an InvalidBundleShapeError refusal is NOT best-effort — rethrow so record-release
-  // itself fails loudly (non-zero exit) rather than silently publishing nothing while reporting
-  // success. This is the crux of AC6: record-release is one of the auto-publish paths that must
-  // never let a shape-invalid bundle slip past unnoticed.
-  const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
-  await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
-    if (err instanceof InvalidBundleShapeError) throw err;
-    if (err instanceof NotFreshHolderError) throw err;
-    if (err instanceof RepoHeadMismatchError) throw err;
-    process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
-  });
+  process.stderr.write("[record-release] delivery publication is disabled on the sidecar surface; use `flow-agents workflow publish-delivery` after canonical Builder learning completes.\n");
   return 0;
 }
 
@@ -4076,9 +5796,9 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
 // is skipped gracefully (no error surfaced to the caller).
 
 /** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
-function resolveCommitSha(): string | null {
+function resolveCommitSha(projectRoot?: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execFileSync("git", ["rev-parse", "HEAD"], { ...(projectRoot ? { cwd: projectRoot } : {}), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null;
   }
@@ -4099,11 +5819,20 @@ function resolveCommitSha(): string | null {
  *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
-export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+export type TrustCheckpointSealResult = {
+  checkpointPath: string;
+  attestationPath: string;
+  companionPath: string;
+  status: "signed" | "unsigned";
+  checkpointSha256: string;
+  bundleSha256: string;
+};
+
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string, projectRoot?: string): Promise<TrustCheckpointSealResult | null> {
   const bundlePath = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundlePath)) return null; // no bundle — skip gracefully
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return null; // Surface unavailable
 
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const report = surface.buildTrustReport(bundle as Record<string, unknown>);
@@ -4124,17 +5853,25 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     status,
     phase,
     sealed_at: sealedAt,
-    commit_sha: resolveCommitSha(),
+    commit_sha: resolveCommitSha(projectRoot),
     checkpoint,
   };
   writeJson(checkpointPath, envelope);
+
+  // Every seal owns a fresh, mutually-exclusive companion set. Removing all prior
+  // companions before signing prevents an old .sig/.intoto or pointer file from
+  // satisfying a later existence-only check when this attempt emits nothing.
+  for (const name of ["trust.checkpoint.attestation.json", "trust.checkpoint.sig.json", "trust.checkpoint.intoto.json"]) {
+    fs.rmSync(path.join(dir, name), { force: true });
+  }
 
   // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
   // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
   // The .catch() at the call site already guards the parent command; this inner
   // catch is defense-in-depth so signing never propagates an error upward.
-  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
+  return await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
     process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return null;
   });
 }
 
@@ -4163,11 +5900,11 @@ async function signCheckpointAttestation(
   surface: SurfaceModule,
   bundle: AnyObj,
   checkpointPath: string,
-): Promise<void> {
+): Promise<TrustCheckpointSealResult | null> {
   // Guard: both primitives must be present (consumed from Surface, never reimplemented).
   if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
     process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
-    return;
+    return null;
   }
 
   // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
@@ -4224,6 +5961,15 @@ async function signCheckpointAttestation(
   // in-toto statement ties it back to the checkpoint without breaking the digest.
   const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
   writeJson(attestationPath, attestation);
+  const companionPath = path.join(dir, String(attestation.path));
+  return {
+    checkpointPath,
+    attestationPath,
+    companionPath,
+    status: attestation.status as "signed" | "unsigned",
+    checkpointSha256: sha256hex,
+    bundleSha256: createHash("sha256").update(fs.readFileSync(path.join(dir, "trust.bundle"))).digest("hex"),
+  };
 }
 
 /**
@@ -4435,6 +6181,37 @@ export class RepoHeadMismatchError extends Error {
 }
 
 /**
+ * Distinct, identifiable error for a publish attempt against a `dir` with no `trust.bundle` to
+ * publish — NOT a generic Error, and NOT one of the three tiers above (shape/hold/head-mismatch),
+ * so every publishDelivery() call site keeps its existing distinguishing behavior. This is the
+ * FIFTH tier, but unlike the other four it is deliberately positioned BEFORE any of them run
+ * (there is nothing to check the shape/hold/ancestry of when there is no bundle at all) and is
+ * the one tier every internal auto-publish call site (advanceState/recordRelease/promote) is
+ * EXPECTED to keep tolerating as best-effort: none of those catch handlers name this class, so it
+ * falls through to their existing generic `[caller] WARNING: publish-delivery failed: ...` swallow
+ * exactly like any other non-distinguished failure did before this class existed — advance-state's
+ * release path and record-release's own fail-soft behavior (a session that was never sealed
+ * must not block a release write) are both unaffected.
+ *
+ * The direct `publish-delivery` CLI subcommand (`publishDeliveryCmd`) has no such catch, so this
+ * error propagates all the way to the process exit code — the fix this class exists for: prior to
+ * it, a missing trust.bundle made `publishDeliveryCmd` return silently with exit 0 and no output,
+ * which was the real-world footgun of passing the OUTPUT dir (`delivery/<name>`) instead of the
+ * session artifact dir (`.kontourai/flow-agents/<slug>`), or invoking publish against a session
+ * that was never sealed (seal-checkpoint/record-release never ran). Both root causes manifest
+ * identically here (there is no trust.bundle at `dir`), so one error/one message covers both.
+ */
+export class SessionNotPublishableError extends Error {
+  readonly code = "PUBLISH_DELIVERY_NO_TRUST_BUNDLE" as const;
+  readonly dir: string;
+  constructor(dir: string) {
+    super(`no trust.bundle at ${dir} — pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint`);
+    this.name = "SessionNotPublishableError";
+    this.dir = dir;
+  }
+}
+
+/**
  * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
  * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
  * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
@@ -4619,7 +6396,19 @@ export function runReconcilePreflight(
   // package.json trust-reconcile-verify tiers apply locally; a repo with neither and no
   // manifest source resolves to the same empty legacy fallback CI itself would in that case.
   const canonicalCommands = tr.resolveCanonicalCommands({ commands: [] }, repoRoot) ?? [];
-  const manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  // A delivery published from a repository must be checked against the same
+  // repository-owned manifest that hosted CI will resolve.  In particular, do
+  // not let an ambient TRUST_RECONCILE_MANIFEST make a locally invalid bundle
+  // appear publishable; CI intentionally does not inherit the caller's shell.
+  const ambientManifest = process.env.TRUST_RECONCILE_MANIFEST;
+  delete process.env.TRUST_RECONCILE_MANIFEST;
+  let manifestResolution: AnyObj;
+  try {
+    manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  } finally {
+    if (ambientManifest === undefined) delete process.env.TRUST_RECONCILE_MANIFEST;
+    else process.env.TRUST_RECONCILE_MANIFEST = ambientManifest;
+  }
   const manifestByCmd = new Map<string, AnyObj>();
   for (const e of manifestResolution.entries) manifestByCmd.set(tr.normalizeCmd(e.command), e);
 
@@ -5200,7 +6989,14 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * trust.checkpoint.intoto.json / trust.checkpoint.sig.json / trust.checkpoint.attestation.json
  * from the session artifact dir to <repoRoot>/delivery/<slug>/.
  *
- * Fail-soft on a missing bundle: if trust.bundle is absent, returns without throwing.
+ * Fail-CLOSED on a missing bundle: if trust.bundle is absent at `dir`, throws
+ * `SessionNotPublishableError` naming the path and the fix (pass the session artifact dir;
+ * build it with record-evidence then seal-checkpoint) — see that class's own doc comment for
+ * why this positively-identifiable error is safe for the internal auto-publish call sites
+ * (advanceState/recordRelease/promote) to keep tolerating as best-effort (none of their catch
+ * handlers name it, so it falls through to their existing generic WARNING-and-swallow, same as
+ * before this became a throw) while still making the direct `publish-delivery` CLI subcommand
+ * (which has no such catch) fail loudly with a non-zero exit instead of silently exiting 0.
  * Fail-CLOSED on repo-root resolution: repoRoot must be a real, resolved kits/ ancestor
  * (see findRepoRootFromDirStrict) — null (no ancestor found) skips the publish with a
  * visible warning instead of writing to whatever process.cwd() happens to be. This
@@ -5250,18 +7046,29 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * protection for that case relies on the shape-check and verify-hold gates above, which correctly
  * no-op (allow) when there is no git repo to inspect, same as this gate.
  *
- * There are now FOUR fail-closed/fail-soft TIERS in this function, and they must never be
- * conflated in prose or in a call site's catch handler: (1) fail-SOFT bundle absence /
- * repo-root resolution (silent no-op / visible warning, unchanged from before #356), (2)
+ * There are now FIVE fail-closed/fail-soft TIERS in this function, and they must never be
+ * conflated in prose or in a call site's catch handler: (0) fail-CLOSED bundle absence
+ * (`SessionNotPublishableError` — loud for the direct CLI, but still tolerated as best-effort
+ * WARNING by the internal auto-publish call sites since none of their catches name it), (1)
+ * fail-SOFT repo-root resolution (visible warning, unchanged from before #356), (2)
  * fail-CLOSED bundle shape (#356, `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293,
  * `NotFreshHolderError`), (4) fail-CLOSED repo-HEAD-vs-checkpoint mismatch (#413 Facet A,
  * `RepoHeadMismatchError`) — see this tier's own gate below for the undeterminable-shallow
- * carve-out. Tiers run in this fixed order (shape, then verify-hold, then HEAD-mismatch); a
- * bundle that fails an earlier tier throws that tier's error specifically, never a later one's.
+ * carve-out. Tiers run in this fixed order (bundle absence, then repo-root, then shape, then
+ * verify-hold, then HEAD-mismatch); a bundle that fails an earlier tier throws that tier's error
+ * specifically, never a later one's.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+  if (!fs.existsSync(bundleSrc)) {
+    // Fail-CLOSED (tier 0): see SessionNotPublishableError's own doc comment above for why this
+    // is safe for the internal auto-publish call sites to keep tolerating as best-effort while
+    // making the direct `publish-delivery` CLI subcommand fail loudly instead of silently exiting
+    // 0 with no output — the real-world footgun this fixes (wrong dir passed, or a session that
+    // was never sealed via record-evidence + seal-checkpoint).
+    process.stderr.write(`[publish-delivery] REFUSING to publish — no trust.bundle at ${dir}: pass the session artifact dir (.kontourai/flow-agents/<slug>); build it with record-evidence then seal-checkpoint.\n`);
+    throw new SessionNotPublishableError(dir);
+  }
 
   if (!repoRoot) {
     process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/ seal. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
@@ -5311,13 +7118,16 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
   const sessionDeliveryDir = path.join(deliveryDir, slug);
 
   fs.mkdirSync(deliveryDir, { recursive: true });
+  const deliveryRootStat = fs.lstatSync(deliveryDir);
+  if (!deliveryRootStat.isDirectory() || deliveryRootStat.isSymbolicLink()) throw new Error("publish-delivery requires a non-symlink delivery root");
   // #413 Facet B: prune only THIS session's own prior seal (never another slug's) before
   // freshly rewriting delivery/<slug>/ below.
   pruneSupersededSeals(deliveryDir, slug);
-  fs.mkdirSync(sessionDeliveryDir, { recursive: true });
+  const stagingDir = path.join(deliveryDir, `.${slug}.publish-${randomBytes(16).toString("hex")}`);
+  fs.mkdirSync(stagingDir, { mode: 0o700 });
 
   // Required: trust.bundle (the CI anchor)
-  fs.copyFileSync(bundleSrc, path.join(sessionDeliveryDir, "trust.bundle"));
+  fs.copyFileSync(bundleSrc, path.join(stagingDir, "trust.bundle"), fs.constants.COPYFILE_EXCL);
 
   // Optional companions: checkpoint + signing artifacts
   const companions = [
@@ -5326,34 +7136,41 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
     "trust.checkpoint.sig.json",
     "trust.checkpoint.attestation.json",
   ];
+  const copiedCompanions: string[] = [];
   for (const filename of companions) {
     const src = path.join(dir, filename);
     if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(sessionDeliveryDir, filename));
+      fs.copyFileSync(src, path.join(stagingDir, filename), fs.constants.COPYFILE_EXCL);
+      copiedCompanions.push(filename);
     }
   }
 
-  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${sessionDeliveryDir} (per-session path, #379)\n`);
+  for (const filename of ["trust.bundle", ...copiedCompanions]) {
+    const descriptor = fs.openSync(path.join(stagingDir, filename), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  }
+  const stagingDescriptor = fs.openSync(stagingDir, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(stagingDescriptor); } finally { fs.closeSync(stagingDescriptor); }
+  if (fs.existsSync(sessionDeliveryDir)) throw new Error("publish-delivery destination appeared during atomic staging");
+  fs.renameSync(stagingDir, sessionDeliveryDir);
+  const deliveryDescriptor = fs.openSync(deliveryDir, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(deliveryDescriptor); } finally { fs.closeSync(deliveryDescriptor); }
+
+  const writtenFiles = ["trust.bundle", ...copiedCompanions].join(", ");
+  process.stderr.write(`[publish-delivery] published ${writtenFiles} to ${sessionDeliveryDir} (per-session path, #379)\n`);
 }
 
 /**
  * publish-delivery <artifact-dir> [--repo-root <path>]
  *
- * Explicit publish of the session trust bundle to the committed delivery/ path.
- * Equivalent to the publish that fires automatically at record-release /
- * advance-state to delivered. Useful for the deliver skill or a human to
- * publish explicitly.
+ * Legacy sidecar entrypoint retained only to direct callers to the canonical
+ * public workflow lifecycle.
  *
  * Usage: workflow-sidecar publish-delivery <artifactDir> [--repo-root <path>]
  */
 async function publishDeliveryCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
-  // Fail-closed: an explicit --repo-root always wins; otherwise resolve strictly (no
-  // process.cwd() fallback) so a scratch/test artifact dir cannot accidentally publish
-  // into whichever repo happens to be the current working directory.
-  const repoRoot = opt(p, "repo-root") || findRepoRootFromDirStrict(dir);
-  await publishDelivery(dir, repoRoot);
-  return 0;
+  void p;
+  die("workflow-sidecar publish-delivery is disabled; use `flow-agents workflow publish-delivery` so canonical Builder lifecycle and learning gates are enforced");
 }
 
 export function validateLearningCorrection(record: AnyObj): void {
@@ -5386,8 +7203,12 @@ function validateLearningPrevention(prevention: unknown): void {
   if (typeof value.status !== "string" || value.status.length === 0) die("correction.prevention.status is required");
   if (!["open", "completed", "accepted", "deferred", "rejected"].includes(value.status)) die("correction.prevention.status must be one of: open, completed, accepted, deferred, rejected");
 }
-export function normalizeLearning(raw: AnyObj, timestamp: string): AnyObj {
+export function normalizeLearning(raw: AnyObj, timestamp: string, projectRoot = process.cwd()): AnyObj {
   if (!Array.isArray(raw.source_refs)) die("source_refs must be an array");
+  for (const ref of raw.source_refs) {
+    if (typeof ref !== "string") die("source_refs entries must be strings");
+    rejectNarrativeReference(projectRoot, ref, "learning source_ref");
+  }
   if (!Array.isArray(raw.facts)) die("facts must be an array");
   if (!Array.isArray(raw.routing)) die("routing must be an array");
   if (!["success", "failure", "mixed", "unknown"].includes(raw.outcome)) die("learning outcome must be one of: success, failure, mixed, unknown");
@@ -5398,7 +7219,8 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const timestamp = opt(p, "timestamp", now());
-  const records = opts(p, "record-json").map((v) => normalizeLearning(parseJson(v, "--record-json"), timestamp));
+  const projectRoot = narrativeGuardRoot(dir);
+  const records = opts(p, "record-json").map((v) => normalizeLearning(parseJson(v, "--record-json"), timestamp, projectRoot));
   const status = opt(p, "status", "learned");
   if (status === "learned" && records.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learning status learned cannot have open routing");
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
@@ -5418,7 +7240,7 @@ function evidenceClean(dir: string): boolean {
   // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
   // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
   // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
@@ -5437,29 +7259,81 @@ function evidenceClean(dir: string): boolean {
 }
 function critiqueClean(dir: string): boolean {
   // trust.bundle is the sole critique artifact. Legacy critique.json must not influence gates.
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
-    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
-      if (!c) return false;
-      // #267/#282: superseded history is not evaluated for cleanliness.
-      if (c.metadata && typeof c.metadata === "object" && (c.metadata as AnyObj).superseded_by) return false;
-      return claimOrigin(c) === "critique";
-    });
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "critique");
     if (critiqueClaims.length === 0) return false; // no critique written yet
-    return critiquesFromBundle(dir)
-      .filter((critique) => !critique.superseded_by)
-      .every((critique) => critiqueIsCleanAndCurrent(dir, critique));
+    const state = loadJson(path.join(dir, "state.json"));
+    const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+      ? state.work_item_refs[0]
+      : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+    const authority = externalCritiqueAuthorityForGate(dir, bundle);
+    const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
+    if (!graph.valid) return false;
+    const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+    return liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) => critiqueWorkspaceSnapshotIsCurrent(dir, critique));
   }
   return false;
+}
+
+/**
+ * Read-only release-boundary freshness check for the public workflow facade.
+ * Reuses the canonical critique graph and workspace-snapshot validation rather
+ * than treating a newly stamped checkpoint as proof that older evidence covered
+ * the current source. A changed HEAD or worktree therefore requires canonical
+ * review and verification to be recorded again before delivery can be published.
+ */
+export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
+  const fail = (): never => {
+    throw new Error("workflow publish-delivery requires current canonical review and test verification evidence bound to the exact same source snapshot; re-run critique and verification after any HEAD or workspace change");
+  };
+  if (!evidenceClean(dir)) fail();
+  const bundle = loadTrustBundleForTrustMachinery(dir);
+  const current = captureReviewWorkspaceSnapshot(canonicalProjectRootForSession(dir), []);
+  if (current.kind !== "git-worktree" || typeof current.head_sha !== "string") fail();
+  const critiqueClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "critique")
+    : [];
+  if (critiqueClaims.length === 0) fail();
+  const state = loadJson(path.join(dir, "state.json"));
+  const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1
+    ? state.work_item_refs[0]
+    : typeof state.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+  const authority = externalCritiqueAuthorityForGate(dir, bundle);
+  const graph = validateCritiqueResolutionGraph(critiqueClaims, subject, authority.events, canonicalProjectRootForSession(dir), authority.completionVerified);
+  if (!graph.valid) fail();
+  const byRecordId = new Map(critiquesFromBundle(dir).map((critique) => [critique.critique_record_id, critique]));
+  if (!liveCritiqueFreshnessSatisfied(graph.live, byRecordId, (critique) =>
+    isDeepStrictEqual(critique.review_target?.workspace_snapshot, current))) fail();
+  const testsClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((claim) => claimOrigin(claim) === "check"
+      && claim.metadata?.gate_claim?.expectation_id === "tests-evidence"
+      && claim.value === "pass" && claim.status === "verified")
+    : [];
+  if (testsClaims.length !== 1) fail();
+  const metadata = testsClaims[0]!.metadata as AnyObj;
+  const observed = metadata.observed_commands;
+  const expected = metadata.verification_workspace_snapshot;
+  if (!Array.isArray(observed) || observed.length === 0
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
+    || !expected || typeof expected !== "object" || Array.isArray(expected)
+    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  if (!isDeepStrictEqual(expected, current)) fail();
+  return structuredClone(current);
 }
 function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
   if (!fs.existsSync(file)) return;
   const data = loadJson(file);
+  const projectRoot = narrativeGuardRoot(dir);
   if (!Array.isArray(data.records)) die("learning records must be an array");
   for (const record of data.records) {
     if (!Array.isArray(record.source_refs)) die("source_refs must be an array");
+    for (const ref of record.source_refs) {
+      if (typeof ref !== "string") die("source_refs entries must be strings");
+      rejectNarrativeReference(projectRoot, ref, "learning source_ref");
+    }
     if (!Array.isArray(record.facts)) die("facts must be an array");
     if (!Array.isArray(record.routing)) die("routing must be an array");
     validateLearningCorrection(record);
@@ -5470,6 +7344,7 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
+  const projectRoot = narrativeGuardRoot(dir);
   assertExistingLearningValid(dir);
   const verdict = opt(p, "verdict");
   if (verdict === "pass") {
@@ -5482,7 +7357,7 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     // trust.bundle does not yet exist (loadJson falls back to {}), exactly as
     // recordEvidence/recordCheck rely on.
     const _dogfoodExistingCheckStampById = existingCheckStampMap(readBundleState(dir).checks);
-    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById));
+    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById, projectRoot));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
     // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.
@@ -5493,13 +7368,13 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
     if (p.flags.has("require-critique") || opt(p, "release-decision")) {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
-      for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
+      for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"), projectRoot);
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
       if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
       if (!critiqueClean(dir) && fs.existsSync(path.join(dir, "trust.bundle"))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
-  const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
+  const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now()), projectRoot));
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learned status cannot have open learning routing");
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.correction === undefined)) die("learned status requires every learning record to include correction.needed");
   if (opts(p, "check-json").length) await recordEvidence({ ...p, positional: [dir], opts: { ...p.opts, verdict: [verdict] }, flags: p.flags });
@@ -5655,7 +7530,7 @@ export function gateAdvisoryFix(
 }
 
 /**
- * Build a schema-conformant InquiryRecord for the hachure inquiry-record.schema.json.
+ * Build a schema-conformant InquiryRecord for @kontourai/surface's canonical InquiryRecord schema.
  * Strips Surface-internal fields (identityLinkIds, transitiveRuleIds) from
  * resolutionPath that are valid in the TS type but not in the JSON schema.
  * Sets answer.value to the gate-review value-add: { calibration, advisoryFix, gateFired, sessionSlug }.
@@ -5855,16 +7730,17 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 
   const records = buildGateInquiryRecords(bundle, blockSignal, slug, expectedCriterionIds, surface);
 
-  // Validate each record against the hachure inquiry-record.schema.json (fail-open)
-  const validator = getHachureInquiryRecordValidator();
+  // Validate each record against the canonical InquiryRecord schema via Surface (fail-open)
   let schemaValid = true;
   const validationErrors: string[] = [];
-  for (const record of records) {
-    if (validator) {
-      const result = validator(record);
-      if (!result.valid) {
+  const inquiryValidator = (surface as { validateInquiryRecord?: (r: unknown) => unknown } | null)?.validateInquiryRecord;
+  if (typeof inquiryValidator === "function") {
+    for (const record of records) {
+      try {
+        inquiryValidator(record);
+      } catch (err) {
         schemaValid = false;
-        validationErrors.push(...result.errors.map((e) => `${record["id"] ?? "?"}: ${e}`));
+        validationErrors.push(`${record["id"] ?? "?"}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -5885,7 +7761,7 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
     .filter(([, n]) => n > 0)
     .map(([k, n]) => `${k}=${n}`)
     .join(", ");
-  const schemaTag = validator ? (schemaValid ? " schema:valid" : " schema:INVALID") : " schema:unavailable";
+  const schemaTag = typeof inquiryValidator === "function" ? (schemaValid ? " schema:valid" : " schema:INVALID") : " schema:unavailable";
   console.log(`gate-review: ${records.length} InquiryRecord(s) [${summary}]${schemaTag} → ${outputPath}`);
   return 0;
 }
@@ -6154,6 +8030,59 @@ function loadLivenessPolicyHelper(): {
 }
 function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivenessEnabled(process.env); }
 /**
+ * #1020: resolve the SHARED liveness stream root for a task directory.
+ *
+ * The lifecycle auto-emit path previously used `path.dirname(taskDir)` directly. `taskDir` is
+ * derived from the caller's own artifact path (`artifactDirFrom` at the `init-plan`/`advance-state`
+ * call sites), so in a linked worktree the event landed in THAT worktree's
+ * `.kontourai/flow-agents/liveness/` — a location no reader in any other checkout of the same repo
+ * consults. #357 built `resolveSharedRepoRoot` precisely so that "a `liveness claim` ... invoked
+ * from ANY worktree's cwd is visible to a reader in any other checkout" (local-artifact-root.ts),
+ * and `liveness claim`'s own explicit path honors it (eval AC3) — but this auto-emit path never
+ * consulted it, so the guarantee silently did not hold for lifecycle-driven lanes.
+ *
+ * Resolution is anchored on `taskDir` itself, NOT on `process.cwd()`: the stream belongs to the
+ * repo that physically contains the artifacts. This keeps eval/fixture isolation intact — a task
+ * dir under a throwaway `mktemp -d` outside any git tree fails open below, and one inside its own
+ * disposable repo resolves to that repo — while a real linked-worktree task dir now resolves to
+ * the primary checkout's shared store.
+ *
+ * FAIL-OPEN (contractual, do not tighten): any failure — git absent, `taskDir` not inside a git
+ * tree, resolution error — returns `path.dirname(taskDir)`, today's exact behavior. Liveness is
+ * advisory; a resolution failure must never divert or drop the event. In the single-checkout case
+ * the two agree byte-for-byte (`<repo>/.kontourai/flow-agents/<slug>` → `<repo>/.kontourai/flow-agents`),
+ * so this is a no-op for every non-worktree caller.
+ */
+/**
+ * The sibling resolvers' default advice — "pass --artifact-root" — is FALSE here. `init-plan` never
+ * reads that flag, and `advance-state`'s copy only steers `writeCurrent`, not this stream root,
+ * which is derived from `taskDir` alone. Telling an operator to pass a flag that cannot affect the
+ * problem being reported is worse than saying nothing: it costs them a debugging cycle and teaches
+ * them the diagnostic is unreliable.
+ */
+const LIFECYCLE_LIVENESS_REMEDIATION =
+  "Repair the repository's git metadata (`git rev-parse --git-common-dir` must succeed from this directory) so lifecycle liveness reaches the shared store; --artifact-root does not affect this path.";
+
+function livenessStreamRootFor(taskDir: string): string {
+  const fallback = path.dirname(taskDir);
+  // Fail open, but never SILENTLY. #413 hardened the sibling resolver
+  // (`flowAgentsArtifactRoot`) for exactly this: a fail-open with no diagnostic inside a git
+  // working tree strands the event in a cwd-local store that no other checkout can read, which is
+  // the precise symptom #1020 exists to fix. Reusing that module's own warning rather than
+  // restating it keeps one wording — and one place to change it.
+  try {
+    const sharedRepoRoot = resolveSharedRepoRoot(taskDir);
+    if (!sharedRepoRoot) {
+      warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
+      return fallback;
+    }
+    return path.resolve(sharedRepoRoot, FLOW_AGENTS_RUNTIME_DIR);
+  } catch {
+    warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
+    return fallback;
+  }
+}
+/**
  * F1 (#288 fix iteration 1, cr-HIGH fail-open violation): the `livenessEnabled()`
  * guard (and therefore its `loadLivenessPolicyHelper()` module load) must sit
  * INSIDE this function's own fail-open try/catch — previously it sat outside,
@@ -6176,7 +8105,7 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
       process.stderr.write("[liveness] skipped auto-emit: actor unresolved (set FLOW_AGENTS_ACTOR or run inside a supported runtime)\n");
       return;
     }
-    const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
+    const root = livenessStreamRootFor(taskDir);
     const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
     if (kind === "claim") evt.ttlSeconds = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
     appendLivenessEvent(root, evt);
@@ -6389,14 +8318,13 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Claim Lookup — pure helper (promotable to Surface #171) ─────────────────
-// buildClaimExplanation + its types are extracted to ./sidecar-claim-explain.ts
-// (ops#22): a PURE projection (report + bundle + id in, structured explanation out)
-// with no fs/CLI/shared state, unit-tested in isolation. Re-exported here so the
-// library facade (src/index.ts) and the IO `claimLookup` handler below are unchanged.
-export { buildClaimExplanation } from "./sidecar-claim-explain.js";
-export type { ClaimEvidenceItem, ClaimExplanation } from "./sidecar-claim-explain.js";
-import { buildClaimExplanation } from "./sidecar-claim-explain.js";
+// ─── Claim Lookup — consumes Surface explainClaim (#171 lift complete) ───────
+// The pure projection this file once hosted (sidecar-claim-explain.ts, ops#22)
+// was lifted verbatim into @kontourai/surface as explainClaim(report, claimId)
+// (kontourai/surface#151, 2.10.0) with the drilldown composition folded inside
+// (same fail-soft semantics the caller-side enrichment had). Types re-export
+// from Surface so the library facade keeps compiling for downstream importers.
+export type { ClaimEvidenceItem, ClaimExplanation } from "@kontourai/surface";
 
 /**
  * claim <id> <dir>
@@ -6438,29 +8366,17 @@ Available claim ids:
 
   // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.buildDerivationDrilldown !== "function") {
-    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/buildDerivationDrilldown
+  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.explainClaim !== "function") {
+    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/explainClaim (needs >=2.10)
 `);
     return 0; // fail-open, consistent with gate-review pattern
   }
 
-  // Build TrustReport (required — buildDerivationDrilldown needs TrustReport, not TrustBundle)
+  // Build TrustReport, then the structured explanation — Surface's explainClaim
+  // (#171 lift) composes the derivation drilldown internally, fail-soft, exactly
+  // as the retired local helper + caller-side enrichment did.
   const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>);
-
-  // Build the structured explanation (pure, promotable to #171)
-  const explanation = buildClaimExplanation(report, bundle as unknown as Record<string, unknown>, claimId);
-
-  // Enrich the why.directInputs/leafClaims/diagnostics from the drilldown
-  try {
-    const drilldown = surface.buildDerivationDrilldown(report, claimId) as AnyObj;
-    if (drilldown) {
-      explanation.why.directInputs = Array.isArray(drilldown.directInputs) ? drilldown.directInputs : [];
-      explanation.why.leafClaims = Array.isArray(drilldown.leafClaims) ? drilldown.leafClaims : [];
-      explanation.why.diagnostics = Array.isArray(drilldown.diagnostics) ? drilldown.diagnostics : [];
-    }
-  } catch {
-    // buildDerivationDrilldown threw (e.g. claim not in report) — proceed without drilldown
-  }
+  const explanation = surface.explainClaim(report, claimId) as import("@kontourai/surface").ClaimExplanation;
 
   if (p.flags.has("json")) {
     console.log(JSON.stringify(explanation, null, 2));
@@ -6547,7 +8463,7 @@ Available claim ids:
   if (explanation.why.changeRecords.length > 0) {
     lines.push(`  Change records: ${explanation.why.changeRecords.length}`);
     for (const cr of explanation.why.changeRecords) {
-      lines.push(`    - ${cr.action ?? "?"} at ${cr.at ?? cr.createdAt ?? "?"}`);
+      lines.push(`    - ${cr.action ?? "?"} at ${(cr as AnyObj).at ?? cr.createdAt ?? "?"}`);
     }
   }
 
@@ -6557,11 +8473,67 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-export function mainFromPublicWorkflow(argv: string[]): Promise<number> {
-  return main(argv, PUBLIC_WORKFLOW_AUTHORITY);
+export type PublicWorkflowInvocation = { writerTransactionId?: string; writerTarget?: TrustBundleWriterTarget };
+
+export function mainFromPublicWorkflow(argv: string[], invocation?: PublicWorkflowInvocation): Promise<number> {
+  if (argv[0] === "resolve-critique") throw new Error("critique resolution mutation is owned by the external lifecycle authority helper");
+  return main(argv, PUBLIC_WORKFLOW_AUTHORITY, invocation);
 }
 
-export async function main(argv: string[] = process.argv.slice(2), authority?: symbol): Promise<number> {
+/**
+ * Single source of truth for the `help` command's listing — one short line per subcommand
+ * dispatched by main()'s switch below, in the SAME order as those `case` labels. `help` itself
+ * is intercepted before dispatch (see main()) and is not a switch case, so it is listed last and
+ * excluded when workflow-sidecar-help.test.mjs greps this file's own source for main()'s `case
+ * "...":` labels and asserts they match this array's other keys exactly — an added, removed, or
+ * renamed command that forgets to update this list fails that test rather than silently
+ * drifting out of sync with the real dispatcher.
+ */
+const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
+  ["ensure-session", "Create or resume a workflow session's artifact directory and state."],
+  ["current", "Print the current session pointer (active flow/step) for an artifact root."],
+  ["record-agent-event", "Append a JSONL agent-activity event for an artifact root."],
+  ["init-plan", "Write the initial plan/handoff artifact for a session."],
+  ["record-evidence", "Record a verification check (pass/fail/waived) into the trust bundle."],
+  ["record-gate-claim", "Record a workflow gate claim (e.g. human-approval) into the trust bundle."],
+  ["record-check", "Run a command, capture its output, and record it as evidence."],
+  ["promote", "Record a durable-residue promotion claim (or none) for a session."],
+  ["advance-state", "Advance a session's status/phase; auto-seals and publishes on delivery."],
+  ["record-critique", "Record a review critique verdict into the trust bundle."],
+  ["resolve-critique", "Resolve a pending critique (public workflow interface only)."],
+  ["import-critique", "Import an externally-authored critique into the trust bundle."],
+  ["record-release", "Record a release-readiness decision; auto-seals and publishes."],
+  ["record-learning", "Record a post-delivery learning/follow-up entry."],
+  ["dogfood-pass", "Run the dogfood self-check pass for an artifact root."],
+  ["gate-review", "Review outstanding gate blocks/misses for a session."],
+  ["render-trust-panel", "Render a human-readable trust panel from a trust bundle."],
+  ["trust-mcp", "Serve trust-bundle explanations over the MCP protocol."],
+  ["liveness", "Claim/heartbeat/release or inspect session liveness/holder status."],
+  ["claim", "Look up a claim's status, evidence, and how-to-verify guidance."],
+  ["resolve-slug", "Resolve a work-item reference to its deterministic session slug."],
+  ["fixture", "Write a test fixture state.json OUTSIDE declared artifact roots (write <dir> --from-json <file> | --malformed --content <string|@file>)."],
+  ["seal-checkpoint", "Seal a trust checkpoint snapshot for the current session state."],
+  ["publish-delivery", "Publish a session's trust bundle to the repo's committed delivery/ path."],
+  ["reconcile-preflight", "Run the same bundle shape check publish-delivery enforces, standalone."],
+  ["verify-hold", "Check whether the calling actor is the fresh holder of a subject."],
+  ["takeover-preflight", "Check whether a subject is safely takeable-over by a new actor."],
+  ["help", "Print this command list."],
+];
+
+function printHelp(): void {
+  const width = Math.max(...COMMAND_DESCRIPTIONS.map(([name]) => name.length));
+  const lines = [
+    "workflow-sidecar <command> [args...]",
+    "",
+    "Commands:",
+    ...COMMAND_DESCRIPTIONS.map(([name, description]) => `  ${name.padEnd(width)}  ${description}`),
+    "",
+    "Run `workflow-sidecar <command> --help` for per-command usage where supported.",
+  ];
+  console.log(lines.join("\n"));
+}
+
+export async function main(argv: string[] = process.argv.slice(2), authority?: symbol, invocation?: PublicWorkflowInvocation): Promise<number> {
   const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
   // command to execute verbatim (never option-parsed: a command like `npm test -- --watch`
@@ -6579,6 +8551,16 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     }
   }
   const p = parseArgs(_argvForParse);
+  // `help` / `--help` / `-h` as the command itself: print the command list and return, before
+  // any lock/artifact-dir resolution runs (this is not one of the dispatched subcommands, so it
+  // must never touch the filesystem — see workflow-sidecar-help.test.mjs's side-effect-free
+  // assertion). Scoped strictly to the top-level command position: a per-command `<cmd> --help`
+  // (e.g. reconcile-preflight/verify-hold/takeover-preflight already handle their own `--help`
+  // internally with tailored usage) is unaffected since those flags never reach `p.command`.
+  if (p.command === "help" || p.command === "--help" || p.command === "-h") {
+    printHelp();
+    return 0;
+  }
   if (!p.command) die("workflow-sidecar command is required");
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
@@ -6591,6 +8573,9 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   // immediately below and is scoped to the `whoami` action only: `liveness status` (a read path)
   // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
   // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
+  // #783: `fixture` writes only OUTSIDE declared artifact roots by contract, so it must not
+  // acquire (or create) a session lock inside any artifact root; lock-free like resolve-slug.
+  const isFixture = p.command === "fixture";
   const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
   // #320 AC1: `liveness verdict` is read-only and lock-free, exactly like `whoami` above — it
   // must never acquire the workflow-sidecar lock. Same bypass shape, scoped to the `verdict`
@@ -6598,7 +8583,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   const isLivenessVerdict = p.command === "liveness" && p.positional[0] === "verdict";
   const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami && !isLivenessVerdict)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict || isFixture) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p, authority === PUBLIC_WORKFLOW_AUTHORITY);
@@ -6606,11 +8591,15 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
-      case "record-gate-claim": return recordGateClaim(p);
+      case "record-gate-claim": return recordGateClaim(p, authority === PUBLIC_WORKFLOW_AUTHORITY, invocation?.writerTransactionId, invocation?.writerTarget);
       case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
+      case "resolve-critique": {
+        if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("resolve-critique is available only through the authenticated public workflow interface");
+        return resolveCritique(p);
+      }
       case "import-critique": return importCritique(p);
       case "record-release": return recordRelease(p);
       case "record-learning": return recordLearning(p);
@@ -6621,6 +8610,7 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
       case "resolve-slug": return resolveSlugCmd(p);
+      case "fixture": return fixtureCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       case "reconcile-preflight": return reconcilePreflightCmd(p);

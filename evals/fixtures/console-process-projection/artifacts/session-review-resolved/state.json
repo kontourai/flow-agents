@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-review-resolved",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:20:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Address the fix-forward from the resolved critique and keep implementing."
+  }
+}

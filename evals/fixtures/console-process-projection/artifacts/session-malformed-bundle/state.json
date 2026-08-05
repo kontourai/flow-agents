@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "session-malformed-bundle",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-20T10:35:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Keep implementing; this session's own trust.bundle predates the origin-stamp cutover."
+  }
+}

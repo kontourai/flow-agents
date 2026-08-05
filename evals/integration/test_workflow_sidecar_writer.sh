@@ -87,6 +87,28 @@ else
   _fail "sidecar writer did not read explicit artifact root: $(cat "$TMPDIR_EVAL/previous-current-explicit.out" "$TMPDIR_EVAL/previous-current-explicit.err")"
 fi
 
+REQUIRED_POINTER_PROJECT="$TMPDIR_EVAL/required-pointer-project"
+REQUIRED_POINTER_ROOT="$REQUIRED_POINTER_PROJECT/.kontourai/flow-agents"
+mkdir -p "$REQUIRED_POINTER_ROOT"
+printf 'not-a-directory\n' > "$REQUIRED_POINTER_ROOT/current"
+if FLOW_AGENTS_ACTOR=required-pointer-actor node "$ROOT/build/src/cli.js" workflow start \
+  --artifact-root "$REQUIRED_POINTER_ROOT" \
+  --flow builder.shape \
+  --task-slug required-pointer \
+  --title "Required actor pointer" \
+  --source-request "Canonical Builder startup must require its actor-scoped binding." \
+  --summary "Refuse startup when the actor pointer cannot be published." \
+  --criterion "No canonical Flow run is minted without the actor binding" \
+  >"$TMPDIR_EVAL/required-pointer.out" 2>"$TMPDIR_EVAL/required-pointer.err"; then
+  _fail "canonical Builder start succeeded without publishing its actor-scoped current pointer"
+elif grep -q "required per-actor current pointer" "$TMPDIR_EVAL/required-pointer.err" \
+  && [[ ! -e "$REQUIRED_POINTER_PROJECT/.kontourai/flow/runs/required-pointer" ]] \
+  && [[ ! -e "$REQUIRED_POINTER_ROOT/current.json" ]]; then
+  _pass "canonical Builder start fails closed before Flow allocation when actor pointer publication fails"
+else
+  _fail "canonical Builder pointer failure was not fail-closed: $(cat "$TMPDIR_EVAL/required-pointer.out" "$TMPDIR_EVAL/required-pointer.err")"
+fi
+
 TRAVERSAL_ROOT="$TMPDIR_EVAL/traversal-repo/.kontourai/flow-agents"
 TRAVERSAL_OUTSIDE="$TMPDIR_EVAL/traversal-outside-existing"
 mkdir -p "$TRAVERSAL_ROOT" "$TRAVERSAL_OUTSIDE"
@@ -206,6 +228,83 @@ else
   _fail "sidecar writer did not record delegation-safe agent event: $(cat "$TMPDIR_EVAL/agent-event.out" "$TMPDIR_EVAL/agent-event.err")"
 fi
 
+UNRESOLVED_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/unresolved-worker/events.jsonl"
+cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-unresolved-agent.json"
+if NODE_ENV=test FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 \
+  flow_agents_node "$WRITER" record-agent-event \
+    --artifact-root "$SESSION_ROOT" \
+    --agent-id unresolved-worker \
+    --kind evidence \
+    --status active \
+    --summary "An unresolved process must not mutate the shared current run." \
+    >"$TMPDIR_EVAL/unresolved-agent-event.out" 2>&1; then
+  _fail "sidecar writer accepted an unresolved agent-event actor"
+elif rg -q 'requires a resolved authenticated runtime actor' "$TMPDIR_EVAL/unresolved-agent-event.out" \
+  && [[ ! -e "$UNRESOLVED_AGENT_EVENT_PATH" ]] \
+  && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-unresolved-agent.json"; then
+  _pass "sidecar writer rejects unresolved agent-event actors without shared-run mutation"
+else
+  _fail "sidecar writer unresolved-actor rejection left mutation or unclear diagnostics: $(cat "$TMPDIR_EVAL/unresolved-agent-event.out")"
+fi
+
+SPOOFED_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/spoofed-worker/events.jsonl"
+if flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --actor another-runtime \
+  --agent-id spoofed-worker \
+  --kind evidence \
+  --status active \
+  --summary "A caller must not select another runtime actor." >"$TMPDIR_EVAL/spoofed-agent-event.out" 2>&1; then
+  _fail "sidecar writer accepted caller-selected actor authority"
+elif rg -q 'does not accept --actor' "$TMPDIR_EVAL/spoofed-agent-event.out" \
+  && [[ ! -e "$SPOOFED_AGENT_EVENT_PATH" ]]; then
+  _pass "sidecar writer rejects caller-selected actor authority"
+else
+  _fail "sidecar writer actor-spoof rejection was incomplete: $(cat "$TMPDIR_EVAL/spoofed-agent-event.out")"
+fi
+
+NESTED_AGENT_OUTSIDE="$TMPDIR_EVAL/nested-agent-outside"
+mkdir -p "$NESTED_AGENT_OUTSIDE"
+ln -s "$NESTED_AGENT_OUTSIDE" "$ENSURED_DIR/ag""ents/symlink-worker"
+if flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --agent-id symlink-worker \
+  --kind evidence \
+  --status active \
+  --summary "Nested symlinks must not redirect agent events." >"$TMPDIR_EVAL/nested-agent-symlink.out" 2>&1; then
+  _fail "sidecar writer followed a nested agent-event symlink"
+elif rg -q 'regular directory' "$TMPDIR_EVAL/nested-agent-symlink.out" \
+  && [[ ! -e "$NESTED_AGENT_OUTSIDE/events.jsonl" ]]; then
+  _pass "sidecar writer rejects nested agent-event symlinks without outside writes"
+else
+  _fail "sidecar writer nested-symlink rejection was incomplete: $(cat "$TMPDIR_EVAL/nested-agent-symlink.out")"
+fi
+rm "$ENSURED_DIR/ag""ents/symlink-worker"
+
+EVENT_SYMLINK_AGENT="symlink-event-worker"
+EVENT_SYMLINK_AGENT_DIR="$ENSURED_DIR/ag""ents/$EVENT_SYMLINK_AGENT"
+EVENT_SYMLINK_OUTSIDE="$TMPDIR_EVAL/symlink-event-outside.jsonl"
+EVENT_STAGE_TMP="$TMPDIR_EVAL/event-stage-tmp"
+mkdir -p "$EVENT_SYMLINK_AGENT_DIR" "$EVENT_STAGE_TMP"
+printf '%s\n' '{"outside":true}' > "$EVENT_SYMLINK_OUTSIDE"
+ln -s "$EVENT_SYMLINK_OUTSIDE" "$EVENT_SYMLINK_AGENT_DIR/events.jsonl"
+cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-event-symlink.json"
+if TMPDIR="$EVENT_STAGE_TMP" flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$SESSION_ROOT" \
+  --agent-id "$EVENT_SYMLINK_AGENT" \
+  --kind evidence \
+  --status active \
+  --summary "A symlinked event stream must fail without staging residue." >"$TMPDIR_EVAL/event-symlink.out" 2>&1; then
+  _fail "sidecar writer followed a symlinked agent event stream"
+elif rg -q 'anchored agent event append failed' "$TMPDIR_EVAL/event-symlink.out" \
+  && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-event-symlink.json" \
+  && cmp -s "$EVENT_SYMLINK_OUTSIDE" <(printf '%s\n' '{"outside":true}') \
+  && [[ -z "$(find "$EVENT_STAGE_TMP" -mindepth 1 -print -quit)" ]]; then
+  _pass "sidecar writer rejects symlinked event streams and removes failed staging state"
+else
+  _fail "sidecar writer event-stream symlink rejection left mutation or staging residue: $(cat "$TMPDIR_EVAL/event-symlink.out")"
+fi
+
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
 TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evil-agent-outside.jsonl"
 if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
@@ -271,21 +370,21 @@ else
 fi
 
 LATE_AGENT_EVENT_PATH="$ENSURED_DIR/ag""ents/late-worker/events.jsonl"
-if flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --artifact-dir "$ENSURED_DIR" \
   --agent-id late-worker \
   --kind completed \
   --status done \
   --summary "A late worker finished the old workflow after a newer session became active." \
-  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/late-agent-event.out" 2>"$TMPDIR_EVAL/late-agent-event.err" \
-  && [[ -f "$LATE_AGENT_EVENT_PATH" ]] \
-  && rg -q '"agent_id": "late-worker"' "$LATE_AGENT_EVENT_PATH" \
-  && rg -q '"active_slug": "fresh-session"' "$SESSION_ROOT/current.json" \
-  && ! rg -q '"agent_id": "late-worker"' "$SESSION_ROOT/current.json"; then
-  _pass "sidecar writer keeps late explicit agent events from stealing current workflow"
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/late-agent-event.out" 2>"$TMPDIR_EVAL/late-agent-event.err"; then
+  _fail "sidecar writer accepted a late event after the actor binding moved"
+elif rg -q 'current actor binding' "$TMPDIR_EVAL/late-agent-event.err" \
+  && [[ ! -e "$LATE_AGENT_EVENT_PATH" ]] \
+  && rg -q '"active_slug": "fresh-session"' "$SESSION_ROOT/current.json"; then
+  _pass "sidecar writer rejects late events after the actor binding moves"
 else
-  _fail "sidecar writer let a late explicit agent event change current workflow: $(cat "$TMPDIR_EVAL/late-agent-event.out" "$TMPDIR_EVAL/late-agent-event.err")"
+  _fail "sidecar writer late-event rejection was incomplete: $(cat "$TMPDIR_EVAL/late-agent-event.out" "$TMPDIR_EVAL/late-agent-event.err")"
 fi
 
 COPIED_ROOT="$TMPDIR_EVAL/copied-workflows"
@@ -295,21 +394,23 @@ cp -R "$ENSURED_DIR" "$COPIED_DIR"
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json"
 COPIED_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/copied-worker/events.jsonl"
 if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$COPIED_ROOT" \
   --artifact-dir "$COPIED_DIR" \
   --agent-id copied-worker \
   --kind evidence \
   --status done \
   --summary "A copied workflow outside the default root records without hanging." \
-  --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/copied-agent-event.out" 2>"$TMPDIR_EVAL/copied-agent-event.err" \
-  && [[ -f "$COPIED_AGENT_EVENT_PATH" ]] \
-  && rg -q '"agent_id": "copied-worker"' "$COPIED_AGENT_EVENT_PATH" \
+  --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/copied-agent-event.out" 2>"$TMPDIR_EVAL/copied-agent-event.err"; then
+  _fail "sidecar writer accepted an event in an unbound copied workflow"
+elif rg -q 'current actor binding|current pointer' "$TMPDIR_EVAL/copied-agent-event.err" \
+  && [[ ! -e "$COPIED_AGENT_EVENT_PATH" ]] \
   && cmp -s "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json" \
   && [[ ! -e "$COPIED_ROOT/.workflow-sidecar.lockdir" ]] \
   && [[ ! -e "$COPIED_DIR/.workflow-sidecar.lockdir" ]] \
   && [[ ! -e "$SESSION_ROOT/.workflow-sidecar.lockdir" ]]; then
-  _pass "sidecar writer records bounded explicit events in copied workflow dirs"
+  _pass "sidecar writer rejects events in unbound copied workflow dirs"
 else
-  _fail "sidecar writer copied explicit event failed or left residue: $(cat "$TMPDIR_EVAL/copied-agent-event.out" "$TMPDIR_EVAL/copied-agent-event.err")"
+  _fail "sidecar writer copied-workflow rejection failed or left residue: $(cat "$TMPDIR_EVAL/copied-agent-event.out" "$TMPDIR_EVAL/copied-agent-event.err")"
 fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-mismatch-agent.json"
@@ -586,6 +687,32 @@ else
   _fail "sidecar writer (#309 setup) failed to seed branch-full-sequence: $(cat "$TMPDIR_EVAL/branch-seq-ensure.out" "$TMPDIR_EVAL/branch-seq-ensure.err")"
 fi
 
+# Builder runtime projects this immutable envelope before later lifecycle commands rewrite
+# state.json. Seed that production shape here so the full rewrite and merge writers both prove
+# they retain it.
+node - "$BRANCH_SEQ_DIR/state.json" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, "utf8"));
+const absent = (reason) => ({ status: "unavailable", reason });
+state.run_correlation = {
+  schema_version: "1.0",
+  correlation_id: "run-branch-full-sequence",
+  identities: {
+    runtime_session: { status: "present", value: "session-branch-full-sequence" },
+    runtime_turn: absent("turn is not established yet"),
+    flow_run: { status: "present", value: "branch-full-sequence" },
+    flow_step: absent("the envelope spans changing Flow steps"),
+    work_item: { status: "present", value: "github:kontourai/flow-agents#924" },
+    agent: { status: "present", value: "codex:session-branch-full-sequence" },
+    delegation_trace: absent("delegation is not established yet"),
+    delegation_span: absent("delegation is not established yet"),
+    terminal_record: absent("the terminal record does not exist yet"),
+  },
+};
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+
 BRANCH_SEQ_PLAN_ARTIFACT="$BRANCH_SEQ_DIR/branch-full-sequence--plan-work.md"
 cat > "$BRANCH_SEQ_PLAN_ARTIFACT" <<'MARKDOWN'
 ---
@@ -611,10 +738,11 @@ if flow_agents_node "$WRITER" init-plan "$BRANCH_SEQ_PLAN_ARTIFACT" \
   --summary "Planning sidecars initialized from a branch-less plan artifact." \
   --next-action "Advance to execution." \
   --timestamp "2026-07-01T00:04:21Z" >"$TMPDIR_EVAL/branch-seq-initplan.out" 2>"$TMPDIR_EVAL/branch-seq-initplan.err" \
-  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
-  _pass "sidecar writer (#309) preserves the already-recorded branch across init-plan even when the plan artifact carries no branch: line"
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
+  && rg -q '"correlation_id": "run-branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
+  _pass "sidecar writer (#309) preserves branch and run correlation across init-plan even when the plan artifact carries no branch: line"
 else
-  _fail "sidecar writer (#309) DROPPED the branch on init-plan: $(cat "$TMPDIR_EVAL/branch-seq-initplan.out" "$TMPDIR_EVAL/branch-seq-initplan.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+  _fail "sidecar writer (#309) DROPPED branch or run correlation on init-plan: $(cat "$TMPDIR_EVAL/branch-seq-initplan.out" "$TMPDIR_EVAL/branch-seq-initplan.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
 fi
 
 if flow_agents_node "$WRITER" advance-state "$BRANCH_SEQ_DIR" \
@@ -624,10 +752,11 @@ if flow_agents_node "$WRITER" advance-state "$BRANCH_SEQ_DIR" \
   --next-action "Run checks." \
   --timestamp "2026-07-01T00:04:22Z" >"$TMPDIR_EVAL/branch-seq-advance.out" 2>"$TMPDIR_EVAL/branch-seq-advance.err" \
   && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
+  && rg -q '"correlation_id": "run-branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
   && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$SESSION_ROOT/current.json"; then
-  _pass "sidecar writer (#309) still carries the branch in state.json and its current.json mirror after advance-state"
+  _pass "sidecar writer (#309) still carries branch and run correlation in state.json after advance-state"
 else
-  _fail "sidecar writer (#309) lost the branch by advance-state, or current.json mirror drifted: $(cat "$TMPDIR_EVAL/branch-seq-advance.out" "$TMPDIR_EVAL/branch-seq-advance.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+  _fail "sidecar writer (#309) lost branch or run correlation by advance-state, or current.json mirror drifted: $(cat "$TMPDIR_EVAL/branch-seq-advance.out" "$TMPDIR_EVAL/branch-seq-advance.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
 fi
 
 # #309 backfill repro: an ALREADY-BROKEN pre-fix session (state.json has no branch key at all,
@@ -3573,6 +3702,62 @@ else
   _fail "compose: record-gate-claim (selected-work) failed: $(cat "$TMPDIR_EVAL/compose-gate1.out" "$TMPDIR_EVAL/compose-gate1.err")"
 fi
 
+# ─── #634: writer-observed execution — die-before-append + append-on-success ────────────────
+# A rejected expected-status mismatch must leave command-log.jsonl untouched (no writer
+# observation may exist for a claim that was refused); a successful gate claim with
+# --command must append a chain-linked canonical-writer-execution observation.
+CMDLOG_634="$COMPOSE_DIR/command-log.jsonl"
+CMDLOG_634_BEFORE=""
+[[ -f "$CMDLOG_634" ]] && CMDLOG_634_BEFORE="$(shasum -a 256 "$CMDLOG_634" | cut -d' ' -f1)"
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "634 mismatch: claiming pass while the command fails must die before any append" \
+  --command "test -f .kontourai/flow-agents/compose-270/definitely-not-a-real-file-634" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--pull-work.md","summary":"634 mismatch fixture."}' \
+  --timestamp "2026-07-14T15:00:00Z" >"$TMPDIR_EVAL/wo-mismatch.out" 2>"$TMPDIR_EVAL/wo-mismatch.err"; then
+  _fail "#634: record-gate-claim accepted a passing claim for a failing command"
+else
+  if grep -Eq 'passing evidence command #[0-9?]+ \(sha256:[0-9a-f]{64}\); exit 1; outcome fail; output_sha256:[0-9a-f]{64} failed' "$TMPDIR_EVAL/wo-mismatch.err" \
+    && ! grep -q 'definitely-not-a-real-file-634' "$TMPDIR_EVAL/wo-mismatch.err"; then
+    _pass "#634: expected-status mismatch dies with the redacted exit-code diagnostic"
+  else
+    _fail "#634: mismatch died with an unexpected diagnostic: $(cat "$TMPDIR_EVAL/wo-mismatch.err")"
+  fi
+fi
+CMDLOG_634_AFTER=""
+[[ -f "$CMDLOG_634" ]] && CMDLOG_634_AFTER="$(shasum -a 256 "$CMDLOG_634" | cut -d' ' -f1)"
+if [[ "$CMDLOG_634_BEFORE" == "$CMDLOG_634_AFTER" ]]; then
+  _pass "#634: rejected mismatch left command-log.jsonl byte-identical (die-before-append)"
+else
+  _fail "#634: rejected mismatch modified command-log.jsonl"
+fi
+
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "634 success: writer observation must append on a genuinely passing command" \
+  --command "test -f .kontourai/flow-agents/compose-270/compose-270--pull-work.md" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--pull-work.md","summary":"634 success fixture."}' \
+  --timestamp "2026-07-14T15:01:00Z" >"$TMPDIR_EVAL/wo-success.out" 2>"$TMPDIR_EVAL/wo-success.err"; then
+  if [[ -f "$CMDLOG_634" ]] && node -e "
+    const fs = require('fs');
+    const entries = fs.readFileSync(process.argv[1], 'utf8').split('\n').filter(Boolean).map(JSON.parse);
+    const writer = entries.filter((e) => e.source === 'canonical-writer-execution');
+    if (writer.length === 0) process.exit(1);
+    const last = writer[writer.length - 1];
+    if (last.observedResult !== 'pass' || last.exitCode !== 0) process.exit(1);
+    if (!last._chain || typeof last._chain.hash !== 'string') process.exit(1);
+  " "$CMDLOG_634"; then
+    _pass "#634: successful gate claim appended a chain-linked canonical-writer-execution pass"
+  else
+    _fail "#634: no chain-linked writer observation found after a successful gate claim"
+  fi
+else
+  _fail "#634: success-path record-gate-claim failed: $(cat "$TMPDIR_EVAL/wo-success.err")"
+fi
+
+
 if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-gate1-assert.err"
 import { readFileSync } from 'node:fs';
 const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
@@ -3863,6 +4048,14 @@ const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
 const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critique');
 if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(4);
+for (const claim of criteria) {
+  const evidence = bundle.evidence.filter((item) => item.claimId === claim.id);
+  const event = bundle.events.find((item) => item.claimId === claim.id && item.status === 'verified');
+  if (evidence.length !== 1 || evidence[0].evidenceType !== 'test_output' || evidence[0].passing !== true) process.exit(5);
+  if (!event || event.evidenceIds.length !== 1 || event.evidenceIds[0] !== evidence[0].id) process.exit(6);
+}
 const snapshot = review?.metadata?.review_target?.workspace_snapshot;
 if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
 NODE
@@ -3873,6 +4066,54 @@ NODE
   fi
 else
   _fail "tests-evidence multi-command write failed: $(cat "$TMPDIR_EVAL/multi-pass.out" "$TMPDIR_EVAL/multi-pass.err")"
+fi
+
+if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"acceptance-rebuild-probe","kind":"external","status":"not_verified","summary":"Trigger a valid unrelated bundle rebuild."}' \
+  --timestamp "2026-07-11T11:00:35Z" >"$TMPDIR_EVAL/multi-rebuild.out" 2>"$TMPDIR_EVAL/multi-rebuild.err" \
+  && node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(1);
+for (const claim of criteria) {
+  if (claim.createdAt !== '2026-07-11T11:00:30Z' || claim.updatedAt !== '2026-07-11T11:00:30Z') process.exit(2);
+  const event = bundle.events.find((item) => item.claimId === claim.id);
+  if (event?.createdAt !== '2026-07-11T11:00:30Z' || event?.verifiedAt !== '2026-07-11T11:00:30Z') process.exit(3);
+}
+NODE
+then
+  _pass "verified acceptance provenance survives an unrelated rebuild without timestamp laundering"
+else
+  _fail "unrelated rebuild regressed or refreshed verified acceptance provenance: $(cat "$TMPDIR_EVAL/multi-rebuild.out" "$TMPDIR_EVAL/multi-rebuild.err")"
+fi
+
+# A direct acceptance artifact edit cannot replace or erase the durable criterion contract on a
+# later, unrelated bundle write. This reproduces the issue #601 artifact-only erasure vector.
+node - "$MULTI_DIR/acceptance.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const acceptance = JSON.parse(fs.readFileSync(file, 'utf8'));
+acceptance.criteria = [{ id: null, description: 'Attempted replacement', status: 'PASS' }];
+fs.writeFileSync(file, JSON.stringify(acceptance, null, 2) + '\n');
+NODE
+if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"acceptance-erasure-probe","kind":"external","status":"not_verified","summary":"Trigger an unrelated bundle rebuild."}' \
+  --timestamp "2026-07-11T11:00:40Z" >"$TMPDIR_EVAL/multi-erasure.out" 2>"$TMPDIR_EVAL/multi-erasure.err"; then
+  _fail "malformed acceptance artifact was accepted during an unrelated bundle rebuild"
+elif node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2) process.exit(1);
+if (criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(2);
+NODE
+then
+  _pass "malformed acceptance replacement fails closed without erasing durable criteria"
+else
+  _fail "rejected acceptance replacement still erased or regressed durable criteria: $(cat "$TMPDIR_EVAL/multi-erasure.out" "$TMPDIR_EVAL/multi-erasure.err")"
 fi
 
 # ─── AC4: compose-three-writer (five writer calls total: evidence x2, gate-claim x2, critique, ──
@@ -5035,8 +5276,6 @@ NODEOF
 else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate (ran 'npm run build' first?)"
 fi
-
-
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."

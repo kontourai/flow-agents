@@ -2,8 +2,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
-type Issue = { path: string; message: string };
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
+// #783: the mini JSON-Schema validator (validateSchemaValue) and its Issue type moved to a
+// shared lib so workflow-sidecar.ts's `fixture write --from-json` validates against the SAME
+// schema-matching logic this file uses -- see src/lib/mini-json-schema.ts's header comment.
+import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
+import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceRead } from "../flow-recovery-fence.js";
+import { validateRunCorrelationPresence } from "../run-correlation.js";
 
 // Resolve bundled JSON Schemas relative to this compiled script's own package
 // location (build/src/cli/validate-workflow-artifacts.js -> ../../../schemas), NOT
@@ -12,7 +21,6 @@ type Issue = { path: string; message: string };
 // used for liveness-read.js in workflow-sidecar.ts.
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const statusRe = /\[(PASS|FAIL|NOT_VERIFIED|SKIP|PARTIAL)\]/i;
-const dateTimeRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const sidecarSchemas: Record<string, string> = {
   "state.json": "schemas/workflow-state.schema.json",
   "acceptance.json": "schemas/workflow-acceptance.schema.json",
@@ -21,7 +29,20 @@ const sidecarSchemas: Record<string, string> = {
   "critique.json": "schemas/workflow-critique.schema.json",
   "release.json": "schemas/workflow-release.schema.json",
   "learning.json": "schemas/workflow-learning.schema.json",
+  "waves.json": "schemas/workflow-waves.schema.json",
+  "workflow-outcome.json": "schemas/workflow-outcome.schema.json",
 };
+
+// Signed critique-resolution events are verified against the repository-owned
+// trust-root registry. Validation can be invoked from any working directory,
+// so process.cwd() is not an authority boundary: derive the owning repository
+// from the canonical runtime session path instead.
+function projectRootForSession(dir: string): string | undefined {
+  const marker = `${path.sep}.kontourai${path.sep}flow-agents${path.sep}`;
+  const resolved = path.resolve(dir);
+  const markerIndex = resolved.lastIndexOf(marker);
+  return markerIndex > 0 ? resolved.slice(0, markerIndex) : undefined;
+}
 // Runtime coordination records live below a session but are not workflow
 // sidecars. Recursing into them would validate continuation-driver/state.json
 // against the public workflow-state schema and turn an active driver into a
@@ -113,7 +134,7 @@ function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) out.push(...walk(p));
+    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) for (const nested of walk(p)) out.push(nested);
     else out.push(p);
   }
   return out;
@@ -140,84 +161,6 @@ function sidecarPaths(pathsIn: string[]): string[] {
     }
   }
   return [...found].sort();
-}
-
-function schemaMatches(value: unknown, schema: any, rootSchema: any): boolean {
-  const issues: Issue[] = [];
-  validateSchemaValue("<schema-match>", value, schema, "<value>", issues, rootSchema);
-  return issues.length === 0;
-}
-
-function validateSchemaCondition(value: unknown, schema: any, rootSchema: any): boolean {
-  const issues: Issue[] = [];
-  validateSchemaValue("<schema-condition>", value, schema, "<value>", issues, rootSchema);
-  return issues.length === 0;
-}
-
-function resolveSchemaRef(ref: string, rootSchema: any): any {
-  if (!ref.startsWith("#/$defs/")) return undefined;
-  return rootSchema?.$defs?.[ref.slice("#/$defs/".length)];
-}
-
-function validateSchemaValue(file: string, value: unknown, schema: any, loc: string, issues: Issue[], rootSchema = schema): void {
-  if (schema.anyOf) {
-    if (!schema.anyOf.some((sub: any) => schemaMatches(value, sub, rootSchema))) {
-      issues.push({ path: file, message: `${loc} must match at least one allowed schema` });
-    }
-  }
-  if (schema.oneOf) {
-    const matches = schema.oneOf.filter((sub: any) => schemaMatches(value, sub, rootSchema)).length;
-    if (matches !== 1) issues.push({ path: file, message: `${loc} must match exactly one allowed schema` });
-  }
-  if (schema.$ref) {
-    const resolved = resolveSchemaRef(schema.$ref, rootSchema);
-    if (!resolved) issues.push({ path: file, message: `${loc} has unsupported schema ref ${schema.$ref}` });
-    else validateSchemaValue(file, value, resolved, loc, issues, rootSchema);
-  }
-  for (const sub of schema.allOf ?? []) validateSchemaValue(file, value, sub, loc, issues, rootSchema);
-  if (schema.if && schema.then && validateSchemaCondition(value, schema.if, rootSchema)) validateSchemaValue(file, value, schema.then, loc, issues, rootSchema);
-  if (schema.const !== undefined && value !== schema.const) issues.push({ path: file, message: `${loc} must be ${schema.const}` });
-  if (schema.enum && !schema.enum.includes(value)) issues.push({ path: file, message: `${loc} must be one of: ${schema.enum.join(", ")}` });
-  const t = schema.type;
-  if (!t && (schema.required || schema.properties)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) { issues.push({ path: file, message: `${loc} must be object` }); return; }
-    const obj = value as Record<string, unknown>;
-    for (const key of schema.required ?? []) if (!(key in obj)) issues.push({ path: file, message: `${loc}.${key} is required` });
-    for (const [key, sub] of Object.entries<any>(schema.properties ?? {})) if (key in obj) validateSchemaValue(file, obj[key], sub, `${loc}.${key}`, issues, rootSchema);
-  }
-  if (t === "string") {
-    if (typeof value !== "string") { issues.push({ path: file, message: `${loc} must be string` }); return; }
-    if (typeof schema.minLength === "number" && value.length < schema.minLength) issues.push({ path: file, message: `${loc} must not be empty` });
-    if (schema.format === "date-time") {
-      const d = Date.parse(value);
-      if (!dateTimeRe.test(value) || Number.isNaN(d)) issues.push({ path: file, message: `${loc} must be date-time` });
-    }
-    return;
-  }
-  if (t === "boolean" && typeof value !== "boolean") { issues.push({ path: file, message: `${loc} must be boolean` }); return; }
-  if (t === "integer") {
-    if (!Number.isInteger(value)) { issues.push({ path: file, message: `${loc} must be integer` }); return; }
-    if (typeof schema.minimum === "number" && (value as number) < schema.minimum) issues.push({ path: file, message: `${loc} must be at least ${schema.minimum}` });
-    return;
-  }
-  if (t === "number" && typeof value !== "number") { issues.push({ path: file, message: `${loc} must be number` }); return; }
-  if (t === "array") {
-    if (!Array.isArray(value)) { issues.push({ path: file, message: `${loc} must be array` }); return; }
-    if (typeof schema.minItems === "number" && value.length < schema.minItems) issues.push({ path: file, message: `${loc} must contain at least ${schema.minItems} item(s)` });
-    if (schema.uniqueItems && new Set(value.map((v) => JSON.stringify(v))).size !== value.length) issues.push({ path: file, message: `${loc} must contain unique items` });
-    if (schema.items) value.forEach((item, i) => validateSchemaValue(file, item, schema.items, `${loc}[${i}]`, issues, rootSchema));
-    return;
-  }
-  if (t === "object") {
-    if (!value || typeof value !== "object" || Array.isArray(value)) { issues.push({ path: file, message: `${loc} must be object` }); return; }
-    const obj = value as Record<string, unknown>;
-    for (const key of schema.required ?? []) if (!(key in obj)) issues.push({ path: file, message: `${loc}.${key} is required` });
-    const props = schema.properties ?? {};
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(obj).filter((k) => !(k in props)).sort()) issues.push({ path: file, message: `${loc}.${key} is not allowed` });
-    }
-    for (const [key, sub] of Object.entries<any>(props)) if (key in obj) validateSchemaValue(file, obj[key], sub, `${loc}.${key}`, issues, rootSchema);
-  }
 }
 
 function artifactKind(file: string, text: string): string {
@@ -283,6 +226,24 @@ function readJson(file: string): { value: any | undefined; issues: Issue[] } {
   catch (error) { return { value: undefined, issues: [{ path: file, message: `invalid JSON: ${(error as Error).message}` }] }; }
 }
 
+/** External lifecycle evidence must never be accepted from Trust Bundle fields. */
+function readProtectedLifecycleAuthorityJson(file: string, label: string, maxBytes: number): any {
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maxBytes || (stat.mode & 0o022) !== 0) throw new Error(`${label} must be a protected regular file`);
+    return JSON.parse(fs.readFileSync(descriptor).toString("utf8"));
+  } finally { fs.closeSync(descriptor); }
+}
+
+function critiqueIsSubstantivePass(critique: any): boolean {
+  return critique?.verdict === "pass" && critique?.claim_status === "verified"
+    && Array.isArray(critique.lanes) && critique.lanes.length > 0 && critique.lanes.every((lane: any) => lane?.status === "pass")
+    && (!Array.isArray(critique.findings) || critique.findings.every((finding: any) => finding?.status !== "open"))
+    && Array.isArray(critique.review_target?.artifacts) && critique.review_target.artifacts.length > 0
+    && critique.review_target.artifacts.every((artifact: any) => typeof artifact?.file === "string" && /^[a-f0-9]{64}$/i.test(String(artifact?.sha256)));
+}
+
 function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
   const { value, issues } = readJson(file);
   const warnings: Issue[] = [];
@@ -290,7 +251,22 @@ function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
   const schemaFile = sidecarSchemas[path.basename(file)];
   if (schemaFile) {
     const schema = JSON.parse(readText(path.join(packageRoot, schemaFile)));
-    validateSchemaValue(file, value, schema, path.basename(file), issues, schema);
+    const schemaRegistry = {
+      "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json": JSON.parse(
+        readText(path.join(packageRoot, "schemas/run-correlation-envelope.schema.json")),
+      ),
+    };
+    validateSchemaValue(file, value, schema, path.basename(file), issues, schema, schemaRegistry);
+    if (path.basename(file) === "state.json" && value.run_correlation) {
+      try {
+        validateRunCorrelationPresence(value.run_correlation);
+      } catch (error) {
+        issues.push({
+          path: file,
+          message: error instanceof Error ? error.message : "state.json.run_correlation is invalid",
+        });
+      }
+    }
   }
   if (path.basename(file) === "evidence.json") {
     const checks = Array.isArray(value.checks) ? value.checks : [];
@@ -321,10 +297,56 @@ function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
       if (Array.isArray(value.post_deploy_checks) && value.post_deploy_checks.some((c: any) => !["planned", "pass"].includes(c.status))) issues.push({ path: file, message: "deploy decision requires post_deploy_checks to be planned or pass" });
     }
   }
+  if (path.basename(file) === "waves.json") {
+    validateWaves(file, value, issues);
+  }
   if (path.basename(file) === "state.json" && value && typeof value === "object" && !Array.isArray(value) && !("branch" in value)) {
     warnings.push({ path: file, message: "state.json has no branch field (legacy/pre-#289 session) — re-run `ensure-session` to backfill agent/<actor>/<slug>." });
   }
   return { issues, warnings };
+}
+
+// #663 slice 1: wave-result reconciliation is machine-checkable, not prose. The schema
+// (schemas/workflow-waves.schema.json) validates the shape; these semantic checks enforce the
+// cross-record arithmetic the mini schema engine cannot express: exactly one terminal status
+// record per declared worker, no undeclared reporters, reconciliation counts that match the
+// records, and a `complete` claim that is impossible while any expected worker lacks a
+// worker-landed terminal status. Missing workers must be recorded explicitly as not_reported —
+// a reconciled wave never silently absorbs a dropped worker. Enforcement here is data-level
+// validation only; stop-hook refusal of wave completion is #663 part 3 (slice 2).
+function validateWaves(file: string, value: any, issues: Issue[]): void {
+  const waves = Array.isArray(value?.waves) ? value.waves : [];
+  waves.forEach((wave: any, index: number) => {
+    const loc = `waves.json.waves[${index}]`;
+    const expected: any[] = Array.isArray(wave?.expected_workers) ? wave.expected_workers : [];
+    const results: any[] = Array.isArray(wave?.worker_results) ? wave.worker_results : [];
+    const expectedIds = expected.map((w) => w?.worker_id).filter((id) => typeof id === "string" && id.length > 0);
+    const expectedIdSet = new Set(expectedIds);
+    if (expectedIdSet.size !== expectedIds.length) issues.push({ path: file, message: `${loc}.expected_workers must declare unique worker_id values` });
+    const resultIds = results.map((r) => r?.worker_id).filter((id) => typeof id === "string" && id.length > 0);
+    const seen = new Set<string>();
+    for (const id of resultIds) {
+      if (seen.has(id)) issues.push({ path: file, message: `${loc}.worker_results has more than one terminal status record for worker ${id}; each worker lands exactly one` });
+      seen.add(id);
+      if (!expectedIdSet.has(id)) issues.push({ path: file, message: `${loc}.worker_results records worker ${id} that is not declared in expected_workers; declare every worker in the manifest before dispatch` });
+    }
+    const reconciliation = wave?.reconciliation;
+    if (!reconciliation || typeof reconciliation !== "object" || Array.isArray(reconciliation)) return;
+    const expectedCount = expectedIds.length;
+    const reportedIds = new Set(results.filter((r) => ["completed", "failed", "blocked"].includes(r?.status) && expectedIdSet.has(r?.worker_id)).map((r) => r.worker_id as string));
+    const reportedCount = reportedIds.size;
+    if (reconciliation.expected_count !== expectedCount) issues.push({ path: file, message: `${loc}.reconciliation.expected_count is ${reconciliation.expected_count} but expected_workers declares ${expectedCount}` });
+    if (reconciliation.reported_count !== reportedCount) issues.push({ path: file, message: `${loc}.reconciliation.reported_count is ${reconciliation.reported_count} but ${reportedCount} of ${expectedCount} expected workers have a worker-landed terminal status (completed|failed|blocked)` });
+    const missing = expectedIds.filter((id) => !results.some((r) => r?.worker_id === id));
+    for (const id of missing) issues.push({ path: file, message: `${loc} is reconciled but worker ${id} has no terminal status record; record it explicitly as not_reported — never silently absorb a missing worker` });
+    const notReported = results.filter((r) => r?.status === "not_reported" && expectedIdSet.has(r?.worker_id));
+    if (reconciliation.status === "complete" && (missing.length > 0 || notReported.length > 0 || reportedCount !== expectedCount)) {
+      issues.push({ path: file, message: `${loc}.reconciliation.status complete requires every expected worker to have a worker-landed terminal status; got ${reportedCount} of ${expectedCount} reported` });
+    }
+    if (reconciliation.status === "incomplete" && missing.length === 0 && notReported.length === 0 && reportedCount === expectedCount) {
+      issues.push({ path: file, message: `${loc}.reconciliation.status incomplete contradicts the records: all ${expectedCount} expected workers reported` });
+    }
+  });
 }
 
 function validateLearningCorrections(file: string, status: unknown, records: any[], issues: Issue[]): void {
@@ -386,14 +408,58 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     }
   }
   for (const [dir, payloads] of byDir) {
+    const projectRoot = projectRootForSession(dir);
+    if (projectRoot) {
+      try { assertFlowRunRecoveryFenceOpen(projectRoot, path.basename(dir)); }
+      catch (error) {
+        issues.push({ path: dir, message: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+    }
     const slugs = new Set([...payloads.values()].map((p: any) => p.task_slug).filter(Boolean));
     if (slugs.size > 1) issues.push({ path: dir, message: "sidecar task_slug mismatch" });
+    const state = payloads.get("state.json");
+    const flowStatus = state?.flow_run?.status;
+    if (["completed", "canceled", "failed", "archived"].includes(flowStatus)) {
+      const outcomeFile = path.join(dir, "workflow-outcome.json");
+      const outcome = payloads.get("workflow-outcome.json");
+      if (!outcome) {
+        issues.push({ path: outcomeFile, message: `terminal Flow status ${flowStatus} requires workflow-outcome.json` });
+      } else {
+        if (outcome.task_slug !== state.task_slug) {
+          issues.push({ path: outcomeFile, message: "workflow outcome task_slug must match state.json" });
+        }
+        if (!isDeepStrictEqual(outcome.run_correlation, state.run_correlation)) {
+          issues.push({ path: outcomeFile, message: "workflow outcome run_correlation must match state.json" });
+        }
+        if (outcome.workflow_outcome?.flow_status !== flowStatus) {
+          issues.push({ path: outcomeFile, message: "workflow outcome flow_status must match terminal state.json flow_run.status" });
+        }
+        if (!isDeepStrictEqual(outcome.workflow_outcome, state.workflow_outcome)) {
+          issues.push({ path: outcomeFile, message: "workflow outcome projection must match state.json workflow_outcome" });
+        }
+        if (outcome.process_status !== state.workflow_outcome?.process_status) {
+          issues.push({ path: outcomeFile, message: "workflow outcome process_status must match state.json workflow_outcome.process_status" });
+        }
+      }
+    }
     const evidence = payloads.get("evidence.json");
     if (evidence?.verdict === "pass" && Array.isArray(evidence.checks) && evidence.checks.some((c: any) => c.status !== "pass" && c.status !== "skip")) issues.push({ path: path.join(dir, "evidence.json"), message: "pass verdict requires all non-skipped checks to pass" });
   }
-  if (requireSidecars) {
-    const dirs = new Set<string>(markdown.map((p) => path.dirname(p)));
+  if (requireSidecars || requireCritique) {
+    const dirs = new Set<string>([
+      ...markdown.map((p) => path.dirname(p)),
+      ...inputs.filter((p) => fs.existsSync(p) && fs.statSync(p).isDirectory()).map((p) => path.resolve(p)),
+    ]);
     for (const dir of dirs) {
+      const projectRoot = projectRootForSession(dir);
+      if (projectRoot) {
+        try { assertFlowRunRecoveryFenceOpen(projectRoot, path.basename(dir)); }
+        catch (error) {
+          issues.push({ path: dir, message: error instanceof Error ? error.message : String(error) });
+          continue;
+        }
+      }
       const deliver = markdown.find((p) => path.dirname(p) === dir && p.includes("deliver") && !p.includes("plan") && !p.includes("review"));
       const delivered = deliver ? /status:\s*(delivered|accepted|archived)/i.test(readText(deliver)) : true;
       // ADR 0010 Phase 4b: trust.bundle is the primary artifact at the delivered phase.
@@ -401,8 +467,12 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       // Hard-fail on evidence.json absence only when no trust.bundle exists for a delivered session.
       const hasTrustBundle = fs.existsSync(path.join(dir, "trust.bundle"));
       const evidenceRequired = delivered && !hasTrustBundle;
-      for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
-        if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+      if (requireSidecars) {
+        const state = readJson(path.join(dir, "state.json")).value;
+        const terminalOutcomeRequired = ["completed", "canceled", "failed", "archived"].includes(state?.flow_run?.status);
+        for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json", ...(terminalOutcomeRequired ? ["workflow-outcome.json"] : [])]) {
+          if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
+        }
       }
       // ADR 0010 Phase 4c: critique.json no longer written; trust.bundle carries critique claims. Accept either.
       if (requireCritique && !fs.existsSync(path.join(dir, "critique.json")) && !fs.existsSync(path.join(dir, "trust.bundle"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });
@@ -412,12 +482,66 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
         const { value: bundleValue } = readJson(trustBundlePath);
         if (bundleValue) {
           const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
-          const critiqueClaims = claims.filter((c: any) => c && c.claimType === "workflow.critique.review");
-          // #282: a historical fail/disputed critique that has been explicitly superseded by a later
-          // resolving write (metadata.superseded_by) is retained structurally as history and does NOT
-          // block a top-level pass — only a LIVE (non-superseded) fail/disputed critique blocks.
-          const isSuperseded = (c: any) => c && c.metadata && typeof c.metadata === "object" && c.metadata.superseded_by;
-          if (critiqueClaims.some((c: any) => (c.value === "fail" || c.status === "disputed") && !isSuperseded(c))) issues.push({ path: trustBundlePath, message: "required critique must pass" });
+          const stateResult = readJson(path.join(dir, "state.json"));
+          const state = stateResult.value;
+          const subject = Array.isArray(state?.work_item_refs) && state.work_item_refs.length === 1
+            ? state.work_item_refs[0]
+            : typeof state?.task_slug === "string" ? `flow-agents://session/${state.task_slug}` : undefined;
+          const ledgerPath = path.join(dir, "lifecycle-authority.resolution-events.json");
+          const completionPath = path.join(dir, "lifecycle-authority.completion.json");
+          const crossReviewerEdge = claims.some((claim: any) => claim?.metadata?.origin === "critique" && claim.metadata?.critique_resolution?.kind === "cross-reviewer");
+          let resolutionEvents: any[] = [];
+          let ledgerAvailable = false;
+          try {
+            const authorityEvents = readProtectedLifecycleAuthorityJson(ledgerPath, "lifecycle authority resolution event ledger", 4 * 1024 * 1024);
+            if (!authorityEvents || authorityEvents.schema_version !== "1.0" || !Array.isArray(authorityEvents.events)) throw new Error("lifecycle authority resolution event ledger shape is invalid");
+            resolutionEvents = authorityEvents.events;
+            ledgerAvailable = true;
+          } catch (error) {
+            if (crossReviewerEdge) issues.push({ path: ledgerPath, message: `required external lifecycle authority ledger is unavailable: ${(error as Error).message}` });
+          }
+          let externalCompletionVerified = false;
+          if (crossReviewerEdge || resolutionEvents.length > 0) {
+            try {
+              const completion = readProtectedLifecycleAuthorityJson(completionPath, "lifecycle authority completion", 256 * 1024);
+              const verified = verifyLifecycleAuthorityCompletion(completion);
+              externalCompletionVerified = ledgerAvailable
+                && lifecycleAuthorityCompletionBindsExactState(verified, path.basename(dir), bundleValue, resolutionEvents);
+            } catch {
+              // The explicit issue below keeps missing/invalid authority evidence distinct from a graph failure.
+            }
+            if (!externalCompletionVerified) issues.push({ path: completionPath, message: "required external lifecycle authority completion is missing, invalid, or does not bind the exact protected ledger" });
+          }
+          const graph = validateCritiqueResolutionGraph(claims, subject, resolutionEvents, projectRootForSession(dir), externalCompletionVerified);
+          if (!graph.valid) issues.push({ path: trustBundlePath, message: `required critique must pass: ${graph.errors.join("; ")}` });
+          const projectRoot = projectRootForSession(dir);
+          if (!projectRoot) {
+            issues.push({ path: trustBundlePath, message: "required critique project root could not be resolved" });
+            continue;
+          }
+          let currentSubstantivePass = false;
+          for (const critique of graph.live) {
+            if (!critiqueIsSubstantivePass(critique)) {
+              issues.push({ path: trustBundlePath, message: "required critique has a live record that is not a substantive verified PASS" });
+              continue;
+            }
+            const artifacts = Array.isArray(critique.review_target?.artifacts) ? critique.review_target.artifacts : [];
+            try {
+              const currentArtifacts = artifacts.map((artifact: any) => {
+                const file = path.resolve(projectRoot, String(artifact.file));
+                const relative = path.relative(fs.realpathSync(projectRoot), fs.realpathSync(file));
+                if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("artifact escapes project root");
+                const sha256 = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+                if (sha256 !== artifact.sha256) throw new Error("artifact digest changed");
+                return { file: String(artifact.file), sha256 };
+              });
+              if (currentArtifacts.length === 0 || !isDeepStrictEqual(critique.review_target?.workspace_snapshot, captureReviewWorkspaceSnapshot(projectRoot, currentArtifacts))) throw new Error("workspace snapshot changed");
+              currentSubstantivePass = true;
+            } catch {
+              // Historical passing anchors may be stale as long as another live substantive PASS is current.
+            }
+          }
+          if (!currentSubstantivePass) issues.push({ path: trustBundlePath, message: "required critique has no current live substantive PASS" });
         }
       }
       const acceptance = path.join(dir, "acceptance.json");
@@ -432,7 +556,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
   return issues;
 }
 
-function main(): number {
+function main(fenced = false): number {
   const args = process.argv.slice(2);
   const requireSidecars = args.includes("--require-sidecars");
   const requireCritique = args.includes("--require-critique");
@@ -441,6 +565,32 @@ function main(): number {
   if (!pathsIn.length) {
     console.error("usage: validate-workflow-artifacts [--require-sidecars] [--require-critique] [--skip-markdown-validation] paths...");
     return 2;
+  }
+  if (!fenced) {
+    const directSessionDirs = pathsIn.flatMap((candidate) => {
+      const resolved = path.resolve(candidate);
+      const marker = `${path.sep}.kontourai${path.sep}flow-agents${path.sep}`;
+      const index = resolved.lastIndexOf(marker);
+      if (index < 0) return [];
+      const suffix = resolved.slice(index + marker.length);
+      const slug = suffix.split(path.sep)[0];
+      return slug ? [resolved.slice(0, index + marker.length + slug.length)] : [];
+    });
+    const sessions = [...new Set([...sidecarPaths(pathsIn).map((file) => path.dirname(file)), ...directSessionDirs]
+      .map((dir) => ({ dir, projectRoot: projectRootForSession(dir) }))
+      .filter((entry): entry is { dir: string; projectRoot: string } => typeof entry.projectRoot === "string")
+      .map((entry) => `${entry.projectRoot}\u0000${path.basename(entry.dir)}`))];
+    const runFenced = (index: number): number => {
+      if (index >= sessions.length) return main(true);
+      const [projectRoot, runId] = sessions[index].split("\u0000");
+      return withFlowRunRecoveryFenceRead(projectRoot, runId, () => runFenced(index + 1));
+    };
+    try {
+      return runFenced(0);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
   }
   const markdown = artifactPaths(pathsIn);
   const sidecars = sidecarPaths(pathsIn);

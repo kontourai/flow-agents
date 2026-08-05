@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-1074",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-29T11:29:36.484Z",
+  "commit_sha": "d5a36e04d48bc924c358d3e9a5c50b8ae4e565d2",
+  "checkpoint": {
+    "asOf": "2026-07-29T11:29:36.484Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-1074-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1074-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1969437e9f051684072e41bd7b549cadf26285d668b7fa37f9e3b6812dfa17d1-gate-visit-2026-07-29t08-59-28z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-bounded-scope-dependency-risks-accepted-baseline-gap-and-planning-readiness-gate-visit-2026-07-29t09-00-11-093z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-and-the-accepted-historical-baseline-gap-are-explicit-in-the-handoff-gate-visit-2026-07-29t09-00-11-456z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-bounded-scope-sequence-acceptance-mapping-stop-short-risks-and-exact-verification-requirements-gate-visit-2026-07-29t09-01-14-178z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-implementation-scope.flow-agents-workflow.the-exact-source-commit-implements-only-the-1074-resolver-export-docs-and-tests-with-criterion-mapping-and-1075-separated-gate-visit-2026-07-29t09-02-34-865z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-tests-evidence.flow-agents-workflow.all-five-1074-acceptance-criteria-pass-on-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-using-the-canonical-public-api-test-gate-visit-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-merge-readiness.flow-agents-workflow.exact-head-acceptance-scope-integrity-full-static-verification-and-two-clean-review-lanes-support-merge-review-provider-checks-remain-a-separate-release-readiness-requirement-gate-visit-2026-07-29t11-02-54-022z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z": "verified",
+      "kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z": "verified",
+      "kontourai-flow-agents-1074-ac1-public-resolver.flow-agents-workflow.the-package-root-exports-the-exact-continuation-adapter-identity-resolver-used-by-workflow-drive-verified-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-ac2-public-projection.flow-agents-workflow.the-resolver-returns-only-the-host-needed-digest-and-exposes-no-mutable-authority-verified-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-ac3-fail-closed.flow-agents-workflow.malformed-relative-executable-nonregular-and-symlinked-inputs-fail-closed-under-existing-driver-rules-verified-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-ac4-exports-and-docs.flow-agents-workflow.package-root-export-coverage-and-host-facing-checkpoint-documentation-are-current-verified-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-ac5-verification.flow-agents-workflow.build-focused-tests-full-unit-tests-static-exports-and-installed-package-smoke-verify-the-exact-source-verified-2026-07-29t11-01-57-682z": "verified",
+      "kontourai-flow-agents-1074-review.flow-agents-workflow.code-and-security-review-passed-for-flow-agents-1074-at-exact-head-f9ebc2d3096abbda0867bab3ee89513a306c58db-the-pre-existing-1075-hardening-limitation-remains-separately-tracked-reviewed-2026-07-29t09-11-03-574z": "verified",
+      "kontourai-flow-agents-1074-review.flow-agents-workflow.two-of-two-declared-review-lanes-completed-clean-at-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-the-prior-missing-public-api-unit-tests-ci-invocation-was-corrected-and-manifest-ci-alignment-is-now-complete-reviewed-2026-07-29t10-59-44-197z": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-29T11:27:54.660Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-1074-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1074-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1969437e9f051684072e41bd7b549cadf26285d668b7fa37f9e3b6812dfa17d1-gate-visit-2026-07-29t08-59-28z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-records-goal-fit-bounded-scope-dependency-risks-accepted-baseline-gap-and-planning-readiness-gate-visit-2026-07-29t09-00-11-093z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-and-the-accepted-historical-baseline-gap-are-explicit-in-the-handoff-gate-visit-2026-07-29t09-00-11-456z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-records-bounded-scope-sequence-acceptance-mapping-stop-short-risks-and-exact-verification-requirements-gate-visit-2026-07-29t09-01-14-178z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-implementation-scope.flow-agents-workflow.the-exact-source-commit-implements-only-the-1074-resolver-export-docs-and-tests-with-criterion-mapping-and-1075-separated-gate-visit-2026-07-29t09-02-34-865z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-tests-evidence.flow-agents-workflow.all-five-1074-acceptance-criteria-pass-on-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-using-the-canonical-public-api-test-gate-visit-2026-07-29t11-01-57-682z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-merge-readiness.flow-agents-workflow.exact-head-acceptance-scope-integrity-full-static-verification-and-two-clean-review-lanes-support-merge-review-provider-checks-remain-a-separate-release-readiness-requirement-gate-visit-2026-07-29t11-02-54-022z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-authorized-exact-implementation-and-provisional-delivery-are-reconciled-all-eight-provider-checks-pass-and-residual-1075-risk-remains-separately-tracked-gate-visit-2026-07-29t11-27-20-852z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-decision-evidence.flow-agents-workflow.the-public-identity-boundary-merge-decision-and-unresolved-separately-owned-risks-are-recorded-without-claiming-merge-completion-gate-visit-2026-07-29t11-27-54-306z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-gate-claim-learning-evidence.flow-agents-workflow.the-ci-manifest-correction-is-resolved-1075-and-1079-retain-their-separate-generic-follow-up-and-merge-remains-not-verified-until-observed-gate-visit-2026-07-29t11-27-54-660z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-ac1-public-resolver.flow-agents-workflow.the-package-root-exports-the-exact-continuation-adapter-identity-resolver-used-by-workflow-drive-verified-2026-07-29t11-01-57-682z": "2026-07-29T11:01:57.682Z",
+      "kontourai-flow-agents-1074-ac2-public-projection.flow-agents-workflow.the-resolver-returns-only-the-host-needed-digest-and-exposes-no-mutable-authority-verified-2026-07-29t11-01-57-682z": "2026-07-29T11:01:57.682Z",
+      "kontourai-flow-agents-1074-ac3-fail-closed.flow-agents-workflow.malformed-relative-executable-nonregular-and-symlinked-inputs-fail-closed-under-existing-driver-rules-verified-2026-07-29t11-01-57-682z": "2026-07-29T11:01:57.682Z",
+      "kontourai-flow-agents-1074-ac4-exports-and-docs.flow-agents-workflow.package-root-export-coverage-and-host-facing-checkpoint-documentation-are-current-verified-2026-07-29t11-01-57-682z": "2026-07-29T11:01:57.682Z",
+      "kontourai-flow-agents-1074-ac5-verification.flow-agents-workflow.build-focused-tests-full-unit-tests-static-exports-and-installed-package-smoke-verify-the-exact-source-verified-2026-07-29t11-01-57-682z": "2026-07-29T11:01:57.682Z",
+      "kontourai-flow-agents-1074-review.flow-agents-workflow.code-and-security-review-passed-for-flow-agents-1074-at-exact-head-f9ebc2d3096abbda0867bab3ee89513a306c58db-the-pre-existing-1075-hardening-limitation-remains-separately-tracked-reviewed-2026-07-29t09-11-03-574z": "2026-07-29T11:27:54.660Z",
+      "kontourai-flow-agents-1074-review.flow-agents-workflow.two-of-two-declared-review-lanes-completed-clean-at-exact-head-fe4417715f09a9ebb7b3a556a1dc04d7ffc735f2-the-prior-missing-public-api-unit-tests-ci-invocation-was-corrected-and-manifest-ci-alignment-is-now-complete-reviewed-2026-07-29t10-59-44-197z": "2026-07-29T11:27:54.660Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

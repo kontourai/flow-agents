@@ -20,7 +20,7 @@ Execution turns an approved plan artifact into code and local evidence while pre
 - Work with existing user or agent changes; do not revert unrelated work.
 - Follow local project patterns and use the smallest implementation that satisfies the plan.
 - Update the session or worker task artifact with modified files and progress. Modified files are required execution evidence for conflict detection, verification scope, and optional governance providers.
-- Prefer `npm run workflow:sidecar -- advance-state` when available to update `state.json` and `handoff.json` at phase boundaries.
+- Update workflow-owned state only through the active public workflow interface. Direct state writes are allowed only when the current action explicitly declares that artifact writable.
 - Run relevant validation for the files changed.
 - If instructions are insufficient, another in-progress task blocks the work, the required sandbox mode is stronger than planned, or approval is missing, stop and report the blocker rather than guessing.
 
@@ -42,7 +42,36 @@ Execution may upgrade to a stronger mode when risk increases. Downgrades require
 - Independent tasks with no shared files can run in the same wave.
 - Shared files, generated artifacts, migrations, and cross-cutting contracts should be serialized unless the plan gives explicit file ownership.
 - Worker delegation must name the exact worker role (`tool-worker`) rather than spawning an unnamed/default implementation agent.
-- After each wave, collect results, check conflicts, and update the session artifact before starting the next wave.
+- After each wave, reconcile results against the wave manifest (below), check conflicts, and update the session artifact before starting the next wave.
+
+## Wave Manifest And Reconciliation
+
+Fan-out collection is machine-checkable, not prose. A reduce step that silently
+drops a worker's stream is worse than one that errors.
+
+- **Declare before dispatch.** Before dispatching a wave that delegates work,
+  declare it in the session's `waves.json` sidecar (schema:
+  `schemas/workflow-waves.schema.json`): `wave_id`, owning step, and one
+  `expected_workers` entry per worker. The expected count (M) must exist before
+  any result arrives.
+- **One terminal record per worker.** Each worker lands exactly one terminal
+  status record: `completed`, `failed`, or `blocked`. Duplicate records and
+  undeclared reporters are validation errors.
+- **Reconcile at wave close.** The orchestrator's collect step is
+  reconcile-against-manifest: record every declared worker that has no terminal
+  record as `not_reported` — never silently absorb a missing worker — then
+  record the wave's `reconciliation` with `expected_count` M, `reported_count`
+  N, and an explicit "N of M reported" summary naming the `not_reported`
+  workers (for example "2 of 3 reported; worker-3 not_reported").
+- **Incomplete is visible, never silent.** A wave is `complete` only when N
+  equals M. An incomplete wave stays visible data and routes to re-dispatch, a
+  blocker report, or an explicit accepted gap; it must never be treated as
+  complete because the missing worker was forgotten.
+- **Enforcement boundary (slice 1).** `validate-workflow-artifacts` enforces
+  the shape and the cross-record arithmetic (counts, exactly-one-record,
+  undeclared reporters, impossible `complete` claims) as data-level validation.
+  Stop-hook refusal of wave completion is #663 part 3 (slice 2), deferred until
+  the hook correctness issues (#453/#450/#494) are resolved.
 
 ## Delegation: Model Routing
 
@@ -139,9 +168,13 @@ npm run workflow:sidecar -- record-agent-event \
 ```
 
 These land as top-level `role`, `model`, and (for escalations) `escalated_from`
-fields on the JSONL event under `agents/<agent-id>/events.jsonl`. The shape is
-additive: events without a routing decision are byte-identical to before, so no
-existing consumer breaks. An economics consumer reads events where `role` is
+fields on the JSONL event under `agents/<agent-id>/events.jsonl`. The writer
+derives runtime actor identity from the environment and stamps that actor-bound
+run-correlation envelope; `--actor` is not accepted on this write surface. If
+the actor binding does not match the target session, the append is refused.
+Free-text
+`summary` remains local workflow context and is not copied into economics
+records. An economics consumer reads authenticated events where `role` is
 present as one priced delegation each; `escalated_from` marks the entries that
 cost more because a gate caught a cheaper tier.
 

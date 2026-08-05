@@ -22,6 +22,13 @@ npx @kontourai/flow-agents init --runtime codex       --dest . --yes
 npx @kontourai/flow-agents init --runtime opencode    --dest . --yes
 ```
 
+To configure provider-backed Builder work at the same time, add
+`--configure-providers --online`. This detects the repository, verifies GitHub
+CLI access, and writes coherent backlog, assignment, and change-provider
+settings. For non-interactive offline setup, provide
+`--provider-project NUMBER`; remote state remains explicitly unverified until
+you run the printed `gh` checks.
+
 The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. The Builder Kit installs automatically. Your agent reads those files at startup; no plugin registry required.
 
 For a normal Codex global install, target the Codex home instead of a project workspace:
@@ -31,6 +38,16 @@ npx @kontourai/flow-agents init --runtime codex --global --activate-kits --yes
 ```
 
 That splits installation by ownership: Codex-only runtime assets go into `CODEX_HOME` when set (otherwise `~/.codex`), while portable skills go into Codex's documented user catalog at `$HOME/.agents/skills`. A repository bundle install similarly exposes skills at `<repo>/.agents/skills`.
+
+For OpenCode, a global install targets `${XDG_CONFIG_HOME:-$HOME/.config}/opencode` and keeps the candidate workspace clean:
+
+```bash
+npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+```
+
+The installer additively merges `opencode.json`, syncs the Flow Agents plugin and agents, and exposes core skills plus the selected kits and their transitive dependencies. Runtime support and a SHA-256 managed-file manifest live under `.flow-agents/`; unrelated user plugins, agents, skills, and config entries remain user-owned. The manifest includes a secret-free Conduit receipt (asset IDs, kinds, and digests only) for the plugin, agents, and skills.
+
+GNU Stow layouts are supported when `opencode.json` is a symlink to its canonical regular-file target and an immediately nested managed asset directory (`plugins`, `agents`, or `skills`) is a symlink contained by that config target's backing directory. The backing directory must be owned by the current user and must not be group- or world-writable. The installer atomically updates the config target without replacing either link, preserves an existing config file's mode, and creates a new config with mode `0600`. It rejects nested links, file links, unbound directories, and targets outside that backing directory. These path-based checks protect owner-controlled Stow state and fail closed on the state observed before each mutation; they are not an `openat`-style security boundary against a concurrent process that can rewrite the same directories. To migrate from an older incomplete global OpenCode install, upgrade Flow Agents and re-run this command. There is no compatibility path for stamp-only experimental installs.
 
 Pass a positional runtime destination and `--skills-dir PATH` when both roots must be isolated, or set `FLOW_AGENTS_SKILLS_DIR` for headless environments:
 
@@ -44,7 +61,8 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 
 **What lands in the workspace:**
 
-- `agents/`, `skills/`, `context/` — skill definitions and shared contracts the agent follows
+- `context/` — shared contracts the agent follows, at the workspace root regardless of runtime
+- Agent and skill definitions, in a runtime-specific location: `.claude/agents/` + `.claude/skills/` for Claude Code, `.codex/agents/` + `.agents/skills/` for Codex, top-level `agents/` + `skills/` for Kiro, `.opencode/agents/` + `.opencode/skills/` for opencode, and `.pi/skills/` for pi
 - `scripts/hooks/` — four canonical policy scripts (steering, quality gate, stop-goal-fit, config protection) wired to the host's native hook surface
 - `kits/builder/` — Builder Kit flows and skills
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
@@ -129,6 +147,9 @@ The `deliver` skill orchestrates the full `builder.build` flow:
 6. **verify-work** — tests and checks with evidence tied to the change; if evidence is missing the verify-gate triggers a route-back (`verify-gate`)
 7. **release-readiness** — scope, evidence, and risk assessment (`merge-ready-gate`)
 8. **pull-request** — PR with linked work item and verification evidence (`pr-open-gate`)
+9. **learning and workspace closeout** — route durable follow-up, retain open
+   changes for review, and reclaim only clean linked worktrees whose exact head
+   is freshly confirmed merged
 
 You can also invoke each skill individually if you want explicit control:
 
@@ -163,7 +184,20 @@ node build/src/cli.js kit inspect kits/builder
 
 (Or, from a global install: `flow-agents kit inspect kits/builder`)
 
-This prints the kit id, name, declared flows, skills, and conformance level (K0/K1). It does not require a running agent or active session.
+This prints a JSON object with the kit id, name, conformance levels (`k0`/`k1`/`k2`), declared targets, and any third-party extensions — for example:
+
+```json
+{
+  "kit_id": "builder",
+  "kit_name": "Builder Kit",
+  "conformance": { "k0": true, "k1": true, "k2": false },
+  "targets": ["flow", "flow-agents"],
+  "third_party_extensions": [],
+  "trust": "unverified"
+}
+```
+
+It does not require a running agent or active session.
 
 To see the raw flow definitions with their gate expectations:
 

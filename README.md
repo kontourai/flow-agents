@@ -4,6 +4,8 @@
 
 **A portable process-discipline layer for agentic work — canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes.**
 
+In plain terms: it keeps your coding agent honest — tracking what it did, checking its work at each step, and refusing to call a job done until the evidence backs it up. (New to the terms below? See the [glossary](CONTEXT.md#glossary).)
+
 [![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -17,7 +19,7 @@
 
 Agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
 
-Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are the swappable solutions on top: Builder, Knowledge, Release Evidence, Veritas Governance, and any third-party kit declared with `kit.json` and registered through a catalog. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
+Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are swappable solutions on top: built-in examples such as Builder, Knowledge, and Release Evidence, plus external products such as the Veritas Governance Kit and any third-party repository with a root `kit.json`. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
 
 **You ask for outcomes. The system supplies the path, the state, the checks, and the proof.**
 
@@ -30,7 +32,8 @@ Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition in
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
 - **Tamper-evident "done"** — the local runtime gate is advisory and best-effort; the controlled CI re-run is the authoritative anchor that reconciles manifest commands and git diff against fresh results before evidence is treated as CI-verified. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
 - **Engine plus opt-in kits** — `kits/catalog.json` lists discoverable kits, each `kit.json` declares its flows and assets, and bring-your-own-kit follows the same validation and activation path. See [Engine and Kits](docs/architecture-engine-and-kits.md).
-- **Evals that keep the bundle honest** — 60 integration scenarios (1,829 assertions) and 7 static suites (110 assertions) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **Evals that keep the bundle honest** — dozens of integration scripts and a full static-suite layer (`bash evals/run.sh`) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **A runnable reviewed-grounding example** — the [credential-free reference workflow](evals/reference/reviewed-grounding-workflow/README.md) acquires a source, performs exact provenance-bearing extraction, routes semantic changes through review, and refuses action until evidence and source-currency requirements are satisfied. A provider adapter can be supplied for optional live execution.
 
 ## Flow Agents as a process-discipline layer
 
@@ -53,8 +56,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Runtime | Ships | Tested |
 | --- | --- | --- |
-| Claude Code | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
-| Codex | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
+| Claude Code | install + hooks + bundle | full integration + static eval layer (`bash evals/run.sh`) — reference implementation |
+| Codex | install + hooks + bundle | full integration + static eval layer (`bash evals/run.sh`) — reference implementation |
 | Kiro | install + hooks + bundle | included in bundle assertions |
 
 **Partial support — L1 (steering + stop-goal-fit warning)**
@@ -68,7 +71,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Tier | Runtime | Ships | Tested |
 | --- | --- | --- | --- |
-| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 50 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 76 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Official framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` — `@kontourai/flow-agents-strands` native-import package | shipped telemetry + native config-protection hot path; workflow-steering/quality-gate/stop-goal-fit are conformance-shim-only — preview, see [integrations/strands-ts/README.md](integrations/strands-ts/README.md) |
 | Conformance-certified | Community / third-party | Self-certify using the conformance kit | Conformance kit in development; not yet shipped |
 
 ## Install
@@ -89,7 +93,30 @@ npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --y
 npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 ```
 
+To establish the repository's backlog, assignment, and change-provider bindings
+as one coherent setup step, add provider configuration:
+
+```bash
+npx @kontourai/flow-agents init --runtime codex --dest . \
+  --configure-providers --online --yes
+```
+
+Interactive init offers the same setup. Headless/offline setup must name the
+GitHub Project explicitly with `--provider-project NUMBER`; it writes the
+settings and prints exact `gh` authentication and label verification commands.
+Use `--provider-scope global` to add a repository-specific entry under
+`~/.config/flow-agents` instead of writing project-local settings. Universal
+bundles intentionally contain no repository-specific provider defaults.
+
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
+
+OpenCode also supports a global install. Flow Agents merges `opencode.json`, installs its plugin and agents, and exposes core skills plus only the selected kits (including their transitive kit dependencies) under OpenCode's global config root:
+
+```bash
+npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+```
+
+The default root is `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`. Managed support files and their content manifest live under `.flow-agents/`; unrelated user config, plugins, agents, and skills are preserved. Versions that produced only an install stamp did not complete a usable global OpenCode installation. Re-run the command above after upgrading; no legacy compatibility layer is required.
 
 Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, Codex's preferred `CODEX_THREAD_ID`, the backward-compatible `CODEX_SESSION_ID`, or `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time. Codex thread identifiers are never written into actor keys verbatim; Flow Agents derives a stable, domain-separated opaque token instead.
 
@@ -148,7 +175,7 @@ A Flow Kit bundles a workflow AND its opinionated output shape into a single val
 
 **Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items), `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning), and `builder.publish-learn` (publish, provider/CI merge readiness, and learning feedback gates).
 
-**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with 198 tests.
+**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with an extensive automated test suite.
 
 The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
 
@@ -164,13 +191,26 @@ npx @kontourai/flow-agents kit install path/to/my-kit
 npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 ```
 
+For a local source that may move between machines or worktrees, add
+`--record-source <locator>` to record caller-declared logical provenance. The
+registry remains portable by storing the copied Kit as
+`kits/local/repositories/<kit-id>`; the recorded `sha256:` hash, not source
+metadata, verifies the installed bytes. Git installs continue to record their
+URL/ref and reject `--record-source`.
+
 - [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.
 - [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
 - [Knowledge Kit docs](kits/knowledge/docs/README.md) — store contract, record types, mutation ops, similarity detectors, and the Obsidian adapter.
 
 **Release Evidence Kit** — a minimal flows-only kit that proves agentless gate evaluation over trusted `release.evidence` claims in CI.
 
-**Veritas Governance Kit** — an agentless kit that gates a real `veritas readiness` verdict as a trust.bundle software-readiness-verdict claim. It wraps @kontourai/veritas through CLI + a kit-local adapter and does not reimplement standards evaluation.
+**Veritas Governance Kit** — maintained with the Veritas product in its own root-valid kit repository. Install it directly from a pinned Git ref; it gates the canonical trust bundle emitted by `veritas readiness` and helps set up the standalone engine without giving Flow Agents any Veritas-specific runtime branch:
+
+```bash
+npx @kontourai/flow-agents kit install \
+  https://github.com/kontourai/veritas.git#v1.5.1 --dest .
+npx @kontourai/flow-agents kit activate --dest . --format json
+```
 
 **Direction**: domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall), and community-contributed kits discovered through a marketplace. Marketplace labels such as official or first-party describe provenance; they do not grant runtime privilege.
 
@@ -183,7 +223,7 @@ The same canonical policies that wire into coding-agent harnesses via file-based
 - enforces config protection via `BeforeToolCallEvent` cancellation (the Strands equivalent of a blocking `preToolUse` hook)
 - injects workflow steering context at agent construction via `steering_context()`
 
-This is a spike/preview — 50 unit tests pass without requiring the Strands SDK, and the README documents 7 limitations honestly. It demonstrates that the policy engine is not harness-specific.
+This is a spike/preview — 76 unit tests pass without requiring the Strands SDK, and the README documents 8 limitations honestly. It demonstrates that the policy engine is not harness-specific.
 
 The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) documents the full framework adapter mapping, including VoltAgent, LangGraph, and OpenAI Agents SDK hook surfaces, and the minimum viable adapter pseudocode.
 
@@ -218,6 +258,39 @@ bash evals/ci/run-baseline.sh --lane runtime-and-kit
 ```
 
 `setup:repo-hooks` is a repo Git hook for local developer checks, not a Flow Agents runtime hook — runtime hooks live under `scripts/hooks/`; see [docs/developer-hook-setup.md](docs/developer-hook-setup.md) for the boundary.
+
+## Human-review gate integration
+
+Library hosts can compose Flow gates with Survey review sessions without adding
+a new gate kind or trusting browser-authored decisions. Use
+`discoverSurveyGateReviewWork` to read explicitly classified missing review
+expectations from an exact, persisted Flow Run head. A producer then creates the
+canonical candidate-bearing `ReviewItem`; `bindSurveyGateReviewItem` validates
+its claim targets and adds immutable workflow correlation, while
+`publishSurveyGateReviewWork` publishes it through a host-owned queue.
+
+After the server-owned review session is complete,
+`continuePausedFlowGateFromSurvey` resolves the opaque session reference,
+derives the canonical outcome, asks Survey to project the complete reviewed
+trust input from its authoritative `ReviewItem`s and results, and delegates the
+atomic attach/evaluate/resume transaction to Flow. Candidate construction,
+queue persistence, review authority, and lifecycle authority remain separate
+capabilities.
+
+## Portable host integration
+
+Flow Agents consumes `@kontourai/conduit` for the host-facing lifecycle and
+portable-asset boundary. Application policy still runs in Flow Agents; its
+model-visible context and deny outcomes are projected unchanged through a
+configured host adapter. Skills, agents, hooks, prompts, commands, and context
+assets use Conduit installation receipts, while Flow definitions, kits, gates,
+sidecars, and evidence remain Flow Agents contracts.
+
+`npm run host-conformance` executes Conduit's external probe against one local
+harness binding and one in-process framework binding, then generates the
+[host integration matrix](docs/specs/host-integration-conformance.md) and its
+machine-readable report. These are adapter-contract results; an actual
+deployment records separate host-bound evidence before runtime selection.
 
 ## Repository layout
 

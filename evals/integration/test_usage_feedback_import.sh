@@ -222,6 +222,47 @@ else
   _pass "import-codex rejects missing input telemetry"
 fi
 
+src_malformed="$TMPDIR_EVAL/src-malformed"
+dst_malformed="$TMPDIR_EVAL/dst-malformed"
+mkdir -p "$src_malformed" "$dst_malformed"
+cat > "$src_malformed/full.jsonl" <<'JSONL'
+{"session_id":"valid-before","event_type":"turn.user","timestamp":"2026-05-04T12:00:00Z"}
+{"session_id":"secret-session","payload":"DO_NOT_ECHO"
+{"session_id":"valid-after","event_type":"session.end","timestamp":"2026-05-04T12:01:00Z"}
+JSONL
+if flow_agents_node "$USAGE_FEEDBACK" import-codex \
+  --input-telemetry-dir "$src_malformed" \
+  --telemetry-dir "$dst_malformed" >/dev/null 2>"$TMPDIR_EVAL/import-malformed-source.err" && \
+   [[ "$(jq -s 'length' "$dst_malformed/normalized-sessions.jsonl" 2>/dev/null)" == "2" ]] && \
+   grep -q 'quarantined 1 malformed record(s) from src-malformed/full.jsonl' "$TMPDIR_EVAL/import-malformed-source.err" && \
+   ! grep -q 'DO_NOT_ECHO' "$TMPDIR_EVAL/import-malformed-source.err" && \
+   ! grep -q "$TMPDIR_EVAL" "$TMPDIR_EVAL/import-malformed-source.err"; then
+  _pass "import-codex quarantines malformed source records without exposing content"
+else
+  _fail "malformed import source handling failed: $(cat "$TMPDIR_EVAL/import-malformed-source.err" 2>/dev/null)"
+fi
+
+dst_strict="$TMPDIR_EVAL/dst-strict"
+mkdir -p "$dst_strict"
+cat > "$dst_strict/normalized-sessions.jsonl" <<'JSONL'
+{"session_id":"preserve-me","payload":"DO_NOT_REWRITE"
+JSONL
+cp "$dst_strict/normalized-sessions.jsonl" "$TMPDIR_EVAL/dst-strict-before.jsonl"
+if flow_agents_node "$USAGE_FEEDBACK" import-codex \
+  --input-full-jsonl "$src/full.jsonl" \
+  --telemetry-dir "$dst_strict" >/dev/null 2>"$TMPDIR_EVAL/import-malformed-destination.err"; then
+  _fail "import-codex accepted a malformed upsert destination"
+else
+  if cmp -s "$dst_strict/normalized-sessions.jsonl" "$TMPDIR_EVAL/dst-strict-before.jsonl" && \
+     grep -q 'malformed JSONL record at dst-strict/normalized-sessions.jsonl:1 (SyntaxError)' "$TMPDIR_EVAL/import-malformed-destination.err" && \
+     ! grep -q 'DO_NOT_REWRITE' "$TMPDIR_EVAL/import-malformed-destination.err" && \
+     ! grep -q "$TMPDIR_EVAL" "$TMPDIR_EVAL/import-malformed-destination.err"; then
+    _pass "import-codex fails closed and preserves malformed upsert destinations byte-for-byte"
+  else
+    _fail "malformed destination was exposed or changed: $(cat "$TMPDIR_EVAL/import-malformed-destination.err" 2>/dev/null)"
+  fi
+fi
+
 echo ""
 echo "Result: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

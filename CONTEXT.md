@@ -171,6 +171,17 @@ A stable explanation for why a Gate passed, failed, could not be verified, or ro
 One execution of a Workflow from selected scope through its gates, evidence, route-backs, and terminal outcome. A Workflow Run references its canonical Selected Scope and snapshots the selected subject identifiers for audit history. Builder Kit Delivery Runs are a build-specific kind of Workflow Run.
 _Avoid_: Delivery Run as the generic term
 
+### Run Correlation Envelope
+
+A versioned, provider-neutral identity carrier that lets runtime telemetry,
+Flow state, trust references, economics, delegation lineage, and terminal
+outcomes identify the same Workflow Run without heuristic joins. The envelope
+uses one opaque correlation id and records every supported identity slot as
+present, unavailable, unsupported, or not applicable. It references
+authority-owned identifiers without replacing them. See
+[`context/contracts/run-correlation-contract.md`](context/contracts/run-correlation-contract.md).
+_Avoid_: Inferring identity from paths, timestamps, working directories, or process ancestry; experiment labels in Builder records
+
 ### Workflow Entry Authority
 
 The authority to create a new Workflow Run or resume an existing one. A new run always starts at the Workflow's first step; a later current step is valid only when recovered from persisted run state whose transitions, gate outcomes, evidence, and accepted exceptions validate against the canonical Workflow definition. Gate exceptions may authorize a gate outcome inside an existing run, but never authorize selecting a later starting step.
@@ -195,6 +206,11 @@ _Avoid_: Boundary Crossing as the generic Flow Agents term
 
 An executable backlog or queue unit selected by a workflow. Work Items are provider-backed when a backlog provider is configured, and Flow Agents keeps a portable local-first Kontour Resource Contract shape for local use, tests, kit demos, and migration. A Work Item is smaller than an Initiative and large enough to move through one coherent Workflow Run with clear acceptance evidence.
 _Avoid_: Task as the generic term, Issue as the provider-neutral term
+
+### Backlog Readiness Source
+
+The provider-backed signal that marks a Work Item intentionally ready for pickup, read by `pull-work` to build the ready queue. The readiness source is declared by backlog provider settings (currently the configured BoardProvider's ready statuses); a configured readiness source that yields nothing is a surfaced warning, never a silent fallback to unranked issue listing. The live decision is recorded in `docs/decisions/backlog-readiness-source.md`.
+_Avoid_: ready label, board status as interchangeable generic terms
 
 ### Work Item Group
 
@@ -338,6 +354,10 @@ The default Console view when launched from a workspace. It shows effective sett
 ### Global Console
 
 The Console overview for global setup, registered projects, cross-project usage, global providers, and system-wide improvement opportunities.
+
+### Console record delivery
+
+How Flow Agents gets facts to a Console and what delivery guarantee each class of fact carries. Two record shapes exist on the same `POST /records` ingest: an append-only **event** (each fact independently meaningful) and an upserted **projection** (a fold of current state, keyed by producer and scope). Delivery class is a declared property of the record class — not an accident of which transport a caller happened to reach for.
 
 ### Control API
 

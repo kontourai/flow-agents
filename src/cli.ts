@@ -2,21 +2,30 @@
 import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
+import { main as effectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { main as effectiveFlowAgentsConfig } from "./cli/effective-flow-agents-config.js";
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
+import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
+import { main as livenessFleet } from "./cli/liveness-fleet.js";
+import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
+import { main as providerBootstrap } from "./cli/provider-bootstrap.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
+import { main as workItemMutationProvider } from "./cli/work-item-mutation-provider.js";
+import { main as narrativeRender } from "./cli/narrative-render.js";
+import { main as narrativeSources } from "./cli/narrative-sources.js";
 import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
-import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
 import { main as workflow } from "./cli/workflow.js";
 import { main as buildBundles } from "./tools/build-universal-bundles.js";
+import { main as capabilityMatrix } from "./tools/generate-capability-matrix.js";
 import { main as contextMap } from "./tools/generate-context-map.js";
 import { main as validateSource } from "./tools/validate-source-tree.js";
 import { main as validatePackage } from "./tools/validate-package.js";
@@ -29,23 +38,32 @@ import { main as verify } from "./cli/verify.js";
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
   ["builder-run", builderRun],
+  ["capability-matrix", capabilityMatrix],
   ["console-learning-projection", consoleLearningProjection],
+  ["console-process-projection", consoleProcessProjection],
+  ["console-trust-projection", consoleTrustProjection],
   ["context-map", contextMap],
   ["assignment-provider", assignmentProvider],
   ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
+  ["effective-change-provider-settings", effectiveChangeProviderSettings],
+  ["effective-flow-agents-config", effectiveFlowAgentsConfig],
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["liveness-fleet", livenessFleet],
+  ["narrative-render", narrativeRender],
+  ["narrative-sources", narrativeSources],
   ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
+  ["provider-bootstrap", providerBootstrap],
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
+  ["work-item-mutation-provider", workItemMutationProvider],
   ["runtime-adapter", runtimeAdapter],
   ["skill-drift-check", skillDriftCheck],
   ["utterance-check", utteranceCheck],
   ["telemetry-doctor", telemetryDoctor],
   ["usage-feedback", usageFeedback],
-  ["veritas-governance", veritasGovernance],
   ["validate-package", validatePackage],
   ["validate-hook-influence", validateHookInfluence],
   ["verify", verify],
@@ -56,21 +74,28 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
 
 const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
+  ["flow-agents-capability-matrix", "capability-matrix"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
+  ["flow-agents-console-process-projection", "console-process-projection"],
+  ["flow-agents-console-trust-projection", "console-trust-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-assignment-provider", "assignment-provider"],
   ["flow-agents-effective-assignment-provider-settings", "effective-assignment-provider-settings"],
+  ["flow-agents-effective-change-provider-settings", "effective-change-provider-settings"],
+  ["flow-agents-effective-flow-agents-config", "effective-flow-agents-config"],
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],
+  ["flow-agents-liveness-fleet", "liveness-fleet"],
+  ["flow-agents-narrative-render", "narrative-render"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],
+  ["flow-agents-work-item-mutation-provider", "work-item-mutation-provider"],
   ["flow-agents-runtime-adapter", "runtime-adapter"],
   ["flow-agents-skill-drift-check", "skill-drift-check"],
   ["flow-agents-telemetry-doctor", "telemetry-doctor"],
   ["flow-agents-usage-feedback", "usage-feedback"],
-  ["flow-agents-veritas-governance", "veritas-governance"],
   ["flow-agents-validate-hook-influence", "validate-hook-influence"],
   ["flow-agents-utterance-check", "utterance-check"],
   ["flow-agents-validate-source", "validate-source"],

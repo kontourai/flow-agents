@@ -57,16 +57,30 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | assignment-provider-settings.schema.json | Flow Agents Assignment Provider Settings | https://flow-agents.dev/schemas/assignment-provider-settings.schema.json |
 | backlog-provider-settings.schema.json | Flow Agents Backlog Provider Settings | https://flow-agents.dev/schemas/backlog-provider-settings.schema.json |
 | builder-lifecycle-authorization.schema.json | Builder Lifecycle Authorization | https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json |
+| change-provider-settings.schema.json | Flow Agents Change Provider Settings | https://flow-agents.dev/schemas/change-provider-settings.schema.json |
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
+| flow-agents-core-config.schema.json | Flow Agents committed core configuration |  |
+| flow-agents-kit-config.schema.json | Flow Agents committed Kit Flow config proposal |  |
 | flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |
+| grounded-execution-narrative.schema.json | Flow Agents Grounded Execution Narrative | https://flow-agents.dev/schemas/grounded-execution-narrative.schema.json |
+| kit-observability-contribution.schema.json | Kit observability contribution | https://kontourai.dev/schemas/flow-agents/kit-observability-contribution/1.0.json |
+| kit-observability-record.schema.json | Kit observability record | https://kontourai.dev/schemas/flow-agents/kit-observability-record/1.0.json |
 | lifecycle-authority-keys.schema.json | Lifecycle Authority Key Registry | https://kontourai.dev/schemas/lifecycle-authority-keys.schema.json |
+| narrative-eval-result.schema.json | Flow Agents Narrative Eval Result | https://flow-agents.dev/schemas/narrative-eval-result.schema.json |
+| narrative-runtime-projection.schema.json | Flow Agents Grounded Runtime Projection | https://flow-agents.dev/schemas/narrative-runtime-projection.schema.json |
+| narrative-source-manifest.schema.json | Flow Agents Narrative Source Manifest | https://flow-agents.dev/schemas/narrative-source-manifest.schema.json |
+| retrospective-observation-manifest.schema.json | Flow Agents retrospective observation input manifest | https://kontourai.dev/schemas/flow-agents/retrospective-observation-manifest/1.0.json |
+| retrospective-observation.schema.json | Flow Agents privacy-safe retrospective run observation | https://kontourai.dev/schemas/flow-agents/retrospective-observation/1.0.json |
+| run-correlation-envelope.schema.json | Run correlation envelope | https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json |
 | workflow-acceptance.schema.json | Flow Agents Workflow Acceptance | https://flow-agents.dev/schemas/workflow-acceptance.schema.json |
 | workflow-critique.schema.json | Flow Agents Workflow Critique | https://flow-agents.dev/schemas/workflow-critique.schema.json |
 | workflow-evidence.schema.json | Flow Agents Workflow Evidence | https://flow-agents.dev/schemas/workflow-evidence.schema.json |
 | workflow-handoff.schema.json | Flow Agents Workflow Handoff | https://flow-agents.dev/schemas/workflow-handoff.schema.json |
 | workflow-learning.schema.json | Flow Agents Workflow Learning | https://flow-agents.dev/schemas/workflow-learning.schema.json |
+| workflow-outcome.schema.json | Flow Agents workflow outcome record | https://kontourai.dev/schemas/flow-agents/workflow-outcome/1.0.json |
 | workflow-release.schema.json | Flow Agents Workflow Release Readiness | https://flow-agents.dev/schemas/workflow-release.schema.json |
 | workflow-state.schema.json | Flow Agents Workflow State | https://flow-agents.dev/schemas/workflow-state.schema.json |
+| workflow-waves.schema.json | Flow Agents Workflow Waves | https://flow-agents.dev/schemas/workflow-waves.schema.json |
 
 Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validation, `scripts/hooks/stop-goal-fit.js`, and `scripts/hooks/workflow-steering.js`. The package-internal writer is not an agent or consumer interface.
 
@@ -99,7 +113,6 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | dependency-update | skills/dependency-update/SKILL.md | Analyze and upgrade project dependencies — latest versions, security vulnerabilities, actionable update plan across all package managers. |
 | design-probe | kits/builder/skills/design-probe/SKILL.md | Generic one-question-at-a-time design probe for turning unclear goals, designs, and handoffs into shared understanding. |
 | eval-rebuild | skills/eval-rebuild/SKILL.md | Project-specific build and install commands for the eval feedback loop. Injected into eval-builder agent. Replace this skill for different build systems. |
-| exemption-usage-review | kits/veritas-governance/skills/exemption-usage-review/SKILL.md | Periodic audit of standing delivery/DECLARED no-agent-delivery exemptions (ADR 0022 §3): lists every current exemption's scope, reason, approver, and age since declared_at, flags entries overdue for owner re-confirmation against a config... |
 | github-cli | skills/github-cli/SKILL.md | Interact with GitHub via gh CLI — PRs, issues, repos, releases, workflows, gists. |
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |

@@ -8,6 +8,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = process.argv[2];
 const kit = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/kit.json'), 'utf8'));
+const buildFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/build.flow.json'), 'utf8'));
+const executeGate = buildFlow.gates?.['execute-gate'];
+if (JSON.stringify(executeGate?.on_route_back) !== JSON.stringify({ plan_gap: 'plan' })) {
+  throw new Error('execute-gate must declare exactly plan_gap -> plan');
+}
+if (JSON.stringify(executeGate?.route_back_policy) !== JSON.stringify({ max_attempts: 3, on_exceeded: 'block' })) {
+  throw new Error('execute-gate must bound plan_gap with the Flow-owned 3-attempt block policy');
+}
 
 const expected = {
   'builder-shape': ['entrypoint', 'builder.shape', []],
@@ -45,7 +53,7 @@ const expectedArtifacts = {
   'pull-work': ['<slug>--pull-work.md', 'trust.bundle#selected-work'],
   'pickup-probe': ['<slug>--pull-work.md', 'trust.bundle#pickup-probe'],
   'plan-work': ['<slug>--plan-work.md', 'acceptance.json', 'handoff.json', 'trust.bundle#implementation-plan'],
-  'execute-plan': ['<slug>--deliver.md', 'state.json', 'trust.bundle#implementation-scope'],
+  'execute-plan': ['<slug>--deliver.md', 'trust.bundle#implementation-scope'],
   'review-work': ['trust.bundle#critique'],
   'verify-work': ['trust.bundle#acceptance-criteria', 'trust.bundle#tests-evidence', 'trust.bundle#policy-compliance'],
   'evidence-gate': ['<slug>--evidence-gate.md', 'trust.bundle#merge-readiness'],
@@ -71,6 +79,8 @@ const expectedActions = {
 };
 
 const failures = [];
+const executeSkillText = fs.readFileSync(path.join(root, 'kits/builder/skills/execute-plan/SKILL.md'), 'utf8');
+if (/\bstate\.json\b/.test(executeSkillText)) failures.push('execute-plan must not claim or reference workflow-owned state.json');
 const rows = Array.isArray(kit.skill_roles) ? kit.skill_roles : [];
 const declared = (kit.skills || []).map((entry) => entry.id.replace(/^builder\./, '')).sort();
 const classified = rows.map((entry) => entry.skill_id.replace(/^builder\./, '')).sort();

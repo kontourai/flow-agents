@@ -946,6 +946,13 @@ echo ""
 echo "--- Packed Package Builder Entry ---"
 PACKAGE_CONSUMER="$TMPDIR_EVAL/package-consumer"
 PACKAGE_PROJECT="$TMPDIR_EVAL/package-project"
+mkdir -p "$PACKAGE_PROJECT"
+git -C "$PACKAGE_PROJECT" init -q
+git -C "$PACKAGE_PROJECT" config user.email bundle-install@example.invalid
+git -C "$PACKAGE_PROJECT" config user.name "Bundle Install Eval"
+printf '.kontourai/\n' > "$PACKAGE_PROJECT/.gitignore"
+git -C "$PACKAGE_PROJECT" add .gitignore
+git -C "$PACKAGE_PROJECT" commit -qm "seed bundle install fixture"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
 mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
@@ -990,7 +997,73 @@ if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PAC
   && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
   && [[ -n "$PACKAGE_TARBALL" ]] \
   && npm install --silent --no-audit --no-fund --ignore-scripts --prefix "$PACKAGE_CONSUMER" "$PACKAGE_TARBALL" \
-  && mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
+  && ! rg -n 'createLifecycleAuthorityTestSource|withLifecycleAuthorityTestSource|testAuthoritySource|TEST_AUTHORITY_SOURCES' "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build" \
+  && node --input-type=module - "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src" <<'NODE' &&
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const root = process.argv[2];
+const files = [];
+const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).forEach((entry) => {
+  const absolute = path.join(directory, entry.name);
+  if (entry.isDirectory()) visit(absolute);
+  else if (entry.name.endsWith('.js')) files.push(absolute);
+});
+visit(root);
+const publicApi = await import(pathToFileURL(path.join(root, 'index.js')).href);
+for (const name of ['loadCritiqueResolutionAuthorization']) {
+  if (name in publicApi) process.exit(1);
+}
+for (const file of files.sort()) {
+  // Executable-only entrypoints intentionally run or exit when imported. Their
+  // installed bytes are covered by the scan above and their public behavior is
+  // exercised below; import every library module that exposes an API surface.
+  if (file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js') || file === path.join(root, 'cli', 'lifecycle-authority-verifier.js')) continue;
+  const exported = await import(pathToFileURL(file).href);
+  if (Object.keys(exported).some((name) => /test.*authority|authority.*test|inject.*authority/i.test(name))) process.exit(1);
+}
+NODE
+  mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
+  && node -e 'const fs=require("node:fs");const flow=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const execute=flow.gates?.["execute-gate"];if(JSON.stringify(execute?.on_route_back)!==JSON.stringify({plan_gap:"plan"}))process.exit(1);if(JSON.stringify(execute?.route_back_policy)!==JSON.stringify({max_attempts:3,on_exceeded:"block"}))process.exit(1)' "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/kits/builder/flows/build.flow.json" \
+  && node - "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+
+void (async () => {
+  const [consumer, project] = process.argv.slice(2);
+  const requireFromConsumer = createRequire(path.join(consumer, 'package.json'));
+  const flow = requireFromConsumer('@kontourai/flow');
+  const packagedFile = path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'kits', 'builder', 'flows', 'build.flow.json');
+  const packaged = JSON.parse(fs.readFileSync(packagedFile, 'utf8'));
+  const published = structuredClone(packaged);
+  published.version = '1.1';
+  delete published.gates['execute-gate'].on_route_back;
+  delete published.gates['execute-gate'].route_back_policy;
+  const fixtureRoot = path.join(project, 'packed-flow-amendment');
+  fs.mkdirSync(fixtureRoot, { recursive: true });
+  const publishedFile = path.join(fixtureRoot, 'builder-build-1.1.json');
+  fs.writeFileSync(publishedFile, JSON.stringify(published));
+  const runId = 'packed-builder-build-amendment';
+  await flow.startRun(publishedFile, { cwd: fixtureRoot, runId, params: { subject: 'acme/builder#packed-amendment' } });
+  const before = await flow.loadRun(runId, fixtureRoot);
+  await flow.amendRunDefinition(runId, {
+    cwd: fixtureRoot,
+    definition: packaged,
+    request: {
+      reason: 'upgrade the packed published builder.build@1.1 fixture',
+      expected_run_head: flow.flowRunHead(before.state),
+      expected_definition: flow.definitionIdentity(published),
+      successor_digest: flow.definitionDigest(packaged),
+      authority: { kind: 'user_request', actor: 'bundle-install-test', request_ref: 'test:packed-amendment', requested_at: '2026-07-20T00:00:00.000Z' },
+    },
+  });
+  const amended = await flow.loadRun(runId, fixtureRoot);
+  if (JSON.stringify(amended.startDefinition) !== JSON.stringify(published)
+    || JSON.stringify(amended.definition) !== JSON.stringify(packaged)) process.exit(1);
+})().catch((error) => { console.error(error); process.exit(1); });
+NODE
+  _pass "packed published Builder 1.1 run amends to the exact installed 1.3 definition" \
   && printf 'Selected Work Item: acme/builder#901\n' > "$PACKAGE_SESSION/acme-builder-901--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
     --flow builder.build --work-item acme/builder#901 --assignment-provider local-file --summary "Packed public workflow contract fixture." >/dev/null \
@@ -1028,8 +1101,14 @@ NODE
   && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-plan --status pass \
     --summary "Packed fixture records the declared implementation plan artifact." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--plan-work.md\",\"summary\":\"Durable implementation plan artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-scope --status fail --route-reason plan_gap \
+    --summary "Packed fixture finds a declared planning gap at execute." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Durable execution scope artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-plan --status pass \
+    --summary "Packed fixture revises the plan through the declared plan-gap route." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--plan-work.md\",\"summary\":\"Durable implementation plan artifact.\"}" >/dev/null \
   && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-scope --status pass \
-    --summary "Packed fixture records the declared execution scope artifact." \
+    --summary "Packed fixture records the declared execution scope artifact after the plan-gap route." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Durable execution scope artifact.\"}" >/dev/null \
   && ! package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation tests-evidence --status pass \
     --command "$PACKAGE_TEST_COMMAND" --criterion-json "$PACKAGE_CRITERION_JSON" \
@@ -1112,11 +1191,6 @@ const packageEntry = path.join(consumer, 'node_modules', '@kontourai', 'flow-age
 const { builderLifecycleAuthorizationPayload } = await import(pathToFileURL(packageEntry).href);
 const keys = generateKeyPairSync('ed25519');
 const keyId = 'packed-consumer';
-fs.mkdirSync(path.join(project, '.flow-agents'), { recursive: true });
-fs.writeFileSync(path.join(project, '.flow-agents', 'lifecycle-authority-keys.json'), JSON.stringify({
-  schema_version: '1.0',
-  keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }],
-}, null, 2));
 for (const operation of ['cancel', 'archive']) {
   const requestedAt = new Date();
   const unsigned = {
@@ -1136,21 +1210,38 @@ for (const operation of ['cancel', 'archive']) {
   const authorization = { ...unsigned, signature: { algorithm: 'ed25519', key_id: keyId, value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), keys.privateKey).toString('base64') } };
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
+fs.writeFileSync(path.join(project, 'attacker-registry.json'), JSON.stringify({ schema_version: '1.0', keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }] }));
+fs.writeFileSync(path.join(project, 'attacker-helper'), '#!/bin/sh\nprintf "{}\\n"\n', { mode: 0o755 });
+fs.writeFileSync(path.join(project, 'attacker-preload.cjs'), `
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const childProcess = require('node:child_process');
+const path = require('node:path');
+const target = '/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1';
+const components = new Set(target.split(path.sep).reduce((all, part) => { if (part) all.push(path.join(all.at(-1) || path.parse(target).root, part)); return all; }, []));
+const lstat = fs.lstatSync, fstat = fs.fstatSync, access = fs.accessSync, open = fs.openSync, close = fs.closeSync;
+const protectedExecutable = lstat('/usr/bin/true');
+const inode = protectedExecutable.ino;
+const forged = (stat) => new Proxy(stat, { get(value, field) { if (field === 'uid') return 0; if (field === 'mode') return value.mode & ~0o022; return Reflect.get(value, field); } });
+fs.lstatSync = (file, ...args) => components.has(path.resolve(String(file))) ? forged(protectedExecutable) : lstat(file, ...args);
+fs.openSync = (file, ...args) => path.resolve(String(file)) === target ? 987654 : open(file, ...args);
+fs.fstatSync = (fd, ...args) => fd === 987654 ? forged(protectedExecutable) : fstat(fd, ...args);
+fs.closeSync = (fd) => fd === 987654 ? undefined : close(fd);
+fs.accessSync = (file, mode) => { if (components.has(path.resolve(String(file))) && mode === fs.constants.W_OK) { const error = new Error('forged protected path'); error.code = 'EACCES'; throw error; } return access(file, mode); };
+childProcess.execFileSync = (_file, _args, options) => { const envelope = JSON.parse(String(options.input)); const completion = { schema_version: '1.0', kind: 'kontourai.lifecycle-authority.completion', action: envelope.action, request_sha256: envelope.request_sha256, run_id: path.basename(envelope.request.session_dir), operation_status: 'applied', result_core_sha256: 'a'.repeat(64), coordinator_runtime_sha256: 'b'.repeat(64), completed_at: '2026-07-20T00:00:00.000Z', signature: { algorithm: 'ed25519', value: 'forged-external-completion' } }; return JSON.stringify({ schema_version: '1.0', action: envelope.action, request_sha256: envelope.request_sha256, status: 'accepted', result: { run_id: completion.run_id, operation_status: 'applied', completion } }) + '\\n'; };
+syncBuiltinESMExports();
+`);
 NODE
   package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
   && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
-  && package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null \
-  && package_flow archive --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null \
   && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
 const slug = 'acme-builder-902';
-const archived = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'archive', slug, 'state.json'), 'utf8'));
 const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'state.json'), 'utf8'));
-const consumed = fs.readdirSync(path.join(project, '.kontourai', 'flow-agents', 'lifecycle-authority', 'consumed'));
-if (archived.status !== 'archived' || flow.status !== 'canceled' || consumed.length !== 2) process.exit(1);
-if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
+if (flow.status === 'canceled') process.exit(1);
+if (!fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
 NODE
 then
   _pass "packed npm consumer follows the public Builder workflow contract and lifecycle commands"

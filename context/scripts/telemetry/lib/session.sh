@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 # session.sh — Session lifecycle management
 
+session_runtime_id() {
+  local runtime_name="$1" runtime_session_id="$2"
+  [[ -n "$runtime_session_id" ]] || return 1
+  node -e '
+    const crypto = require("node:crypto");
+    process.stdout.write(`r-${crypto.createHash("sha256").update(process.argv[1]).update("\\0").update(process.argv[2]).digest("hex")}`);
+  ' "$runtime_name" "$runtime_session_id"
+}
+
 session_start() {
-  local agent_name="$1"
+  local agent_name="$1" runtime_session_id="${2:-}" runtime_name="${3:-unknown}"
   local session_id start_time pid tty
   
-  session_id=$(uuidgen 2>/dev/null || echo "s-$(date +%s)-$$")
+  session_id=$(session_runtime_id "$runtime_name" "$runtime_session_id" 2>/dev/null \
+    || uuidgen 2>/dev/null \
+    || echo "s-$(date +%s)-$$")
   start_time=$(date +%s)
   pid="${PPID:-$$}"
   tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ' || echo "unknown")
@@ -17,32 +28,47 @@ session_start() {
     --argjson st "$start_time" \
     --argjson pid "$pid" \
     --arg tty "$tty" \
+    --arg runtime "$runtime_name" \
+    --arg runtime_session_id "$runtime_session_id" \
     '{
       session_id: $sid,
       agent_name: $an,
       start_time: $st,
       pid: $pid,
-      tty: $tty
+      tty: $tty,
+      runtime: $runtime,
+      runtime_session_id: (if $runtime_session_id == "" then null else $runtime_session_id end)
     }' > "$session_file"
   
   echo "$session_id"
 }
 
 session_get() {
+  local runtime_session_id="${1:-}" runtime_name="${2:-unknown}" session_id
+  if [[ -n "$runtime_session_id" ]]; then
+    session_id=$(session_runtime_id "$runtime_name" "$runtime_session_id") || return
+    [[ -f "${TELEMETRY_SESSION_DIR}/${session_id}.session" ]] && printf '%s\n' "$session_id"
+    return
+  fi
   local latest_session
   latest_session=$(ls -t "${TELEMETRY_SESSION_DIR}"/*.session 2>/dev/null | head -n1)
   [[ -f "$latest_session" ]] && jq -r '.session_id' "$latest_session" 2>/dev/null
 }
 
 session_get_tty() {
+  local session_id="${1:-}"
+  if [[ -n "$session_id" && -f "${TELEMETRY_SESSION_DIR}/${session_id}.session" ]]; then
+    jq -r '.tty // "unknown"' "${TELEMETRY_SESSION_DIR}/${session_id}.session" 2>/dev/null
+    return
+  fi
   local latest_session
   latest_session=$(ls -t "${TELEMETRY_SESSION_DIR}"/*.session 2>/dev/null | head -n1)
   [[ -f "$latest_session" ]] && jq -r '.tty // "unknown"' "$latest_session" 2>/dev/null
 }
 
 session_end() {
-  local session_id
-  session_id=$(session_get)
+  local session_id="${1:-}"
+  [[ -n "$session_id" ]] || session_id=$(session_get)
   [[ -z "$session_id" ]] && return
   
   local session_file="${TELEMETRY_SESSION_DIR}/${session_id}.session"
@@ -63,4 +89,7 @@ session_cleanup() {
   # Bound the per-cwd project-label cache (see console_project_label) so a project rename
   # (package.json name / git remote) self-heals within the same window instead of caching forever.
   find "${TELEMETRY_SESSION_DIR}" -name "project-label.*" -mtime +1 -delete 2>/dev/null || true
+  # Bound #580 tool-start records (see tool_start_record_path) so an invoke whose matching
+  # result never fires (crash, dropped hook, etc.) doesn't leak the start file forever.
+  find "${TELEMETRY_SESSION_DIR}" -name "toolstart-*" -mtime +1 -delete 2>/dev/null || true
 }

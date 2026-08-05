@@ -1,0 +1,191 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import childProcess from "node:child_process";
+import { pathToFileURL } from "node:url";
+
+import { main as kitMain } from "../../build/src/cli/kit.js";
+import { observeInstalledKitIntegrity } from "../../build/src/flow-kit/content-hash.js";
+
+const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
+const CANONICAL_PATH = "kits/local/repositories/example-kit";
+
+function tempRoot(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+function copyFixture(destination) {
+  fs.cpSync(FIXTURE, destination, { recursive: true });
+}
+
+function createGitFixture(destination) {
+  copyFixture(destination);
+  childProcess.execFileSync("git", ["init", "-q", destination]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.email", "tests@example.invalid"]);
+  childProcess.execFileSync("git", ["-C", destination, "config", "user.name", "Flow Agents tests"]);
+  childProcess.execFileSync("git", ["-C", destination, "add", "."]);
+  childProcess.execFileSync("git", ["-C", destination, "commit", "-qm", "fixture"]);
+}
+
+function readEntry(dest) {
+  const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
+  return JSON.parse(fs.readFileSync(registryPath, "utf8")).kits[0];
+}
+
+function writeLegacyAbsoluteEntry(dest) {
+  const registryPath = path.join(dest, "kits", "local", "installed-kits.json");
+  const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+  registry.kits[0] = {
+    ...registry.kits[0],
+    installed_at: "2000-01-01T00:00:00.000Z",
+    installed_path: path.join(dest, "kits", "local", "repositories", "example-kit"),
+  };
+  fs.writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
+async function captureMain(argv) {
+  const output = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (...args) => output.push(args.join(" "));
+  console.error = (...args) => output.push(args.join(" "));
+  try {
+    return { status: await kitMain(argv), output: output.join("\n") };
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+}
+
+test("local installs record portable paths and remain installed after the destination moves", async () => {
+  const root = tempRoot("flow-kit-registry-portable-");
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  const movedDest = path.join(root, "moved-dest");
+  copyFixture(source);
+
+  const install = await captureMain([
+    "install", source, "--dest", dest, "--record-source", "catalog:example-kit@v1",
+  ]);
+  assert.equal(install.status, 0, install.output);
+  assert.match(install.output, /caller-declared source metadata/);
+  const entry = readEntry(dest);
+  assert.equal(entry.installed_path, CANONICAL_PATH);
+  assert.equal(entry.source, "catalog:example-kit@v1");
+
+  fs.cpSync(dest, movedDest, { recursive: true });
+  const movedEntry = readEntry(movedDest);
+  assert.equal(observeInstalledKitIntegrity(movedEntry, movedDest).state, "installed");
+  const status = await captureMain(["status", "example-kit", "--dest", movedDest]);
+  assert.equal(status.status, 0, status.output);
+  assert.match(status.output, /"state": "installed"/);
+
+  const replacementSource = path.join(root, "replacement-source");
+  copyFixture(replacementSource);
+  const idempotent = await captureMain([
+    "install", replacementSource, "--dest", dest, "--record-source", "catalog:example-kit@v1",
+  ]);
+  assert.equal(idempotent.status, 0, idempotent.output);
+  assert.match(idempotent.output, /already installed/);
+});
+
+test("integrity rejects legacy absolute targets with a supported migration command", async () => {
+  const root = tempRoot("flow-kit-registry-legacy-");
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  const copiedDest = path.join(root, "copied-dest");
+  copyFixture(source);
+  assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
+  const entry = readEntry(dest);
+  const legacyEntry = {
+    ...entry,
+    installed_path: path.join(dest, "kits", "local", "repositories", "example-kit"),
+  };
+  const exactCurrentDestination = observeInstalledKitIntegrity(legacyEntry, dest);
+  assert.equal(exactCurrentDestination.state, "invalid");
+  assert.match(exactCurrentDestination.diagnostic, /registry migration required/);
+  assert.match(exactCurrentDestination.diagnostic, /flow-agents kit install <source> --dest <dest> --update/);
+
+  fs.cpSync(dest, copiedDest, { recursive: true });
+  const crossCheckout = observeInstalledKitIntegrity(legacyEntry, copiedDest);
+  assert.equal(crossCheckout.state, "invalid");
+  assert.match(crossCheckout.diagnostic, /registry migration required/);
+});
+
+async function assertLegacyRegistryMigratesWithUpdate(installSource) {
+  const root = tempRoot("flow-kit-registry-migrate-");
+  const dest = path.join(root, "dest");
+  assert.equal(await kitMain(["install", installSource, "--dest", dest]), 0);
+  writeLegacyAbsoluteEntry(dest);
+
+  const invalidStatus = await captureMain(["status", "example-kit", "--dest", dest]);
+  assert.equal(invalidStatus.status, 0, invalidStatus.output);
+  assert.match(invalidStatus.output, /"state": "invalid"/);
+  assert.match(invalidStatus.output, /registry migration required/);
+
+  const update = await captureMain(["install", installSource, "--dest", dest, "--update"]);
+  assert.equal(update.status, 0, update.output);
+  assert.match(update.output, /updated/);
+  const migrated = readEntry(dest);
+  assert.equal(migrated.installed_path, CANONICAL_PATH);
+  assert.notEqual(migrated.installed_at, "2000-01-01T00:00:00.000Z");
+  assert.equal(Number.isNaN(Date.parse(migrated.installed_at)), false);
+  assert.equal(observeInstalledKitIntegrity(migrated, dest).state, "installed");
+  const status = await captureMain(["status", "example-kit", "--dest", dest]);
+  assert.equal(status.status, 0, status.output);
+  assert.match(status.output, /"state": "installed"/);
+}
+
+test("local --update migrates a same-source legacy registry entry", async () => {
+  const root = tempRoot("flow-kit-local-registry-migrate-");
+  const source = path.join(root, "source");
+  copyFixture(source);
+  await assertLegacyRegistryMigratesWithUpdate(source);
+});
+
+test("Git --update migrates a same-source legacy registry entry", async () => {
+  const root = tempRoot("flow-kit-git-registry-migrate-");
+  const source = path.join(root, "source");
+  createGitFixture(source);
+  await assertLegacyRegistryMigratesWithUpdate(pathToFileURL(source).href);
+});
+
+test("integrity rejects alternate paths without resolving registry-supplied targets", async () => {
+  const root = tempRoot("flow-kit-registry-invalid-path-");
+  const source = path.join(root, "source");
+  const dest = path.join(root, "dest");
+  copyFixture(source);
+  assert.equal(await kitMain(["install", source, "--dest", dest]), 0);
+  const entry = readEntry(dest);
+  for (const installed_path of [
+    "./kits/local/repositories/example-kit",
+    "kits/local/repositories/../repositories/example-kit",
+    "../kits/local/repositories/example-kit",
+    "kits\\local\\repositories\\example-kit",
+    path.join(root, "other-checkout", "kits", "local", "repositories", "example-kit"),
+    "kits/local/repositories/example-kit\u0000suffix",
+  ]) {
+    const integrity = observeInstalledKitIntegrity({ ...entry, installed_path }, dest);
+    assert.equal(integrity.state, "invalid", installed_path);
+  }
+});
+
+test("record-source is bounded caller-declared local metadata and Git rejects it", async () => {
+  const root = tempRoot("flow-kit-record-source-");
+  const source = path.join(root, "source");
+  copyFixture(source);
+  for (const invalidSource of ["", "   ", " leading", "trailing ", "line\nbreak", "c1\u0085break", "c1\u009Bbreak", "line\u2028separator", "paragraph\u2029separator", "bidi\u202Eoverride", "x".repeat(1025)]) {
+    const result = await captureMain([
+      "install", source, "--dest", path.join(root, `dest-${invalidSource.length}`), "--record-source", invalidSource,
+    ]);
+    assert.equal(result.status, 2, invalidSource || "empty");
+    assert.match(result.output, /--record-source must be a trimmed non-blank locator.*unsafe Unicode control, format, or separator characters/);
+  }
+  const gitResult = await captureMain([
+    "install", "https://example.invalid/example-kit.git", "--record-source", "logical:example-kit",
+  ]);
+  assert.equal(gitResult.status, 2, gitResult.output);
+  assert.match(gitResult.output, /only for local path installs/);
+});

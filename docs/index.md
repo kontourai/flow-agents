@@ -70,7 +70,7 @@ Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has
 
 ## Framework adapters
 
-The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 50 unit tests, no Strands SDK required. `integrations/strands-ts/` adds a native-import TypeScript preview with shipped telemetry callbacks and native config-protection blocking; workflow-steering, quality-gate, and stop-goal-fit policy coverage is exercised by the conformance shim only. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
+The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 76 unit tests, no Strands SDK required. `integrations/strands-ts/` adds a native-import TypeScript preview with shipped telemetry callbacks and native config-protection blocking; workflow-steering, quality-gate, and stop-goal-fit policy coverage is exercised by the conformance shim only. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
 
 ## Quick Start
 
@@ -146,7 +146,7 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
   </a>
   <a class="doc-card" href="knowledge-kit.html">
     <strong>Knowledge Kit</strong>
-    <span>Gated knowledge storage with five pipeline flows, a representation-neutral store contract, default and Obsidian adapters, 198 tests, and a parameterized contract suite any adapter can run.</span>
+    <span>Gated knowledge storage with five pipeline flows, a representation-neutral store contract, default and Obsidian adapters, an extensive automated test suite, and a parameterized contract suite any adapter can run.</span>
   </a>
   <a class="doc-card" href="spec/runtime-hook-surface.html">
     <strong>Runtime Hook Surface</strong>

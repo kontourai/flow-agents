@@ -12,7 +12,7 @@ This page captures where Flow Agents is headed, clearly labeled as direction rat
 
 Flow Agents currently ships as a harness adapter layer: six core harness runtimes (base, Claude Code, Codex, Kiro, opencode, pi) receive bundled agents, skills, context, scripts, and hook wiring through the `npx @kontourai/flow-agents init` installer. The four canonical policy classes — workflow steering, quality gate, stop-goal-fit, and config protection — are implemented as canonical scripts under `scripts/hooks/` and wired to each host's native event surface at conformance levels L0, L1, or L2.
 
-One official framework adapter spike exists: `integrations/strands/` is a Python `HookProvider` for AWS Strands that emits the canonical telemetry taxonomy and enforces config protection via tool-call cancellation. It is preview-status with documented limitations.
+Two official AWS Strands framework adapters exist. `integrations/strands/` is a Python `HookProvider` spike that emits the canonical telemetry taxonomy and enforces config protection via tool-call cancellation; it is preview-status with documented limitations. `integrations/strands-ts/` is a native-import TypeScript adapter — the first adapter to consume the Flow Agents policy engine in-process rather than via subprocess — with telemetry callbacks and the config-protection hot path shipped; workflow-steering, quality-gate, and stop-goal-fit coverage is exercised by the conformance shim only, not by the production callbacks.
 
 ---
 
@@ -24,7 +24,7 @@ Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is valid
 
 **Builder Kit** packages the full `idea → backlog → plan → build → review → verify → evidence → release → learning` pipeline as two flows (`builder.shape`, `builder.build`). It installs automatically.
 
-**Knowledge Kit** packages durable gated knowledge storage: a store contract with four record types, five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. It ships with 198 tests, a parameterized contract suite that any adapter can run against, and a vector similarity detector (ollama embeddings, pluggable interface).
+**Knowledge Kit** packages durable gated knowledge storage: a store contract with four record types, five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. It ships with an extensive automated test suite, a parameterized contract suite that any adapter can run against, and a vector similarity detector (ollama embeddings, pluggable interface).
 
 The output-shape story is the reason kit authoring matters beyond workflow reuse. The Knowledge Kit store contract is representation-neutral — the pipeline is identical, but the rendering layer is swapped by adapter. Today two adapters ship: the default adapter (flat markdown records with YAML frontmatter and a JSON graph index) and the Obsidian adapter (one human-canonical note per record, category→folder hierarchy, configurable frontmatter dimensions, living overviews, superseded notes in `archive/` not deleted). Authors who choose the Obsidian adapter get the same gated workflow rendered into the shape they already think in. That is what kit authoring unlocks: packaging both the process discipline and the output opinion as a deployable unit. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
 
@@ -48,7 +48,7 @@ The process-discipline layer is not coding-specific. The canonical policies, sid
 
 ### TypeScript framework adapters
 
-The Strands Python spike proves the thesis: the policy engine is not harness-specific. The direction is TypeScript framework adapters that consume the canonical policy engine natively via the published `@kontourai/flow-agents` npm package, rather than shelling out to bash scripts. Candidate frameworks include LangGraph, VoltAgent, and the OpenAI Agents SDK. The [Runtime Hook Surface spec](spec/runtime-hook-surface.html) documents the adapter contract and the framework event mapping tables for each.
+The Strands Python spike proves the thesis: the policy engine is not harness-specific. `integrations/strands-ts/` ships that natively for Strands today. The direction is extending the same native-import pattern — consuming the canonical policy engine directly via the published `@kontourai/flow-agents` npm package, rather than shelling out to bash scripts — to other frameworks. Candidate frameworks include LangGraph, VoltAgent, and the OpenAI Agents SDK. The [Runtime Hook Surface spec](spec/runtime-hook-surface.html) documents the adapter contract and the framework event mapping tables for each.
 
 ### Kontour Console as the unifying telemetry surface
 

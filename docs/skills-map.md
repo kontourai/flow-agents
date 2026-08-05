@@ -14,6 +14,11 @@ For practical operator instructions and copy/paste prompts, see https://github.c
 Flow Definitions own step order, gates, route-backs, and trust expectations;
 the role matrix only maps each skill to that Flow-owned behavior.
 
+For the Builder build flow, `execute` exposes only the declared correction
+`plan_gap -> plan`, with Flow-owned bounded attempt accounting (three attempts,
+then block). A skill or handoff cannot create that permission: `plan_gap` is valid
+only while the active gate definition declares it, and status/sync do not backtrack.
+
 | Role | Skills | Activation |
 | --- | --- | --- |
 | Entrypoint | `builder-shape`, `deliver` | User selects the Builder product workflow; the skill coordinates but owns no step evidence. |
@@ -166,7 +171,7 @@ Each workflow phase ends with an explicit gate and durable artifact:
 - `builder-shape` selects a safe-slugged public shape run and delegates to `idea-to-backlog`.
 - `idea-to-backlog` owns `<slug>--idea-to-backlog.md` and the `builder.shape` slices in `trust.bundle`.
 - `pull-work` and `pickup-probe` own the selected-work and Probe sections of `<slug>--pull-work.md` plus their `trust.bundle` slices.
-- `plan-work` owns `<slug>--plan-work.md`, `acceptance.json`, `handoff.json`, and its `trust.bundle` plan slice; `execute-plan` owns the session execution report, `state.json`, and its scope slice.
+- `plan-work` owns `<slug>--plan-work.md`, `acceptance.json`, `handoff.json`, and its `trust.bundle` plan slice; `execute-plan` owns the session execution report and its scope slice. Flow Agents owns workflow and continuation control state.
 - `review-work` records report-only critique through public `workflow critique` and owns `clean-critique`.
 - `verify-work` records command-backed `acceptance-criteria`, `tests-evidence`, and applicable `policy-compliance` evidence in `trust.bundle`.
 - `evidence-gate` owns `<slug>--evidence-gate.md`; `release-readiness` owns `release.json`; `learning-review` owns `learning.json`; each also records its declared `trust.bundle` slice.

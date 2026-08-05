@@ -1,18 +1,21 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
+import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
+import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
+import { createOpenCodeAdapter, type InstallationReceipt, type PortableAsset } from "@kontourai/conduit";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -37,6 +40,11 @@ type InitOptions = {
   // "(auto-detected)" annotation. headlessOptions() itself never sets this
   // (untouched) -- main() merges it onto the headless result separately.
   runtimeAutoDetected?: boolean;
+  configureProviders?: boolean;
+  providerScope?: ProviderScope;
+  providerRepoPath?: string;
+  providerProjectNumber?: number;
+  providerOnline?: boolean;
 };
 
 const runtimeBundles: Record<Runtime, string> = {
@@ -123,8 +131,26 @@ Options:
   --console-tenant ID
   --activate-kits
   --activate-kit KIT_ID   Activate one catalog kit by id. Repeat for multiple kits.
+  --configure-providers   Configure backlog, assignment, and change providers together.
+  --provider-scope project|global
+  --provider-repo-path PATH
+  --provider-project NUMBER
+  --online               Verify GitHub auth/project and create the claim label if missing.
   --yes, --headless
 `);
+}
+
+function parseProviderScope(value: string | undefined): ProviderScope {
+  if (value === undefined || value === "project") return "project";
+  if (value === "global") return "global";
+  throw new Error(`unknown provider scope '${value}'; expected project or global`);
+}
+
+function parseProviderProject(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) throw new Error("--provider-project must be a positive integer");
+  return number;
 }
 
 function catalogKitIds(): string[] {
@@ -471,6 +497,27 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
         activeKitIds.push(...answer.split(",").map((id) => id.trim()).filter((id) => available.includes(id)));
       }
     }
+    const configureProvidersFlag = flagBool(args.flags, "configure-providers");
+    const configureProvidersAnswer = configureProvidersFlag
+      ? "y"
+      : await rl.question("Configure GitHub backlog, assignment, and change providers? [Y/n]: ");
+    const configureProviders = configureProvidersFlag || !["n", "no"].includes(configureProvidersAnswer.trim().toLowerCase());
+    const providerScopeAnswer = flagString(args.flags, "provider-scope")
+      ?? (configureProviders ? (await rl.question("Provider settings scope [project/global] [project]: ")).trim() : undefined);
+    const providerScope = configureProviders ? parseProviderScope(providerScopeAnswer || "project") : undefined;
+    const providerOnlineFlag = flagBool(args.flags, "online");
+    const providerOnlineAnswer = configureProviders && !providerOnlineFlag
+      ? await rl.question("Verify github.com state and create the configured claim label if missing? [y/N]: ")
+      : "";
+    const providerOnline = configureProviders
+      && (providerOnlineFlag || ["y", "yes"].includes(providerOnlineAnswer.trim().toLowerCase()));
+    const providerProjectFlag = flagString(args.flags, "provider-project");
+    const providerProjectAnswer = configureProviders && providerProjectFlag === undefined
+      ? await rl.question(`GitHub Project number${providerOnline ? " (blank to discover)" : ""}: `)
+      : providerProjectFlag;
+    if (configureProviders && !providerOnline && !(providerProjectAnswer?.trim())) {
+      throw new Error("offline provider setup requires a GitHub Project number");
+    }
     return {
       runtime,
       runtimeAutoDetected,
@@ -484,6 +531,11 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       telemetrySinks,
       activateKits: activeKitIds.length > 0,
       activeKitIds,
+      configureProviders,
+      providerScope,
+      providerRepoPath: flagString(args.flags, "provider-repo-path"),
+      providerProjectNumber: parseProviderProject(providerProjectAnswer?.trim() || undefined),
+      providerOnline,
     };
   } finally {
     rl.close();
@@ -506,7 +558,30 @@ function headlessOptions(argv: string[]): InitOptions {
     telemetrySinks: telemetrySinksFromFlags(args.flags),
     activateKits: selectedKitIdsFromFlags(args.flags).length > 0,
     activeKitIds: selectedKitIdsFromFlags(args.flags),
+    configureProviders: flagBool(args.flags, "configure-providers"),
+    providerScope: flagBool(args.flags, "configure-providers") ? parseProviderScope(flagString(args.flags, "provider-scope")) : undefined,
+    providerRepoPath: flagString(args.flags, "provider-repo-path"),
+    providerProjectNumber: parseProviderProject(flagString(args.flags, "provider-project")),
+    providerOnline: flagBool(args.flags, "online"),
   };
+}
+
+function configureWorkflowProviders(options: InitOptions): number {
+  if (!options.configureProviders) return 0;
+  const repoPath = path.resolve(options.providerRepoPath ?? (options.global ? process.cwd() : options.dest));
+  const result = bootstrapProviders({
+    scope: options.providerScope ?? "project",
+    repoPath,
+    projectSettingsRoot: options.providerScope === "project"
+      ? path.join(options.global ? repoPath : options.dest, "context", "settings")
+      : undefined,
+    projectNumber: options.providerProjectNumber,
+    online: options.providerOnline,
+  });
+  console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
+  for (const file of result.files) console.log(`  ${file}`);
+  if (result.offlineRemediation) console.warn(result.offlineRemediation);
+  return 0;
 }
 
 export function ensureBundle(runtime: Runtime): string {
@@ -557,6 +632,102 @@ function mergeInstallSettings(
   const merged = mergeSettings(existing, managed, { onConflict: (conflict) => conflicts.push(conflict) });
   warnInstallMergeConflicts(conflicts);
   return merged;
+}
+
+type OpenCodeConfigBinding = {
+  visiblePath: string;
+  canonicalPath: string;
+  trustedSymlinkRoot?: string;
+  wasSymlink: boolean;
+};
+
+function opencodeGlobalConfigPath(dest: string): string {
+  const override = process.env["FLOW_AGENTS_USER_OPENCODE_CONFIG"];
+  return override ? path.resolve(override) : path.join(dest, "opencode.json");
+}
+
+function assertPrivateOpenCodeBackingRoot(rootPath: string): void {
+  const stat = fs.statSync(rootPath);
+  const currentUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (!stat.isDirectory()) throw new Error(`OpenCode config backing root is not a directory: ${rootPath}`);
+  if (currentUid !== undefined && stat.uid !== currentUid) throw new Error(`OpenCode config backing root is not owned by the current user: ${rootPath}`);
+  if ((stat.mode & 0o022) !== 0) throw new Error(`OpenCode config backing root is group- or world-writable: ${rootPath}`);
+}
+
+/**
+ * Bind a global OpenCode config link once, then write only its canonical file
+ * target. The target's parent is deliberately the sole trusted backing root
+ * passed to the ownership writer for direct Stow-style child links.
+ */
+function resolveOpenCodeConfigBinding(visiblePath: string): OpenCodeConfigBinding {
+  let visibleStat: fs.Stats;
+  try {
+    visibleStat = fs.lstatSync(visiblePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+    }
+    throw error;
+  }
+  if (!visibleStat.isSymbolicLink()) {
+    if (!visibleStat.isFile()) throw new Error(`existing OpenCode config is not a regular file: ${visiblePath}`);
+    return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+  }
+  let canonicalPath: string;
+  try {
+    canonicalPath = fs.realpathSync(visiblePath);
+  } catch (error) {
+    throw new Error(`OpenCode config symlink is not resolvable: ${visiblePath}: ${(error as Error).message}`);
+  }
+  if (!fs.lstatSync(canonicalPath).isFile()) throw new Error(`OpenCode config symlink target is not a regular file: ${visiblePath}`);
+  assertPrivateOpenCodeBackingRoot(path.dirname(canonicalPath));
+  return {
+    visiblePath,
+    canonicalPath,
+    trustedSymlinkRoot: path.dirname(canonicalPath),
+    wasSymlink: true,
+  };
+}
+
+function revalidateOpenCodeConfigBinding(binding: OpenCodeConfigBinding): void {
+  if (binding.wasSymlink) {
+    const stat = fs.lstatSync(binding.visiblePath);
+    if (!stat.isSymbolicLink()) throw new Error(`OpenCode config symlink changed during install: ${binding.visiblePath}`);
+    if (fs.realpathSync(binding.visiblePath) !== binding.canonicalPath) {
+      throw new Error(`OpenCode config symlink target changed during install: ${binding.visiblePath}`);
+    }
+  }
+  let canonicalStat: fs.Stats | undefined;
+  try {
+    canonicalStat = fs.lstatSync(binding.canonicalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!binding.wasSymlink && canonicalStat?.isSymbolicLink()) {
+    throw new Error(`OpenCode config path became a symlink during install: ${binding.canonicalPath}`);
+  }
+  if (canonicalStat && !canonicalStat.isFile()) {
+    throw new Error(`OpenCode config write target is not a regular file: ${binding.canonicalPath}`);
+  }
+}
+
+function writeJsonAtomic(target: string, value: unknown): void {
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.flow-agents-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`);
+  let mode = 0o600;
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`OpenCode config write target is not a regular file: ${target}`);
+    mode = stat.mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode });
+    fs.chmodSync(temp, mode);
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
 }
 
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
@@ -615,6 +786,152 @@ function copyDirMerge(srcDir: string, destDir: string): { added: number; updated
   return { added, updated };
 }
 
+function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeKitIds: string[]): string[] {
+  const selected = new Set<string>();
+  const coreSkills = path.join(bundle, "skills");
+  for (const entry of fs.readdirSync(coreSkills, { withFileTypes: true })) {
+    if (entry.isDirectory() && fs.existsSync(path.join(coreSkills, entry.name, "SKILL.md"))) selected.add(entry.name);
+  }
+  const visited = new Set<string>();
+  const visit = (kitId: string): void => {
+    if (visited.has(kitId)) return;
+    visited.add(kitId);
+    const kitRoot = path.join(bundle, "kits", kitId);
+    const manifestPath = path.join(kitRoot, "kit.json");
+    if (!fs.existsSync(manifestPath)) throw new Error(`activated OpenCode kit is missing its manifest: ${kitId}`);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { id?: unknown; skills?: unknown; dependencies?: unknown };
+    if (manifest.id !== kitId) throw new Error(`activated OpenCode kit manifest identity mismatch: ${kitId}`);
+    if (Array.isArray(manifest.skills)) {
+      for (const skill of manifest.skills) {
+        if (!skill || typeof skill !== "object") throw new Error(`activated OpenCode kit has an invalid skill: ${kitId}`);
+        const skillPath = (skill as Record<string, unknown>)["path"];
+        if (typeof skillPath !== "string" || path.basename(skillPath) !== "SKILL.md") throw new Error(`activated OpenCode kit has an invalid skill: ${kitId}`);
+        const skillName = path.basename(path.dirname(skillPath));
+        const exportedSkill = path.join(skillsSource, skillName, "SKILL.md");
+        if (!fs.existsSync(exportedSkill)) throw new Error(`activated OpenCode kit skill is missing from the runtime export: ${kitId}/${skillName}`);
+        selected.add(skillName);
+      }
+    }
+    if (Array.isArray(manifest.dependencies)) {
+      for (const dependency of manifest.dependencies) {
+        if (!dependency || typeof dependency !== "object") throw new Error(`activated OpenCode kit has an invalid dependency: ${kitId}`);
+        const dependencyId = (dependency as Record<string, unknown>)["kit_id"];
+        if (typeof dependencyId !== "string" || dependencyId.length === 0) throw new Error(`activated OpenCode kit has an invalid dependency: ${kitId}`);
+        visit(dependencyId);
+      }
+    }
+  };
+  for (const kitId of activeKitIds) visit(kitId);
+  const skillNames = [...selected].sort();
+  for (const skillName of skillNames) {
+    const skillPath = path.join(skillsSource, skillName, "SKILL.md");
+    const content = fs.readFileSync(skillPath, "utf8");
+    const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+    if (!frontmatter || !frontmatter[1].split(/\r?\n/).some((line) => line.match(/^name:\s*["']?([^"']+)["']?\s*$/)?.[1] === skillName)) {
+      throw new Error(`generated OpenCode skill is corrupt or has the wrong identity: ${skillName}`);
+    }
+  }
+  return skillNames;
+}
+
+function stageOpenCodeRuntimeAsset(source: string, destinationRelative: string, overlay: string): number {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    return fs.readdirSync(source).sort().reduce(
+      (count, name) => count + stageOpenCodeRuntimeAsset(path.join(source, name), path.join(destinationRelative, name), overlay),
+      0,
+    );
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const destination = path.join(overlay, destinationRelative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(destination, stat.mode & 0o777);
+  return 1;
+}
+
+function addOpenCodePortableAssets(
+  source: string,
+  destinationRelative: string,
+  kind: PortableAsset["kind"],
+  overlay: string,
+  assetSources: Map<string, string>,
+  assets: PortableAsset[],
+): void {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(source).sort()) {
+      addOpenCodePortableAssets(path.join(source, name), path.join(destinationRelative, name), kind, overlay, assetSources, assets);
+    }
+    return;
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const target = path.resolve(overlay, ...destinationRelative.split("/"));
+  const relative = path.relative(overlay, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`generated OpenCode asset has an unsafe destination: ${destinationRelative}`);
+  if (assetSources.has(target)) throw new Error(`generated OpenCode asset has a duplicate destination: ${destinationRelative}`);
+  assetSources.set(target, source);
+  assets.push({ id: destinationRelative, kind, content: fs.readFileSync(source, "utf8"), targetHint: destinationRelative });
+}
+
+async function stageOpenCodeConduitAssets(bundle: string, skillNames: string[], overlay: string): Promise<InstallationReceipt> {
+  const assetSources = new Map<string, string>();
+  const assets: PortableAsset[] = [];
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js", "hook", overlay, assetSources, assets);
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "agents"), "agents", "agent", overlay, assetSources, assets);
+  for (const skillName of skillNames) {
+    addOpenCodePortableAssets(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName), "skill", overlay, assetSources, assets);
+  }
+  const conduit = createOpenCodeAdapter({
+    resolveTarget: (asset) => asset.targetHint ? path.resolve(overlay, ...asset.targetHint.split("/")) : undefined,
+    write: (target, content) => {
+      const source = assetSources.get(target);
+      if (!source) throw new Error(`Conduit attempted to write an unbound OpenCode asset: ${target}`);
+      if (content !== fs.readFileSync(source, "utf8")) throw new Error(`Conduit content changed before staging: ${source}`);
+      const stat = fs.lstatSync(source);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content, { encoding: "utf8", flag: "wx" });
+      fs.chmodSync(target, stat.mode & 0o777);
+    },
+  });
+  const receipt = await conduit.install(assets);
+  if (receipt.skipped.length > 0 || receipt.installed.length !== assets.length) throw new Error("Conduit did not stage every required OpenCode asset");
+  return receipt;
+}
+
+function installOpenCodeOverlay(overlay: string, dest: string, metadata: string, trustedSymlinkRoot?: string): void {
+  const installerArgs = [path.join(root, "scripts", "install-owned-files.js"), overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata];
+  if (trustedSymlinkRoot) {
+    installerArgs.push(
+      "--trusted-symlink-root", trustedSymlinkRoot,
+      "--trusted-symlink-child", "plugins",
+      "--trusted-symlink-child", "agents",
+      "--trusted-symlink-child", "skills",
+    );
+  }
+  const result = spawnSync(process.execPath, installerArgs, { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+}
+
+async function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[], trustedSymlinkRoot?: string): Promise<number> {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
+  try {
+    const receipt = await stageOpenCodeConduitAssets(bundle, skillNames, overlay);
+    let fileCount = 0;
+    for (const entry of [...runtimeSources, ...runtimeFiles]) {
+      fileCount += stageOpenCodeRuntimeAsset(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry), overlay);
+    }
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds, conduit_receipt: receipt });
+    installOpenCodeOverlay(overlay, dest, metadata, trustedSymlinkRoot);
+    return fileCount + receipt.installed.length;
+  } finally {
+    fs.rmSync(overlay, { recursive: true, force: true });
+  }
+}
+
 function installBundle(bundle: string, options: InitOptions): number {
   const args = ["install.sh", options.dest];
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
@@ -640,7 +957,21 @@ function installBundle(bundle: string, options: InitOptions): number {
   return result.status ?? 1;
 }
 
-function activateKits(options: InitOptions): number {
+function kitPathForInit(kitId: string, dest: string): string | null {
+  const catalogPath = path.join(root, "kits", "catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as { kits?: unknown[] };
+    const entry = Array.isArray(catalog.kits)
+      ? catalog.kits.find((item) => typeof item === "object" && item !== null && (item as Record<string, unknown>).id === kitId)
+      : undefined;
+    const rel = entry && typeof entry === "object" ? (entry as Record<string, unknown>).path : undefined;
+    if (typeof rel === "string") return path.resolve(root, rel);
+  }
+  const installed = path.join(dest, "kits", "local", "repositories", kitId);
+  return fs.existsSync(installed) ? installed : null;
+}
+
+async function activateKits(options: InitOptions): Promise<number> {
   const activeKitIds = options.activeKitIds ?? [];
   if (!options.activateKits || activeKitIds.length === 0 || options.runtime !== "codex") return 0;
   const result = activateCodexLocal(options.dest, options.dest, { kitIdFilter: activeKitIds });
@@ -650,6 +981,19 @@ function activateKits(options: InitOptions): number {
   }
   const generated = Array.isArray(result.generated_runtime_files) ? result.generated_runtime_files : [];
   console.log(`Activated ${generated.length} Codex local runtime asset(s)`);
+  for (const kitId of activeKitIds) {
+    const kitDir = kitPathForInit(kitId, options.dest);
+    if (!kitDir) throw new Error(`activated kit '${kitId}' could not be resolved for provisioning`);
+    try {
+      const provisioned = await provisionKit(kitDir, options.dest);
+      if (provisioned.files.length > 0) console.log(`Provisioned ${provisioned.files.length} file(s) from kit '${kitId}'`);
+    } catch (error) {
+      if (!(error instanceof ProvisionConflictError)) throw error;
+      for (const conflict of error.conflicts) {
+        console.warn(`flow-agents init: warning: skipped existing provision '${conflict.target}' from kit '${kitId}'`);
+      }
+    }
+  }
   return 0;
 }
 
@@ -812,38 +1156,73 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
             "(drift detection will report unbaselined until the next successful --global sync)."
         );
       }
-      return 0;
+      return configureWorkflowProviders(options);
     }
-    // --global for opencode: merge FA opencode.json into the global opencode config dir.
+    // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
     // Global path: ~/.config/opencode/opencode.json (honor XDG_CONFIG_HOME).
     // Test isolation: FLOW_AGENTS_USER_OPENCODE_CONFIG points to the opencode.json FILE.
     if (options.global && options.runtime === "opencode") {
       const bundle = ensureBundle(options.runtime);
       const sourcePath = path.join(bundle, "opencode.json");
-      if (!fs.existsSync(sourcePath)) {
-        console.error(`flow-agents init: bundle opencode.json missing: ${sourcePath}`);
+      const pluginSource = path.join(bundle, ".opencode", "plugins", "flow-agents.js");
+      const agentsSource = path.join(bundle, ".opencode", "agents");
+      const skillsSource = path.join(bundle, ".opencode", "skills");
+      const runtimeSources = ["build", "context", "kits", "packaging", "schemas", "scripts"];
+      const runtimeFiles = ["AGENTS.md", "console.telemetry.json"];
+      const requiredSources = [sourcePath, pluginSource, agentsSource, skillsSource, ...runtimeSources.map((entry) => path.join(bundle, entry)), ...runtimeFiles.map((entry) => path.join(bundle, entry))];
+      const missingSource = requiredSources.find((entry) => !fs.existsSync(entry));
+      if (missingSource) {
+        console.error(`flow-agents init: bundle OpenCode asset missing: ${missingSource}`);
         return 1;
       }
+      const pluginCheck = spawnSync(process.execPath, ["--check", pluginSource], { encoding: "utf8" });
+      if (pluginCheck.status !== 0 || !fs.readFileSync(pluginSource, "utf8").includes("export const FlowAgentsPlugin")) {
+        console.error(`flow-agents init: generated OpenCode plugin is corrupt: ${pluginCheck.stderr.trim()}`);
+        return 1;
+      }
+      const skillNames = resolveOpencodeSkillNames(bundle, skillsSource, options.activeKitIds ?? []);
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
       fs.mkdirSync(options.dest, { recursive: true });
-      // The global opencode.json lives directly at dest/opencode.json.
-      const destConfigPath = path.join(options.dest, "opencode.json");
+      const runtimeRoot = path.join(options.dest, ".flow-agents", "runtime");
+      managed["instructions"] = [path.join(runtimeRoot, "AGENTS.md")];
+      // Bind the host-visible config symlink before any host mutation. Its
+      // canonical target is the only config file we ever replace, while the
+      // host-visible config root remains the OpenCode discovery root.
+      const configBinding = resolveOpenCodeConfigBinding(opencodeGlobalConfigPath(options.dest));
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
       const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
       let existing: Record<string, unknown> = {};
-      if (fs.existsSync(destConfigPath)) {
-        try { existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+      if (fs.existsSync(configBinding.canonicalPath)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(configBinding.canonicalPath, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          throw new Error(`existing OpenCode config is invalid JSON; refusing to replace it: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       const merged = mergeInstallSettings(mergeSettings, existing, managed);
-      const tmp = `${destConfigPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
-`, "utf8");
-      fs.renameSync(tmp, destConfigPath);
-      // Write version stamp.
+      const existingInstructions = existing["instructions"];
+      if (existingInstructions !== undefined && (!Array.isArray(existingInstructions) || existingInstructions.some((entry) => typeof entry !== "string"))) {
+        throw new Error("existing OpenCode instructions must be an array of strings");
+      }
+      const managedInstructions = managed["instructions"] as string[];
+      merged["instructions"] = [...new Set([...(existingInstructions as string[] | undefined ?? []), ...managedInstructions])];
+      const installedAssetCount = await installOpencodeGlobalAssets(
+        options.dest,
+        bundle,
+        runtimeSources,
+        runtimeFiles,
+        skillNames,
+        options.activeKitIds ?? [],
+        configBinding.trustedSymlinkRoot,
+      );
+      revalidateOpenCodeConfigBinding(configBinding);
+      writeJsonAtomic(configBinding.canonicalPath, merged);
+      // Stamp only after every required runtime asset and its content manifest exist.
       writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
-      console.log(`Flow Agents global config merged for opencode in ${options.dest}`);
-      return 0;
+      console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
+      console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
+      return configureWorkflowProviders(options);
     }
     // --global for codex: run install-codex-home.sh to install into the Codex home.
     // Defaults to CODEX_HOME or ~/.codex. --dest remains an explicit override.
@@ -867,7 +1246,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const installed = result.status ?? 1;
       if (installed !== 0) return installed;
       writeInstallRecord(options.dest, "codex", true, options.activeKitIds ?? []);
-      return activateKits(options);
+      const activated = await activateKits(options);
+      return activated === 0 ? configureWorkflowProviders(options) : activated;
     }
     // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
     if (options.global && options.runtime === "pi") {
@@ -881,12 +1261,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
     writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? []);
-    const activated = activateKits(options);
+    const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or
     // interactiveOptions() -- never changes `activated`'s exit code.
     await printPostInstallSummary(options);
-    return activated;
+    return activated === 0 ? configureWorkflowProviders(options) : activated;
   } catch (error) {
     console.error(`flow-agents init: ${(error as Error).message}`);
     return 2;

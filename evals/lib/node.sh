@@ -113,12 +113,6 @@ flow_agents_node() {
       node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli/usage-feedback.js" "$@"
       return
       ;;
-    veritas-governance)
-      shift
-      flow_agents_build_ts || return
-      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" veritas-governance "$@"
-      return
-      ;;
     */scripts/validate-hook-influence-cases.js|scripts/validate-hook-influence-cases.js)
       shift
       flow_agents_build_ts || return

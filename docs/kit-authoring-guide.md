@@ -54,7 +54,7 @@ Required fields:
 | `name` | Non-empty display name |
 | `flows` | Non-empty list; each entry must have `id` and `path` |
 
-Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)), `workflow_triggers` (structured workflow steering keyed by engine trigger names such as `implementation-work-detected`), `hook_influence_expectations` (kit-owned required hook-influence fixture expectations), and `first_party` (legacy catalog/marketplace metadata; no runtime privilege). Optional asset fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
+Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)), `workflow_triggers` (structured workflow steering keyed by engine trigger names such as `implementation-work-detected`), `hook_influence_expectations` (kit-owned required hook-influence fixture expectations), `agent_spawn_triggers` (perimeter trigger surfaces that spawn agent runs plus their dedup/cooldown/cap/concurrency guard config; validation warns when a spawning surface lacks complete guards — see `context/contracts/trigger-guards.md`), `observability_contribution` (an optional host-neutral read descriptor; see [Kit observability contribution contract](kit-observability-contribution-contract.md)), and `first_party` (legacy catalog/marketplace metadata; no runtime privilege). Optional asset fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
 
 ## Minimal flow file
 
@@ -91,7 +91,7 @@ A Flow Definition at minimum needs `id`, `version`, `steps`, and `gates`. Steps 
 
 The `id` in the flow file should match the `id` declared in `kit.json`'s `flows` list. Look at `kits/builder/flows/shape.flow.json` and `kits/builder/flows/build.flow.json` in this repository for fuller examples of multi-step flows with required and optional gate evidence.
 
-Flow Definitions may compose another declared Flow Definition at a step with `uses_flow`. The parent keeps lifecycle ownership (`active_flow_id` can remain the parent flow), while gate resolution for that step comes from the child flow with the same step id. Use this for reusable extensions such as publish, CI merge readiness, or learning closeout:
+Flow Definitions may compose another declared Flow Definition at a step with `uses_flow`. The parent keeps lifecycle ownership (`active_flow_id` can remain the parent flow), while gate resolution for that step comes from the child flow with the same step id. Use this scalar form for one reusable extension such as publish, CI merge readiness, or learning closeout:
 
 ```json
 {
@@ -105,7 +105,30 @@ Flow Definitions may compose another declared Flow Definition at a step with `us
 }
 ```
 
-The child flow should declare the gates for those step ids and list the claim types it intentionally exposes in `exports` (expectation ids are also accepted for non-claim expectations). Composition fails closed when a child gate expectation is not exported. Parent verification is still determined by trust-bundle claims: required child claims that are missing, disputed, or `not_verified` prevent the composed parent from being treated as verified.
+The additive `uses_flows` form accepts an ordered list of required children at one extension step. Each child must declare exactly one gate for that same step and export every expectation it contributes. The resolver preflights all children, then emits one deterministic `flow-agents.aggregate.<step-id>` gate containing every imported expectation in declared order. It records each child gate in `flow_agents_contributions` provenance. All required expectations participate in that one parent gate; a missing, failed, disputed, stale, or `not_verified` child claim prevents verification.
+
+```json
+{
+  "id": "my-kit.release",
+  "steps": [
+    {
+      "id": "verify",
+      "next": null,
+      "uses_flows": ["verification.verify", "veritas.verify", "third-party.verify"]
+    }
+  ]
+}
+```
+
+Do not declare both `uses_flow` and `uses_flows` on one step, do not repeat a child flow id, and do not place a parent-owned gate on a composed step; each shape is rejected. The aggregate gate id is reserved: a collision is rejected rather than overwritten. Child route-back declarations merge only when every declared retry policy is identical and a reason maps to one target; conflicting targets, retry limits, or malformed/partial metadata are rejected. Scalar `uses_flow` remains supported unchanged.
+
+This is a composition primitive only. It neither chooses installed child kits nor reads per-Kit configuration: #579 owns selected/optional dependency closure and #275 owns committed effective configuration and activation semantics. Until those contracts select contributions, an author must provide the explicit child list and treat optional-absence and configuration-precedence behavior as `NOT_VERIFIED` here.
+
+An optional named terminal sentinel may make the source definition easier to
+read, for example `{ "id": "shape-done", "next": null }`. When that sentinel is
+referenced by another step and has no gate, effective-definition compilation
+removes it and sets its predecessor's `next` to `null`, which is Flow's native
+completion edge. The sentinel name is not significant.
 
 ## Validate
 
@@ -315,6 +338,24 @@ Shape:
 
 The retired `hint` field is invalid. `display_name` is not a workflow trigger field; keep human-readable names in catalog/listing metadata such as top-level `name` or `product_name`. Do not put natural-language steering instructions in kit metadata; express routing needs through the structured identifier fields above.
 
+#### A manifest alone is not discoverable — declare it in a registry too
+
+`workflow_triggers` are read by `workflowTriggersFor()` (`scripts/hooks/lib/kit-catalog.js`), which enumerates kits through `readKitManifests(root)`. That function finds a `kit.json` **only** through one of two registries under the repository root:
+
+- `kits/catalog.json` — a `{ "schema_version": "1.0", "kits": [{ "id", "name", "path", "description" }] }` list whose `path` points at the kit directory (`kits/<kit-id>`); or
+- `kits/local/installed-kits.json` — the local install registry written by `flow-agents kit install`, which reads copies under `kits/local/repositories/<kit-id>/`.
+
+**A `kits/<kit-id>/kit.json` with no entry in either registry is invisible.** Nothing reads it, nothing warns about it, and the steering hook renders an empty string — indistinguishable from a repository that declares no triggers at all. This is the failure mode to check first when configured triggers produce no steering: confirm the registry entry exists, not just the manifest.
+
+Which registry to use:
+
+- Committing durable, repo-owned routing policy (the common case for a product repository that wants its own delivery routing): add `kits/catalog.json` **and** `kits/<kit-id>/kit.json`, and commit both. Both files are required.
+- Installing a kit as runtime overlay state: use `flow-agents kit install`, which owns `kits/local/**`. Install state is regenerable and is not the place for committed policy.
+
+A repository-root kit that declares `workflow_triggers` without a `flows` list is valid for routing purposes: Flow Definitions resolve through the installed package's packaged-flow fallback (`src/lib/flow-resolver.ts`) when the repository does not vendor its own under `kits/<kit-id>/flows/`. Vendor the flow files only when the repository needs to pin them.
+
+Note that the hook resolves the repository root through git's **shared** common-dir root, so a manifest added on a branch in a linked worktree does not take effect for sessions elsewhere until it reaches the branch the primary checkout has open.
+
 ### When a kit "is" a Flow Agents Kit
 
 A kit is a **Flow Agents Kit** when it satisfies both layers:
@@ -492,7 +533,11 @@ A third-party kit inspected before verification:
 
 ## Direction
 
-Flow Kits are designed to be shareable workflow units — authored once, carried across teams and workspaces. The intended growth path is distribution from git remotes and a curated Kontour kit catalog of Kontour-authored kits covering work modes beyond software delivery. Today install is local-path only; remote fetch is explicitly a non-goal in this version.
+Flow Kits are shareable workflow units authored once and carried across teams and workspaces.
+`flow-agents kit install` accepts local paths and Git URLs today. Git repositories are shallow-
+cloned, validated at their root, provenance-recorded, and copied without executing repository
+scripts. Put `kit.json` at the repository root and pin a branch, tag, or SHA with `#ref` or
+`--ref`.
 
 ## Migration: flow-kit → flow-agents kit
 

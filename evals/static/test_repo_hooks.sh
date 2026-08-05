@@ -49,6 +49,8 @@ pass ".githooks/pre-push is tracked with executable mode"
 
 require_contains ".githooks/pre-push" "npm run validate:repo-hooks --silent" "pre-push runs repo hook drift check"
 require_contains ".githooks/pre-push" "npm run validate:source --silent" "pre-push runs source validation"
+require_contains ".githooks/pre-push" "npm run context-map:check --silent" "pre-push runs context-map drift check"
+require_contains ".githooks/pre-push" "regenerate with: npm run context-map" "pre-push names context-map regeneration command"
 require_not_contains ".githooks/pre-push" "--global" "pre-push does not use global Git config"
 
 require_file "scripts/setup-repo-hooks.sh"

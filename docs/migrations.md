@@ -6,6 +6,52 @@ title: Migrations
 
 ## Unreleased
 
+- Economics records produced from runtime telemetry now use
+  `version: "0.2"`. Version `0.2` requires exact run correlation,
+  declared observation semantics, and producer authority. Its verification
+  verdict comes only from the canonical Builder `workflow_outcome`; legacy
+  artifact or critique status no longer supplies a runtime verification
+  verdict. The bundled validator continues to accept historical `0.1` records.
+- Telemetry lifecycle clocks are now keyed by native runtime name and session
+  id. Runtime adapters must pass the same native session identity at start and
+  stop; they no longer fall back to the newest session file, which could join
+  elapsed time across concurrent agents.
+- Effective Flow compilation now removes any referenced, ungated terminal
+  sentinel, regardless of its step name. The preceding gated step therefore
+  completes the run directly instead of leaving a workflow active at a
+  no-gate terminal marker.
+- `record-agent-event --artifact-dir` now also requires the owning
+  `--artifact-root`, and the current runtime actor must still be bound to that
+  session. Late or copied-directory appends are rejected instead of becoming
+  unauthenticated delegation facts. `record-agent-event` no longer accepts
+  `--actor`; identity is derived from the runtime environment, and nested
+  agent-event directories must be regular non-symlink directories. Economics
+  commands that pass explicit
+  sidecar paths are now fixture-only: set
+  `FLOW_AGENTS_ECONOMICS_FIXTURE_MODE=true`; those records are marked
+  `producer_authority: "fixture_input"` and can never relay to Console. Hosted
+  economics now also requires an authenticated terminal binding and a run-scoped
+  transcript baseline; unbound or session-scoped observations remain local.
+- Gate-action envelopes now use `schema_version: "3.0"`. `action.declared_artifacts`
+  and `stop_condition.required.artifact_refs` contain typed targets instead of
+  strings. A `file` target names its project-relative `path` and whether it is
+  directly writable or must be produced through a declared operation; a
+  `trust_slice` target is explicitly non-writable and names the public interface
+  that records it. `action.artifact_bindings` maps each typed target to the
+  gate expectation ids it satisfies, so consumers can derive the exact required
+  target set from unresolved required expectations without private kit metadata.
+  The bindings are product-owned gate semantics, not grader hints or
+  consumer-authored guidance. Empty expectation ownership on a file represents
+  a declared optional artifact that is never gate-required; trust slices must
+  own an expectation so their recording interface can be derived.
+  Structured evidence parameters reference the canonical
+  `public_interfaces.schemas.evidence_ref_json` JSON Schema. There is no legacy
+  envelope fallback; adapters must require version 3.0 and stop treating
+  `trust.bundle#<slice>` as a filesystem path.
+- Gate-action envelope version 2.0 added the originating `gate_id` to each
+  `gate.requirements` entry, allowing consumers to
+  verify accepted exceptions without private Flow-definition knowledge. There
+  was no legacy version 1.0 fallback.
 - Workflow runtime artifacts now live under `.kontourai/flow-agents/` instead
   of earlier runtime roots such as `.flow-agents/` or `.agents/flow-agents/`.
   Move any local session directories, sidecars, or `current.json` pointers you

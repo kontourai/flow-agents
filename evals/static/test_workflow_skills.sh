@@ -98,6 +98,7 @@ BUILDER_KIT_BASELINE_FRESHNESS_HINT_FIXTURE="$ROOT/evals/fixtures/builder-kit-wo
 PULL_WORK_PERSONAL_WIP_FIXTURE="$ROOT/evals/fixtures/pull-work-wip-shepherding/personal-wip-blocks.json"
 PULL_WORK_GLOBAL_WIP_FIXTURE="$ROOT/evals/fixtures/pull-work-wip-shepherding/global-wip-informs.json"
 BACKLOG_PROVIDER_SETTINGS="$ROOT/context/settings/backlog-provider-settings.json"
+LIFECYCLE_AUTHORITY_ADMIN="$ROOT/scripts/lifecycle-authority-admin.sh"
 BACKLOG_PROVIDER_SETTINGS_SCHEMA="$ROOT/schemas/backlog-provider-settings.schema.json"
 VERIFICATION_CONTRACT="$ROOT/context/contracts/verification-contract.md"
 REVIEW_CONTRACT="$ROOT/context/contracts/review-contract.md"
@@ -156,6 +157,73 @@ done < <(
     find "$ROOT/docs" -maxdepth 1 -type f \( -name 'workflow-*.md' -o -name 'skills-map.md' \)
   } | sort -u
 )
+
+if node - "$LIFECYCLE_AUTHORITY_ADMIN" <<'NODE'; then
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const source = fs.readFileSync(process.argv[2], "utf8");
+const match = source.match(/^ensure_operator_group\(\) \{[\s\S]*?^\}$/m);
+if (!match) throw new Error("could not extract ensure_operator_group");
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-darwin-group-"));
+const bin = path.join(temporary, "bin");
+const harness = path.join(temporary, "ensure-operator-group.sh");
+const log = path.join(temporary, "dseditgroup.log");
+fs.mkdirSync(bin);
+fs.writeFileSync(path.join(bin, "uname"), "#!/bin/sh\nprintf '%s\\n' Darwin\n", { mode: 0o755 });
+fs.writeFileSync(path.join(bin, "dscl"), `#!/bin/sh
+case "\${DARWIN_GROUP_STATE:?}" in
+  existing) printf '%s\\n' kontourai-lifecycle-operator ;;
+  absent|create-fails) : ;;
+  lookup-fails) exit 70 ;;
+  *) exit 71 ;;
+esac
+`, { mode: 0o755 });
+fs.writeFileSync(path.join(bin, "dseditgroup"), `#!/bin/sh
+printf '%s\\n' "$*" >> "\${DARWIN_GROUP_LOG:?}"
+[ "\${DARWIN_GROUP_STATE:?}" = absent ]
+`, { mode: 0o755 });
+fs.writeFileSync(harness, `#!/bin/sh
+set -eu
+operator_group="$1"
+${match[0]}
+ensure_operator_group
+`, { mode: 0o755 });
+
+const run = (state) => spawnSync("/bin/sh", [harness, "kontourai-lifecycle-operator"], {
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    DARWIN_GROUP_STATE: state,
+    DARWIN_GROUP_LOG: log,
+  },
+});
+const logLines = () => fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+
+let result = run("existing");
+if (result.status !== 0) throw new Error(`existing Darwin group lookup failed: ${result.stderr}`);
+if (logLines().length !== 0) throw new Error("existing Darwin group was recreated");
+
+result = run("absent");
+if (result.status !== 0) throw new Error(`absent Darwin group was not created: ${result.stderr}`);
+if (logLines().join("\n") !== "-o create kontourai-lifecycle-operator") throw new Error("absent Darwin group was not created exactly once");
+
+result = run("lookup-fails");
+if (result.status === 0) throw new Error("failed Darwin group lookup was accepted");
+if (logLines().length !== 1) throw new Error("failed Darwin group lookup attempted creation");
+
+result = run("create-fails");
+if (result.status === 0) throw new Error("failed Darwin group creation was accepted");
+if (logLines().length !== 2) throw new Error("failed Darwin group creation did not attempt exactly one additional create");
+fs.rmSync(temporary, { recursive: true, force: true });
+NODE
+  pass "Darwin lifecycle operator group preservation and fail-closed creation are deterministic"
+else
+  fail "Darwin lifecycle operator group preservation and fail-closed creation are deterministic"
+fi
 
 require_file "$IDEA" "idea-to-backlog skill"
 require_file "$BUILDER_SHAPE" "builder-shape skill"
@@ -246,6 +314,19 @@ require_text "$PLANNING_CONTRACT" 'Stop-short risks' "planning contract defines 
 require_text "$PLANNING_CONTRACT" 'Source Evidence / Permalinks' "planning contract requires source evidence permalink expectations"
 require_text "$EXECUTION_CONTRACT" 'Parallel Wave Rules' "execution contract defines parallel wave rules"
 require_text "$EXECUTION_CONTRACT" 'modified files are recorded' "execution contract requires modified files"
+require_text "$EXECUTION_CONTRACT" 'Wave Manifest And Reconciliation' "execution contract defines wave manifest reconciliation (#663)"
+require_text "$EXECUTION_CONTRACT" 'N of M reported' "execution contract requires explicit N-of-M reconciliation language"
+require_text "$EXECUTION_CONTRACT" 'not_reported' "execution contract records missing workers as not_reported"
+require_text "$EXECUTION_CONTRACT" 'never silently absorb' "execution contract forbids silently absorbing missing workers"
+require_text "$EXECUTE_PLAN" 'waves\.json' "execute-plan declares the wave manifest sidecar"
+require_text "$EXECUTE_PLAN" 'N of M reported' "execute-plan reconciles waves with explicit N-of-M language"
+require_text "$EXECUTE_PLAN" 'not_reported' "execute-plan records missing workers as not_reported"
+require_text "$EXECUTE_PLAN" 'reconcile results against the wave manifest' "execute-plan collect step is reconcile-against-manifest"
+require_text "$REVIEW_WORK" 'waves\.json' "review-work declares fan-out reviewer lanes in the wave manifest"
+require_text "$REVIEW_WORK" 'N of M reported' "review-work reconciles reviewer lanes with explicit N-of-M language"
+require_text "$REVIEW_WORK" 'not_reported' "review-work records missing reviewers as not_reported"
+test -f "$ROOT/schemas/workflow-waves.schema.json" && pass "workflow waves schema exists" || fail "workflow waves schema exists"
+require_text "$ROOT/src/cli/validate-workflow-artifacts.ts" 'waves\.json.*workflow-waves\.schema\.json' "validator registers waves.json against the waves schema"
 require_text "$ARTIFACT_LIFECYCLE_DOC" 'current-state dashboard' "artifact lifecycle defines local current-state role"
 require_text "$ARTIFACT_LIFECYCLE_DOC" 'Learning records are a routing surface' "artifact lifecycle defines learning routing semantics"
 require_text "$ARTIFACT_LIFECYCLE_DOC" '14-30 days' "artifact lifecycle documents local retention window"
@@ -351,7 +432,7 @@ require_text "$KIT_REPOSITORY_DOC" 'Flow validates Flow Definition semantics' "k
 require_text "$KIT_REPOSITORY_DOC" 'schema_version' "kit repository doc defines schema version"
 require_text "$KIT_REPOSITORY_DOC" 'flows' "kit repository doc defines declared Flow Definitions"
 require_text "$KIT_REPOSITORY_DOC" '[Aa]bsolute paths are rejected' "kit repository doc defines path safety"
-require_text "$KIT_REPOSITORY_DOC" 'does not install remote kits' "kit repository doc states remote install non-goal"
+require_text "$KIT_REPOSITORY_DOC" 'Git sources are shallow-cloned' "kit repository doc defines explicit Git installation"
 require_text "$ROOT/docs/kit-authoring-guide.md" 'uses_flow' "kit authoring guide documents Flow Definition composition"
 require_text "$ROOT/docs/kit-authoring-guide.md" 'builder.publish-learn' "kit authoring guide documents composed publish-learn example"
 require_text "$PAGES_INDEX" 'Quick Start' "docs index presents product quick start"
@@ -380,9 +461,9 @@ require_text "$BACKLOG_PROVIDER_SETTINGS" '"prefer_finishing_active_work": true'
 require_text "$EXECUTION_CONTRACT" 'context/contracts/sandbox-policy.md' "execution contract references sandbox policy contract"
 require_text "$VERIFICATION_CONTRACT" 'context/contracts/governance-adapter-contract.md' "verification contract references governance adapter contract"
 require_text "$SANDBOX_DOC" 'context/contracts/sandbox-policy.md' "sandbox doc links canonical contract"
-require_text "$VERITAS_DOC" 'Veritas owns repo-local standards, authority, and evidence-check semantics' "Veritas doc defines ownership boundary"
+require_text "$VERITAS_DOC" 'Veritas owns both the standalone governance engine and the optional governance Flow Kit' "Veritas doc defines ownership boundary"
 require_text "$ROOT/docs/north-star.md" 'Flow owns generic process transparency' "north star defines Flow ownership"
-require_text "$VERITAS_DOC" 'standard_refs' "Veritas doc maps output to evidence refs"
+require_text "$VERITAS_DOC" 'software-readiness-verdict' "Veritas doc maps canonical readiness output to a gate claim"
 require_text "$TOOL_PLANNER" 'context/contracts/planning-contract.md' "tool-planner references planning contract"
 require_text "$TOOL_WORKER" 'context/contracts/execution-contract.md' "tool-worker references execution contract"
 require_text "$TOOL_VERIFIER" 'context/contracts/verification-contract.md' "tool-verifier references verification contract"
@@ -483,7 +564,10 @@ require_text "$SIDECAR_WRITER_INTEGRATION" 'does not archive state after invalid
 require_text "$CONTEXT_MAP_INTEGRATION" 'context map is current' "context map integration covers drift"
 require_text "$CONTEXT_MAP_INTEGRATION" 'context map generation is deterministic' "context map integration covers deterministic generation"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering fixture relies on trust.bundle, not a retired critique sidecar' "workflow steering integration covers bundle-only critique handling"
-require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook appends context-map recovery guidance' "workflow steering integration covers context-map guidance"
+# #1172: the context-map pointer moved from every-turn to SessionStart-only, so the integration
+# suite now covers it at the boundary (and asserts its ABSENCE on the prompt path).
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'SessionStart re-grounds with the RESUME block and the context-map pointer' "workflow steering integration covers context-map guidance at SessionStart"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'context-map pointer is not re-emitted on the prompt path' "workflow steering integration covers context-map placement"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook emits ambient state guidance at user prompt submit' "workflow steering integration covers ambient state guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'Claude hook adapter surfaces Builder workflow route for coding prompts' "workflow steering integration covers Claude Builder-route prompt guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'release-readiness and learning-review' "workflow steering integration covers full Builder lifecycle guidance"
@@ -759,10 +843,6 @@ require_text "$USAGE_GUIDE" 'decision_gap' "usage guide documents decision gap r
 require_text "$USAGE_GUIDE" 'pickup or planning alignment gaps, `decision_gap -> design-probe` means returning to the pickup Probe' "usage guide interprets decision gap route-back"
 require_text "$BUILDER_BUILD_FLOW" '"on_route_back"' "Builder build flow declares route-back mappings"
 require_text "$BUILDER_BUILD_FLOW" '"route_back_policy"' "Builder build flow declares route-back policy"
-require_text "$BUILDER_BUILD_FLOW" '"missing_evidence": "verify"' "Builder build flow routes missing evidence to verify"
-require_text "$BUILDER_BUILD_FLOW" '"implementation_defect": "execute"' "Builder build flow routes implementation defects to execute"
-require_text "$BUILDER_BUILD_FLOW" '"plan_gap": "plan"' "Builder build flow routes plan gaps to plan"
-require_text "$BUILDER_BUILD_FLOW" '"decision_gap": "design-probe"' "Builder build flow routes decision gaps to design-probe"
 require_text "$BUILDER_BUILD_FLOW" '"pull-work", "next": "design-probe"' "Builder build flow routes pull-work to design-probe"
 require_text "$BUILDER_BUILD_FLOW" '"design-probe", "next": "plan"' "Builder build flow routes design-probe to plan"
 require_text "$BUILDER_BUILD_FLOW" '"pickup-probe-readiness"' "Builder build flow requires pickup Probe readiness"
@@ -776,6 +856,9 @@ require_text "$BUILDER_BUILD_FLOW" 'probe_status' "Builder build flow names prob
 require_text "$BUILDER_BUILD_FLOW" 'probe_artifact_ref' "Builder build flow names probe artifact ref"
 require_text "$BUILDER_BUILD_FLOW" 'Stale broad continuation language after a merge is not sufficient' "Builder build flow blocks stale broad continuation"
 require_text "$BUILDER_BUILD_FLOW" '"uses_flow": "builder.publish-learn"' "Builder build flow composes publish-learn extension"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"on_route_back"' "Builder publish-learn flow declares route-back mappings (#695 item a)"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"missing_evidence": "verify"' "Builder publish-learn pr-open-gate routes missing evidence to verify"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"route_back_policy"' "Builder publish-learn pr-open-gate declares a route-back policy"
 require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.pr-open.pull-request"' "Builder publish-learn flow exports PR-open evidence"
 require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.merge-ready-ci.readiness"' "Builder publish-learn flow exports CI merge readiness evidence"
 require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.learn.evidence"' "Builder publish-learn flow exports learning evidence"
@@ -783,6 +866,13 @@ require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"exports"' "Builder publish-learn fl
 if node - "$BUILDER_BUILD_FLOW" <<'NODE'; then
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const executeGate = flow.gates?.["execute-gate"];
+if (JSON.stringify(executeGate?.on_route_back) !== JSON.stringify({ plan_gap: "plan" })) {
+  throw new Error("execute-gate must declare exactly plan_gap -> plan without defaults or unrelated reasons");
+}
+if (JSON.stringify(executeGate?.route_back_policy) !== JSON.stringify({ max_attempts: 3, on_exceeded: "block" })) {
+  throw new Error("execute-gate must use the bounded Flow-owned 3-attempt block policy");
+}
 const expectations = Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []);
 if (!expectations.length) throw new Error("no Builder Kit gate expectations found");
 for (const expectation of expectations) {

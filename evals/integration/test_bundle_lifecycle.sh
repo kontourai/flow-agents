@@ -28,7 +28,44 @@ pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$TMPDIR_EVAL"
+  local primary_status=$?
+  local cleanup_status=0
+  local attempt
+  trap - EXIT
+
+  if [[ ! "$TMPDIR_EVAL" =~ ^/tmp/bundle-lifecycle\.[[:alnum:]]{6}$ ]] \
+    || [[ -L "$TMPDIR_EVAL" ]]; then
+    echo "TEARDOWN ERROR: refusing unsafe bundle-lifecycle fixture target: $TMPDIR_EVAL" >&2
+    [[ "$primary_status" -ne 0 ]] && exit "$primary_status"
+    exit 1
+  fi
+  [[ ! -e "$TMPDIR_EVAL" ]] && exit "$primary_status"
+  if [[ ! -d "$TMPDIR_EVAL" ]]; then
+    echo "TEARDOWN ERROR: refusing non-directory bundle-lifecycle fixture target: $TMPDIR_EVAL" >&2
+    [[ "$primary_status" -ne 0 ]] && exit "$primary_status"
+    exit 1
+  fi
+
+  for attempt in 1 2 3; do
+    [[ ! -e "$TMPDIR_EVAL" ]] && break
+    if rm -rf -- "$TMPDIR_EVAL"; then
+      cleanup_status=0
+      break
+    fi
+    cleanup_status=1
+    sleep 1
+  done
+
+  if [[ -e "$TMPDIR_EVAL" ]]; then
+    cleanup_status=1
+    echo "TEARDOWN ERROR: exact fixture remained after joined-writer cleanup: $TMPDIR_EVAL" >&2
+    find "$TMPDIR_EVAL" -mindepth 1 -maxdepth 4 -print >&2 || true
+  fi
+
+  if [[ "$cleanup_status" -ne 0 && "$primary_status" -eq 0 ]]; then
+    exit 1
+  fi
+  exit "$primary_status"
 }
 trap cleanup EXIT
 
@@ -651,29 +688,55 @@ CHAIN_WS="$TMPDIR_EVAL/plugin-chain-opencode"
 (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$CHAIN_WS" >/dev/null 2>&1) || true
 rm -rf "$CHAIN_WS/.kontourai/telemetry" "$CHAIN_WS/.telemetry" "$TMPDIR_EVAL/.kontourai" "$TMPDIR_EVAL/.telemetry"
 
-if (cd "$CHAIN_WS" && node --input-type=module -e "
+if (cd "$CHAIN_WS" && FLOW_AGENTS_OPENCODE_TELEMETRY_FOREGROUND=true node --input-type=module -e "
 const mod = await import('./.opencode/plugins/flow-agents.js');
-const hooks = await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: process.cwd(), worktree: process.cwd() });
-await hooks['session.created']({}, {});
-await hooks['tool.execute.before']({ tool: 'edit', sessionID: 's1', callID: 'c1' }, { args: { filePath: 'README.md' } });
+const hooks = await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: '$TMPDIR_EVAL', worktree: process.cwd() });
+for (let iteration = 0; iteration < 5; iteration += 1) {
+  await hooks['session.created']({}, {});
+  await hooks['tool.execute.before'](
+    { tool: 'edit', sessionID: 's1', callID: 'c' + iteration },
+    { args: { filePath: 'README.md' } }
+  );
+}
 " 2>/dev/null); then
-  _pass "opencode plugin: module loads and handlers execute under node"
+  _pass "opencode plugin: module loads and repeated handlers join telemetry writers"
 else
-  _fail "opencode plugin: module load or handler execution failed"
+  _fail "opencode plugin: module load, repeated handler, or joined telemetry execution failed"
 fi
 
-# The telemetry emit is detached (disowned) and can take a few seconds to
-# land; poll rather than fixed-sleep.
-for _i in 1 2 3 4 5 6 7 8 9 10; do
-  [[ -s "$CHAIN_WS/.kontourai/telemetry/full.jsonl" ]] && break
-  sleep 1
-done
+# The fixture forces foreground telemetry, so returning from the handler loop
+# is the writer join boundary. Assert all ten uniquely identified writes
+# immediately; polling here would conceal a detached-writer regression.
 if [[ -s "$CHAIN_WS/.kontourai/telemetry/full.jsonl" ]] && node -e "
-  require('fs').readFileSync('$CHAIN_WS/.kontourai/telemetry/full.jsonl','utf8').trim().split('\n').map(JSON.parse);
+  const events = require('fs').readFileSync('$CHAIN_WS/.kontourai/telemetry/full.jsonl','utf8').trim().split('\n').map(JSON.parse);
+  if (events.length !== 10) throw new Error('expected exactly 10 joined telemetry events, got ' + events.length);
+  const ids = events.map((event) => event.event_id);
+  if (ids.some((id) => typeof id !== 'string' || !id)) throw new Error('every joined telemetry event must have an event_id');
+  if (new Set(ids).size !== 10) throw new Error('joined telemetry event_id values must be unique');
 " 2>/dev/null; then
-  _pass "opencode plugin: handlers persisted telemetry events in workspace .kontourai/telemetry/"
+  _pass "opencode plugin: all repeated handlers persisted before return in workspace .kontourai/telemetry/"
 else
-  _fail "opencode plugin: no telemetry events persisted in workspace .kontourai/telemetry/"
+  _fail "opencode plugin: repeated handlers returned before all telemetry events persisted"
+fi
+
+if [[ -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$TMPDIR_EVAL/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "$CHAIN_WS/.telemetry/opencode-plugin.loaded" ]]; then
+  _pass "opencode plugin: active worktree owns runtime state when project directory differs"
+else
+  _fail "opencode plugin: runtime state did not stay in the active worktree"
+fi
+
+rm -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded"
+if (cd "$CHAIN_WS" && node --input-type=module -e "
+const mod = await import('./.opencode/plugins/flow-agents.js');
+await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: process.cwd(), worktree: '/' });
+" 2>/dev/null) \
+  && [[ -f "$CHAIN_WS/.kontourai/flow-agents/opencode-plugin.loaded" ]] \
+  && [[ ! -e "/.kontourai/flow-agents/opencode-plugin.loaded" ]]; then
+  _pass "opencode plugin: filesystem-root worktree sentinel falls back to the active directory"
+else
+  _fail "opencode plugin: filesystem-root worktree sentinel escaped the active directory"
 fi
 
 if [[ ! -e "$TMPDIR_EVAL/.kontourai/telemetry" && ! -e "$TMPDIR_EVAL/.telemetry" ]]; then

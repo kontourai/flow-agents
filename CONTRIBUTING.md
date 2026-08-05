@@ -38,6 +38,14 @@ root to enable full Flow Definition validation in `npm run validate:source`.
 
 Releases are automated with release-please: merges to main accumulate into a release PR, and merging it tags the version and dispatches the npm publish workflow. Use conventional commit prefixes (feat:, fix:, docs:, chore:) so version inference works.
 
+### Pull request titles
+
+Every pull request title must use `<lowercase-type>[optional-scope][!]: <non-empty subject>`. The type has no allowlist, but it must begin lowercase; a scope, when present, is nonempty and enclosed in parentheses; `!` may follow the type or scope; and the separator is exactly `: `.
+
+For example, `fix: normalize legacy lifecycle assignment actors`, `fix(scope)!: describe a breaking correction`, `chore(main): release 4.6.1`, and `chore(deps): bump actions/setup-node from 6.4.0 to 7.0.0` are valid. `Fix legacy lifecycle actor retry recovery` is not valid because it lacks the conventional prefix and separator. Humans, Release Please, and Dependabot use the same rule; there are no bot exceptions.
+
+This contract applies to the pull request title rather than replacing local commit-message guidance. Squash merges make the pull request title the release commit subject that Release Please reads, so use a title such as `fix(ci): require conventional pull request titles` when a patch fix should be released.
+
 ## Validation
 
 - `npm run validate:source` — source-tree integrity (paths, packs, manifests)

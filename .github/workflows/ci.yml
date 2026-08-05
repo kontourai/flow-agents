@@ -2,6 +2,7 @@ name: Flow Agents CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: ["main"]
   workflow_dispatch:
@@ -44,6 +45,12 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Validate pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/ci/validate-pr-title.mjs
+
       - name: Install Node dependencies
         run: npm ci
 
@@ -68,6 +75,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check content-boundary
 
+      - name: Layer boundary
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check layer-boundary
+
+      - name: Hachure boundary
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check hachure-boundary
+
       - name: Decision registry
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check decision-registry
@@ -80,9 +95,25 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check context-map-drift
 
+      - name: Capability matrix drift
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-matrix-drift
+
+      - name: Host conformance drift
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check host-conformance-drift
+
       - name: Static eval suite
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite
+
+      - name: Public API unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
+
+      - name: Liveness fleet unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
 
       - name: Finalize CI evidence
         if: always()
@@ -133,13 +164,61 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workflow-artifact-cleanup-audit-integration
 
+      - name: Evidence command serialization integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check evidence-command-serialization-integration
+
       - name: Fixture retirement audit integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
 
+      - name: Reviewed grounding reference integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check reviewed-grounding-reference-integration
+
+      - name: Narrative source contract integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration
+
+      - name: Narrative runtime projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-runtime-projection-integration
+
+      - name: Narrative grounded envelope integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-envelope-integration
+
+      - name: Narrative redaction fail-closed integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration
+
+      - name: Narrative trust isolation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-trust-isolation-integration
+
+      - name: Narrative grounding validator integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounding-validator-integration
+
+      - name: Narrative prose renderer integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-prose-renderer-integration
+
+      - name: Narrative grounded evals integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-evals-integration
+
+      - name: Narrative intent annotation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-intent-annotation-integration
+
       - name: Publish-change helper integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration
+
+      - name: Publish-change operation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check publish-change-operation-integration
 
       - name: Workflow sidecar writer integration
         continue-on-error: true
@@ -201,6 +280,18 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-tenant-isolation-integration
 
+      - name: Telemetry tool outcome integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-tool-outcome-integration
+
+      - name: Telemetry delegation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-delegation-integration
+
+      - name: Telemetry action-class integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-action-class-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
@@ -217,7 +308,7 @@ jobs:
   runtime-and-kit:
     name: Runtime and Kit
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       FLOW_AGENTS_CI_LANE: runtime-and-kit
       FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/runtime-and-kit
@@ -246,6 +337,30 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
 
+      - name: Goal Fit committed config integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-committed-config-integration
+
+      - name: Effective Flow Agents config unit
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check effective-flow-agents-config-unit
+
+      - name: Goal Fit escape hatch integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-escape-hatch-integration
+
+      - name: Plain stop messaging integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check plain-stop-messaging-integration
+
+      - name: Stop gate actor-scoped completion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check stop-gate-actor-scoped-completion-integration
+
+      - name: Goal Fit narrative exclusion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-narrative-exclusion-integration
+
       - name: Hook category behavior integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check hook-category-behavior-integration
@@ -262,9 +377,17 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flow-kit-repository-integration
 
+      - name: Kit provisioning integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-provisioning-integration
+
       - name: Runtime adapter activation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check runtime-adapter-activation-integration
+
+      - name: Runtime hook parity integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check runtime-hook-parity-integration
 
       - name: Bundle install integration
         continue-on-error: true
@@ -302,6 +425,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-learning-projection-integration
 
+      - name: Console process projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-process-projection-integration
+
       - name: Context map integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check context-map-integration
@@ -338,9 +465,33 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-tool-usage-integration
 
+      - name: Telemetry sanitize usage integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-sanitize-usage-integration
+
+      - name: Telemetry task slug integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-task-slug-integration
+
+      - name: Installed runtime correlation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check installed-runtime-correlation-integration
+
       - name: Economics record integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
+
+      - name: Console board sync integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-board-sync-integration
+
+      - name: Capability declarations integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
+
+      - name: Install identity stamp integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check install-identity-stamp-integration
 
       - name: Learning review proposals integration
         continue-on-error: true
@@ -365,10 +516,6 @@ jobs:
       - name: Liveness conflict injection integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-conflict-injection-integration
-
-      - name: Veritas governance kit integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check veritas-governance-kit-integration
 
       # The anti-gaming + trust regression suite runs in this REQUIRED lane so that
       # weakening the gate / CI anchor / their protections (or removing a regression
@@ -426,6 +573,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check builder-canonical-flow-run-integration
 
+      - name: Builder execute plan-gap integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check builder-execute-plan-gap-integration
+
       - name: Codex hook resolution integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check codex-hook-resolution-integration
@@ -434,6 +585,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check critique-supersession-roundtrip-integration
 
+      - name: Lifecycle authority container integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check lifecycle-authority-container-integration
+
       - name: Dual emit flow step integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check dual-emit-flow-step-integration
@@ -441,10 +596,6 @@ jobs:
       - name: Evidence capture hook integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check evidence-capture-hook-integration
-
-      - name: Exemption usage review integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check exemption-usage-review-integration
 
       - name: FlowDefinition session history preservation integration
         continue-on-error: true
@@ -505,10 +656,6 @@ jobs:
       - name: Verify CLI integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check verify-cli-integration
-
-      - name: Veritas governance adapter integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check veritas-governance-adapter-integration
 
       - name: Workspace settings integration
         continue-on-error: true

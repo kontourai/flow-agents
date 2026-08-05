@@ -86,7 +86,7 @@ export type AssignmentStatus = {
   issue_number?: number | null;
 };
 
-type GithubIssueDoc = {
+export type GithubIssueDoc = {
   number?: number;
   assignees?: Array<{ login?: string } | string>;
   labels?: Array<{ name?: string } | string>;
@@ -94,7 +94,7 @@ type GithubIssueDoc = {
   state?: string;
 };
 
-type RenderClaimInput = {
+export type RenderClaimInput = {
   repo?: { owner?: string; name?: string };
   issue_number?: number;
   assignee_login?: string;
@@ -113,6 +113,15 @@ type RenderClaimInput = {
 
 const DEFAULT_LABEL_NAME = "agent:claimed";
 const CLAIM_COMMENT_MARKER_DEFAULT = "<!-- flow-agents:assignment-claim -->";
+
+export type AssignmentRenderResult = {
+  role: "AssignmentRenderResult";
+  transition: "claim";
+  subject_id: string;
+  gh_commands: string[][];
+  claim_comment_body: string;
+  record: AssignmentClaimRecord;
+};
 
 /**
  * Delegate to the shared pure-CJS resolver (scripts/hooks/lib/actor-identity.js), mirroring the
@@ -395,6 +404,69 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
   return result;
 }
 
+/**
+ * Async counterpart for transactions whose body awaits I/O or whose contenders
+ * may run in the same event loop. Unlike the legacy synchronous mutator lock,
+ * contention yields with a timer so the current async owner can settle,
+ * heartbeat, and release its lock.
+ */
+export async function withSubjectLockAsync<T>(artifactRoot: string, subjectId: string, body: () => T | Promise<T>): Promise<T> {
+  const lockDir = subjectLockDir(artifactRoot, subjectId);
+  const staleMs = trustedSubjectLockStaleMs();
+  const token = randomBytes(16).toString("hex");
+  const ownerFile = path.join(lockDir, "owner.json");
+  const deadline = Date.now() + 30000;
+  while (true) {
+    let createdLockDir = false;
+    try {
+      fs.mkdirSync(lockDir);
+      createdLockDir = true;
+      fs.writeFileSync(ownerFile, `${JSON.stringify({ token, pid: process.pid, acquired_at: isoNow() })}\n`, { flag: "wx", mode: 0o600 });
+      break;
+    } catch (error) {
+      const lockError = error as NodeJS.ErrnoException;
+      if (createdLockDir) fs.rmSync(lockDir, { recursive: true, force: true });
+      if (lockError.code !== "EEXIST") {
+        throw new Error(`failed to acquire assignment lock for subject ${subjectId}: ${lockDir}: ${lockError.message || lockError.code || String(lockError)}`);
+      }
+      try {
+        const owner = readSubjectLockOwner(ownerFile);
+        const stat = fs.lstatSync(owner?.token ? ownerFile : lockDir);
+        if (stat.isSymbolicLink() || !(owner?.token ? stat.isFile() : stat.isDirectory())) {
+          throw new Error(`assignment lock has an unsafe ${owner?.token ? "owner file" : "directory"}: ${lockDir}`);
+        }
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          throw new Error(`assignment lock is stale or malformed and requires explicit operator cleanup after confirming no owner is active: ${lockDir}`);
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for assignment lock for subject ${subjectId}: ${lockDir}`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  let heartbeat: NodeJS.Timeout | undefined;
+  const ownsLock = (): boolean => readSubjectLockOwner(ownerFile)?.token === token;
+  const heartbeatMs = Math.max(10, Math.min(1_000, Math.floor(staleMs > 0 ? staleMs / 3 : 1_000)));
+  heartbeat = setInterval(() => {
+    try {
+      if (!ownsLock()) return;
+      const timestamp = new Date();
+      fs.utimesSync(ownerFile, timestamp, timestamp);
+      fs.utimesSync(lockDir, timestamp, timestamp);
+    } catch { /* release, reclamation, or process teardown owns cleanup */ }
+  }, heartbeatMs);
+  try {
+    return await body();
+  } finally {
+    clearInterval(heartbeat);
+    if (ownsLock()) fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
 function readSubjectLockOwner(file: string): { token?: string } | null {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
@@ -422,6 +494,23 @@ function readSubjectLockOwner(file: string): { token?: string } | null {
  * through here too means `--now` deterministically governs idle_days as well as liveness
  * freshness, rather than idle_days silently reading the real wall clock regardless of `--now`.
  */
+/**
+ * The canonical holder actor key for a claim record: `record.actor_key` when present (the
+ * canonical `resolveActor(env).actor` string every actor-key consumer in this repository already
+ * compares against — `liveness whoami`, `liveness claim --actor`, per-actor `current.json`,
+ * pull-work's `--self-actor`), falling back to `serializeActor(record.actor)` for pre-actor_key
+ * records. Single-sourced here (#777 review finding 3) so `computeEffectiveState`'s
+ * self-recognition/liveness-join comparison and any OTHER holder-identity comparison (e.g.
+ * `local-file-provider-adapters.ts`'s `list()` actor filter) can never diverge by each
+ * re-deriving their own, potentially inconsistent, holder key. See the assignment-provider-
+ * contract.md `actor_key` field doc for why `serializeActor(record.actor)` alone is NOT a valid
+ * holder key for an explicit-override actor (a bare canonical token vs. a re-derived
+ * `explicit-override:<value>:<host>` triple diverge for that one actor shape).
+ */
+export function canonicalHolderActorKey(record: AssignmentClaimRecord): string {
+  return record.actor_key || loadActorIdentityHelper().serializeActor(record.actor);
+}
+
 export function computeEffectiveState(assignment: AssignmentStatus, freshHoldersList: FreshHolder[], selfActor: string | undefined, nowMs: number): {
   effective_state: EffectiveState;
   reason: string;
@@ -463,7 +552,7 @@ export function computeEffectiveState(assignment: AssignmentStatus, freshHolders
   // use — so for an explicit-override actor the self-check and the liveness join now agree with
   // every other tool. BACK-COMPAT: records with no actor_key (every pre-fix record, every #290
   // eval fixture) fall back to serializeActor(record.actor) exactly as before this fix.
-  const holderActorKey = record.actor_key || loadActorIdentityHelper().serializeActor(record.actor);
+  const holderActorKey = canonicalHolderActorKey(record);
   if (selfActor && holderActorKey === selfActor) return { effective_state: "held", reason: "self_is_holder", holder: { actor: holderActorKey } };
 
   const fresh = freshHoldersList.find((holder) => holder.actor === holderActorKey);
@@ -972,6 +1061,49 @@ function renderClaimCommentBody(record: AssignmentClaimRecord, marker: string): 
   ].join("\n");
 }
 
+export function renderGithubClaim(
+  subjectId: string,
+  input: RenderClaimInput,
+  actor: ActorStruct,
+  claimedAt: string = isoNow(),
+): AssignmentRenderResult {
+  const repo = requireRepo(input);
+  const issueNumber = requireIssueNumber(input);
+  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, actor, repo, issueNumber);
+  const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
+  const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
+  const ttlSeconds = input.ttl_seconds ?? 1800;
+  const branch = input.branch;
+  const artifactDir = input.artifact_dir;
+  if (!branch) throw new Error("input-json.branch is required for render-claim");
+  if (!artifactDir) throw new Error("input-json.artifact_dir is required for render-claim");
+
+  const record: AssignmentClaimRecord = {
+    schema_version: "1.0",
+    role: "AssignmentClaimRecord",
+    subject_id: subjectId,
+    actor,
+    actor_key: actorKey,
+    work_item_ref: workItemRef,
+    claimed_at: claimedAt,
+    ttl_seconds: ttlSeconds,
+    branch,
+    artifact_dir: artifactDir,
+    status: "claimed",
+  };
+  const repoSlug = `${repo.owner}/${repo.name}`;
+  const commentBody = renderClaimCommentBody(record, marker);
+  const ghCommands: string[][] = [];
+  if (input.assignee_login) ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-assignee", input.assignee_login]);
+  ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-label", labelName]);
+  ghCommands.push(
+    input.existing_comment_id
+      ? ["gh", "api", "--method", "PATCH", `repos/${repoSlug}/issues/comments/${input.existing_comment_id}`, "-f", `body=${commentBody}`]
+      : ["gh", "issue", "comment", String(issueNumber), "--repo", repoSlug, "--body", commentBody],
+  );
+  return { role: "AssignmentRenderResult", transition: "claim", subject_id: subjectId, gh_commands: ghCommands, claim_comment_body: commentBody, record };
+}
+
 function renderHandoffCommentBody(subjectId: string, input: RenderClaimInput): string {
   const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
   const record = input.previous_record
@@ -993,41 +1125,7 @@ function renderClaim(argv: string[]): number {
   const subjectId = requireFlag(args, "subject-id");
   const input = loadJsonInput(requireFlag(args, "input-json")) as RenderClaimInput;
   const actor = loadActorStructFromFile(requireFlag(args, "actor-json"));
-  const repo = requireRepo(input);
-  const issueNumber = requireIssueNumber(input);
-  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, actor, repo, issueNumber);
-  const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
-  const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
-  const ttlSeconds = input.ttl_seconds ?? 1800;
-  const branch = input.branch;
-  const artifactDir = input.artifact_dir;
-  if (!branch) throw new Error("input-json.branch is required for render-claim");
-  if (!artifactDir) throw new Error("input-json.artifact_dir is required for render-claim");
-
-  const record: AssignmentClaimRecord = {
-    schema_version: "1.0",
-    role: "AssignmentClaimRecord",
-    subject_id: subjectId,
-    actor,
-    actor_key: actorKey,
-    work_item_ref: workItemRef,
-    claimed_at: isoNow(),
-    ttl_seconds: ttlSeconds,
-    branch,
-    artifact_dir: artifactDir,
-    status: "claimed",
-  };
-  const repoSlug = `${repo.owner}/${repo.name}`;
-  const commentBody = renderClaimCommentBody(record, marker);
-  const ghCommands: string[][] = [];
-  if (input.assignee_login) ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-assignee", input.assignee_login]);
-  ghCommands.push(["gh", "issue", "edit", String(issueNumber), "--repo", repoSlug, "--add-label", labelName]);
-  ghCommands.push(
-    input.existing_comment_id
-      ? ["gh", "api", "--method", "PATCH", `repos/${repoSlug}/issues/comments/${input.existing_comment_id}`, "-f", `body=${commentBody}`]
-      : ["gh", "issue", "comment", String(issueNumber), "--repo", repoSlug, "--body", commentBody],
-  );
-  console.log(JSON.stringify({ role: "AssignmentRenderResult", transition: "claim", subject_id: subjectId, gh_commands: ghCommands, claim_comment_body: commentBody, record }, null, 2));
+  console.log(JSON.stringify(renderGithubClaim(subjectId, input, actor), null, 2));
   return 0;
 }
 
@@ -1171,7 +1269,9 @@ function listCommand(argv: string[]): number {
     for (const name of files) {
       const record = readJson(path.join(dir, name)) as AssignmentClaimRecord;
       if (record.status !== "claimed") continue;
-      if (actorFilter && loadActorIdentityHelper().serializeActor(record.actor) !== actorFilter) continue;
+      // #777 review: filter on the CANONICAL holder key (stored actor_key first, serialized
+      // actor as fallback) — explicit-override actors deliberately diverge between the two.
+      if (actorFilter && canonicalHolderActorKey(record) !== actorFilter) continue;
       subjectIds.push(record.subject_id);
     }
   } else if (provider === "github") {
@@ -1183,7 +1283,8 @@ function listCommand(argv: string[]): number {
     for (const issue of issues) {
       const assignment = githubAssignmentStatus(issue, labelName, marker);
       if (!assignment.record || assignment.record.status !== "claimed") continue;
-      if (actorFilter && loadActorIdentityHelper().serializeActor(assignment.record.actor) !== actorFilter) continue;
+      // #777 review: same canonical-key rule as the local-file branch above.
+      if (actorFilter && canonicalHolderActorKey(assignment.record) !== actorFilter) continue;
       subjectIds.push(assignment.record.subject_id);
     }
   } else {

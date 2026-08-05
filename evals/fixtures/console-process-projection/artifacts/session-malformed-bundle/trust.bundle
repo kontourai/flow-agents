@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "source": "fixture",
+  "claims": [
+    {
+      "id": "orphan-claim",
+      "subjectId": "flow-agents://session/session-malformed-bundle/critique/review",
+      "subjectType": "workflow",
+      "claimType": "critique",
+      "fieldOrBehavior": "independent review verdict",
+      "value": "fail",
+      "status": "verified",
+      "createdAt": "2026-07-20T10:35:00Z",
+      "updatedAt": "2026-07-20T10:35:00Z",
+      "metadata": {}
+    }
+  ],
+  "evidence": [],
+  "events": [],
+  "policies": []
+}

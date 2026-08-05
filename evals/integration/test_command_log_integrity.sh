@@ -171,17 +171,18 @@ else
   _fail "T2: expected broken on reorder, got $chain_reorder"
 fi
 
-# Test: delete middle entry (restore then delete entry 0 so entry 1's prevHash is wrong)
-write_chained_log "$T2" t2  # re-append fresh entries (now 4 total — but that's fine for test)
-# Write a fresh log with just 2 entries and then delete the first
+# Test: delete a predecessor from a fresh valid two-entry chain. The shared
+# append authority correctly refuses to extend the deliberately broken reorder
+# above, so reset only this disposable fixture's log before creating the case.
+: > "$LOG2"
+write_chained_log "$T2" t2
+# Delete the first entry, leaving the second with an unreachable parent.
 LOG2_FRESH="$T2/.kontourai/flow-agents/t2/command-log.jsonl"
 python3 - "$LOG2_FRESH" << 'PY'
 import sys
 lines = [l for l in open(sys.argv[1]).read().strip().split('\n') if l.strip()]
-# Keep only the last 2 entries (fresh from second write_chained_log call above)
-last2 = lines[-2:]
-# Delete entry[0] of the last2 → only entry[1] remains, whose prevHash won't match genesis
-open(sys.argv[1], 'w').write(last2[1] + '\n')
+# Delete entry[0] → only entry[1] remains, whose prevHash is unreachable.
+open(sys.argv[1], 'w').write(lines[1] + '\n')
 PY
 
 chain_delete=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.kontourai/flow-agents/t2'); console.log(r.status);")
@@ -274,6 +275,87 @@ if ! echo "$gate4_out" | grep -q "command-log integrity check FAILED"; then
   _pass "T4: no integrity-failure warning for legacy (unchained) log"
 else
   _fail "T4: spurious integrity warning for legacy log: $gate4_out"
+fi
+
+# ─── Test 5: denied append authority must not write a fallback record ───────────────
+echo ""
+echo "Test 5: broken chained log denies capture append authority without changing log bytes"
+
+T5="$TMP/t5"; seed_repo "$T5" t5
+write_chained_log "$T5" t5
+LOG5="$T5/.kontourai/flow-agents/t5/command-log.jsonl"
+python3 - "$LOG5" << 'PY'
+import json, sys
+lines = [line for line in open(sys.argv[1]).read().splitlines() if line]
+entry = json.loads(lines[-1])
+entry['_chain']['hash'] = '0' * 64
+lines[-1] = json.dumps(entry)
+open(sys.argv[1], 'w').write('\n'.join(lines) + '\n')
+PY
+cp "$LOG5" "$LOG5.before"
+capture_t5_err=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm run denied-authority"},"tool_response":{"exitCode":0}}' "$T5" \
+  | node "$CAPTURE" 2>&1 >/dev/null)
+if cmp -s "$LOG5.before" "$LOG5"; then
+  _pass "T5: denied append authority preserves the broken command log byte-for-byte"
+else
+  _fail "T5: denied append authority changed command-log.jsonl (unchained fallback is forbidden)"
+fi
+if echo "$capture_t5_err" | grep -q "append authority unavailable; log left unchanged"; then
+  _pass "T5: denied append authority emits a redacted visible diagnostic"
+else
+  _fail "T5: denied append authority did not emit the visible redacted diagnostic"
+fi
+
+# ─── Test 6: a false generation release is visible, redacted, and still append-only ──
+echo ""
+echo "Test 6: hook generation-release uncertainty is visible and redacted"
+
+T6="$TMP/t6"; seed_repo "$T6" t6
+capture_t6_err=$(CAPTURE_PATH="$CAPTURE" FIXTURE_ROOT="$T6" node <<'NODE' 2>&1 >/dev/null
+const path = require("path");
+const capturePath = process.env.CAPTURE_PATH;
+const chainRelative = ["..", "lib", "command-log-chain" + ".js"].join(path.sep);
+const chain = require(path.resolve(path.dirname(capturePath), chainRelative));
+const originalRelease = chain.releaseGenerationLock;
+chain.releaseGenerationLock = () => false;
+try {
+  const capture = require(capturePath);
+  capture.run(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    cwd: process.env.FIXTURE_ROOT,
+    tool_input: { command: "echo HOOK_RELEASE_SECRET_756" },
+    tool_response: { exitCode: 0 },
+  }));
+} finally {
+  chain.releaseGenerationLock = originalRelease;
+}
+NODE
+)
+if [[ -f "$T6/.kontourai/flow-agents/t6/command-log.jsonl" ]]; then
+  _pass "T6: release uncertainty retains the append-only captured record"
+else
+  _fail "T6: release uncertainty did not retain the captured record"
+fi
+if echo "$capture_t6_err" | grep -qi "generation release uncertain.*operator recovery"; then
+  _pass "T6: false generation release emits an immediate recovery diagnostic"
+else
+  _fail "T6: false generation release did not emit the required recovery diagnostic"
+fi
+if ! echo "$capture_t6_err" | grep -q "HOOK_RELEASE_SECRET_756"; then
+  _pass "T6: release uncertainty diagnostic is redacted"
+else
+  _fail "T6: release uncertainty diagnostic exposed command content: $capture_t6_err"
+fi
+
+# ─── Test 7: source contract matches the fail-open authority behavior ─────────────────
+echo ""
+echo "Test 7: hook comments do not promise an unchained fallback write"
+
+if rg -q "falls back to writing the plain record" "$CAPTURE"; then
+  _fail "T7: stale hook contract still claims a plain-record fallback after authority failure"
+else
+  _pass "T7: hook contract states authority failure leaves the command log unchanged"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────

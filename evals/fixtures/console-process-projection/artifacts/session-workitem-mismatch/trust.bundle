@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "source": "fixture",
+  "claims": [
+    {
+      "id": "critique-foreign-workitem",
+      "subjectId": "github:kontourai/flow-agents#999/critique/review",
+      "subjectType": "workflow",
+      "claimType": "critique",
+      "fieldOrBehavior": "independent review verdict",
+      "value": "fail",
+      "status": "verified",
+      "createdAt": "2026-07-20T10:45:00Z",
+      "updatedAt": "2026-07-20T10:45:00Z",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-20T10:45:00Z",
+        "workflow_subject_ref": "github:kontourai/flow-agents#999"
+      }
+    }
+  ],
+  "evidence": [],
+  "events": [],
+  "policies": []
+}

@@ -1,0 +1,1 @@
+{"run_id":"run-runtime","session_id":"runtime-session","status":"active","step":"execute","gate":"tests-evidence","transitions":[{"at":"2026-07-14T13:00:03.000Z","from":"planned","to":"executing","session_id":"runtime-session","step":"execute","gate":"tests-evidence"}]}

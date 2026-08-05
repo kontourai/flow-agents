@@ -1,0 +1,1 @@
+{"schema_version":"1.0","claims":[{"id":"claim-fixture","status":"accepted","summary":"fixture claim"}],"evidence":[{"id":"evidence-fixture","kind":"command","status":"pass","summary":"fixture evidence"}]}

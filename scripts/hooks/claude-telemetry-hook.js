@@ -56,14 +56,12 @@ function canonicalEvent(cliEvent, payload) {
 
 function claudeSuccessOutput(event, conflict) {
   if (event === 'SessionStart') {
-    return {
-      continue: true,
-      suppressOutput: true,
-      hookSpecificOutput: {
-        hookEventName: 'SessionStart',
-        additionalContext: 'Flow Agents telemetry hooks are active for this Claude Code session.',
-      },
-    };
+    // #1172: the telemetry shim used to inject "Flow Agents telemetry hooks are active for
+    // this Claude Code session." here. `suppressOutput: true` only hides it from the
+    // transcript — `additionalContext` still reached the model, every session, as a second
+    // copy of the announcement claude-hook-adapter.js was also making. Telemetry has no
+    // model-facing guidance to give; it records. Emit nothing.
+    return { continue: true, suppressOutput: true };
   }
   if (event === 'UserPromptSubmit') {
     return { continue: true, suppressOutput: true };
@@ -105,9 +103,15 @@ async function main() {
   let conflict;
   if (canonical === 'postToolUse') {
     try {
+      // Richer "real liveness": name the tool this pulse rode in on so the heartbeat says WHAT the
+      // agent is doing, not just that it is alive. Claude Code's PostToolUse payload carries the
+      // tool name as `tool_name` (fall back to `toolName`); the heartbeat sanitizes it, so a
+      // missing/odd value degrades to a plain aliveness pulse rather than an error.
+      const toolName = payload.tool_name || payload.toolName;
       const heartbeatResult = require('./lib/liveness-heartbeat').maybeEmitHeartbeat({
         cwd: process.cwd(),
         env: process.env,
+        activity: toolName ? { tool: toolName } : undefined,
       });
       conflict = heartbeatResult && heartbeatResult.conflict;
     } catch (err) {
