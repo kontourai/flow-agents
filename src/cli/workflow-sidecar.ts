@@ -19,7 +19,7 @@ import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
-import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+import { assertMutationWritable, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -4765,6 +4765,11 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const verdict = opt(p, "verdict") || die("--verdict is required");
   if (!verdicts.has(verdict)) die("verdict must be one of: pass, partial, fail, not_verified");
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  // #1191: signal validation — reject writes against terminal/closed Flow runs
+  // (Temporal closed-workflow signal rule). record-evidence carries no flow_run_head,
+  // so only the run_closed check applies. No-op for sessions without a Flow run.
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot });
   const _ts0 = opt(p, "timestamp", now());
   const _waiver = parseWaiver(p, _ts0);
   // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
@@ -4871,6 +4876,10 @@ function clampOutput(text: string): string {
 async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[] | null): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  // #1191: signal validation — reject writes against terminal/closed Flow runs
+  // (Temporal closed-workflow signal rule). No-op for sessions without a Flow run.
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot });
   const ts = opt(p, "timestamp", now());
   const commandString = opt(p, "command");
   if (!commandArgv?.length && !commandString) die('record-check requires a command: either `record-check <dir> -- <command...>` or `--command "<shell string>"`');
@@ -5046,6 +5055,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     die("--flow-run-head must match the exact session Flow projection");
   }
   const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
+  // #1191: signal validation — reject writes against terminal/closed Flow runs or
+  // stale heads (Temporal closed-workflow signal rule). The sidecar projection may
+  // lag the canonical head (#1164); this guard reads the CANONICAL state via the
+  // public Flow interface and fails closed before any mutation (command execution,
+  // command-log append, or bundle write). No-op for sessions without a Flow run.
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot, stampedFlowRunHead: flowRunHead });
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
