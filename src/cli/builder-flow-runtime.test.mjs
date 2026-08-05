@@ -11,6 +11,8 @@ import { pathToFileURL } from "node:url";
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, withRunMutationLock } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
+  ClassifiedWriteError,
+  classifyWriteFailure,
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
   inspectBuilderFlowSession,
@@ -21,8 +23,11 @@ import {
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
   setSignalValidationBypassForTest,
+  setTransientRetryBypassForTest,
+  setTransientRetryHeadAdvancerForTest,
   startBuilderFlowSession,
   syncBuilderFlowSession,
+  TRANSIENT_RETRY_MAX_ATTEMPTS,
 } from "../../build/src/builder-flow-runtime.js";
 import * as builderFlowRuntime from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, buildUnsignedCritiqueResolutionAuthorization, buildUnsignedLifecycleAuthorization, critiqueResolutionAuthorizationPayload, loadBuilderLifecycleAuthorization, loadCritiqueResolutionAuthorization } from "../../build/src/builder-lifecycle-authority.js";
@@ -36,7 +41,7 @@ import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import * as critiqueResolutionRuntime from "../../build/src/cli/critique-resolution.js";
-import { startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
+import { BuilderBuildRunInputError, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
@@ -8504,7 +8509,7 @@ test("#1191 accepted_by_exception is not terminal: record-evidence still succeed
   );
 });
 
-test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is rejected; the run remains writable", async () => {
+test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is detected; #1192 transient retry lands the write", async () => {
   const session = makeGitBackedSession("signal-validation-gate-advanced");
   claimAmbientSessionAssignment(session);
   fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nGate advanced fixture.\n");
@@ -8516,35 +8521,44 @@ test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is rejec
   assert.notEqual(staleHead, currentHead);
 
   // The session projection still shows H1, so --flow-run-head H1 passes the
-  // projection check. But the guard reads the CANONICAL head (H2) and rejects.
+  // projection check. The #1191 guard reads the CANONICAL head (H2) and detects
+  // the desync (gate_advanced). #1192 classifies this as TRANSIENT: the verb
+  // retries with a fresh canonical re-read, re-stamps with H2, and the write
+  // lands — transparent to the caller.
   const bundleBefore = snapshotFile(path.join(session.sessionDir, "trust.bundle"));
-  await assert.rejects(
-    () => workflowSidecarMain([
-      "record-gate-claim", session.sessionDir,
-      "--expectation", "selected-work", "--status", "not_verified",
-      "--summary", "stale-head write should be rejected",
-      "--flow-run-head", staleHead,
-    ]),
-    (error) => {
-      assert.match(error.message, /signal_validation:gate_advanced/);
-      assert.ok(error.message.includes(staleHead), "the diagnostic names the stamped (stale) head");
-      assert.ok(error.message.includes(currentHead), "the diagnostic names the canonical (current) head");
-      return true;
-    },
+  const rc = await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified",
+    "--summary", "stale-head write retried transparently",
+    "--flow-run-head", staleHead,
+  ]);
+  assert.equal(rc, 0, "transient head-desync retries and succeeds without caller involvement");
+
+  // The write landed: the bundle changed (the claim was recorded).
+  assert.notEqual(
+    snapshotFile(path.join(session.sessionDir, "trust.bundle")), bundleBefore,
+    "the retried write changed the bundle (the claim landed)",
   );
 
-  // Never-wedge: the trust.bundle is unchanged (no partial state from the rejected write).
-  assert.equal(snapshotFile(path.join(session.sessionDir, "trust.bundle")), bundleBefore, "rejected write left no partial state");
+  // The claim is stamped with the CANONICAL head (H2), not the stale head (H1) —
+  // the retry re-stamped against the fresh canonical read.
+  const bundle = JSON.parse(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"));
+  const claim = bundle.claims.find((c) => c.claimType === "builder.pull-work.selected");
+  assert.ok(claim, "a pull-work claim was recorded");
+  assert.equal(
+    claim.metadata.gate_claim.flow_run_head, currentHead,
+    "the claim is stamped with the canonical head (re-stamped on retry), not the stale head",
+  );
 
   // Never-wedge: the same run remains writable — record-evidence (no stamped head) succeeds.
   assert.equal(
     await workflowSidecarMain([
       "record-evidence", session.sessionDir,
       "--verdict", "partial",
-      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write after gate_advanced rejection" }),
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write after transient retry" }),
     ]),
     0,
-    "a valid write to the same run succeeds after a gate_advanced rejection (never-wedge)",
+    "a valid write to the same run succeeds after a transient retry (never-wedge)",
   );
 });
 
@@ -8600,19 +8614,25 @@ test("#1191 fault injection: stale-head write silently accepted on un-guarded pa
     setSignalValidationBypassForTest(false);
   }
 
-  // GREEN: with the guard restored, the stale-head write is rejected.
-  await assert.rejects(
-    () => workflowSidecarMain([
-      "record-gate-claim", session.sessionDir,
-      "--expectation", "selected-work", "--status", "not_verified",
-      "--summary", "fault injection: guarded stale-head write",
-      "--flow-run-head", staleHead,
-    ]),
-    (error) => {
-      assert.match(error.message, /signal_validation:gate_advanced/);
-      return true;
-    },
-  );
+  // GREEN: with the guard restored (and #1192 transient retry bypassed to show
+  // the pre-taxonomy hard-rejection behavior), the stale-head write is rejected.
+  setTransientRetryBypassForTest(true);
+  try {
+    await assert.rejects(
+      () => workflowSidecarMain([
+        "record-gate-claim", session.sessionDir,
+        "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", "fault injection: guarded stale-head write (no retry)",
+        "--flow-run-head", staleHead,
+      ]),
+      (error) => {
+        assert.match(error.message, /signal_validation:gate_advanced/);
+        return true;
+      },
+    );
+  } finally {
+    setTransientRetryBypassForTest(false);
+  }
 });
 
 test("#1191 claim_lost is subsumed by gate_advanced and run_closed in this slice", () => {
@@ -8623,4 +8643,197 @@ test("#1191 claim_lost is subsumed by gate_advanced and run_closed in this slice
   // becomes stale (gate_advanced). When the run is terminal, all claims are lost
   // (run_closed). So claim_lost is not separable from these two classes here.
   assert.ok(true, "claim_lost is subsumed by gate_advanced (head-based liveness) and run_closed (run-based liveness)");
+});
+
+// #1192: failure taxonomy — transient-vs-domain failure classification for hook
+// and evidence writes. These tests prove the three-class vocabulary, the bounded
+// transient retry with re-read, the no-retry posture for domain and terminal, the
+// never-wedge invariant after retry exhaustion, and the fault-injection red/green
+// pair.
+
+test("#1192 transient: head advances once between stamp and write → transparent retry + success", async () => {
+  const session = makeGitBackedSession("failure-taxonomy-transient-success");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nTransient retry fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  assert.notEqual(staleHead, currentHead);
+
+  // The head advanced once (H1 → H2). The guard detects gate_advanced on the
+  // first attempt, re-reads the canonical head (H2), re-stamps, and succeeds —
+  // all transparent to the caller (no caller involvement in the retry).
+  const rc = await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified",
+    "--summary", "transient retry should land this write",
+    "--flow-run-head", staleHead,
+  ]);
+  assert.equal(rc, 0, "transient head-desync retries and succeeds without caller involvement");
+
+  // The claim is stamped with the CANONICAL head (H2), not the stale head (H1).
+  const bundle = JSON.parse(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"));
+  const claim = bundle.claims.find((c) => c.claimType === "builder.pull-work.selected");
+  assert.ok(claim, "a pull-work claim was recorded");
+  assert.equal(claim.metadata.gate_claim.flow_run_head, currentHead, "claim stamped with canonical head after retry");
+  assert.notEqual(claim.metadata.gate_claim.flow_run_head, staleHead, "claim NOT stamped with stale head");
+});
+
+test("#1192 transient bounded: persistent head-desync past the bound rejects with class + attempts; run stays writable (never-wedge)", async () => {
+  const session = makeGitBackedSession("failure-taxonomy-transient-bounded");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nBounded retry fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+
+  // Install a head-advancer that advances the canonical head on EVERY retry
+  // re-read, simulating persistent contention. Each retry re-stamps with the
+  // head it just read, but the advancer moves the head again before the next
+  // guard attempt — so the stamped head is always one step behind.
+  const authority = { kind: "user_request", actor: "taxonomy-bounded-test", request_ref: "test:taxonomy-bounded", requested_at: new Date().toISOString() };
+  setTransientRetryHeadAdvancerForTest(async () => {
+    await pauseRun(session.slug, { cwd: session.projectRoot, reason: "persistent desync", authority });
+    await resumeRun(session.slug, { cwd: session.projectRoot, reason: "persistent desync", authority });
+  });
+  try {
+    await assert.rejects(
+      () => workflowSidecarMain([
+        "record-gate-claim", session.sessionDir,
+        "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", "persistent desync should exhaust the retry bound",
+        "--flow-run-head", staleHead,
+      ]),
+      (error) => {
+        // The rejection is a ClassifiedWriteError with failure_class=transient
+        // and attempts=TRANSIENT_RETRY_MAX_ATTEMPTS.
+        assert.match(error.message, /signal_validation:gate_advanced/);
+        assert.match(error.message, /failure_class=transient/);
+        assert.match(error.message, new RegExp(`attempts=${TRANSIENT_RETRY_MAX_ATTEMPTS}`));
+        assert.ok(error instanceof ClassifiedWriteError, "rejection is a ClassifiedWriteError");
+        assert.equal(error.failureClass, "transient");
+        assert.equal(error.attempts, TRANSIENT_RETRY_MAX_ATTEMPTS);
+        return true;
+      },
+    );
+  } finally {
+    setTransientRetryHeadAdvancerForTest(null);
+  }
+
+  // Never-wedge: the run is still active and writable after retry exhaustion.
+  // A valid record-evidence (no stamped head, only run_closed check) succeeds.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-evidence", session.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write after retry exhaustion" }),
+    ]),
+    0,
+    "a valid write succeeds after transient retry exhaustion (never-wedge)",
+  );
+});
+
+test("#1192 domain: evidence-failure (BuilderBuildRunInputError) is classified domain, never retried", () => {
+  // Domain failures (evidence genuinely fails the gate — bundleGateEvidence
+  // mismatches about evidence content) are classified as domain with
+  // no_retry_recorded posture. The retry helper (assertMutationWritableWithRetry)
+  // only catches SignalValidationError; any other error — including
+  // BuilderBuildRunInputError — propagates immediately without retry.
+  const error = new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state");
+  const classification = classifyWriteFailure(error);
+  assert.ok(classification, "BuilderBuildRunInputError is classifiable");
+  assert.equal(classification.failureClass, "domain");
+  assert.equal(classification.retryPosture, "no_retry_recorded");
+  assert.equal(classification.maxAttempts, undefined, "domain has no retry bound (single attempt)");
+});
+
+test("#1192 terminal: run_closed is classified terminal, never retried (attempts=1)", async () => {
+  const session = makeGitBackedSession("failure-taxonomy-terminal");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nTerminal fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  // Cancel the canonical Flow run (terminal state).
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "test: terminal run for taxonomy",
+    authority: { kind: "user_request", actor: "test", request_ref: "test:taxonomy-terminal", requested_at: new Date().toISOString() },
+  });
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.status, "canceled");
+
+  // record-gate-claim against a canceled run: terminal, never retried.
+  await assert.rejects(
+    () => workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "terminal run should not be retried",
+    ]),
+    (error) => {
+      assert.ok(error instanceof ClassifiedWriteError, "terminal rejection is a ClassifiedWriteError");
+      assert.equal(error.failureClass, "terminal");
+      assert.equal(error.attempts, 1, "terminal is never retried (single attempt)");
+      assert.match(error.message, /signal_validation:run_closed/);
+      assert.match(error.message, /failure_class=terminal/);
+      return true;
+    },
+  );
+});
+
+test("#1192 fault injection: pre-taxonomy hard rejection vs post-taxonomy transparent retry + success", async () => {
+  const session = makeGitBackedSession("failure-taxonomy-fault-injection");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nFault injection fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  assert.notEqual(staleHead, currentHead);
+
+  // RED (pre-taxonomy): with the transient retry bypassed (guard active, no
+  // retry), the stale-head write is hard-rejected — the pre-#1192 behavior.
+  setTransientRetryBypassForTest(true);
+  try {
+    await assert.rejects(
+      () => workflowSidecarMain([
+        "record-gate-claim", session.sessionDir,
+        "--expectation", "selected-work", "--status", "not_verified",
+        "--summary", "fault injection: pre-taxonomy hard rejection",
+        "--flow-run-head", staleHead,
+      ]),
+      (error) => {
+        process.stderr.write(`[fault-injection RED] pre-taxonomy rejection: ${error.message}\n`);
+        assert.ok(error instanceof ClassifiedWriteError, "pre-taxonomy rejection is a ClassifiedWriteError");
+        assert.equal(error.failureClass, "transient");
+        assert.equal(error.attempts, 1, "pre-taxonomy: single attempt, no retry");
+        assert.match(error.message, /signal_validation:gate_advanced/);
+        return true;
+      },
+    );
+  } finally {
+    setTransientRetryBypassForTest(false);
+  }
+
+  // GREEN (post-taxonomy): with the transient retry enabled, the same
+  // stale-head write retries with a fresh canonical re-read and succeeds.
+  // Use a fresh session to avoid the bundle state from the rejected write above.
+  const session2 = makeGitBackedSession("failure-taxonomy-fault-injection-post");
+  claimAmbientSessionAssignment(session2);
+  fs.writeFileSync(path.join(session2.projectRoot, `${session2.slug}--pull-work.md`), "# Pull Work\n\nPost-taxonomy fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session2.sessionDir });
+  const { before: staleHead2, after: currentHead2 } = await advanceFlowHeadWithoutTouchingTheTree(session2);
+  assert.notEqual(staleHead2, currentHead2);
+
+  const rc = await workflowSidecarMain([
+    "record-gate-claim", session2.sessionDir,
+    "--expectation", "selected-work", "--status", "not_verified",
+    "--summary", "fault injection: post-taxonomy transparent retry",
+    "--flow-run-head", staleHead2,
+  ]);
+  assert.equal(rc, 0, "post-taxonomy: transient retry succeeds");
+  process.stderr.write(`[fault-injection GREEN] post-taxonomy: retry succeeded, rc=${rc}, claim stamped with canonical head ${currentHead2.slice(0, 12)}… (stale was ${staleHead2.slice(0, 12)}…)\n`);
+
+  // The write landed with the canonical head, not the stale head.
+  const bundle = JSON.parse(fs.readFileSync(path.join(session2.sessionDir, "trust.bundle"), "utf8"));
+  const claim = bundle.claims.find((c) => c.claimType === "builder.pull-work.selected");
+  assert.ok(claim, "a pull-work claim was recorded");
+  assert.equal(claim.metadata.gate_claim.flow_run_head, currentHead2, "post-taxonomy: claim stamped with canonical head");
 });

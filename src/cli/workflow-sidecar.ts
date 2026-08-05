@@ -19,7 +19,7 @@ import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
-import { assertMutationWritable, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -4965,8 +4965,10 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   // #1191: signal validation — reject writes against terminal/closed Flow runs
   // (Temporal closed-workflow signal rule). record-evidence carries no flow_run_head,
   // so only the run_closed check applies. No-op for sessions without a Flow run.
+  // #1192: classified — run_closed is terminal (never retried). Using the retry
+  // helper without enableTransientRetry wraps the throw in ClassifiedWriteError.
   const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
-  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot });
+  if (_signalValidationRoot) await assertMutationWritableWithRetry({ runId: slug, cwd: _signalValidationRoot });
   const _ts0 = opt(p, "timestamp", now());
   const _waiver = parseWaiver(p, _ts0);
   // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
@@ -5075,8 +5077,9 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   // #1191: signal validation — reject writes against terminal/closed Flow runs
   // (Temporal closed-workflow signal rule). No-op for sessions without a Flow run.
+  // #1192: classified — run_closed is terminal (never retried).
   const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
-  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot });
+  if (_signalValidationRoot) await assertMutationWritableWithRetry({ runId: slug, cwd: _signalValidationRoot });
   const ts = opt(p, "timestamp", now());
   const commandString = opt(p, "command");
   if (!commandArgv?.length && !commandString) die('record-check requires a command: either `record-check <dir> -- <command...>` or `--command "<shell string>"`');
@@ -5259,8 +5262,19 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // head via --flow-run-head (concurrent-writer guard). When the head is inferred
   // from the projection, only run_closed is enforced — the projection is a cache,
   // not a concurrency signal. No-op for sessions without a Flow run.
+  // #1192: a transient head-desync (gate_advanced) is retried with a fresh
+  // canonical re-read — re-load, re-stamp head, re-attempt — instead of dying.
+  // Terminal (run_closed) is never retried.
   const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
-  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot, stampedFlowRunHead: requestedFlowRunHead ? flowRunHead : undefined });
+  let effectiveFlowRunHead = flowRunHead;
+  if (_signalValidationRoot) {
+    const _retryResult = await assertMutationWritableWithRetry({
+      runId: slug, cwd: _signalValidationRoot,
+      stampedFlowRunHead: requestedFlowRunHead ? flowRunHead : undefined,
+      enableTransientRetry: true,
+    });
+    effectiveFlowRunHead = _retryResult.effectiveFlowRunHead;
+  }
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
@@ -5336,7 +5350,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
-    ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
+    ...(effectiveFlowRunHead ? { _gate_claim_flow_run_head: effectiveFlowRunHead } : {}),
   };
   if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
     const acceptance = loadJson(path.join(dir, "acceptance.json"));

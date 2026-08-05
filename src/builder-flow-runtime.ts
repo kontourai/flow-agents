@@ -257,6 +257,187 @@ export async function assertMutationWritable(input: AssertMutationWritableInput)
   assertRunMutableForWrite(run, input.stampedFlowRunHead, input.runId);
 }
 
+// #1192: failure taxonomy — distinguish retryable infrastructure failure from
+// gate rejection. Temporal separates three classes explicitly:
+//
+//   transient — lock contention, head moved / snapshot stale, timeout.
+//               Retry posture: bounded automatic retry with re-read (max
+//               TRANSIENT_RETRY_MAX_ATTEMPTS, small linear backoff). Never
+//               consumes budgets, never wedges.
+//   domain    — evidence fails the gate, claim invalid.
+//               Retry posture: no retry, recorded and routed, budgeted.
+//   terminal  — run closed.
+//               Retry posture: no retry, fail closed with recovery instructions.
+//
+// The #1191 guard DETECTS the desync; this taxonomy decides what HAPPENS next.
+// The first application (#1164): gate_advanced head-desyncs become transient —
+// retry with re-read — not run-poisoning hard rejections.
+
+export type FailureClass = "transient" | "domain" | "terminal";
+
+export type RetryPosture = "bounded_retry_with_reread" | "no_retry_recorded" | "no_retry_fail_closed";
+
+export interface FailureClassification {
+  readonly failureClass: FailureClass;
+  readonly retryPosture: RetryPosture;
+  readonly maxAttempts?: number;
+}
+
+export const TRANSIENT_RETRY_MAX_ATTEMPTS = 3;
+export const TRANSIENT_RETRY_BASE_DELAY_MS = 50;
+
+/**
+ * Classify a `SignalValidationCode` into the failure taxonomy (#1192).
+ * `gate_advanced` is transient (head moved between stamp and write — retry with
+ * re-read); `run_closed` is terminal (run is closed — fail closed).
+ */
+export function classifySignalValidationFailure(code: SignalValidationCode): FailureClassification {
+  switch (code) {
+    case "gate_advanced":
+      return { failureClass: "transient", retryPosture: "bounded_retry_with_reread", maxAttempts: TRANSIENT_RETRY_MAX_ATTEMPTS };
+    case "run_closed":
+      return { failureClass: "terminal", retryPosture: "no_retry_fail_closed" };
+  }
+}
+
+/**
+ * Classify any write-path error into the failure taxonomy (#1192). Returns null
+ * for errors the taxonomy does not cover (unclassified — caller should surface).
+ * `SignalValidationError` is classified by code; `BuilderBuildRunInputError`
+ * (evidence content / claim shape mismatches from `bundleGateEvidence`) is
+ * domain — the evidence genuinely fails the gate, not an infrastructure fault.
+ */
+export function classifyWriteFailure(error: unknown): FailureClassification | null {
+  if (error instanceof SignalValidationError) {
+    return classifySignalValidationFailure(error.code);
+  }
+  if (error instanceof BuilderBuildRunInputError) {
+    return { failureClass: "domain", retryPosture: "no_retry_recorded" };
+  }
+  return null;
+}
+
+/**
+ * A write-path rejection classified into the failure taxonomy (#1192). Wraps the
+ * original `SignalValidationError` with the `FailureClass` and the number of
+ * attempts taken (for transient retries). The message preserves the original
+ * diagnostic and appends `[failure_class=…, attempts=…]` so existing
+ * `/signal_validation:…/` matchers still fire.
+ */
+export class ClassifiedWriteError extends Error {
+  readonly failureClass: FailureClass;
+  readonly code: SignalValidationCode;
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly stampedHead: string | null;
+  readonly canonicalHead: string;
+  readonly attempts: number;
+
+  constructor(original: SignalValidationError, failureClass: FailureClass, attempts: number) {
+    const cls = failureClass === "transient" && attempts > 1 ? "transient (retry exhausted)" : failureClass;
+    super(`${original.message} [failure_class=${cls}, attempts=${attempts}]`);
+    this.name = "ClassifiedWriteError";
+    this.failureClass = failureClass;
+    this.code = original.code;
+    this.runId = original.runId;
+    this.runStatus = original.runStatus;
+    this.stampedHead = original.stampedHead;
+    this.canonicalHead = original.canonicalHead;
+    this.attempts = attempts;
+  }
+}
+
+// #1192 test seam: disables the transient retry while keeping the #1191 guard
+// active — proves the pre-taxonomy hard-rejection behavior vs post-taxonomy
+// transparent retry. Never set outside tests.
+let transientRetryBypassForTest = false;
+export function setTransientRetryBypassForTest(value: boolean): void {
+  transientRetryBypassForTest = value;
+}
+
+// #1192 test seam: called between the canonical re-read and the next guard
+// attempt during a transient retry, allowing a test to advance the canonical
+// head AGAIN (simulating persistent contention). Never set outside tests.
+let transientRetryHeadAdvancerForTest: (() => Promise<void>) | null = null;
+export function setTransientRetryHeadAdvancerForTest(fn: (() => Promise<void>) | null): void {
+  transientRetryHeadAdvancerForTest = fn;
+}
+
+export interface AssertMutationWritableWithRetryInput extends AssertMutationWritableInput {
+  /**
+   * When true, a transient (gate_advanced) head-desync triggers a bounded retry:
+   * re-read the canonical Flow head, re-stamp, and re-attempt. When false (or
+   * when `transientRetryBypassForTest` is set), the original rejection propagates
+   * immediately as a `ClassifiedWriteError` — preserving the #1191 hard-rejection
+   * behavior for callers that have not opted into the taxonomy retry.
+   */
+  enableTransientRetry?: boolean;
+}
+
+export interface AssertMutationWritableWithRetryResult {
+  /**
+   * The effective flow_run_head to stamp the write with. On a successful
+   * transient retry, this is the CANONICAL head (re-read after the desync),
+   * which may differ from the input `stampedFlowRunHead`. On a first-attempt
+   * success, it matches the input. Null when the input carried no head.
+   */
+  effectiveFlowRunHead: string | null;
+  /** Number of attempts taken (1 = first attempt succeeded). */
+  attempts: number;
+}
+
+async function readCanonicalFlowHead(runId: string, cwd: string): Promise<string> {
+  const run = await loadBuilderFlowRun({ runId, cwd });
+  return flowRunHead(run.state);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Load the canonical Flow run and validate write permission with the failure
+ * taxonomy (#1192). On a transient (`gate_advanced`) head-desync, re-reads the
+ * canonical head, re-stamps, and retries up to `TRANSIENT_RETRY_MAX_ATTEMPTS`
+ * times with a small linear backoff. On terminal (`run_closed`), throws
+ * `ClassifiedWriteError` immediately — never retried. When the bound is
+ * exhausted, throws `ClassifiedWriteError` with `failureClass: "transient"` and
+ * a diagnostic naming the class and attempts taken.
+ *
+ * For sessions with no Flow run, the guard is a no-op (inherited from
+ * `assertMutationWritable`).
+ */
+export async function assertMutationWritableWithRetry(
+  input: AssertMutationWritableWithRetryInput,
+): Promise<AssertMutationWritableWithRetryResult> {
+  const enableRetry = input.enableTransientRetry === true && !transientRetryBypassForTest;
+  const maxAttempts = enableRetry ? TRANSIENT_RETRY_MAX_ATTEMPTS : 1;
+  let stampedHead = input.stampedFlowRunHead ?? null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await assertMutationWritable({ runId: input.runId, cwd: input.cwd, stampedFlowRunHead: stampedHead ?? undefined });
+      return { effectiveFlowRunHead: stampedHead, attempts: attempt };
+    } catch (error) {
+      if (!(error instanceof SignalValidationError)) throw error;
+      const classification = classifySignalValidationFailure(error.code);
+      if (classification.failureClass === "terminal") {
+        throw new ClassifiedWriteError(error, "terminal", attempt);
+      }
+      // transient
+      if (attempt < maxAttempts) {
+        stampedHead = await readCanonicalFlowHead(input.runId, input.cwd);
+        if (transientRetryHeadAdvancerForTest) await transientRetryHeadAdvancerForTest();
+        await sleep(TRANSIENT_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      throw new ClassifiedWriteError(error, "transient", attempt);
+    }
+  }
+  // Unreachable — the loop covers all paths.
+  throw new Error("assertMutationWritableWithRetry: unreachable");
+}
+
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
@@ -852,7 +1033,21 @@ async function syncAndProject(
     // stale heads BEFORE any Flow mutation (evaluateBuilderFlowRun below). A clean
     // rejection here means no partial state: the evidence manifest, run state, and
     // session projection are all untouched (never-wedge guarantee).
-    assertRunMutableForWrite(run, expectedRunHead, context.slug);
+    // #1192: classify the throw into the failure taxonomy. gate_advanced is
+    // transient (retry with re-read in the sidecar verbs); run_closed is terminal.
+    // The retry itself is not applied on this public-workflow-evidence path —
+    // `expectedRunHead` is caller-supplied and re-derivation requires a session
+    // re-sync that is a separate change. Classification ensures no unclassified
+    // throw in this path.
+    try {
+      assertRunMutableForWrite(run, expectedRunHead, context.slug);
+    } catch (error) {
+      if (error instanceof SignalValidationError) {
+        const classification = classifySignalValidationFailure(error.code);
+        throw new ClassifiedWriteError(error, classification.failureClass, 1);
+      }
+      throw error;
+    }
     const snapshot = stagedTrustBundle ? verifiedStagedTrustBundleSnapshot(context, stagedTrustBundle) : stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
