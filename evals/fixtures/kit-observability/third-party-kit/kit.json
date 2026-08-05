@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "id": "partner-review",
+  "name": "Partner Review Kit",
+  "description": "Synthetic third-party fixture for the Kit observability contract.",
+  "flows": [
+    { "id": "partner-review.review", "path": "flows/review.flow.json" }
+  ],
+  "observability_contribution": { "path": "kit-observability.contribution.json" }
+}

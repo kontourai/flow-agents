@@ -231,7 +231,8 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
   let attachedEvidence: FlowEvidenceEntry[] = [];
   if (input.evidence !== undefined) {
     const evidence = validateEvidenceInput(input.evidence);
-    assertCurrentOpenGate(run.definition, run.state, evidence.gate);
+    const currentGate = assertCurrentOpenGate(run.definition, run.state, evidence.gate);
+    assertDeclaredRouteReason(currentGate, evidence.routeReason);
     const source = path.resolve(cwd, evidence.file);
     const bytes = readFileSync(source);
     const validatedSha256 = createHash("sha256").update(bytes).digest("hex");
@@ -239,7 +240,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
       throw new BuilderBuildRunInputError("evidence.expectedSha256", "does not match the bytes presented for validation");
     }
     const normalized = normalizeTrustBundle(JSON.parse(bytes.toString("utf8")));
-    assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
+    assertBundleSubjects(normalized.bundle, run.state.subject, currentGate);
     const expectedRunHead = input.expectedRunHead ?? flowRunHead(run.state);
     assertFlowRunRecoveryFenceOpen(cwd, input.runId);
     const attached = await attachEvidence(
@@ -461,13 +462,22 @@ function validateEvidenceInput(evidence: unknown): BuilderBuildTrustBundleEviden
   return evidence as unknown as BuilderBuildTrustBundleEvidenceInput;
 }
 
-function assertCurrentOpenGate(definition: unknown, state: FlowRunState, evidenceGate: string): void {
+function assertCurrentOpenGate(definition: unknown, state: FlowRunState, evidenceGate: string): unknown {
   const gates = openGates(definition, state);
   if (gates.length !== 1) {
     throw new BuilderBuildRunInputError("evidence.gate", "requires exactly one current open gate");
   }
   if (gates[0].id !== evidenceGate) {
     throw new BuilderBuildRunInputError("evidence.gate", "must target the persisted current open gate");
+  }
+  return gates[0];
+}
+
+function assertDeclaredRouteReason(gate: unknown, routeReason: string | undefined): void {
+  if (!routeReason) return;
+  const routes = isRecord(gate) && isRecord(gate.on_route_back) ? gate.on_route_back : null;
+  if (!routes || typeof routes[routeReason] !== "string" || !routes[routeReason]) {
+    throw new BuilderBuildRunInputError("evidence.route_reason", `is not declared by gate ${String(isRecord(gate) ? gate.id ?? "<unknown>" : "<unknown>")}`);
   }
 }
 

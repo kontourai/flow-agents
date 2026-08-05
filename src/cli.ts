@@ -3,10 +3,12 @@ import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
 import { main as effectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
+import { main as effectiveFlowAgentsConfig } from "./cli/effective-flow-agents-config.js";
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
+import { main as livenessFleet } from "./cli/liveness-fleet.js";
 import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -44,9 +46,11 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["assignment-provider", assignmentProvider],
   ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
   ["effective-change-provider-settings", effectiveChangeProviderSettings],
+  ["effective-flow-agents-config", effectiveFlowAgentsConfig],
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["liveness-fleet", livenessFleet],
   ["narrative-render", narrativeRender],
   ["narrative-sources", narrativeSources],
   ["init", init],
@@ -78,9 +82,11 @@ const aliases = new Map<string, string>([
   ["flow-agents-assignment-provider", "assignment-provider"],
   ["flow-agents-effective-assignment-provider-settings", "effective-assignment-provider-settings"],
   ["flow-agents-effective-change-provider-settings", "effective-change-provider-settings"],
+  ["flow-agents-effective-flow-agents-config", "effective-flow-agents-config"],
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],
+  ["flow-agents-liveness-fleet", "liveness-fleet"],
   ["flow-agents-narrative-render", "narrative-render"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],

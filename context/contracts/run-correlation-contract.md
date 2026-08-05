@@ -26,6 +26,20 @@ fields are not permitted in version 1. New identity classes require a new
 contract version so older consumers fail visibly instead of silently dropping a
 join dimension.
 
+Producer identity rides beside the envelope, never inside it. The envelope
+answers "which run is this"; it does not answer "which build of Flow Agents
+produced this record," and that is not one of its identity slots. Runtime
+telemetry therefore carries the producer's install identity — the
+`{package_version, content_fingerprint}` tuple with an explicit `source` label —
+as a top-level sibling block on the event, so the
+`correlation_id` x `install_identity` join is available on every record without
+widening a closed contract. A version string alone is not that identity: an
+artifact packed from post-release history can install under the previous
+version number while containing the newer code, so the content fingerprint is
+what makes the join honest. Consumers read the `source` label before trusting
+the tuple, and never repair an `unknown` identity from adjacent records,
+timestamps, or paths.
+
 Runtime adapters declare support for every identity slot through
 `runtimeCorrelationIdentityDeclaration`. `supported` means the adapter can
 observe that identity when the host supplies it; `partial` names the host mode

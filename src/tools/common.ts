@@ -36,12 +36,15 @@ export function exists(file: string): boolean {
   return fs.existsSync(file);
 }
 
+// Never `out.push(...walkFiles(full))`: spreading passes one argument per path, so a
+// subtree larger than the engine's argument limit (~124k on Node 24) throws RangeError.
+// Push individually so cost scales with file count instead of argument count.
 export function walkFiles(dir: string): string[] {
   if (!exists(dir)) return [];
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...walkFiles(full));
+    if (entry.isDirectory()) for (const nested of walkFiles(full)) out.push(nested);
     else if (entry.isFile()) out.push(full);
   }
   return out;

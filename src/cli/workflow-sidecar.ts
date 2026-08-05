@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
-import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
@@ -17,6 +17,7 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
+import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
 import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
@@ -1171,6 +1172,32 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * #1170 (PR2): the workspace snapshot stamped onto a FRESHLY-recorded kit-typed gate claim.
+   *
+   * Captured at most once per bundle write (the Git diff is whole-tree) and only if some check
+   * actually needs it.
+   *
+   * ONLY fresh writes are stamped — see `_fresh_record_write`, set by the recording verb on the
+   * checks supplied in THIS invocation. Every writer in this file rebuilds the whole bundle from
+   * `checksFromBundle` + its own new checks, so stamping unconditionally would re-anchor a check
+   * recorded against an OLD tree to the CURRENT one on every unrelated later write (a
+   * record-critique or record-learning call would silently refresh a stale verifier check).
+   * That is precisely the evidence laundering PR1's read-time predicate is built to prevent:
+   * "no path re-stamps a snapshot". A previously-recorded snapshot round-trips untouched through
+   * `checksFromBundle`'s `_verification_workspace_snapshot` restoration, so a rebuild preserves
+   * the original binding rather than renewing it.
+   */
+  let capturedFreshWorkspaceSnapshot: AnyObj | null | undefined;
+  const freshWorkspaceSnapshot = (): AnyObj | null => {
+    if (capturedFreshWorkspaceSnapshot === undefined) {
+      capturedFreshWorkspaceSnapshot = flowAgentsDir
+        ? tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(path.join(flowAgentsDir, slug)))
+        : null;
+    }
+    return capturedFreshWorkspaceSnapshot;
+  };
+
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
   for (const check of Array.isArray(checks) ? checks : []) {
     if (!check.id) continue;
@@ -1350,9 +1377,31 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
-      const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+      // #1170 (PR2) producer completeness: a check that resolves to a kit-typed gate claim is a
+      // CURRENT-GATE claim — `builder-flow-runtime.ts` classifies every `origin: "check"` claim as
+      // head-bound. A sidecar `record-evidence` check carries no `metadata.gate_claim` (that stamp
+      // is minted only by record-gate-claim), so it contributes a NULL head and, before PR1, made
+      // every later public `workflow evidence` write fail forever — #1164.
+      //
+      // PR1 lets such a claim re-establish freshness from a Git workspace snapshot instead. This is
+      // the producer half: stamp that snapshot at record time, so a live #1164-shaped run recovers
+      // in the field on an unchanged tree with no operator intervention.
+      //
+      // Only the snapshot is stamped here, deliberately NOT a `flow_run_head`. A fresh
+      // record-evidence check has no `gate_claim` object to carry a head (`_gate_claim_expectation_id`
+      // is minted only by record-gate-claim and restored only from a prior write), and synthesizing
+      // one from `matchExpectsEntry`'s heuristic would freeze a guessed expectation binding into
+      // the #270 anti-smuggling surface. Stamping a head onto a RESTORED claim would be worse
+      // still: it would let a stale claim pass the head fast path without any tree comparison at
+      // all. The snapshot is the whole producer gap, and it is the binding that actually describes
+      // a claim whose subject is repository content.
+      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta ?? (check._fresh_record_write === true ? freshWorkspaceSnapshot() : null);
+      const declaredBaseMetadata: AnyObj = declaredWorkspaceSnapshot
+        ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
+      const declaredMetadata: AnyObj = gateClaimExpectationId
+        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+        : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
@@ -1386,7 +1435,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
       && Number.isSafeInteger(observation.test_count)
       && observation.test_count > 0
-      && observation.execution_proof?.kind === "local-process-exit",
+      && ["local-process-exit", "coordinated-command-receipt"].includes(String(observation.execution_proof?.kind)),
     );
     const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
       && criterionIdentityVersion === 2
@@ -3145,6 +3194,47 @@ function canonicalProjectRootForSession(dir: string): string {
   return projectRoot;
 }
 
+/**
+ * #1170 (PR2): the canonical project root for a session, or null when the session is not a
+ * canonical `.kontourai/flow-agents/<slug>` layout.
+ *
+ * `canonicalProjectRootForSession` dies on a non-canonical layout, which is correct where a
+ * canonical root is a precondition (observed commands, passing public tests evidence). The
+ * broadened workspace-snapshot capture below is *additive provenance* — a legacy or tmp session
+ * layout must keep recording claims exactly as it does today rather than becoming unrecordable.
+ */
+function tryCanonicalProjectRootForSession(dir: string): string | null {
+  try {
+    return canonicalProjectRootForSession(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #1170 (PR2): best-effort Git worktree snapshot for gate-claim provenance.
+ *
+ * Returns a snapshot ONLY when a canonical Git worktree resolves. Two deliberate exclusions:
+ *
+ * - `null` root / capture failure / non-Git tree → null. The claim degrades to today's legacy
+ *   semantics (no snapshot recorded, nothing rejected at record time). Snapshot capture is a
+ *   freshness *affordance*; failing to obtain one must never make a recordable claim unrecordable.
+ * - A `reviewed-files` snapshot → null, never stamped. `captureReviewWorkspaceSnapshot` falls back
+ *   to digesting the supplied reviewed-file list when the tree is not Git-backed; with the empty
+ *   list passed here that digest is a constant, so stamping it would mint a claim that is
+ *   permanently self-current. The consumer (`builder-flow-runtime.ts` `isGitWorktreeSnapshot`)
+ *   already refuses to honor that shape — this keeps the producer from writing it at all.
+ */
+function tryCaptureGitWorktreeSnapshot(projectRoot: string | null): AnyObj | null {
+  if (!projectRoot) return null;
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return snapshot.kind === "git-worktree" && typeof snapshot.head_sha === "string" ? snapshot as AnyObj : null;
+  } catch {
+    return null;
+  }
+}
+
 // #619: the narrative isolation guard must run for EVERY session layout (canonical,
 // tmp, or legacy .flow-agents/) without imposing the canonical-session requirement that
 // canonicalProjectRootForSession enforces. It only needs a best-effort project root to
@@ -3386,11 +3476,12 @@ function resolvesExplicitTestTarget(projectRoot: string, token: string): boolean
 }
 
 /** Validate test-evidence command shape without executing it. */
-type TestExecutionProof = {
+type LocalTestExecutionProof = {
   kind: "local-process-exit";
   runner: string;
   static_test_units: number;
 };
+type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
 
 function staticTestUnits(file: string, executable: string): number {
   try {
@@ -3436,6 +3527,18 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       const target = tokens.slice(2).find((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token));
       const units = target ? staticTestUnits(path.resolve(projectRoot, target), "bun") : 0;
       return units > 0 ? { kind: "local-process-exit", runner: "bun test", static_test_units: units } : null;
+    }
+    // A coordinator is admitted only when its exact public command is declared
+    // in the reconcile manifest and its observed receipt proves a complete,
+    // stable, committed test result. The resolver names no product or filename.
+    if (resolveCoordinatedCommandBinding(normalized, projectRoot)) {
+      return {
+        kind: "coordinated-command-receipt",
+        protocol: "flow-agents.coordinated-command-receipt/v1",
+        request_key: "pending-observation",
+        receipt_sha256: "pending-observation",
+        receipt_commit_sha256: "pending-observation",
+      };
     }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
     if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
@@ -3537,7 +3640,7 @@ export function observedExecutedTestCount(output: string): number {
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
-  if (!proof) return 0;
+  if (!proof || proof.kind !== "local-process-exit") return 0;
   const observed = observedExecutedTestCount(output);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
@@ -3564,6 +3667,11 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // attestations but can never stand in for locally observed test execution.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
+    const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
+    if (coordinated) {
+      const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
+      return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...receipt };
+    }
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
     return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
   };
@@ -3581,7 +3689,7 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
     if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
     if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
     if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
-    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
+    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || !["local-process-exit", "coordinated-command-receipt"].includes(String(entry.execution_proof.kind)))) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
     if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
@@ -4667,9 +4775,16 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   const projectRoot = narrativeGuardRoot(dir);
+  // #1170 (PR2): `_fresh_record_write` marks the checks supplied in THIS invocation, so
+  // buildTrustBundle stamps a workspace snapshot onto them and onto nothing else. Every check
+  // restored from the existing bundle by the mergeChecksById call below keeps whatever snapshot
+  // it was originally recorded with; only a genuinely new (or re-recorded, same-id superseding)
+  // check gets bound to the tree as it is right now. The marker is transient — buildTrustBundle
+  // projects an explicit allowlist of `_`-prefixed fields into claim metadata and this is not one
+  // of them, so it never reaches the bundle and never round-trips through checksFromBundle.
   const _checksRaw = [
-    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
-    ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
+    ...opts(p, "check-json").map((v) => ({ ...normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot), _fresh_record_write: true })),
+    ...opts(p, "surface-trust-json").map((file, index) => ({ ...surfaceCheckFromArtifact(file, index, projectRoot), _fresh_record_write: true })),
   ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
@@ -5039,11 +5154,29 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
+    // Unchanged strict path: a passing public tests-evidence claim REQUIRES a Git-backed
+    // snapshot and dies without one. `canonicalRoot` is non-null here because mustRunTests
+    // already required at least one --command above.
     const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
     if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
       die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
     }
     checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+  } else {
+    // #1170 (PR2) producer completeness: capture the workspace snapshot for EVERY gate claim
+    // recorded while a canonical Git root resolves, not only the passing-public-tests case.
+    //
+    // `flow_run_head` hashes workflow POSITION, so a claim recorded before any state movement is
+    // stranded by the head predicate even though the code it attests to never changed (#1164).
+    // PR1 taught the consumer to re-establish freshness from a Git workspace snapshot; without
+    // this capture that tolerance is unreachable for the claims that actually need it, because
+    // nothing but the tests-evidence path ever produced a snapshot to reconcile against.
+    //
+    // Strictly additive: absent a Git root this records exactly what it recorded before (no
+    // snapshot, no failure — legacy semantics), and a claim whose head still matches never
+    // consults the snapshot at all.
+    const snapshot = tryCaptureGitWorktreeSnapshot(canonicalRoot ?? tryCanonicalProjectRootForSession(dir));
+    if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
   }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
@@ -7897,6 +8030,59 @@ function loadLivenessPolicyHelper(): {
 }
 function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivenessEnabled(process.env); }
 /**
+ * #1020: resolve the SHARED liveness stream root for a task directory.
+ *
+ * The lifecycle auto-emit path previously used `path.dirname(taskDir)` directly. `taskDir` is
+ * derived from the caller's own artifact path (`artifactDirFrom` at the `init-plan`/`advance-state`
+ * call sites), so in a linked worktree the event landed in THAT worktree's
+ * `.kontourai/flow-agents/liveness/` — a location no reader in any other checkout of the same repo
+ * consults. #357 built `resolveSharedRepoRoot` precisely so that "a `liveness claim` ... invoked
+ * from ANY worktree's cwd is visible to a reader in any other checkout" (local-artifact-root.ts),
+ * and `liveness claim`'s own explicit path honors it (eval AC3) — but this auto-emit path never
+ * consulted it, so the guarantee silently did not hold for lifecycle-driven lanes.
+ *
+ * Resolution is anchored on `taskDir` itself, NOT on `process.cwd()`: the stream belongs to the
+ * repo that physically contains the artifacts. This keeps eval/fixture isolation intact — a task
+ * dir under a throwaway `mktemp -d` outside any git tree fails open below, and one inside its own
+ * disposable repo resolves to that repo — while a real linked-worktree task dir now resolves to
+ * the primary checkout's shared store.
+ *
+ * FAIL-OPEN (contractual, do not tighten): any failure — git absent, `taskDir` not inside a git
+ * tree, resolution error — returns `path.dirname(taskDir)`, today's exact behavior. Liveness is
+ * advisory; a resolution failure must never divert or drop the event. In the single-checkout case
+ * the two agree byte-for-byte (`<repo>/.kontourai/flow-agents/<slug>` → `<repo>/.kontourai/flow-agents`),
+ * so this is a no-op for every non-worktree caller.
+ */
+/**
+ * The sibling resolvers' default advice — "pass --artifact-root" — is FALSE here. `init-plan` never
+ * reads that flag, and `advance-state`'s copy only steers `writeCurrent`, not this stream root,
+ * which is derived from `taskDir` alone. Telling an operator to pass a flag that cannot affect the
+ * problem being reported is worse than saying nothing: it costs them a debugging cycle and teaches
+ * them the diagnostic is unreliable.
+ */
+const LIFECYCLE_LIVENESS_REMEDIATION =
+  "Repair the repository's git metadata (`git rev-parse --git-common-dir` must succeed from this directory) so lifecycle liveness reaches the shared store; --artifact-root does not affect this path.";
+
+function livenessStreamRootFor(taskDir: string): string {
+  const fallback = path.dirname(taskDir);
+  // Fail open, but never SILENTLY. #413 hardened the sibling resolver
+  // (`flowAgentsArtifactRoot`) for exactly this: a fail-open with no diagnostic inside a git
+  // working tree strands the event in a cwd-local store that no other checkout can read, which is
+  // the precise symptom #1020 exists to fix. Reusing that module's own warning rather than
+  // restating it keeps one wording — and one place to change it.
+  try {
+    const sharedRepoRoot = resolveSharedRepoRoot(taskDir);
+    if (!sharedRepoRoot) {
+      warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
+      return fallback;
+    }
+    return path.resolve(sharedRepoRoot, FLOW_AGENTS_RUNTIME_DIR);
+  } catch {
+    warnIfFailingOpenInsideGitTree(taskDir, fallback, LIFECYCLE_LIVENESS_REMEDIATION);
+    return fallback;
+  }
+}
+/**
  * F1 (#288 fix iteration 1, cr-HIGH fail-open violation): the `livenessEnabled()`
  * guard (and therefore its `loadLivenessPolicyHelper()` module load) must sit
  * INSIDE this function's own fail-open try/catch — previously it sat outside,
@@ -7919,7 +8105,7 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
       process.stderr.write("[liveness] skipped auto-emit: actor unresolved (set FLOW_AGENTS_ACTOR or run inside a supported runtime)\n");
       return;
     }
-    const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
+    const root = livenessStreamRootFor(taskDir);
     const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
     if (kind === "claim") evt.ttlSeconds = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
     appendLivenessEvent(root, evt);

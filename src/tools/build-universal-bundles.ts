@@ -413,34 +413,190 @@ function codexPolicy(script: string, envPrefix = ""): string {
 // operator-overridable via the FLOW_AGENTS_GOAL_FIT_MODE environment variable.
 // The canonical engine default stays warn so the conformance contract is honest.
 const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_MODE:-block}" ';
-function exportClaudeSettings(): string {
-  const hooks: Record<string, Array<Record<string, unknown>>> = {};
-  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"]) {
-    hooks[event] = [{ hooks: [shellHook(claudeTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
+
+/**
+ * #1024: the ONE policy-hook table every runtime derives from.
+ *
+ * This used to be open-coded once per runtime — `exportClaudeSettings` and `exportCodexHooks`
+ * were hand-maintained parallel lists, and codex's copy simply omitted two `.push(...)` lines.
+ * The result: codex sessions shipped WITHOUT `config-protection` (the gate that refuses
+ * interpreter writes to protected gate files) and WITHOUT `quality-gate`, with nothing anywhere
+ * declaring the gap. Not a capability limit — codex already wires `PreToolUse` and `PostToolUse`
+ * for telemetry, so the events demonstrably exist — just drift between two copies of a list.
+ *
+ * A hook is now added in exactly one place. Every runtime must then either MAP it to that
+ * runtime's own event vocabulary or DECLARE it unsupported with a reason; `assertPolicyHookCoverage`
+ * fails the build on silence. Mapping is the legitimate kind of runtime-specificity — the same
+ * generic outcome reached the way that runtime requires — and a declared `null` is the honest
+ * kind of gap. Silent absence is neither.
+ */
+type PolicyHookId = "workflow-steering-session" | "workflow-steering-prompt" | "config-protection" | "quality-gate" | "evidence-capture" | "stop-goal-fit";
+
+const POLICY_HOOKS: { id: PolicyHookId; script: string; statusMessage: string; envPrefix?: string }[] = [
+  { id: "workflow-steering-session", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "workflow-steering-prompt", script: "workflow-steering.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "config-protection", script: "config-protection.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "quality-gate", script: "quality-gate.js", statusMessage: "Running Flow Agents hook policy" },
+  { id: "evidence-capture", script: "evidence-capture.js", statusMessage: "Capturing Flow Agents command evidence" },
+  { id: "stop-goal-fit", script: "stop-goal-fit.js", statusMessage: "Running Flow Agents hook policy", envPrefix: GOAL_FIT_MODE_PREFIX },
+];
+
+/** Telemetry events per runtime. A runtime absent from an event emits no record for it — declare why below. */
+const RUNTIME_TELEMETRY_EVENTS: Record<string, string[]> = {
+  "claude-code": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"],
+  codex: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"],
+};
+
+/**
+ * Each runtime's event vocabulary for each policy hook. `null` = declared unsupported.
+ * Every `null` MUST have a matching entry in `RUNTIME_HOOK_NOTES`.
+ */
+const RUNTIME_POLICY_EVENTS: Record<string, Record<PolicyHookId, string | null>> = {
+  "claude-code": {
+    "workflow-steering-session": "SessionStart",
+    "workflow-steering-prompt": "UserPromptSubmit",
+    "config-protection": "PreToolUse",
+    "quality-gate": "PostToolUse",
+    "evidence-capture": "PostToolUse",
+    "stop-goal-fit": "Stop",
+  },
+  codex: {
+    "workflow-steering-session": "SessionStart",
+    "workflow-steering-prompt": "UserPromptSubmit",
+    "config-protection": "PreToolUse",
+    "quality-gate": "PostToolUse",
+    "evidence-capture": "PostToolUse",
+    "stop-goal-fit": "Stop",
+  },
+  // opencode and pi wire the same canonical policies through their own plugin/extension
+  // generators below rather than a JSON hook map. They are declared here anyway so the coverage
+  // assertion spans every shipped runtime, and so a hook added to POLICY_HOOKS cannot silently
+  // skip them — `assertGeneratedPolicyCoverage` checks their emitted source against these rows.
+  opencode: {
+    "workflow-steering-session": "session.created",
+    "workflow-steering-prompt": null,
+    "config-protection": "tool.execute.before",
+    "quality-gate": "tool.execute.after",
+    "evidence-capture": "tool.execute.after",
+    "stop-goal-fit": "session.idle",
+  },
+  pi: {
+    "workflow-steering-session": "before_agent_start",
+    "workflow-steering-prompt": null,
+    "config-protection": "tool_call",
+    "quality-gate": "tool_result",
+    "evidence-capture": "tool_result",
+    "stop-goal-fit": "session_shutdown",
+  },
+};
+
+/** Declared, reasoned gaps. Keyed `<runtime>:<policy hook id>` or `<runtime>:telemetry:<event>`. */
+const RUNTIME_HOOK_NOTES: Record<string, string> = {
+  "codex:telemetry:SessionEnd":
+    "codex's hooks.json vocabulary exposes no SessionEnd event; session termination is observed through Stop. Revisit if codex adds one.",
+  "opencode:workflow-steering-prompt":
+    "opencode exposes no user-prompt-submit hook; session.created carries session-start steering and tool.execute.before carries per-tool policy. Closest honest approximation, not equivalent coverage.",
+  "pi:workflow-steering-prompt":
+    "pi exposes no user-prompt-submit hook; before_agent_start carries session-start steering. Closest honest approximation, not equivalent coverage.",
+};
+
+/**
+ * Runtimes whose policies are emitted as generated plugin/extension SOURCE rather than a JSON
+ * hook map. Their coverage is proven by checking the emitted text mentions each mapped hook's
+ * script — coarse, but it is the difference between "the table is enforced everywhere" and "the
+ * table is enforced on the two runtimes that happen to use JSON."
+ */
+const SOURCE_GENERATED_RUNTIMES = new Set(["opencode", "pi"]);
+
+function assertedPolicySource(runtime: string, source: string): string {
+  assertPolicyHookCoverage();
+  assertGeneratedPolicyCoverage(runtime, source);
+  return source;
+}
+
+/**
+ * Is `script` actually WIRED to `event` in the generated source, rather than merely mentioned?
+ *
+ * Both source-generated runtimes dispatch policy through one call shape —
+ * `runAdapter(<adapter>, <event>, [detail,] <hookId>, <script>)` — so requiring the event and the
+ * script to appear as quoted arguments of the SAME `runAdapter(` call is a real wiring check.
+ *
+ * A whole-file `includes(script)` was not. It passed on a source with zero handlers whose only
+ * mention of the script sat in a dead comment: an independent review removed opencode's
+ * `config-protection` enforcement, left the name in a comment, and got a clean build plus 22/22
+ * green eval checks with the shipped plugin enforcing nothing. That is #1024's own failure —
+ * a runtime silently shipping without enforcement — one level down, inside the guard meant to
+ * prevent it.
+ *
+ * Binding to the event also stops a hook from silently moving to the wrong lifecycle point, and
+ * separates two hook ids that share one script (`workflow-steering-session` and
+ * `workflow-steering-prompt`) but map to different events — previously one mention satisfied both.
+ */
+function policyHookIsWired(generatedSource: string, event: string, script: string): boolean {
+  const quoted = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(String.raw`runAdapter\s*\([^\n]*['"]${quoted(event)}['"][^\n]*['"]${quoted(script)}['"]`).test(generatedSource);
+}
+
+export function assertGeneratedPolicyCoverage(runtime: string, generatedSource: string): void {
+  if (!SOURCE_GENERATED_RUNTIMES.has(runtime)) return;
+  const mapped = RUNTIME_POLICY_EVENTS[runtime] ?? {};
+  const missing: string[] = [];
+  for (const hook of POLICY_HOOKS) {
+    const event = mapped[hook.id];
+    if (!event) continue;
+    if (!policyHookIsWired(generatedSource, event, hook.script)) missing.push(`${hook.id} -> ${event}`);
   }
-  hooks.Stop.push({ hooks: [shellHook(claudePolicy("Stop", "stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
-  hooks.SessionStart.push({ hooks: [shellHook(claudePolicy("SessionStart", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
-  hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
+  if (missing.length) {
+    throw new Error(`${runtime}: generated source does not wire policy hooks mapped in RUNTIME_POLICY_EVENTS: ${missing.join(", ")}`);
+  }
+}
+
+function buildRuntimeHookMap(
+  runtime: string,
+  telemetryCommand: (event: string) => string,
+  policyCommand: (event: string, script: string, envPrefix?: string) => string,
+): Record<string, Array<Record<string, unknown>>> {
+  const hooks: Record<string, Array<Record<string, unknown>>> = {};
+  for (const event of RUNTIME_TELEMETRY_EVENTS[runtime] ?? []) {
+    hooks[event] = [{ hooks: [shellHook(telemetryCommand(event), 10, "Recording Flow Agents telemetry")] }];
+  }
+  for (const hook of POLICY_HOOKS) {
+    const event = RUNTIME_POLICY_EVENTS[runtime]?.[hook.id];
+    if (!event) continue; // declared unsupported; assertPolicyHookCoverage proves it was declared, not forgotten
+    (hooks[event] ??= []).push({ hooks: [shellHook(policyCommand(event, hook.script, hook.envPrefix), 30, hook.statusMessage)] });
+  }
+  return hooks;
+}
+
+/**
+ * Fail the build when a runtime neither maps nor declares a policy hook. This is what makes the
+ * table load-bearing rather than decorative: adding a hook and forgetting a runtime is now a build
+ * error, which is exactly the failure that shipped codex without config-protection.
+ */
+export function assertPolicyHookCoverage(): void {
+  const problems: string[] = [];
+  for (const runtime of Object.keys(RUNTIME_POLICY_EVENTS)) {
+    for (const hook of POLICY_HOOKS) {
+      const mapped = RUNTIME_POLICY_EVENTS[runtime][hook.id];
+      if (mapped === undefined) problems.push(`${runtime}: policy hook '${hook.id}' is neither mapped to an event nor declared unsupported`);
+      else if (mapped === null && !RUNTIME_HOOK_NOTES[`${runtime}:${hook.id}`]) problems.push(`${runtime}: policy hook '${hook.id}' is declared unsupported with no reason in RUNTIME_HOOK_NOTES`);
+    }
+  }
+  if (problems.length) throw new Error(`policy-hook coverage is undeclared:\n  - ${problems.join("\n  - ")}`);
+}
+
+function exportClaudeSettings(): string {
+  assertPolicyHookCoverage();
   return `${JSON.stringify({
     statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
     permissions: manifest.claude_code.permissions ?? {},
     skipDangerousModePermissionPrompt: manifest.claude_code.skipDangerousModePermissionPrompt ?? true,
-    hooks,
+    hooks: buildRuntimeHookMap("claude-code", claudeTelemetry, (event, script, envPrefix) => claudePolicy(event, script, envPrefix ?? "")),
   }, null, 2)}\n`;
 }
 function exportCodexHooks(): string {
-  const hooks: Record<string, Array<Record<string, unknown>>> = {};
-  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
-    hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
-  }
-  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
-  hooks.SessionStart.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.PostToolUse.push({ hooks: [shellHook(codexPolicy("evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
-  return `${JSON.stringify({ hooks }, null, 2)}\n`;
+  assertPolicyHookCoverage();
+  return `${JSON.stringify({ hooks: buildRuntimeHookMap("codex", codexTelemetry, (_event, script, envPrefix) => codexPolicy(script, envPrefix ?? "")) }, null, 2)}\n`;
 }
 
 function copySharedContent(targetRoot: string, targetName: string, token: string): void {
@@ -671,6 +827,9 @@ function exportOpencodeAgent(spec: Agent): string {
   return lines.join("\n");
 }
 function exportOpencodePlugin(): string {
+  return assertedPolicySource("opencode", buildOpencodePluginSource());
+}
+function buildOpencodePluginSource(): string {
   // Generate the Flow Agents opencode plugin.
   // opencode plugins are auto-loaded from .opencode/plugins/*.js at startup.
   //
@@ -852,6 +1011,9 @@ function buildOpencode(agents: Agent[]): void {
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function exportPiExtension(): string {
+  return assertedPolicySource("pi", buildPiExtensionSource());
+}
+function buildPiExtensionSource(): string {
   // Generate the Flow Agents pi extension.
   // pi extensions are auto-discovered from .pi/extensions/*.ts (needs project trust).
   // pi has no named-subagent registry; agents are not exported. The extension

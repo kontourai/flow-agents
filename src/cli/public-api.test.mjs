@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 import {
+  continuationAdapterCommandIdentity,
   defaultArtifactRootForRead,
   defaultCodexHome,
   durableFlowAgentsRoot,
@@ -16,6 +17,41 @@ import {
   flowAgentsArtifactRoot,
   KONTOURAI_DIR,
 } from "../../build/src/index.js";
+
+test("public API resolves the workflow driver's integrity-bound adapter identity", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-adapter-identity-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const adapter = path.join(root, "adapter.mjs");
+  const command = path.join(root, "adapter-command.json");
+  fs.writeFileSync(adapter, "process.stdout.write('{}');\n", { mode: 0o700 });
+  fs.writeFileSync(command, `${JSON.stringify({ argv: [adapter, "--profile", "builder"] })}\n`);
+
+  const first = continuationAdapterCommandIdentity(command);
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.equal(continuationAdapterCommandIdentity(command), first);
+
+  fs.appendFileSync(adapter, "\n");
+  assert.notEqual(continuationAdapterCommandIdentity(command), first);
+
+  fs.writeFileSync(command, `${JSON.stringify({ argv: ["node", adapter] })}\n`);
+  assert.throws(() => continuationAdapterCommandIdentity(command), /executable must be an absolute path/);
+
+  fs.writeFileSync(command, "{");
+  assert.throws(() => continuationAdapterCommandIdentity(command), SyntaxError);
+
+  const commandTarget = path.join(root, "adapter-command-target.json");
+  fs.writeFileSync(commandTarget, `${JSON.stringify({ argv: [adapter] })}\n`);
+  fs.rmSync(command);
+  fs.symlinkSync(commandTarget, command);
+  assert.throws(() => continuationAdapterCommandIdentity(command), /command file must be a regular file/);
+
+  fs.rmSync(command);
+  const adapterTarget = path.join(root, "adapter-target.mjs");
+  fs.renameSync(adapter, adapterTarget);
+  fs.symlinkSync(adapterTarget, adapter);
+  fs.writeFileSync(command, `${JSON.stringify({ argv: [adapter] })}\n`);
+  assert.throws(() => continuationAdapterCommandIdentity(command), /executable must be a regular file/);
+});
 
 test("public API exports local artifact root helpers", () => {
   const cwd = path.resolve("/tmp/flow-agents-public-api");
@@ -38,7 +74,7 @@ test("public API retains the documented native-host compatibility surface", asyn
     "pauseBuilderFlowSession", "resumeBuilderFlowSession",
     "cancelBuilderFlowSession", "archiveBuilderFlowSession",
     "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
-    "ContinuationAdapterTimeoutError",
+    "ContinuationAdapterTimeoutError", "continuationAdapterCommandIdentity",
     "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
   ]) {
     assert.equal(typeof lib[name], "function", `${name} must remain package-root exported`);

@@ -1,0 +1,8 @@
+{
+  "not_installed": { "installed": false, "enabled": false, "supported_contract_versions": ["1.0"], "capabilities": ["standard_views"] },
+  "disabled": { "installed": true, "enabled": false, "supported_contract_versions": ["1.0"], "capabilities": ["standard_views"] },
+  "standard_views_only": { "installed": true, "enabled": true, "supported_contract_versions": ["1.0"], "capabilities": ["standard_views"] },
+  "mcp_apps_full": { "installed": true, "enabled": true, "supported_contract_versions": ["1.0"], "capabilities": ["standard_views", "mcp_apps_resource_bridge", "resource.open", "export.local", "proposal.review"] },
+  "missing_standard_views": { "installed": true, "enabled": true, "supported_contract_versions": ["1.0"], "capabilities": ["mcp_apps_resource_bridge"] },
+  "unsupported_contract_version": { "installed": true, "enabled": true, "supported_contract_versions": [], "capabilities": ["standard_views"] }
+}

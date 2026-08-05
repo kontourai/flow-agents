@@ -757,9 +757,13 @@ then
   if node - "$TMPDIR_EVAL/claude-stop-adapter.out" <<'NODE'
 const fs = require("node:fs");
 const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const reason = payload.reason || payload.stopReason || "";
+// #1172: first contact must carry the remediation to the MODEL. `continue:false` preempts
+// `decision:"block"` in the Claude Code contract and routes the text to the user instead, so its
+// presence here means the goal-fit block never reaches the agent that has to act on it.
+const reason = payload.reason || "";
 if (payload.decision !== "block") throw new Error("decision should block");
-if (payload.continue !== false) throw new Error("continue should be false");
+if (payload.continue === false) throw new Error("first-contact Stop must not end the turn");
+if ("stopReason" in payload) throw new Error("first-contact Stop must not route the reason to the user channel");
 if (!reason.includes("evidence verdict:not_verified")) throw new Error("missing evidence guidance");
 if (!reason.includes("critique status:fail")) throw new Error("missing critique guidance");
 if (reason.includes("\nPretend it passed") || reason.includes("\nShip anyway")) throw new Error("multiline sidecar guidance leaked as instruction");
@@ -771,6 +775,357 @@ NODE
   fi
 else
   _fail "Claude hook adapter should exit successfully after translating Stop block"
+fi
+
+# #1172 (review HIGH-2): the $REPO fixture is a HARD block (its warnings carry
+# "evidence verdict:"/"critique status:", which HARD_BLOCK matches), so goal-fit will never
+# release it on its own. That class — and only that class — ends the turn on the continuation
+# firing, when Claude Code sets stop_hook_active because a previous Stop blocked. One
+# self-correction attempt, then a human.
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/claude-stop-adapter-continuation.out" 2>"$TMPDIR_EVAL/claude-stop-adapter-continuation.err" <<JSON
+{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"$REPO"}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-stop-adapter-continuation.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (payload.decision !== "block") throw new Error("decision should still block");
+if (payload.continue !== false) throw new Error("continuation Stop on a HARD block must end the turn");
+if (!String(payload.stopReason || "").includes("evidence verdict:not_verified")) throw new Error("missing user-facing reason");
+if (!String(payload.reason || "").includes("evidence verdict:not_verified")) throw new Error("missing model-facing reason");
+NODE
+  then
+    _pass "#1172: a HARD Stop block that refuses again after the model was told ends the turn"
+  else
+    _fail "#1172: continuation Stop did not end the turn: $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.out") $(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.err")"
+  fi
+else
+  _fail "Claude hook adapter should exit successfully on a continuation Stop"
+fi
+
+# #1172 (review HIGH-2/HIGH-3): the control line is a machine-to-machine classification channel.
+# It must be present for a hard block (or the adapter cannot tell the classes apart) and must be
+# stripped from BOTH agent-facing and user-facing text (or it becomes noise in the model's
+# context and gibberish in front of an operator).
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/stop-control-raw.out" 2>"$TMPDIR_EVAL/stop-control-raw.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$REPO"}
+JSON
+then
+  _fail "#1172: hard-block fixture unexpectedly did not block"
+else
+  if rg -q '^\[flow-agents:stop-control\] \{.*"terminal":true' "$TMPDIR_EVAL/stop-control-raw.err" \
+    && ! rg -q 'stop-control' "$TMPDIR_EVAL/claude-stop-adapter-continuation.out" \
+    && ! rg -q 'stop-control' "$TMPDIR_EVAL/claude-stop-adapter.out"; then
+    _pass "#1172: the terminal control line is emitted by the hook and stripped by the adapter"
+  else
+    _fail "#1172: control-line emission/stripping is wrong: raw=$(cat "$TMPDIR_EVAL/stop-control-raw.err") adapter=$(cat "$TMPDIR_EVAL/claude-stop-adapter-continuation.out")"
+  fi
+fi
+
+# The literal is duplicated across the hook and the adapter lib on purpose (the hook ships a
+# byte-identical context/ mirror with a fixed lib subset). A one-sided rename would silently make
+# every hard block read as soft and never reach a human, so pin the parity here.
+if ROOT_ARG="$ROOT" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/stop-control-parity.err"
+const root = process.env.ROOT_ARG;
+const hook = require(root + "/scripts/hooks/stop-goal-fit.js");
+const lib = require(root + "/scripts/hooks/lib/stop-escalation.js");
+if (hook.STOP_CONTROL_PREFIX !== lib.STOP_CONTROL_PREFIX) {
+  throw new Error(`prefix drift: hook=${hook.STOP_CONTROL_PREFIX} lib=${lib.STOP_CONTROL_PREFIX}`);
+}
+NODE
+then
+  _pass "#1172: stop-goal-fit.js and stop-escalation.js agree on the control-line literal"
+else
+  _fail "#1172: control-line literal drifted between hook and adapter lib: $(cat "$TMPDIR_EVAL/stop-control-parity.err")"
+fi
+
+# ─── #1172 review HIGH-2: a SOFT block must survive to goal-fit's OWN release valve ──────────
+#
+# The regression this locks: fencing every Stop on stop_hook_active truncated the documented
+# max-blocks valve (default 3) to ~2 and made the gate's own promise to the operator — "after 3
+# identical blocks I stop blocking and hand this to you" — false. A soft block must therefore be
+# refused, and refused again, with stop_hook_active TRUE throughout, and only then release.
+SOFT_REPO="$TMPDIR_EVAL/soft-valve-repo"
+SOFT_SLUG="soft-valve-demo"
+# Filename assembled, not spelled: the repo's own config-protection hook refuses an interpreter
+# invocation or redirect that names a sidecar file literally (see test_stop_gate_actor_scoped
+# _completion.sh's SIDECAR_STATE_FILENAME for the same dodge).
+SOFT_STATE_FILENAME="$(printf 'state.%s' json)"
+mkdir -p "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG"
+printf '# Test Repo\n' > "$SOFT_REPO/AGENTS.md"
+cat > "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG/$SOFT_SLUG--deliver.md" <<MARKDOWN
+# ${SOFT_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+Ordinary unfinished work: an artifact-status gap, nothing HARD_BLOCK matches.
+MARKDOWN
+cat > "$SOFT_REPO/.kontourai/flow-agents/$SOFT_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${SOFT_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${SOFT_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$SOFT_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$SOFT_SLUG" ACTOR_ARG="soft-valve-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+soft_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_ACTOR="soft-valve-actor"
+    printf '{"hook_event_name":"Stop","stop_hook_active":true,"cwd":"%s"}' "$SOFT_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+
+SOFT_1="$(soft_stop)"
+SOFT_2="$(soft_stop)"
+SOFT_3="$(soft_stop)"
+if node - "$SOFT_1" "$SOFT_2" "$SOFT_3" <<'NODE'
+const [, , first, second, third] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(first), p(second), p(third)];
+if (a.decision !== "block" || a.continue === false) throw new Error("soft block 1 must refuse without ending the turn");
+if (b.decision !== "block" || b.continue === false) throw new Error("soft block 2 must refuse without ending the turn — this is the valve the adapter fence used to truncate");
+if (c.decision === "block") throw new Error("soft block 3 must be goal-fit's own release, not another refusal");
+if (c.continue !== true) throw new Error("the released Stop must let the turn continue");
+if (!String(a.reason || "").includes("after 3 identical blocks I stop blocking")) throw new Error("gate message must still promise the valve");
+NODE
+then
+  _pass "#1172: a SOFT block runs its full 3-block course to goal-fit's own release, even with stop_hook_active set"
+else
+  _fail "#1172: soft-block valve was truncated: 1=$SOFT_1 2=$SOFT_2 3=$SOFT_3"
+fi
+
+# ─── #1172 review HIGH-3: the backstop bounds a gate that never releases ─────────────────────
+#
+# stop_hook_active is observed in live Claude Code payloads but is no longer listed in the
+# published hooks reference. If it disappears, the marker path above never fires and a
+# non-releasable block would re-prompt the model indefinitely with no human visibility. The
+# adapter's own consecutive-block counter is the floor under that, and under any future hook
+# whose own release valve fails.
+#
+# Simulated exactly: a gate that keeps blocking (its own valve pushed out of reach via
+# FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS) and a payload carrying NO stop_hook_active at all. Its own
+# repo, because this file exports FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED at the top — every
+# adapter invocation here therefore files under the same "unresolved" streak bucket, and sharing
+# $REPO with the blocking tests above would start this one mid-count.
+BACKSTOP_REPO="$TMPDIR_EVAL/backstop-repo"
+BACKSTOP_SLUG="backstop-demo"
+mkdir -p "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG"
+printf '# Test Repo\n' > "$BACKSTOP_REPO/AGENTS.md"
+cat > "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG/$BACKSTOP_SLUG--deliver.md" <<MARKDOWN
+# ${BACKSTOP_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+A gate that keeps refusing and never releases.
+MARKDOWN
+cat > "$BACKSTOP_REPO/.kontourai/flow-agents/$BACKSTOP_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${BACKSTOP_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${BACKSTOP_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$BACKSTOP_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$BACKSTOP_SLUG" ACTOR_ARG="backstop-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+backstop_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS="100"
+    export FLOW_AGENTS_STOP_MAX_BLOCKS="3"
+    printf '{"hook_event_name":"Stop","cwd":"%s"}' "$BACKSTOP_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+BACK_1="$(backstop_stop)"
+BACK_2="$(backstop_stop)"
+BACK_3="$(backstop_stop)"
+if node - "$BACK_1" "$BACK_2" "$BACK_3" <<'NODE'
+const [, , first, second, third] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(first), p(second), p(third)];
+for (const [i, out] of [a, b].entries()) {
+  if (out.decision !== "block") throw new Error(`block ${i + 1} should still block`);
+  if (out.continue === false) throw new Error(`block ${i + 1} must not end the turn before the backstop threshold`);
+}
+if (c.decision !== "block") throw new Error("the backstop escalates a refusal; it never stops being one");
+if (c.continue !== false) throw new Error("the threshold-th consecutive blocking Stop must end the turn with no runtime signal at all");
+if (!String(c.reason || "").includes("blocked 3 times in a row")) throw new Error("the escalation must say why it stopped asking");
+NODE
+then
+  _pass "#1172: the adapter's consecutive-block backstop ends the turn without stop_hook_active or a marker"
+else
+  _fail "#1172: backstop did not bound the no-signal case: 1=$BACK_1 2=$BACK_2 3=$BACK_3"
+fi
+
+if [[ -d "$BACKSTOP_REPO/.kontourai/flow-agents/.stop-escalation" ]]; then
+  _pass "#1172: the Stop-block streak is stored per actor under the existing artifact root"
+else
+  _fail "#1172: no Stop-block streak record was written under the artifact root"
+fi
+
+# A Stop that does NOT block clears the streak: the counter is CONSECUTIVE blocks, so a cleared
+# obligation must not leave the next unrelated block one strike from a forced turn-end.
+if FLOW_AGENTS_GOAL_FIT_MODE=off printf '{"hook_event_name":"Stop","cwd":"%s"}' "$BACKSTOP_REPO" \
+  | FLOW_AGENTS_GOAL_FIT_MODE=off node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default >/dev/null 2>&1; then
+  BACK_AFTER_CLEAR="$(backstop_stop)"
+  if node - "$BACK_AFTER_CLEAR" <<'NODE'
+const out = JSON.parse(process.argv[2].trim().split("\n").pop());
+if (out.continue === false) throw new Error("a non-blocking Stop must reset the consecutive-block streak");
+NODE
+  then
+    _pass "#1172: a non-blocking Stop resets the consecutive-block streak"
+  else
+    _fail "#1172: streak survived a non-blocking Stop: $BACK_AFTER_CLEAR"
+  fi
+else
+  _fail "#1172: the non-blocking Stop probe did not exit cleanly"
+fi
+
+# ─── #1172 review follow-up: a SessionStart must reset the consecutive-block streak ──────────
+#
+# The invariant is "a new session must not inherit the previous one's Stop strikes". Verification
+# of 5fd7028b found it had no test power: deleting the clearStopBlocks call on the adapter's
+# SessionStart path broke nothing, while the latent regression is real and reproducible — exhaust
+# the backstop, start a new session, and its very FIRST Stop reports "blocked 6 times in a row"
+# and ends the turn immediately, with the operator never seeing a first-contact refusal.
+#
+# Driven through the REAL adapter end to end, because the defect lives in the adapter's wiring
+# (which store key it clears, and on which event), not in the counter the lib unit tests cover.
+# Own repo, so the streak starts clean regardless of what the tests above left behind: the store
+# is rooted at the payload cwd's artifact root, so a distinct fixture repo is a distinct store.
+SESSION_RESET_REPO="$TMPDIR_EVAL/session-reset-repo"
+SESSION_RESET_SLUG="session-reset-demo"
+mkdir -p "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG"
+printf '# Test Repo\n' > "$SESSION_RESET_REPO/AGENTS.md"
+cat > "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG/$SESSION_RESET_SLUG--deliver.md" <<MARKDOWN
+# ${SESSION_RESET_SLUG}
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: executing
+type: deliver
+
+## Plan
+
+A gate that keeps refusing, so only the backstop can end a turn here.
+MARKDOWN
+cat > "$SESSION_RESET_REPO/.kontourai/flow-agents/$SESSION_RESET_SLUG/$SOFT_STATE_FILENAME" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "${SESSION_RESET_SLUG}",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Fixture next-action summary for ${SESSION_RESET_SLUG}." }
+}
+JSON
+CP_HELPER_ARG="$ROOT/scripts/hooks/lib/current-pointer.js" FLOW_AGENTS_DIR_ARG="$SESSION_RESET_REPO/.kontourai/flow-agents" \
+  SLUG_ARG="$SESSION_RESET_SLUG" ACTOR_ARG="session-reset-actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, {
+  schema_version: '1.0',
+  active_slug: process.env.SLUG_ARG,
+  artifact_dir: process.env.SLUG_ARG,
+  updated_at: '2026-08-03T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+});
+NODE
+
+# One blocking Stop through the real adapter. No stop_hook_active at all, and the gate's own
+# release valve pushed out of reach, so the ONLY thing that can end a turn here is the backstop —
+# which is what makes the assertions below read purely on the counter.
+session_reset_stop() {
+  (
+    unset FLOW_AGENTS_GOAL_FIT_RECHECK FLOW_AGENTS_GOAL_FIT_STRICT
+    export FLOW_AGENTS_GOAL_FIT_MODE="block"
+    export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS="100"
+    export FLOW_AGENTS_STOP_MAX_BLOCKS="2"
+    printf '{"hook_event_name":"Stop","cwd":"%s"}' "$SESSION_RESET_REPO" \
+      | node "$ROOT/scripts/hooks/claude-hook-adapter.js" Stop stop:goal-fit stop-goal-fit.js default
+  )
+}
+
+RESET_BEFORE_1="$(session_reset_stop)"
+RESET_BEFORE_2="$(session_reset_stop)"
+
+# The session boundary itself, through the same adapter binary a real SessionStart runs.
+printf '{"hook_event_name":"SessionStart","source":"startup","cwd":"%s"}' "$SESSION_RESET_REPO" \
+  | node "$ROOT/scripts/hooks/claude-hook-adapter.js" SessionStart session:workflow-steering workflow-steering.js default \
+  >"$TMPDIR_EVAL/session-reset-boundary.out" 2>"$TMPDIR_EVAL/session-reset-boundary.err"
+
+RESET_AFTER="$(session_reset_stop)"
+
+if node - "$RESET_BEFORE_1" "$RESET_BEFORE_2" "$RESET_AFTER" <<'NODE'
+const [, , before1, before2, after] = process.argv;
+const p = (raw) => JSON.parse(raw.trim().split("\n").pop());
+const [a, b, c] = [p(before1), p(before2), p(after)];
+
+// Preconditions: the backstop really did exhaust, or the reset below proves nothing.
+if (a.continue === false) throw new Error("setup: the first Stop should not have ended the turn");
+if (b.continue !== false) throw new Error("setup: the backstop should have exhausted on the second Stop");
+if (!String(b.reason || "").includes("blocked 2 times in a row")) throw new Error("setup: the second Stop should carry the backstop escalation note");
+
+// The invariant: the first Stop of the NEW session is a first contact again.
+if (c.decision !== "block") throw new Error("the gate must still refuse after a SessionStart");
+if (c.continue === false) throw new Error("a SessionStart must reset the streak: the new session's first Stop ended the turn instead of handing the reason to the model");
+if (/blocked \d+ times in a row/.test(String(c.reason || ""))) {
+  throw new Error(`a SessionStart must reset the streak: the new session's first Stop inherited a count -> ${String(c.reason).match(/blocked \d+ times in a row/)[0]}`);
+}
+NODE
+then
+  _pass "#1172: a SessionStart resets the consecutive-block streak, so a new session's first Stop is a first contact"
+else
+  _fail "#1172: Stop strikes leaked across a SessionStart boundary: before1=$RESET_BEFORE_1 before2=$RESET_BEFORE_2 after=$RESET_AFTER"
 fi
 
 if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true node "$ROOT/scripts/hooks/codex-hook-adapter.js" stop:goal-fit stop-goal-fit.js standard,strict >"$TMPDIR_EVAL/codex-stop-adapter.out" 2>"$TMPDIR_EVAL/codex-stop-adapter.err" <<JSON
@@ -2255,12 +2610,12 @@ node - "$ROOT/scripts/hooks/stop-goal-fit.js" <<'NODEEOF' 2>"$TMPDIR_EVAL/hardbl
 const fs = require('fs');
 const file = process.argv[2];
 let src = fs.readFileSync(file, 'utf8');
-const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
+const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)|tests-evidence scope divergence \\(blocking\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 if (!src.includes(needle)) {
   process.stderr.write('mutation: HARD_BLOCK NOT_VERIFIED (ambiguous) pattern not found — source pattern drifted, cannot mutation-test\n');
   process.exit(1);
 }
-const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
+const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|tests-evidence scope divergence \\(blocking\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 src = src.split(needle).join(mutated);
 fs.writeFileSync(file, src);
 NODEEOF
@@ -3124,6 +3479,588 @@ elif [[ "$?" -eq 2 ]] && grep -q 'max-blocks reached but the block' "$TMPDIR_EVA
   _pass "nonordinary FULL_BLOCK cannot burn through max-block release"
 else
   _fail "nonordinary FULL_BLOCK did not remain hard after max blocks: $(cat "$TMPDIR_EVAL/authority-hard-block-repeat.err")"
+fi
+
+# --- #1171: tests-evidence scope divergence (narrowed command vs declared suite) -------------
+#
+# The deterministic narrowing hole: a tests-shaped claim naming `npx vitest run <one file>`
+# satisfies every predicate that guards publish (captured, exit 0, re-runnable) while the
+# repo's DECLARED suite is never re-checked. Both emission sites are covered here — the
+# capture-log cross-reference shortcut (the claimed command WAS captured, passing) and the
+# trusted-backstop live re-run (never captured, re-run passes).
+#
+# Contract under test:
+#   1. narrowed + undisclosed         -> visible divergence line
+#   2. default severity is warn       -> the line matches NEITHER HARD_BLOCK nor FULL_BLOCK
+#   3. FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block -> same finding hard-blocks (exit 2)
+#   4. disclosed narrowing            -> clean, even under the escalation opt-in
+#   5. declared-suite command         -> clean (no false positive on honest full-suite claims)
+echo ""
+echo "--- #1171: tests-evidence scope divergence (narrowed test command vs declared suite) ---"
+
+SCOPE_REPO="$TMPDIR_EVAL/scope-divergence/repo"
+SCOPE_DIR="$SCOPE_REPO/.kontourai/flow-agents/narrowed-tests-task"
+mkdir -p "$SCOPE_DIR"
+printf '# Test Repo\n' > "$SCOPE_REPO/AGENTS.md"
+# The repo DECLARES a full test suite -- this is what the narrowed claim is measured against.
+# Without a declared target the check stays silent (we never invent a suite to diverge from).
+printf '%s\n' '{ "name": "scope-fixture", "version": "1.0.0", "scripts": { "test": "vitest run" } }' > "$SCOPE_REPO/package.json"
+
+cat > "$SCOPE_DIR/narrowed-tests-task--deliver.md" <<'MARKDOWN'
+# Narrowed tests task
+
+branch: main
+worktree: main
+created: 2026-08-02
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Goal Fit Gate
+- [x] acceptance verified
+
+## Verification Report
+
+Build: PASS
+
+### Verdict: PASS
+MARKDOWN
+
+# Terminal (delivered) session: only HARD_BLOCK signals block here, so a default-severity
+# divergence line provably does not block, and the escalated one provably does.
+write_json_file "$SCOPE_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "narrowed-tests-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-02T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+write_json_file "$SCOPE_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "narrowed-tests-task.tests-evidence",
+      "subjectId": "narrowed-tests-task/tests-evidence",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-02T00:00:00Z",
+      "updatedAt": "2026-08-02T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:narrowed-tests-task.tests-evidence",
+      "claimId": "narrowed-tests-task.tests-evidence",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-02T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+# The narrowed command WAS captured and genuinely passed -- this is the capture-log shortcut
+# site, where the claim is otherwise accepted as "satisfied deterministically".
+write_json_file "$SCOPE_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npx vitest run test/one-trivial.test.ts","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-02T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-narrowed.out" 2>"$TMPDIR_EVAL/scope-narrowed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_narrowed_status=0
+else
+  scope_narrowed_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-narrowed.err"; then
+  _pass "#1171: a narrowed, undisclosed tests-evidence claim produces a visible scope-divergence finding"
+else
+  _fail "#1171: no scope-divergence finding for a narrowed tests-evidence claim: exit=$scope_narrowed_status $(cat "$TMPDIR_EVAL/scope-narrowed.out" "$TMPDIR_EVAL/scope-narrowed.err")"
+fi
+
+# Default severity is warn: the finding is visible but blocks nothing (the #1048 recipe
+# institutionalized narrowed commands -- existing green flows must stay green).
+if [[ "$scope_narrowed_status" -eq 0 ]] && ! grep -q 'scope divergence (blocking)' "$TMPDIR_EVAL/scope-narrowed.err"; then
+  _pass "#1171: the default scope-divergence severity is warn -- visible, non-blocking (exit 0)"
+else
+  _fail "#1171: the default scope-divergence severity blocked the stop: exit=$scope_narrowed_status $(cat "$TMPDIR_EVAL/scope-narrowed.err")"
+fi
+
+# Escalation opt-in: the SAME finding becomes a hard block.
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-escalated.out" 2>"$TMPDIR_EVAL/scope-escalated.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_escalated_status=0
+else
+  scope_escalated_status=$?
+fi
+
+if [[ "$scope_escalated_status" -eq 2 ]] && grep -q 'tests-evidence scope divergence (blocking)' "$TMPDIR_EVAL/scope-escalated.err"; then
+  _pass "#1171: FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block escalates the same finding to a hard block (exit 2)"
+else
+  _fail "#1171: the escalation opt-in did not hard-block a narrowed claim: exit=$scope_escalated_status $(cat "$TMPDIR_EVAL/scope-escalated.out" "$TMPDIR_EVAL/scope-escalated.err")"
+fi
+
+# Disclosed narrowing reconciles clean -- narrowing is legitimate when it is DECLARED in the
+# bundle rather than inferred as full coverage. Asserted under the escalation opt-in, so this
+# proves the disclosure clears the finding rather than the mode merely being off.
+python3 - "$SCOPE_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+bundle["claims"][0]["metadata"]["evidence_scope"] = {
+    "narrowed": True,
+    "reason": "focused evidence lane: only the touched suite is in scope for this slice",
+}
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-disclosed.out" 2>"$TMPDIR_EVAL/scope-disclosed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_disclosed_status=0
+else
+  scope_disclosed_status=$?
+fi
+
+if [[ "$scope_disclosed_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-disclosed.err"; then
+  _pass "#1171: a DISCLOSED narrowing (claim metadata.evidence_scope) reconciles clean even under the escalation opt-in"
+else
+  _fail "#1171: a disclosed narrowing was still flagged: exit=$scope_disclosed_status $(cat "$TMPDIR_EVAL/scope-disclosed.out" "$TMPDIR_EVAL/scope-disclosed.err")"
+fi
+
+# Regression guard: an honest full-suite claim (the declared command itself) is never flagged.
+python3 - "$SCOPE_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+del bundle["claims"][0]["metadata"]["evidence_scope"]
+bundle["claims"][0]["fieldOrBehavior"] = "npm run test"
+bundle["evidence"][0]["excerptOrSummary"] = "npm run test"
+bundle["evidence"][0]["execution"]["label"] = "npm run test"
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+write_json_file "$SCOPE_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npm run test","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-02T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-fullsuite.out" 2>"$TMPDIR_EVAL/scope-fullsuite.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_REPO"}
+JSON
+then
+  scope_fullsuite_status=0
+else
+  scope_fullsuite_status=$?
+fi
+
+if [[ "$scope_fullsuite_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-fullsuite.err"; then
+  _pass "#1171: a claim naming the DECLARED suite is never flagged (no false positive on honest full-suite evidence)"
+else
+  _fail "#1171: a declared-suite claim was flagged as narrowed: exit=$scope_fullsuite_status $(cat "$TMPDIR_EVAL/scope-fullsuite.out" "$TMPDIR_EVAL/scope-fullsuite.err")"
+fi
+
+# Second emission site: the TRUSTED BACKSTOP live re-run. The claimed command was never
+# captured, so the backstop re-runs it -- and re-running a narrowed command re-confirms only
+# the subset. This is the exact path the issue names ("both backstops re-run the narrowed
+# command, which re-passes"). `node --test <file>` is a real, fast, hermetic narrowed run.
+SCOPE_BS_REPO="$TMPDIR_EVAL/scope-divergence-backstop/repo"
+SCOPE_BS_DIR="$SCOPE_BS_REPO/.kontourai/flow-agents/backstop-narrow-task"
+mkdir -p "$SCOPE_BS_DIR" "$SCOPE_BS_REPO/tests"
+printf '# Test Repo\n' > "$SCOPE_BS_REPO/AGENTS.md"
+printf '%s\n' '{ "name": "scope-backstop-fixture", "version": "1.0.0", "scripts": { "test": "node --test tests/" } }' > "$SCOPE_BS_REPO/package.json"
+printf "import { test } from 'node:test';\ntest('trivial', () => {});\n" > "$SCOPE_BS_REPO/tests/one.test.mjs"
+
+cat > "$SCOPE_BS_DIR/backstop-narrow-task--deliver.md" <<'MARKDOWN'
+# Backstop narrowed task
+
+branch: main
+worktree: main
+created: 2026-08-02
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_BS_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-02T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+write_json_file "$SCOPE_BS_DIR/acceptance.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "criteria": [
+    {
+      "id": "tests-evidence",
+      "description": "Tests pass.",
+      "status": "pass",
+      "evidence_refs": [
+        { "kind": "command", "excerpt": "node --test $SCOPE_BS_REPO/tests/one.test.mjs", "summary": "Focused single-file run." }
+      ]
+    }
+  ],
+  "goal_fit": {"status": "pass", "summary": "Focused suite verified."}
+}
+JSON
+
+write_json_file "$SCOPE_BS_DIR/evidence.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "backstop-narrow-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-evidence",
+      "kind": "command",
+      "status": "pass",
+      "command": "node --test $SCOPE_BS_REPO/tests/one.test.mjs",
+      "summary": "Focused single-file run."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+# No command-log.jsonl -- forces the trusted-backstop re-run path.
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-backstop.out" 2>"$TMPDIR_EVAL/scope-backstop.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_BS_REPO"}
+JSON
+then
+  scope_backstop_status=0
+else
+  scope_backstop_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-backstop.err" \
+  && ! grep -q 'caught false-completion' "$TMPDIR_EVAL/scope-backstop.err"; then
+  _pass "#1171: the trusted-backstop re-run site also reports narrowing -- a re-passing narrowed command is not silent coverage"
+else
+  _fail "#1171: the backstop re-run site did not report narrowing: exit=$scope_backstop_status $(cat "$TMPDIR_EVAL/scope-backstop.out" "$TMPDIR_EVAL/scope-backstop.err")"
+fi
+
+# --- #1171 review finding 1: the backstop actually re-ran the FULL declared suite ----------
+#
+# resolveTrustedCommand source (b) — the declared manifest target — runs the repo's WHOLE
+# suite. Reporting "the declared suite was not re-run" there is simply false, and under the
+# escalation opt-in it hard-blocked a session the backstop itself had just fully verified.
+# The finding must be bound to what was ACTUALLY EXECUTED, not to the claimed command text.
+#
+# Fixture shape (from the review's live repro): package.json scripts.test = "node --test .",
+# an uncaptured narrow `node --test <file>` claim, and NO acceptance.json — so
+# resolveTrustedCommand falls past (a) to (b) and executes the declared suite. The shipped
+# cases above only exercise trusted.source === 'acceptance'.
+echo ""
+echo "--- #1171 (review finding 1): no divergence when the backstop re-ran the DECLARED suite ---"
+
+SCOPE_MF_REPO="$TMPDIR_EVAL/scope-divergence-manifest/repo"
+SCOPE_MF_DIR="$SCOPE_MF_REPO/.kontourai/flow-agents/manifest-backstop-task"
+mkdir -p "$SCOPE_MF_DIR" "$SCOPE_MF_REPO/tests"
+printf '# Test Repo\n' > "$SCOPE_MF_REPO/AGENTS.md"
+# Declared suite is bare `node --test` (auto-discovery = the WHOLE suite, unmistakably not a
+# narrowed invocation). It must genuinely PASS, so that a non-zero exit below can only mean
+# the false-narrowing block, never an incidentally red fixture suite.
+printf '%s\n' '{ "name": "scope-manifest-fixture", "version": "1.0.0", "scripts": { "test": "node --test" } }' > "$SCOPE_MF_REPO/package.json"
+printf "import { test } from 'node:test';\ntest('trivial', () => {});\n" > "$SCOPE_MF_REPO/tests/one.test.mjs"
+
+cat > "$SCOPE_MF_DIR/manifest-backstop-task--deliver.md" <<'MARKDOWN'
+# Manifest backstop task
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_MF_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "manifest-backstop-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+# NO acceptance.json on purpose: source (a) must not resolve, so the backstop falls through
+# to (b) and runs the repo's declared `npm run test --silent`.
+write_json_file "$SCOPE_MF_DIR/evidence.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "manifest-backstop-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-evidence",
+      "kind": "command",
+      "status": "pass",
+      "command": "node --test $SCOPE_MF_REPO/tests/one.test.mjs",
+      "summary": "Focused single-file run claimed; the backstop re-runs the declared suite."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+# No command-log.jsonl -- forces the trusted-backstop path. Escalation opt-in ON: if the
+# false positive were still present this would hard-block (exit 2).
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-manifest.out" 2>"$TMPDIR_EVAL/scope-manifest.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_MF_REPO"}
+JSON
+then
+  scope_manifest_status=0
+else
+  scope_manifest_status=$?
+fi
+
+if [[ "$scope_manifest_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-manifest.err"; then
+  _pass "#1171 finding 1: a backstop re-run of the DECLARED manifest target reports no narrowing (it really did run the full suite)"
+else
+  _fail "#1171 finding 1 REGRESSION: the manifest-target backstop path reported a false narrowing: exit=$scope_manifest_status $(cat "$TMPDIR_EVAL/scope-manifest.out" "$TMPDIR_EVAL/scope-manifest.err")"
+fi
+
+# Proof the fixture actually reaches the backstop (and not a silent no-op): the same fixture
+# with the declared script REMOVED has no declared suite to compare against, which is also
+# clean -- so instead assert the backstop genuinely executed by pointing the declared script
+# at a command that fails, which must surface as a caught false-completion.
+printf '%s\n' '{ "name": "scope-manifest-fixture", "version": "1.0.0", "scripts": { "test": "node --test tests/does-not-exist.mjs" } }' > "$SCOPE_MF_REPO/package.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-manifest-ran.out" 2>"$TMPDIR_EVAL/scope-manifest-ran.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_MF_REPO"}
+JSON
+then
+  scope_manifest_ran_status=0
+else
+  scope_manifest_ran_status=$?
+fi
+if grep -q 'trusted backstop (manifest)' "$TMPDIR_EVAL/scope-manifest-ran.err"; then
+  _pass "#1171 finding 1 (fixture power): the clean case above really did traverse the manifest backstop, not a silent skip"
+else
+  _fail "#1171 finding 1 (fixture power): the fixture never reached the manifest backstop -- the clean result above proves nothing: exit=$scope_manifest_ran_status $(cat "$TMPDIR_EVAL/scope-manifest-ran.out" "$TMPDIR_EVAL/scope-manifest-ran.err")"
+fi
+
+# --- #1171 review finding 2: cross-claim disclosure laundering -----------------------------
+#
+# Bundle-sourced checks dedup by normalized COMMAND TEXT while a disclosure is a property of a
+# CLAIM. A single disclosed claim must not silence sibling claims naming the identical command.
+echo ""
+echo "--- #1171 (review finding 2): a disclosed claim cannot launder an undisclosed sibling ---"
+
+SCOPE_TWO_REPO="$TMPDIR_EVAL/scope-divergence-two-claims/repo"
+SCOPE_TWO_DIR="$SCOPE_TWO_REPO/.kontourai/flow-agents/two-claim-task"
+mkdir -p "$SCOPE_TWO_DIR"
+printf '# Test Repo\n' > "$SCOPE_TWO_REPO/AGENTS.md"
+printf '%s\n' '{ "name": "scope-two-claim-fixture", "version": "1.0.0", "scripts": { "test": "vitest run" } }' > "$SCOPE_TWO_REPO/package.json"
+
+cat > "$SCOPE_TWO_DIR/two-claim-task--deliver.md" <<'MARKDOWN'
+# Two claim task
+
+branch: main
+worktree: main
+created: 2026-08-03
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Verification Report
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$SCOPE_TWO_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "two-claim-task",
+  "status": "delivered",
+  "phase": "verification",
+  "updated_at": "2026-08-03T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+
+# TWO claims naming the IDENTICAL narrowed command. The DISCLOSED one is written first so it
+# is the claim that survives dedup -- the exact ordering that let it launder its sibling.
+write_json_file "$SCOPE_TWO_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "two-claim-task.disclosed-lane",
+      "subjectId": "two-claim-task/disclosed-lane",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-03T00:00:00Z",
+      "updatedAt": "2026-08-03T00:00:00Z",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "evidence_scope": { "narrowed": true, "reason": "focused evidence lane for the touched suite" }
+      }
+    },
+    {
+      "id": "two-claim-task.undisclosed-lane",
+      "subjectId": "two-claim-task/undisclosed-lane",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npx vitest run test/one-trivial.test.ts",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-08-03T00:00:00Z",
+      "updatedAt": "2026-08-03T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:two-claim-task.disclosed-lane",
+      "claimId": "two-claim-task.disclosed-lane",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-03T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    },
+    {
+      "id": "ev:two-claim-task.undisclosed-lane",
+      "claimId": "two-claim-task.undisclosed-lane",
+      "evidenceType": "test_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "npx vitest run test/one-trivial.test.ts",
+      "observedAt": "2026-08-03T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "npx vitest run test/one-trivial.test.ts", "exitCode": 0 }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+write_json_file "$SCOPE_TWO_DIR/command-log.jsonl" <<'JSONL'
+{"command":"npx vitest run test/one-trivial.test.ts","observedResult":"pass","exitCode":0,"capturedAt":"2026-08-03T00:00:00Z","source":"postToolUse-capture"}
+JSONL
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-two-mixed.out" 2>"$TMPDIR_EVAL/scope-two-mixed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_TWO_REPO"}
+JSON
+then
+  scope_two_mixed_status=0
+else
+  scope_two_mixed_status=$?
+fi
+
+if grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-two-mixed.err"; then
+  _pass "#1171 finding 2: an undisclosed claim still reports divergence when a disclosed sibling names the identical command"
+else
+  _fail "#1171 finding 2 REGRESSION: a disclosed claim laundered its undisclosed sibling: exit=$scope_two_mixed_status $(cat "$TMPDIR_EVAL/scope-two-mixed.out" "$TMPDIR_EVAL/scope-two-mixed.err")"
+fi
+
+if grep -q 'undisclosed-lane' "$TMPDIR_EVAL/scope-two-mixed.err"; then
+  _pass "#1171 finding 2: the warning names the UNDISCLOSED claim, not the disclosed sibling that won dedup"
+else
+  _fail "#1171 finding 2: the warning did not name the undisclosed claim: $(cat "$TMPDIR_EVAL/scope-two-mixed.err")"
+fi
+
+# Both claims disclosed -> clean (the disclosure path still works when it is honest).
+python3 - "$SCOPE_TWO_DIR/trust.bundle" << 'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+bundle = json.loads(p.read_text())
+for claim in bundle["claims"]:
+    claim["metadata"]["evidence_scope"] = {
+        "narrowed": True,
+        "reason": "focused evidence lane for the touched suite",
+    }
+tmp = p.with_name(p.name + ".write-tmp")
+tmp.write_text(json.dumps(bundle, indent=2))
+tmp.replace(p)
+PY
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+  >"$TMPDIR_EVAL/scope-two-all.out" 2>"$TMPDIR_EVAL/scope-two-all.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$SCOPE_TWO_REPO"}
+JSON
+then
+  scope_two_all_status=0
+else
+  scope_two_all_status=$?
+fi
+
+if [[ "$scope_two_all_status" -eq 0 ]] && ! grep -q 'tests-evidence scope divergence' "$TMPDIR_EVAL/scope-two-all.err"; then
+  _pass "#1171 finding 2: when EVERY claim naming the command is disclosed, the check is clean even under the escalation opt-in"
+else
+  _fail "#1171 finding 2: fully-disclosed sibling claims were still flagged: exit=$scope_two_all_status $(cat "$TMPDIR_EVAL/scope-two-all.out" "$TMPDIR_EVAL/scope-two-all.err")"
 fi
 
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then

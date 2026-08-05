@@ -15,6 +15,7 @@ import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
+import { createOpenCodeAdapter, type InstallationReceipt, type PortableAsset } from "@kontourai/conduit";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -633,6 +634,102 @@ function mergeInstallSettings(
   return merged;
 }
 
+type OpenCodeConfigBinding = {
+  visiblePath: string;
+  canonicalPath: string;
+  trustedSymlinkRoot?: string;
+  wasSymlink: boolean;
+};
+
+function opencodeGlobalConfigPath(dest: string): string {
+  const override = process.env["FLOW_AGENTS_USER_OPENCODE_CONFIG"];
+  return override ? path.resolve(override) : path.join(dest, "opencode.json");
+}
+
+function assertPrivateOpenCodeBackingRoot(rootPath: string): void {
+  const stat = fs.statSync(rootPath);
+  const currentUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (!stat.isDirectory()) throw new Error(`OpenCode config backing root is not a directory: ${rootPath}`);
+  if (currentUid !== undefined && stat.uid !== currentUid) throw new Error(`OpenCode config backing root is not owned by the current user: ${rootPath}`);
+  if ((stat.mode & 0o022) !== 0) throw new Error(`OpenCode config backing root is group- or world-writable: ${rootPath}`);
+}
+
+/**
+ * Bind a global OpenCode config link once, then write only its canonical file
+ * target. The target's parent is deliberately the sole trusted backing root
+ * passed to the ownership writer for direct Stow-style child links.
+ */
+function resolveOpenCodeConfigBinding(visiblePath: string): OpenCodeConfigBinding {
+  let visibleStat: fs.Stats;
+  try {
+    visibleStat = fs.lstatSync(visiblePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+    }
+    throw error;
+  }
+  if (!visibleStat.isSymbolicLink()) {
+    if (!visibleStat.isFile()) throw new Error(`existing OpenCode config is not a regular file: ${visiblePath}`);
+    return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+  }
+  let canonicalPath: string;
+  try {
+    canonicalPath = fs.realpathSync(visiblePath);
+  } catch (error) {
+    throw new Error(`OpenCode config symlink is not resolvable: ${visiblePath}: ${(error as Error).message}`);
+  }
+  if (!fs.lstatSync(canonicalPath).isFile()) throw new Error(`OpenCode config symlink target is not a regular file: ${visiblePath}`);
+  assertPrivateOpenCodeBackingRoot(path.dirname(canonicalPath));
+  return {
+    visiblePath,
+    canonicalPath,
+    trustedSymlinkRoot: path.dirname(canonicalPath),
+    wasSymlink: true,
+  };
+}
+
+function revalidateOpenCodeConfigBinding(binding: OpenCodeConfigBinding): void {
+  if (binding.wasSymlink) {
+    const stat = fs.lstatSync(binding.visiblePath);
+    if (!stat.isSymbolicLink()) throw new Error(`OpenCode config symlink changed during install: ${binding.visiblePath}`);
+    if (fs.realpathSync(binding.visiblePath) !== binding.canonicalPath) {
+      throw new Error(`OpenCode config symlink target changed during install: ${binding.visiblePath}`);
+    }
+  }
+  let canonicalStat: fs.Stats | undefined;
+  try {
+    canonicalStat = fs.lstatSync(binding.canonicalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!binding.wasSymlink && canonicalStat?.isSymbolicLink()) {
+    throw new Error(`OpenCode config path became a symlink during install: ${binding.canonicalPath}`);
+  }
+  if (canonicalStat && !canonicalStat.isFile()) {
+    throw new Error(`OpenCode config write target is not a regular file: ${binding.canonicalPath}`);
+  }
+}
+
+function writeJsonAtomic(target: string, value: unknown): void {
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.flow-agents-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`);
+  let mode = 0o600;
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`OpenCode config write target is not a regular file: ${target}`);
+    mode = stat.mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode });
+    fs.chmodSync(temp, mode);
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   return command
     .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
@@ -737,35 +834,99 @@ function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeK
   return skillNames;
 }
 
-function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[]): number {
-  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
-  let fileCount = 0;
-  const stage = (source: string, destinationRelative: string): void => {
-    const stat = fs.lstatSync(source);
-    if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
-    if (stat.isDirectory()) {
-      for (const name of fs.readdirSync(source).sort()) stage(path.join(source, name), path.join(destinationRelative, name));
-      return;
+function stageOpenCodeRuntimeAsset(source: string, destinationRelative: string, overlay: string): number {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    return fs.readdirSync(source).sort().reduce(
+      (count, name) => count + stageOpenCodeRuntimeAsset(path.join(source, name), path.join(destinationRelative, name), overlay),
+      0,
+    );
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const destination = path.join(overlay, destinationRelative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(destination, stat.mode & 0o777);
+  return 1;
+}
+
+function addOpenCodePortableAssets(
+  source: string,
+  destinationRelative: string,
+  kind: PortableAsset["kind"],
+  overlay: string,
+  assetSources: Map<string, string>,
+  assets: PortableAsset[],
+): void {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(source).sort()) {
+      addOpenCodePortableAssets(path.join(source, name), path.join(destinationRelative, name), kind, overlay, assetSources, assets);
     }
-    if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
-    const destination = path.join(overlay, destinationRelative);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
-    fs.chmodSync(destination, stat.mode & 0o777);
-    fileCount += 1;
-  };
+    return;
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const target = path.resolve(overlay, ...destinationRelative.split("/"));
+  const relative = path.relative(overlay, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`generated OpenCode asset has an unsafe destination: ${destinationRelative}`);
+  if (assetSources.has(target)) throw new Error(`generated OpenCode asset has a duplicate destination: ${destinationRelative}`);
+  assetSources.set(target, source);
+  assets.push({ id: destinationRelative, kind, content: fs.readFileSync(source, "utf8"), targetHint: destinationRelative });
+}
+
+async function stageOpenCodeConduitAssets(bundle: string, skillNames: string[], overlay: string): Promise<InstallationReceipt> {
+  const assetSources = new Map<string, string>();
+  const assets: PortableAsset[] = [];
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js", "hook", overlay, assetSources, assets);
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "agents"), "agents", "agent", overlay, assetSources, assets);
+  for (const skillName of skillNames) {
+    addOpenCodePortableAssets(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName), "skill", overlay, assetSources, assets);
+  }
+  const conduit = createOpenCodeAdapter({
+    resolveTarget: (asset) => asset.targetHint ? path.resolve(overlay, ...asset.targetHint.split("/")) : undefined,
+    write: (target, content) => {
+      const source = assetSources.get(target);
+      if (!source) throw new Error(`Conduit attempted to write an unbound OpenCode asset: ${target}`);
+      if (content !== fs.readFileSync(source, "utf8")) throw new Error(`Conduit content changed before staging: ${source}`);
+      const stat = fs.lstatSync(source);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content, { encoding: "utf8", flag: "wx" });
+      fs.chmodSync(target, stat.mode & 0o777);
+    },
+  });
+  const receipt = await conduit.install(assets);
+  if (receipt.skipped.length > 0 || receipt.installed.length !== assets.length) throw new Error("Conduit did not stage every required OpenCode asset");
+  return receipt;
+}
+
+function installOpenCodeOverlay(overlay: string, dest: string, metadata: string, trustedSymlinkRoot?: string): void {
+  const installerArgs = [path.join(root, "scripts", "install-owned-files.js"), overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata];
+  if (trustedSymlinkRoot) {
+    installerArgs.push(
+      "--trusted-symlink-root", trustedSymlinkRoot,
+      "--trusted-symlink-child", "plugins",
+      "--trusted-symlink-child", "agents",
+      "--trusted-symlink-child", "skills",
+    );
+  }
+  const result = spawnSync(process.execPath, installerArgs, { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+}
+
+async function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[], trustedSymlinkRoot?: string): Promise<number> {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
   try {
-    stage(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js");
-    stage(path.join(bundle, ".opencode", "agents"), "agents");
-    for (const skillName of skillNames) stage(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName));
-    for (const entry of runtimeSources) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
-    for (const entry of runtimeFiles) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
+    const receipt = await stageOpenCodeConduitAssets(bundle, skillNames, overlay);
+    let fileCount = 0;
+    for (const entry of [...runtimeSources, ...runtimeFiles]) {
+      fileCount += stageOpenCodeRuntimeAsset(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry), overlay);
+    }
     const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds });
-    const installer = path.join(root, "scripts", "install-owned-files.js");
-    const result = spawnSync(process.execPath, [installer, overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata], { encoding: "utf8" });
-    if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
-    return fileCount;
+    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds, conduit_receipt: receipt });
+    installOpenCodeOverlay(overlay, dest, metadata, trustedSymlinkRoot);
+    return fileCount + receipt.installed.length;
   } finally {
     fs.rmSync(overlay, { recursive: true, force: true });
   }
@@ -1024,15 +1185,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.mkdirSync(options.dest, { recursive: true });
       const runtimeRoot = path.join(options.dest, ".flow-agents", "runtime");
       managed["instructions"] = [path.join(runtimeRoot, "AGENTS.md")];
-      // The global opencode.json lives directly at dest/opencode.json.
-      const destConfigPath = path.join(options.dest, "opencode.json");
+      // Bind the host-visible config symlink before any host mutation. Its
+      // canonical target is the only config file we ever replace, while the
+      // host-visible config root remains the OpenCode discovery root.
+      const configBinding = resolveOpenCodeConfigBinding(opencodeGlobalConfigPath(options.dest));
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
       const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
       let existing: Record<string, unknown> = {};
-      if (fs.existsSync(destConfigPath)) {
+      if (fs.existsSync(configBinding.canonicalPath)) {
         try {
-          existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>;
+          existing = JSON.parse(fs.readFileSync(configBinding.canonicalPath, "utf8")) as Record<string, unknown>;
         } catch (error) {
           throw new Error(`existing OpenCode config is invalid JSON; refusing to replace it: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -1044,11 +1207,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       const managedInstructions = managed["instructions"] as string[];
       merged["instructions"] = [...new Set([...(existingInstructions as string[] | undefined ?? []), ...managedInstructions])];
-      const installedAssetCount = installOpencodeGlobalAssets(options.dest, bundle, runtimeSources, runtimeFiles, skillNames, options.activeKitIds ?? []);
-      const tmp = `${destConfigPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
-`, "utf8");
-      fs.renameSync(tmp, destConfigPath);
+      const installedAssetCount = await installOpencodeGlobalAssets(
+        options.dest,
+        bundle,
+        runtimeSources,
+        runtimeFiles,
+        skillNames,
+        options.activeKitIds ?? [],
+        configBinding.trustedSymlinkRoot,
+      );
+      revalidateOpenCodeConfigBinding(configBinding);
+      writeJsonAtomic(configBinding.canonicalPath, merged);
       // Stamp only after every required runtime asset and its content manifest exist.
       writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
       console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);

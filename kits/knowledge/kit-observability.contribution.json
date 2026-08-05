@@ -1,0 +1,27 @@
+{
+  "apiVersion": "flowagents.kontourai.io/v1alpha1",
+  "kind": "KitObservabilityContribution",
+  "metadata": { "name": "knowledge" },
+  "spec": {
+    "contract_version": "1.0",
+    "package_ref": "npm:@kontourai/flow-agents@5.5.0#kits/knowledge",
+    "projections": {
+      "run_summary": { "schema_ref": "https://kontourai.dev/schemas/knowledge/run-summary/1.0.json" },
+      "metric_series": { "schema_ref": "https://kontourai.dev/schemas/knowledge/metric-series/1.0.json" },
+      "grounded_narrative": { "schema_ref": "https://kontourai.dev/schemas/knowledge/grounded-narrative/1.0.json" },
+      "learning": { "schema_ref": "https://kontourai.dev/schemas/knowledge/learning/1.0.json" }
+    },
+    "authority_refs": {
+      "flow": "flowagents.kontourai.io/v1alpha1/WorkflowRun",
+      "surface": "surface.kontourai.io/v1alpha1/TrustBundle",
+      "runtime": "flowagents.kontourai.io/v1alpha1/RunCorrelationEnvelope"
+    },
+    "host": { "required_capabilities": ["standard_views"], "optional_capabilities": ["mcp_apps_resource_bridge"], "presentation": { "preferred": { "kind": "mcp_apps_resource_bridge", "resource": { "uri": "ui://flow-agents.kontourai.io/kits/knowledge/observability", "mime_type": "text/html;profile=mcp-app" }, "bridge": { "tool_name": "knowledge-observability", "visibility": ["model", "app"] } }, "fallback": { "kind": "standard_views", "source": "declared_projections" } } },
+    "data_policy": { "redaction": "declared", "retention": "kit_owned", "raw_source": "available" },
+    "operator_intents": [
+      { "intent": "open_resource", "label": "Open knowledge narrative", "required_capability": "resource.open", "target": { "authority": "runtime", "kind": "narrative" } },
+      { "intent": "review_proposal", "label": "Review knowledge proposal", "required_capability": "proposal.review", "target": { "authority": "surface", "kind": "proposal" } }
+    ],
+    "compatibility": { "unsupported_version": "diagnostic" }
+  }
+}
