@@ -158,7 +158,7 @@ const path = require('node:path');
 const dir = process.argv[2];
 const slug = path.basename(dir);
 fs.writeFileSync(path.join(dir, `${slug}--plan-work.md`), '# Plan\n\n- AC-1: Verify FlowDefinition producer evidence.\n', 'utf8');
-fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify({ schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'Verify FlowDefinition producer evidence.', status: 'pending', evidence_refs: [] }], goal_fit: { status: 'pending', summary: 'Fixture has not completed Goal Fit review.' } }, null, 2), 'utf8');
+fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify({ schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'Verify FlowDefinition producer evidence.', status: 'pending', evidence_refs: [{ kind: 'source', summary: 'Station planner captured a source placeholder that verification must replace.' }] }], goal_fit: { status: 'pending', summary: 'Fixture has not completed Goal Fit review.' } }, null, 2), 'utf8');
 NODE
 mkdir -p "$TMP/main-project/checks"
 cat > "$TMP/main-project/checks/check-flow-step.test.mjs" <<'JS'
@@ -270,10 +270,16 @@ const critiques = (bundle.claims || []).filter(c => c.metadata?.origin === 'crit
 if (critiques.length !== 1) throw new Error('expected one current clean critique, got ' + critiques.length);
 const criterion = (bundle.claims || []).find(c => c.metadata?.origin === 'acceptance' && c.metadata?.criterion?.id === 'AC-1');
 if (!criterion || criterion.value !== 'pass' || criterion.status !== 'verified') throw new Error('MISSING verified completed AC-1 criterion');
-console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; current clean critique and AC-1 verified');
+const suppliedRefs = criterion.metadata.criterion.evidence_refs;
+if (!Array.isArray(suppliedRefs) || suppliedRefs.length !== 1 || suppliedRefs[0]?.kind !== 'command' || suppliedRefs[0]?.excerpt !== '$TEST_COMMAND') throw new Error('AC-1 trust criterion did not retain the supplied complete command evidence');
+const planned = JSON.parse(fs.readFileSync('$SESSION_DIR/acceptance.json', 'utf8'));
+const plannedCriterion = planned.criteria?.find(c => c.id === 'AC-1');
+const plannedRefs = plannedCriterion?.evidence_refs;
+if (plannedCriterion?.status !== 'pending' || !Array.isArray(plannedRefs) || plannedRefs.length !== 1 || plannedRefs[0]?.kind !== 'source' || plannedRefs[0]?.summary !== 'Station planner captured a source placeholder that verification must replace.' || Object.keys(plannedRefs[0]).length !== 2) throw new Error('acceptance.json planning contract was repaired instead of retaining its incomplete Station-shaped source ref');
+console.log('builder.verify.tests: subjectType=' + declared.subjectType + ' status=' + declared.status + ' value=' + declared.value + '; trust AC-1 has supplied command evidence while acceptance.json retains its incomplete Station-shaped planning ref');
 " 2>&1 \
-  && _pass "bundle advances with a current clean critique plus completed AC-1" \
-  || _fail "bundle lacks declared tests evidence, current critique, or completed AC-1"
+  && _pass "public evidence verifies AC-1 in trust.bundle without repairing the incomplete planning ref" \
+  || _fail "bundle lacks supplied verified AC-1 evidence or acceptance.json no longer preserves the planning contract"
 
 # ─── TEST 4: tampered bundle at verify step BLOCKS ────────────────────────────
 echo ""
@@ -281,76 +287,145 @@ echo "=== 4. tamper-blocks: builder.verify.tests — tampered bundle triggers ga
 
 TAMPER_DIR="$TMP/tamper-verify"
 TAMPER_SLUG="tamper-verify-test"
-mkdir -p "$TAMPER_DIR"
+TAMPER_AROOT="$TAMPER_DIR/.kontourai/flow-agents"
+TAMPER_SESSION="$TAMPER_AROOT/$TAMPER_SLUG"
+mkdir -p "$TAMPER_SESSION"
+git -C "$TAMPER_DIR" init -q
+git -C "$TAMPER_DIR" config user.email flow-tamper@example.invalid
+git -C "$TAMPER_DIR" config user.name "Flow Tamper Eval"
+printf '.kontourai/\n' > "$TAMPER_DIR/.gitignore"
 printf '# Test repo\n' > "$TAMPER_DIR/AGENTS.md"
-mkdir -p "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG"
-printf 'Selected Work Item: local:%s\n' "$TAMPER_SLUG" > "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/$TAMPER_SLUG--pull-work.md"
+git -C "$TAMPER_DIR" add .gitignore AGENTS.md
+git -C "$TAMPER_DIR" commit -qm "seed tamper fixture"
+printf 'Selected Work Item: tamper:verify-test\n' > "$TAMPER_SESSION/$TAMPER_SLUG--pull-work.md"
 
-flow_agents_node "$WRITER" ensure-session \
-  --artifact-root "$TAMPER_DIR/.kontourai/flow-agents" \
-  --task-slug "$TAMPER_SLUG" \
-  --actor tamper-verify-actor \
+FLOW_AGENTS_ACTOR=tamper-verify-actor node "$ROOT/build/src/cli.js" workflow start \
+  --artifact-root "$TAMPER_AROOT" \
+  --flow builder.build \
+  --work-item tamper:verify-test \
+  --assignment-provider local-file \
   --title "Tamper verify test" \
   --summary "Testing tamper detection at verify step." \
-  --flow-id builder.build \
-  --timestamp "2026-06-01T02:00:00Z" >/dev/null 2>&1
+  --criterion "Tampered tests evidence blocks." >/dev/null 2>&1
 
-flow_agents_node "$WRITER" init-plan "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/$TAMPER_SLUG--deliver.md" \
-  --source-request "Test" --summary "Tamper test" \
-  --timestamp "2026-06-01T02:00:00Z" >/dev/null 2>&1
+printf '# Tamper plan\n' > "$TAMPER_SESSION/$TAMPER_SLUG--plan-work.md"
+printf '# Tamper delivery\n' > "$TAMPER_SESSION/$TAMPER_SLUG--deliver.md"
 
-flow_agents_node "$WRITER" advance-state "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG" \
+record_tamper_producer_evidence() {
+  local expectation="$1" artifact="$2"
+  FLOW_AGENTS_ACTOR=tamper-verify-actor node "$ROOT/build/src/cli.js" workflow evidence \
+    --session-dir "$TAMPER_SESSION" \
+    --status pass \
+    --expectation "$expectation" \
+    --summary "Tamper fixture records passing $expectation evidence." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$artifact\",\"summary\":\"Tamper fixture producer artifact.\"}" >/dev/null 2>&1
+}
+
+record_tamper_producer_evidence "pickup-probe-readiness" "$TAMPER_SESSION/$TAMPER_SLUG--pull-work.md"
+record_tamper_producer_evidence "probe-decisions-or-accepted-gaps" "$TAMPER_SESSION/$TAMPER_SLUG--pull-work.md"
+record_tamper_producer_evidence "implementation-plan" "$TAMPER_SESSION/$TAMPER_SLUG--plan-work.md"
+record_tamper_producer_evidence "implementation-scope" "$TAMPER_SESSION/$TAMPER_SLUG--deliver.md"
+
+# Re-establish the same actor's current-pointer after the public transactions;
+# the Stop hook deliberately ignores every other actor's session (#440).
+FLOW_AGENTS_ACTOR=tamper-verify-actor flow_agents_node "$WRITER" advance-state "$TAMPER_SESSION" \
   --status in_progress --phase verification \
   --summary "At verify." --next-action "Continue." \
   --flow-definition builder.build \
   --timestamp "2026-06-01T02:00:30Z" >/dev/null 2>&1
 
-# Write TAMPERED trust.bundle: stored verified, evidence passing=false
-python3 - "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/trust.bundle" << 'PY'
+mkdir -p "$TAMPER_DIR/checks"
+cat > "$TAMPER_DIR/checks/tamper-flow-step.test.mjs" <<'JS'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+test('the tamper fixture has a substantive passing command', () => {
+  assert.equal(1 + 1, 2);
+});
+JS
+
+# Create every reviewable byte before capturing the critique workspace snapshot.
+if ! tamper_critique_output="$(FLOW_AGENTS_ACTOR=tamper-reviewer node "$ROOT/build/src/cli.js" workflow critique \
+  --session-dir "$TAMPER_SESSION" \
+  --id "tamper-review" \
+  --verdict pass \
+  --summary "Fixture review is clean before evidence tampering." \
+  --artifact-ref "$TAMPER_SESSION/$TAMPER_SLUG--deliver.md" \
+  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the tamper fixture.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$TAMPER_SESSION/$TAMPER_SLUG--deliver.md\",\"summary\":\"Reviewed delivery artifact.\"}]}" 2>&1)"; then
+  _fail "tamper fixture could not record its clean critique: $tamper_critique_output"
+fi
+
+TAMPER_TEST_COMMAND="node --test checks/tamper-flow-step.test.mjs"
+TAMPER_CRITERION_JSON="$(node - "$TAMPER_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({
+  id: 'tampered-tests-evidence-blocks',
+  status: 'pass',
+  evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Runs the tamper fixture test.' }],
+}));
+NODE
+)"
+TAMPER_COMMAND_REF="$(node - "$TAMPER_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ kind: 'command', excerpt: command, summary: 'Runs the tamper fixture test.' }));
+NODE
+)"
+
+if ! tamper_evidence_output="$(FLOW_AGENTS_ACTOR=tamper-verify-actor node "$ROOT/build/src/cli.js" workflow evidence \
+  --session-dir "$TAMPER_SESSION" \
+  --status pass \
+  --expectation "tests-evidence" \
+  --summary "The untampered fixture test passes." \
+  --command "$TAMPER_TEST_COMMAND" \
+  --criterion-json "$TAMPER_CRITERION_JSON" \
+  --evidence-ref-json "$TAMPER_COMMAND_REF" 2>&1)"; then
+  _fail "tamper fixture could not record its passing tests evidence: $tamper_evidence_output"
+fi
+
+# Mutate one field in a writer-produced, schema-current bundle. The stored claim
+# and verified event remain untouched, so Surface must re-derive the mismatch.
+python3 - "$TAMPER_SESSION/trust.bundle" <<'PY'
 import json, sys
-bundle = {
-    "schemaVersion": 5,
-    "source": "flow-agents/workflow-sidecar",
-    "claims": [{
-        "id": "c1",
-        "subjectId": "tamper-verify-test/verify-tests",
-        "subjectType": "flow-step",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Tests pass",
-        "value": "pass",
-        "impactLevel": "high",
-        "status": "verified",
-        "createdAt": "2026-06-01T02:00:00Z",
-        "updatedAt": "2026-06-01T02:00:00Z"
-    }],
-    "evidence": [{
-        "id": "ev1",
-        "claimId": "c1",
-        "evidenceType": "test_output",
-        "method": "validation",
-        "sourceRef": "command-log.jsonl",
-        "excerptOrSummary": "tests FAILED",
-        "observedAt": "2026-06-01T02:00:00Z",
-        "collectedBy": "harness",
-        "passing": False,
-        "blocking": True
-    }],
-    "policies": [],
-    "events": [{
-        "id": "evt1",
-        "claimId": "c1",
-        "status": "verified",
-        "actor": "agent",
-        "method": "workflow-check",
-        "evidenceIds": ["ev1"],
-        "createdAt": "2026-06-01T02:00:00Z"
-    }]
-}
-json.dump(bundle, open(sys.argv[1], 'w'))
+path = sys.argv[1]
+bundle = json.load(open(path))
+claim = next(c for c in bundle['claims'] if c.get('metadata', {}).get('gate_claim', {}).get('expectation_id') == 'tests-evidence')
+evidence = next(e for e in bundle['evidence'] if e.get('claimId') == claim['id'])
+evidence['passing'] = False
+evidence['excerptOrSummary'] = 'tests FAILED after tampering'
+with open(path, 'w') as handle:
+    json.dump(bundle, handle)
 PY
 
+# Public tests evidence advances the canonical Flow beyond verify. This is a
+# corruption fixture, so place both persisted projections back at the protected
+# gate before invoking Stop; the bundle itself remains writer-produced apart
+# from the one deliberately tampered evidence field above.
+node - "$TAMPER_DIR/.kontourai/flow/runs/$TAMPER_SLUG/state.json" "$TAMPER_SESSION/state.json" "$TAMPER_AROOT" <<'NODE'
+const fs = require('node:fs');
+const [canonicalPath, sidecarPath, artifactRoot] = process.argv.slice(2);
+for (const path of [canonicalPath, sidecarPath]) {
+  const state = JSON.parse(fs.readFileSync(path, 'utf8'));
+  if (state.flow_run) state.flow_run.current_step = 'verify';
+  else state.current_step = 'verify';
+  fs.writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
+}
+const pointerPaths = [
+  `${artifactRoot}/current.json`,
+  ...fs.existsSync(`${artifactRoot}/current`)
+    ? fs.readdirSync(`${artifactRoot}/current`).map(name => `${artifactRoot}/current/${name}`)
+    : [],
+];
+for (const path of pointerPaths) {
+  const pointer = JSON.parse(fs.readFileSync(path, 'utf8'));
+  if (pointer.artifact_dir !== 'tamper-verify-test') continue;
+  pointer.active_step_id = 'verify';
+  fs.writeFileSync(path, `${JSON.stringify(pointer, null, 2)}\n`);
+}
+NODE
+
 set +e
-tamper_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
+tamper_out="$(FLOW_AGENTS_ACTOR=tamper-verify-actor \
+    FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
     node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$TAMPER_DIR\"}")"
 tamper_exit="$?"
 set -e

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { readJson } from "../lib/fs.js";
 import { parseKitFlowStepActions, workflowTriggerIdentifier } from "./action-metadata.js";
 import { validateActionRepositoryMetadata } from "./action-repository-validation.js";
+import { loadKitObservabilityContribution } from "../kit-observability-contract.js";
 export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowStepActions } from "./action-metadata.js";
 export type { KitFlowStepActionEntry, KitFlowStepArtifactBinding, KitFlowStepExpectationBinding } from "./action-metadata.js";
 
@@ -22,7 +23,7 @@ const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", 
 // agent_spawn_triggers declares perimeter trigger surfaces that spawn agent runs plus
 // their guard config (context/contracts/trigger-guards.md), and first_party is legacy
 // catalog/marketplace metadata. It does not grant runtime capability or steering privilege.
-const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers"]);
+const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers", "observability_contribution"]);
 
 export interface KitDependencyEntry {
   kit_id: string;
@@ -796,6 +797,13 @@ function validateAgentMetadata(kitDir: string, manifestPath: string, manifest: R
   for (const err of skillRoleResult.errors) errors.push(err);
   if ((manifest.skill_roles !== undefined || manifest.flow_step_actions !== undefined) && skillRoleResult.errors.length === 0) {
     errors.push(...validateActionRepositoryMetadata({ kitDir, manifestPath, manifest, actions: flowStepActionResult.entries, skillRoles: skillRoleResult.entries }));
+  }
+  const observability = loadKitObservabilityContribution(kitDir, manifest);
+  if (observability.status === "invalid") {
+    for (const diagnostic of observability.diagnostics) errors.push(`${manifestPath}: observability_contribution ${diagnostic.code}: ${diagnostic.message}`);
+  }
+  if (observability.status === "unsupported") {
+    for (const diagnostic of observability.diagnostics) warnings.push(`${manifestPath}: observability_contribution ${diagnostic.code}: ${diagnostic.message}`);
   }
   return { errors, warnings };
 }

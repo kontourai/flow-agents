@@ -52,14 +52,14 @@ It does not edit the source Kit Catalog at `kits/catalog.json`.
 Each registry entry records:
 
 - `id`: kit id from `kit.json`.
-- `source`: absolute local source path used for the install.
-- `hash`: `sha256:` content hash of the source repository.
+- `source`: local source path used for the install, or caller-declared logical provenance supplied with local-only `--record-source <locator>`. `--record-source` is metadata and is not independently acquired or verified.
+- `hash`: `sha256:` content hash of the installed repository bytes; this is the verified byte identity, not `source` metadata.
 - `version`: optional manifest version when a future contract permits one.
 - `installed_at`: UTC ISO timestamp.
-- `installed_path`: copied kit path under the destination.
-- `state`: install state reported by status commands.
+- `installed_path`: canonical POSIX repository-relative path, always `kits/local/repositories/<kit-id>`.
+- `state`: install state recorded at install time. Read-only status observation reports the current state separately and never rewrites this registry field.
 
-Reinstalling the same kit id from the same source with the same content is idempotent and leaves the registry unchanged. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--update` replaces the copied kit and registry entry after the new source validates. `--force` re-copies an existing same-source install after validation.
+Reinstalling the same kit id from the same source metadata with the same content is idempotent and leaves the registry unchanged. An explicit `--update` bypasses that idempotency decision and runs the full copied-tree and registry transaction even when the source, hash, and target are unchanged; it replaces the entry and records a new `installed_at` timestamp. This is the supported migration for an invalid historical absolute `installed_path`: rerun `flow-agents kit install <source> --dest <dest> --update`. `--record-source <locator>` is available only for local paths, so callers can preserve logical provenance across source-directory moves; it must be trimmed and non-blank, at most 1024 characters, and contain no Unicode control (`Cc`), format (`Cf`), line-separator (`Zl`), or paragraph-separator (`Zp`) characters. This includes C0/C1 controls (`U+0000`–`U+001F`, `U+007F`–`U+009F`), U+2028, U+2029, and bidirectional format controls such as U+202E. Git installs reject `--record-source` and retain their normalized URL/ref provenance. Installing a different source with an existing kit id fails with a conflict unless `--update` is passed. `--force` re-copies an existing same-source install after validation.
 
 Git sources are shallow-cloned into a temporary directory and validated at the clone root. A
 repository installed from Git must therefore place `kit.json` at its root; subdirectory selection
@@ -67,7 +67,14 @@ is not supported. Use a URL `#ref` fragment or `--ref <branch|tag|sha>` to pin t
 records the normalized URL/ref and content hash, and never executes scripts from the cloned
 repository.
 
-`list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance and reports copied kit state as `installed` or `missing`.
+`list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance plus `recorded_hash` and `observed_hash`, and reports copied-kit state as one of:
+
+- `installed`: the safely observed tree exactly matches the recorded hash.
+- `drifted`: the safely observed tree is present but its canonical content hash differs from the recorded hash.
+- `missing`: the registered copied tree is absent.
+- `invalid`: the registry entry or copied tree cannot be safely observed (including symlinks, special files, unreadable paths, and paths replaced during observation).
+
+The canonical tree hash sorts relative paths in locale-independent code-unit order and hashes each regular file's path and bytes, while excluding the VCS/cache paths excluded by installation (`.git`, `__pycache__`, and `.pytest_cache`). Observation derives the copied Kit target only from the current trusted destination plus kit id; it never follows a registry-supplied target. It accepts only the canonical relative `installed_path`; every absolute or alternate value, including an exact-current legacy absolute value, is invalid. The invalid diagnostic is a migration instruction: reinstall with `flow-agents kit install <source> --dest <dest> --update` to replace the registry entry. Observation never follows symlinks: for an installed Kit it checks every component from the requested destination root through the copied Kit root, so intermediate and dangling links are invalid too. Status and activation do not repair or rewrite registry metadata; reinstall (or `--force` for the same source) is the explicit refresh path.
 
 ## Runtime Activation
 
@@ -85,7 +92,7 @@ The `codex-local` adapter supports assets declared in `flows`, `skills`, and `do
 <dest>/kits/local/repositories/<kit-id>/
 ```
 
-Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`.
+Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`. It performs the same read-only integrity observation as `kit status`: missing and invalid local copies are skipped with a warning, and a drifted but safely readable copy emits a warning with both hashes and remains activatable for this warning-only rollout. Before generating runtime files, activation copies a safely observed local Kit to a private staging snapshot and generates only from that snapshot, so a later replacement cannot change the activated bytes. Malformed registry entries, including missing or non-string ids, are warnings and are skipped. Drift is therefore never represented as registry-matched, but it is not yet an activation blocker.
 
 Generated adapter projections are written under:
 

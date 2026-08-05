@@ -564,7 +564,10 @@ require_text "$SIDECAR_WRITER_INTEGRATION" 'does not archive state after invalid
 require_text "$CONTEXT_MAP_INTEGRATION" 'context map is current' "context map integration covers drift"
 require_text "$CONTEXT_MAP_INTEGRATION" 'context map generation is deterministic' "context map integration covers deterministic generation"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering fixture relies on trust.bundle, not a retired critique sidecar' "workflow steering integration covers bundle-only critique handling"
-require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook appends context-map recovery guidance' "workflow steering integration covers context-map guidance"
+# #1172: the context-map pointer moved from every-turn to SessionStart-only, so the integration
+# suite now covers it at the boundary (and asserts its ABSENCE on the prompt path).
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'SessionStart re-grounds with the RESUME block and the context-map pointer' "workflow steering integration covers context-map guidance at SessionStart"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'context-map pointer is not re-emitted on the prompt path' "workflow steering integration covers context-map placement"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook emits ambient state guidance at user prompt submit' "workflow steering integration covers ambient state guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'Claude hook adapter surfaces Builder workflow route for coding prompts' "workflow steering integration covers Claude Builder-route prompt guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'release-readiness and learning-review' "workflow steering integration covers full Builder lifecycle guidance"

@@ -120,6 +120,50 @@ arming the status check. Change it to `required` when the check becomes required
 setting controls bundle absence only: a failed fresh verification still fails in either
 mode.
 
+### Advisory PR comments (reusable workflow)
+
+An organization can keep advisory comment wording and update behavior consistent in a
+centrally owned reusable workflow, conventionally in its `.github` repository. Add a thin
+caller job to the same pull-request workflow as `trust-verify`:
+
+```yaml
+jobs:
+  trust-verify:
+    outputs:
+      failure-summary: ${{ steps.trust-verify.outputs.failure-summary }}
+    steps:
+      # Existing setup steps remain unchanged.
+      - id: trust-verify
+        uses: kontourai/flow-agents/.github/actions/trust-verify@<SHA>
+        with:
+          verify-command: "npm run verify"
+
+  trust-advisory-comment:
+    if: >-
+      ${{ always() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: trust-verify
+    permissions:
+      pull-requests: write
+    uses: your-org/.github/.github/workflows/trust-advisory-comment.yml@<SHA>
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      result: ${{ needs['trust-verify'].result }}
+      run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      check-name: Trust Verify
+      details: ${{ needs['trust-verify'].outputs.failure-summary }}
+```
+
+Pin `<SHA>` to an immutable reviewed commit. The caller runs as a separate job, grants only
+`pull-requests: write`, and skips fork pull requests because their `GITHUB_TOKEN` cannot be
+elevated to write. Forks still receive the Trust Verify check result, just not the conversation
+comment. A non-successful result creates or updates one warning; a later success removes it.
+
+This is an advisory convenience, not a hostile-workflow security boundary: a same-repository
+pull request can modify its caller workflow. Repositories that accept changes from untrusted
+same-repository branch authors need a separately reviewed privileged-event design instead. Keep
+the comment job non-required; it reports the Trust Verify result but does not alter it.
+
 ## Step 4 — Protect the Verify Config
 
 CODEOWNERS prevents the agent from quietly weakening the verify command. Add entries

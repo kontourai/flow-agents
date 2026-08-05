@@ -146,11 +146,9 @@
  *   "no comprehensive trust-reconcile-verify configured" — refuses to attest a
  *   compile-only check.
  *
- * NOTE: This job IS ALREADY a required status check in GitHub branch protection on
- * `main` (verified via the GitHub branch-protection API — required_status_checks.contexts
- * includes "Trust Reconcile", enforce_admins: true). Disabling or downgrading that
- * requirement is a server-side branch-protection change — it cannot be done by editing
- * this file or .github/workflows/trust-reconcile.yml.
+ * ADVISORY PHASE: this job is not currently a required status check on `main`.
+ * Arming it later is a server-side branch-protection change; editing this script or
+ * .github/workflows/trust-reconcile.yml alone cannot make it required.
  *
  * Programmatic use:
  *   const { runTrustReconcile } = require('./trust-reconcile.js');
@@ -188,6 +186,29 @@ const {
 /** Normalize a command string: collapse whitespace, trim. */
 function normalizeCmd(cmd) {
   return String(cmd || '').replace(/\s+/g, ' ').trim();
+}
+
+/** Render a bounded, human-readable failure summary for advisory PR comments. */
+function formatFailureSummary(issues, maxIssues = 20, maxChars = 12000) {
+  const selected = issues.slice(0, maxIssues);
+  const lines = selected.map((issue) => `[${issue.type}] ${issue.message}`);
+  if (issues.length > selected.length) {
+    lines.push(`... and ${issues.length - selected.length} more issue(s); open the workflow run for the complete log.`);
+  }
+  const summary = lines.join('\n');
+  return summary.length <= maxChars
+    ? summary
+    : `${summary.slice(0, maxChars)}\n... output truncated; open the workflow run for the complete log.`;
+}
+
+/** Expose structured failure reasons to a downstream reusable comment workflow. */
+function writeFailureSummary(issues, outputPath = process.env.GITHUB_OUTPUT) {
+  if (!outputPath || issues.length === 0) return;
+  const delimiter = `trust_reconcile_${crypto.randomUUID().replace(/-/g, '')}`;
+  fs.appendFileSync(
+    outputPath,
+    `failure-summary<<${delimiter}\n${formatFailureSummary(issues)}\n${delimiter}\n`,
+  );
 }
 
 /**
@@ -1262,7 +1283,9 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
     missingBundlePolicy || process.env.TRUST_RECONCILE_MISSING_BUNDLE_POLICY || 'required'
   ).trim().toLowerCase();
   if (!['required', 'advisory'].includes(resolvedMissingBundlePolicy)) {
-    process.stderr.write(`[trust-reconcile] FAILED — unsupported missing-bundle policy '${resolvedMissingBundlePolicy}'; expected required or advisory.\n`);
+    const issue = { type: 'invalid-policy', message: `unsupported missing-bundle policy '${resolvedMissingBundlePolicy}'; expected required or advisory` };
+    process.stderr.write(`[trust-reconcile] FAILED — ${issue.message}.\n`);
+    writeFailureSummary([issue]);
     return 1;
   }
 
@@ -1338,6 +1361,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       '[trust-reconcile] Declare package.json scripts["trust-reconcile-verify"] or set TRUST_RECONCILE_COMMANDS.\n' +
       '[trust-reconcile] Example: add "trust-reconcile-verify": "npm run build && npm run eval:static && npm run eval:integration"\n'
     );
+    writeFailureSummary([{
+      type: 'missing-canonical-verify',
+      message: 'no comprehensive trust-reconcile-verify configured; refusing to attest a compile-only check',
+    }]);
     return 1;
   }
 
@@ -1380,6 +1407,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
+      writeFailureSummary([{
+        type: 'canonical-command-laundering',
+        message: `canonical verify command is laundered ('${cmd}'); refusing to attest a masked exit code`,
+      }]);
       return 1;
     }
   }
@@ -1436,6 +1467,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
     } catch (err) {
       process.stderr.write(`[trust-reconcile] failed to read bundle at ${bundlePath}: ${err.message}\n`);
+      writeFailureSummary([{
+        type: 'bundle-read-failed',
+        message: `failed to read bundle at ${bundlePath}: ${err.message}`,
+      }]);
       return 1;
     }
 
@@ -1656,6 +1691,7 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   for (const issue of issues) {
     process.stderr.write(`  [${issue.type}] ${issue.message}\n`);
   }
+  writeFailureSummary(issues);
   return 1;
 }
 
@@ -1691,6 +1727,8 @@ module.exports.runBaselineManifest = runBaselineManifest;
 module.exports.normalizeManifestEntries = normalizeManifestEntries;
 module.exports.slugifyLabel = slugifyLabel;
 module.exports.normalizeCmd = normalizeCmd;
+module.exports.formatFailureSummary = formatFailureSummary;
+module.exports.writeFailureSummary = writeFailureSummary;
 module.exports.isAncestorCommit = isAncestorCommit;
 module.exports.provisionalDeliveryIsExactCheckedRevision = provisionalDeliveryIsExactCheckedRevision;
 // #356: resolveManifest's legacy fallback tier (tier 5, "legacy:fresh-verify-commands")

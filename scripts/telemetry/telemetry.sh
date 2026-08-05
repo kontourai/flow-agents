@@ -10,6 +10,7 @@ source "${TELEMETRY_DIR}/lib/session.sh"
 source "${TELEMETRY_DIR}/lib/enrich.sh"
 source "${TELEMETRY_DIR}/lib/transport.sh"
 source "${TELEMETRY_DIR}/lib/usage.sh"
+source "${TELEMETRY_DIR}/lib/install-identity.sh"
 
 normalize_tool_name() {
   case "$1" in
@@ -161,6 +162,12 @@ build_base_event() {
     claude|claude-code) runtime_name="claude-code" ;;
     kiro|kiro-cli) runtime_name="kiro-cli" ;;
   esac
+  # Fail-safe: --argjson aborts jq on malformed input, which would drop the whole event. Any
+  # resolution hiccup degrades to the explicit unknown tuple, never to a missing block.
+  local install_identity_json
+  install_identity_json=$(install_identity 2>/dev/null) || install_identity_json=""
+  printf '%s' "$install_identity_json" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || install_identity_json='{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}'
   jq -nc \
     --arg sv "0.3.0" \
     --arg ts "$(date +%s)000" \
@@ -170,6 +177,7 @@ build_base_event() {
     --arg an "$agent_name" \
     --arg rv "$(runtime_version "$runtime_name")" \
     --arg rn "$runtime_name" \
+    --argjson ii "$install_identity_json" \
     '{
       schema_version: $sv,
       timestamp: $ts,
@@ -180,7 +188,8 @@ build_base_event() {
         name: $an,
         runtime: $rn,
         version: $rv
-      }
+      },
+      install_identity: $ii
     }'
 }
 

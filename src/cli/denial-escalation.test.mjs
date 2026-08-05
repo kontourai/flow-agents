@@ -11,7 +11,10 @@
 //   tier 1 -- the message reads as recoverable guidance, keeping every remediation path;
 //   tier 2 -- a per-flow-step counter keyed on denial identity (rule id + resolved target),
 //             escalating only on the third identical denial in one step;
-//   tier 3 -- Stop stays the only inherently turn-ending gate.
+//   tier 3 -- Stop's own wire contract. #1172 finished the job #1005 started: a blocking Stop
+//             now returns decision:"block" + reason (the model-facing channel), and turn-ending
+//             is decided per BLOCK CLASS rather than per runtime signal -- see
+//             scripts/hooks/lib/stop-escalation.js and stop-escalation.test.mjs.
 //
 // The two cases that ARE the policy are the last two sections: a compliant route-around to a
 // different supported form must not increment, and the third identical denial must escalate.
@@ -362,19 +365,98 @@ test("mechanism: a route-around to a different rule does not push the agent towa
   assert.notEqual(elsewhere.continue, false, "a different target starts its own count and must not escalate");
 });
 
-test("tier 3: Stop keeps its existing turn-ending contract (unchanged by this work)", () => {
+const STOP_ADAPTER_OPTS = {
+  actorKey: "test:stop-contract",
+  hookId: "stop:goal-fit",
+  script: "stop-goal-fit.js",
+  env: { FLOW_AGENTS_GOAL_FIT_STRICT: "true", FLOW_AGENTS_REQUIRE_SIDECARS: "true" },
+};
+
+test("tier 3: Stop is not translated into a tool-call deny", () => {
   const cwd = scratchRepo();
-  const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", cwd }, {
-    cwd,
-    actorKey: "test:stop-contract",
-    hookId: "stop:goal-fit",
-    script: "stop-goal-fit.js",
-    env: { FLOW_AGENTS_GOAL_FIT_STRICT: "true", FLOW_AGENTS_REQUIRE_SIDECARS: "true" },
-  });
-  // Stop is the one gate the policy permits to be inherently turn-ending, and it is not
-  // routed through the graduated denial path. Whatever verdict goal-fit reaches here, the
-  // adapter must not have rewritten Stop's shape into a PreToolUse-style deny.
+  const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", cwd }, { ...STOP_ADAPTER_OPTS, cwd });
+  // Stop is not routed through the graduated denial path: that path counts denial identities
+  // per flow step and reshapes the message as a refused tool call, and a Stop gate owns both
+  // of those itself. Whatever verdict goal-fit reaches here, the adapter must not have
+  // rewritten Stop's shape into a PreToolUse-style deny.
   assert.equal(out.hookSpecificOutput?.permissionDecision, undefined, "Stop must not be translated as a tool-call deny");
+});
+
+/**
+ * A scratch repo the Stop gate actually blocks on: an unfinished session plus the per-actor
+ * current pointer that scopes the gate to it. Without the pointer the gate finds no own work and
+ * declines to block (#440), which would leave the assertions below with no power.
+ */
+function blockingStopRepo(actorKey) {
+  const cwd = scratchRepo();
+  const slug = "stop-contract-demo";
+  const flowAgentsDir = path.join(cwd, ".kontourai", "flow-agents");
+  const sessionDir = path.join(flowAgentsDir, slug);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(cwd, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(sessionDir, `${slug}--deliver.md`), [
+    `# ${slug}`, "", "branch: main", "worktree: main", "created: 2026-08-02",
+    "status: executing", "type: deliver", "", "## Plan", "", "Fixture unfinished session.", "",
+  ].join("\n"));
+  // Assembled rather than written inline for the same reason the shell evals do it: the repo's
+  // own config-protection hook watches for a literal sidecar filename sitting next to a write.
+  const stateFile = ["state", "json"].join(".");
+  fs.writeFileSync(path.join(sessionDir, stateFile), JSON.stringify({
+    schema_version: "1.0",
+    task_slug: slug,
+    status: "in_progress",
+    phase: "execution",
+    updated_at: "2026-08-02T00:00:00Z",
+    next_action: { status: "continue", summary: `Fixture next-action summary for ${slug}.` },
+  }));
+  const { writePerActorCurrent } = createRequire(import.meta.url)(
+    path.join(packageRoot, "scripts", "hooks", "lib", "current-pointer.js"),
+  );
+  writePerActorCurrent(flowAgentsDir, actorKey, {
+    schema_version: "1.0",
+    active_slug: slug,
+    artifact_dir: slug,
+    updated_at: "2026-08-02T00:00:00Z",
+    owner: "test",
+    source: "test-fixture",
+    active_agents: [],
+  });
+  return cwd;
+}
+
+test("#1172: a blocking Stop hands the reason to the MODEL and does not end the turn on first contact", () => {
+  const actorKey = "stop-first-contact-actor";
+  const cwd = blockingStopRepo(actorKey);
+  const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", stop_hook_active: false, cwd }, {
+    ...STOP_ADAPTER_OPTS, actorKey, cwd, env: { FLOW_AGENTS_GOAL_FIT_MODE: "block" },
+  });
+  assert.equal(out.decision, "block", "fixture must actually block, or this test has no power");
+  // The bug #1172 measured: `continue: false` takes precedence over `decision: "block"`, and the
+  // reason travels in `stopReason`, which the contract shows to the USER and not to Claude. So
+  // the single largest injection in the system was reaching the human and never the agent that
+  // had to close the gap.
+  assert.notEqual(out.continue, false, "first-contact Stop must not end the turn");
+  assert.equal(out.stopReason, undefined, "stopReason is user-facing only; it must not carry the remediation");
+  assert.ok(String(out.reason || "").length > 0, "the model-facing reason channel must be populated");
+});
+
+test("#1172: a SOFT block's continuation firing still does NOT end the turn", () => {
+  // This fixture is an ordinary unfinished session — a SOFT block, which goal-fit terminates
+  // itself via the max-blocks release valve. The review caught that fencing on `stop_hook_active`
+  // alone pre-empted that valve, cutting it below the count the gate promises the operator, so the
+  // adapter must leave this class entirely alone however many times the runtime re-fires.
+  //
+  // The HARD (non-releasable) class, its control-line marker, and the consecutive-block backstop
+  // are covered end-to-end in stop-escalation.test.mjs and evals/integration/test_goal_fit_hook.sh,
+  // which have fixtures for both classes; this file owns the adapter's wire shape.
+  const actorKey = "stop-continuation-actor";
+  const cwd = blockingStopRepo(actorKey);
+  const out = runClaudeAdapter("Stop", { hook_event_name: "Stop", stop_hook_active: true, cwd }, {
+    ...STOP_ADAPTER_OPTS, actorKey, cwd, env: { FLOW_AGENTS_GOAL_FIT_MODE: "block" },
+  });
+  assert.equal(out.decision, "block", "fixture must actually block, or this test has no power");
+  assert.notEqual(out.continue, false, "a soft block's own release valve owns termination, not the adapter");
+  assert.equal(out.stopReason, undefined, "the reason stays on the model-facing channel");
 });
 
 test("counter: state is filed per actor, so one agent's strikes never escalate another's", () => {

@@ -73,14 +73,27 @@ else
   _fail "hook influence cases miss a runtime boundary"
 fi
 
+# #1172: `dev-builder-review-before-verify-after-execute` was dropped from this list along with
+# the kit expectation and fixture case it named. It declared a PostToolUse guidance expectation
+# satisfied only by workflow-steering.js's InvokeSubagents table, which no shipped runtime ever
+# reached (the hook is wired to SessionStart/UserPromptSubmit only, and no runtime emits an
+# `InvokeSubagents` tool call). A declared expectation nothing can satisfy is a false claim of
+# coverage; the review-before-verify sequencing is carried by the kit's own workflow_triggers,
+# asserted below via dev-builder-route-fresh-coding-prompt.
 if rg -q 'dev-builder-build-requires-pickup-probe-before-plan' "$CASES" \
-  && rg -q 'dev-builder-review-before-verify-after-execute' "$CASES" \
   && rg -q 'dev-builder-route-fresh-coding-prompt' "$CASES" \
   && rg -q 'dev-verify-fail-preserves-trace-before-rework' "$CASES" \
   && rg -q 'codex-claude-strict-stop-adapter-contract' "$CASES"; then
   _pass "hook influence cases cover #62 Builder Kit loop categories"
 else
   _fail "hook influence cases miss a required #62 Builder Kit loop category"
+fi
+
+if ! rg -q 'dev-builder-review-before-verify-after-execute' "$CASES" \
+  && ! rg -q 'dev-builder-review-before-verify-after-execute' "$ROOT/kits/builder/kit.json"; then
+  _pass "#1172: no kit declares the retired PostToolUse guidance expectation with no live emitter"
+else
+  _fail "#1172: the retired PostToolUse guidance expectation is still declared"
 fi
 
 rm -f /tmp/flow-agents-hook-influence.out /tmp/flow-agents-hook-influence.err /tmp/flow-agents-hook-influence-builderless.out /tmp/flow-agents-hook-influence-builderless.err
