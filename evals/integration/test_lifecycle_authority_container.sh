@@ -402,6 +402,23 @@ NODE
 # tests-evidence replacement while the canonical run is still at verify.
 su -s /bin/bash node -c "cd /work && node /work/history-repair-invoke.mjs resolve-critique '$PROJECT' '$RESEAL_SESSION' /root/lifecycle-authorizations/reseal-resolve.json '${RESEAL_CRITIQUE_IDS[0]}' '${RESEAL_CRITIQUE_IDS[1]}'" >/tmp/reseal-resolve-result.json
 node -e "const r=require('/tmp/reseal-resolve-result.json'); if(r.operation_status!=='applied') throw new Error('reseal fixture critique resolution was not applied')"
+cat > /work/sync-builder-session.mjs <<'NODE'
+import fs from 'node:fs';
+import { assertBuilderFlowProjectionCurrent, syncBuilderFlowSession } from './build/src/builder-flow-runtime.js';
+const sessionDir = process.argv[2];
+const synced = await syncBuilderFlowSession({ sessionDir });
+const projected = JSON.parse(fs.readFileSync(`${sessionDir}/state.json`, 'utf8'));
+const projectionHead = projected.flow_run?.run_head;
+const canonicalHead = synced.projection.flow_run?.run_head;
+if (typeof projectionHead !== 'string' || projectionHead !== canonicalHead) {
+  throw new Error('synchronized sidecar projection head does not match canonical Flow state');
+}
+await assertBuilderFlowProjectionCurrent({ sessionDir });
+console.log(JSON.stringify({ hasLifecycleAttachment: synced.run.manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:')), projectionHead, canonicalHead }));
+NODE
+# External lifecycle resolution advances canonical Flow. Synchronize before staging
+# another sidecar write so its flow_run_head is not a stale signal (#1191).
+su -s /bin/bash node -c "cd /work && node /work/sync-builder-session.mjs '$RESEAL_SESSION' >/tmp/reseal-projection-sync.json"
 node --input-type=module - "$PROJECT" "$RESEAL_SESSION" /root/lifecycle-authorizations/reseal-resolve.json "${RESEAL_CRITIQUE_IDS[0]}" "${RESEAL_CRITIQUE_IDS[1]}" <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import { canonicalJson, sha256 } from './packaging/lifecycle-authority/coordinator.mjs';
 const [project, session, authorizationFile, priorRecordId, resolvingRecordId] = process.argv.slice(2);
@@ -609,11 +626,6 @@ import fs from 'node:fs';
 import { verifyLifecycleAuthorityCompletion } from './build/src/external-lifecycle-authority.js';
 const completionFile = process.argv[2];
 console.log(JSON.stringify(verifyLifecycleAuthorityCompletion(JSON.parse(fs.readFileSync(completionFile, 'utf8')))));
-NODE
-cat > /work/sync-builder-session.mjs <<'NODE'
-import { syncBuilderFlowSession } from './build/src/builder-flow-runtime.js';
-const synced = await syncBuilderFlowSession({ sessionDir: process.argv[2] });
-console.log(JSON.stringify({ hasLifecycleAttachment: synced.run.manifest.evidence.some((entry) => entry.id.startsWith('lifecycle-authority:')) }));
 NODE
 cat > /work/reseal-native-lock-e2e.mjs <<'NODE'
 import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto'; import { spawn } from 'node:child_process'; import { pathToFileURL } from 'node:url';
