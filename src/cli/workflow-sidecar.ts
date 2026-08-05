@@ -5057,11 +5057,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
   // #1191: signal validation — reject writes against terminal/closed Flow runs or
   // stale heads (Temporal closed-workflow signal rule). The sidecar projection may
-  // lag the canonical head (#1164); this guard reads the CANONICAL state via the
-  // public Flow interface and fails closed before any mutation (command execution,
-  // command-log append, or bundle write). No-op for sessions without a Flow run.
+  // lag the canonical head after an external lifecycle authority mutation (#1164);
+  // the gate_advanced head check applies only when the caller explicitly stamped a
+  // head via --flow-run-head (concurrent-writer guard). When the head is inferred
+  // from the projection, only run_closed is enforced — the projection is a cache,
+  // not a concurrency signal. No-op for sessions without a Flow run.
   const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
-  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot, stampedFlowRunHead: flowRunHead });
+  if (_signalValidationRoot) await assertMutationWritable({ runId: slug, cwd: _signalValidationRoot, stampedFlowRunHead: requestedFlowRunHead ? flowRunHead : undefined });
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;

@@ -8348,6 +8348,36 @@ test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is rejec
   );
 });
 
+test("#1191 projected-head record-gate-claim succeeds on a stale projection (external authority recovery path)", async () => {
+  // After an external lifecycle authority mutation (resolve-critique, cancel,
+  // reseal), the canonical Flow head advances but the sidecar projection may
+  // lag (#1164). The gate_advanced head check applies only when the caller
+  // explicitly stamps --flow-run-head (concurrent-writer guard). Without it,
+  // the head comes from the projection (a cache, not a concurrency signal) and
+  // only run_closed is enforced. This keeps the lifecycle authority's
+  // post-mutation writes working without forcing a syncBuilderFlowSession
+  // (which evaluates the gate and advances the head again).
+  const session = makeGitBackedSession("signal-validation-projected-head");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nProjected head fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  assert.notEqual(staleHead, currentHead, "test precondition: canonical head advanced past the projection");
+
+  // record-gate-claim WITHOUT --flow-run-head: the projected (stale) head is
+  // NOT checked against canonical. Only run_closed applies. The write succeeds.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "projected-head write on a stale projection (external authority recovery path)",
+    ]),
+    0,
+    "record-gate-claim without --flow-run-head succeeds even when the projection is stale",
+  );
+});
+
 test("#1191 fault injection: stale-head write silently accepted on un-guarded path, rejected on guarded path", async () => {
   const session = makeGitBackedSession("signal-validation-fault-injection");
   claimAmbientSessionAssignment(session);
