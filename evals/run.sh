@@ -48,7 +48,7 @@ parse_runtime_args() {
     case "$1" in
       --runtime)
         if [[ -z "${2:-}" ]]; then
-          echo "--runtime requires kiro or codex" >&2
+          echo "--runtime requires kiro, codex, claude, opencode, pi, or strands" >&2
           exit 1
         fi
         RUNTIME="$2"
@@ -60,7 +60,7 @@ parse_runtime_args() {
         ;;
       --judge-runtime)
         if [[ -z "${2:-}" ]]; then
-          echo "--judge-runtime requires kiro, codex, or claude" >&2
+          echo "--judge-runtime requires kiro, codex, claude, opencode, pi, or strands" >&2
           exit 1
         fi
         JUDGE_RUNTIME="$2"
@@ -89,17 +89,17 @@ parse_runtime_args() {
     esac
   done
   case "$RUNTIME" in
-    kiro|Claude\ Code|codex|claude|claude-code) ;;
+    kiro|Claude\ Code|codex|claude|claude-code|opencode|pi|strands|strands-local) ;;
     *)
-      echo "Unsupported eval runtime '$RUNTIME' (expected kiro, codex, or claude)" >&2
+      echo "Unsupported eval runtime '$RUNTIME' (expected kiro, codex, claude, opencode, pi, strands)" >&2
       exit 1
       ;;
   esac
   JUDGE_RUNTIME="${JUDGE_RUNTIME:-$RUNTIME}"
   case "$JUDGE_RUNTIME" in
-    kiro|Claude\ Code|codex|claude|claude-code) ;;
+    kiro|Claude\ Code|codex|claude|claude-code|opencode|pi|strands|strands-local) ;;
     *)
-      echo "Unsupported judge runtime '$JUDGE_RUNTIME' (expected kiro, codex, or claude)" >&2
+      echo "Unsupported judge runtime '$JUDGE_RUNTIME' (expected kiro, codex, claude, opencode, pi, strands)" >&2
       exit 1
       ;;
   esac

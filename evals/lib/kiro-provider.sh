@@ -9,11 +9,19 @@ OPTIONS="$2"
 SNAPSHOT_FILE="/tmp/promptfoo-eval-telemetry-snapshot.txt"
 TIMEOUT="${KIRO_EVAL_TIMEOUT:-300}"
 
-# Extract agent from options JSON or env var
+# Kit agent selection — consistent out of the box: default agent via kit hooks, no custom agent required.
+# For harnesses that support splitting, set EVALS_KIT_AGENT=builder (or FLOW_AGENTS_KIT_AGENT) to run via custom agent.
+# When set, the provider validates via that agent's bundle + hooks; when unset, it validates via default agent.
+EVALS_KIT_AGENT="${EVALS_KIT_AGENT:-${FLOW_AGENTS_KIT_AGENT:-}}"
 if [[ -n "$OPTIONS" ]]; then
   AGENT=$(node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);process.stdout.write(j.config?.agent||'')}catch{}})" <<<"$OPTIONS" 2>/dev/null)
 fi
-AGENT="${AGENT:-${KIRO_EVAL_AGENT:-dev}}"
+# Default to EVALS_KIT_AGENT if set, else no custom agent (empty → default)
+if [[ -z "$AGENT" || "$AGENT" == "dev" ]]; then
+  # Respect explicit EVALS_KIT_AGENT even when OPTIONS is empty; allow 'dev' back-compat
+  AGENT="${EVALS_KIT_AGENT:-${KIRO_EVAL_AGENT:-}}"
+  # If still empty and no flag, leave AGENT empty to use default agent (consistent)
+fi
 
 # Auto-detect telemetry file from installed agent location
 _find_telemetry() {
@@ -40,12 +48,19 @@ else
   echo "0" > "$SNAPSHOT_FILE"
 fi
 
-# Run agent, capture output
-RAW=$(timeout "$TIMEOUT" kiro-cli chat \
-  --agent "$AGENT" \
-  --no-interactive \
-  --trust-tools "$SAFE_TOOLS" \
-  "$PROMPT" 2>/dev/null)
+# Run agent — when AGENT is empty, use default agent (no --agent flag) for consistency
+if [[ -n "$AGENT" ]]; then
+  RAW=$(timeout "$TIMEOUT" kiro-cli chat \
+    --agent "$AGENT" \
+    --no-interactive \
+    --trust-tools "$SAFE_TOOLS" \
+    "$PROMPT" 2>/dev/null)
+else
+  RAW=$(timeout "$TIMEOUT" kiro-cli chat \
+    --no-interactive \
+    --trust-tools "$SAFE_TOOLS" \
+    "$PROMPT" 2>/dev/null)
+fi
 
 # Strip ANSI escape codes and bell chars
 CLEAN=$(echo "$RAW" | sed $'s/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\[[0-9;]*m//g; s/\x07//g')
