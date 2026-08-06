@@ -690,6 +690,8 @@ npm run workflow:sidecar -- dogfood-pass \
 
 Flow Agents source changes also have a deterministic CI baseline. Run it locally before publishing a branch when the change touches workflow contracts, hooks, package/bundle output, or Builder Kit behavior:
 
+For provider-backed delivery, do not treat a passing release-readiness decision as merge authority. After learning completes, publish terminal delivery on the already reviewed source branch, commit and push only its delivery companions, and collect required provider checks for that new exact head. Obtain a signed single-use lifecycle authorization with `flow-agents merge-change request`, then provide it to `flow-agents merge-change execute --session-dir <session> --strategy squash --authorization-file <signed-file>` (or `rebase`, `merge-commit`, or `merge-queue`). The protected authority binds and consumes the exact merge operation under the subject lock; it requires the completed Builder definition's semantic `merge-ready-ci` evidence-refresh control and passing verification evidence, as well as a clean worktree and exact session/committed terminal-delivery binding. Zero required checks or provider-actor drift fails closed. A provisional CI delivery never qualifies.
+
 ```bash
 bash evals/ci/run-baseline.sh
 ```

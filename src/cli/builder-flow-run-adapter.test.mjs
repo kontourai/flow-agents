@@ -385,9 +385,9 @@ test("start is creation-only and persists canonical id/version", async () => {
   const persisted = snapshotRun(cwd, runId);
 
   assert.equal(result.definitionId, BUILDER_BUILD_FLOW_ID);
-  assert.equal(result.definitionVersion, "1.3");
+  assert.equal(result.definitionVersion, "1.4");
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.3");
+  assert.equal(persisted.state.definition_version, "1.4");
   assert.equal(persisted.state.subject, SUBJECT);
   assert.equal(persisted.state.status, "active");
   assert.equal(persisted.state.current_step, "pull-work");
@@ -396,10 +396,10 @@ test("start is creation-only and persists canonical id/version", async () => {
   assert.deepEqual(persisted.manifest.evidence, []);
 });
 
-test("a published 1.1 start definition amends through Flow to the exact packaged 1.3 successor", async () => {
+test("a published 1.1 start definition amends through Flow to the exact packaged 1.4 successor", async () => {
   const cwd = makeWorkspace();
   const runId = "published-1-1-amendment";
-  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-3-reference", subject: SUBJECT })).definition;
+  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-4-reference", subject: SUBJECT })).definition;
   const published = structuredClone(packaged);
   published.version = "1.1";
   delete published.gates["execute-gate"].on_route_back;
@@ -413,7 +413,7 @@ test("a published 1.1 start definition amends through Flow to the exact packaged
     cwd,
     definition: packaged,
     request: {
-      reason: "upgrade a published builder.build@1.1 run to the packaged 1.3 definition",
+      reason: "upgrade a published builder.build@1.1 run to the packaged 1.4 definition",
       expected_run_head: flowRunHead(before),
       expected_definition: definitionIdentity(published),
       successor_digest: definitionDigest(packaged),
@@ -429,15 +429,15 @@ test("a published 1.1 start definition amends through Flow to the exact packaged
   const loaded = await loadBuilderBuildRun({ cwd, runId });
   assert.deepEqual(loaded.startDefinition, published, "the old published start bytes remain immutable");
   assert.deepEqual(loaded.definition, packaged, "the effective definition is the exact packaged successor");
-  assert.equal(loaded.definitionVersion, "1.3");
+  assert.equal(loaded.definitionVersion, "1.4");
   assert.equal(loaded.definitionDigest, definitionDigest(packaged));
   assert.deepEqual(readJson(runFile(cwd, runId, "definition.json")), published, "Flow never overwrites the immutable origin");
 });
 
-test("a raw 1.2 amendment corrects append-only to the exact packaged 1.3 composition", async () => {
+test("a raw 1.2 amendment corrects append-only to the exact packaged 1.4 composition", async () => {
   const cwd = makeWorkspace();
   const runId = "raw-1-2-composition-correction";
-  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-3-correction-reference", subject: SUBJECT })).definition;
+  const packaged = (await startBuilderBuildRun({ cwd, runId: "packaged-1-4-correction-reference", subject: SUBJECT })).definition;
   const published = structuredClone(packaged);
   published.version = "1.1";
   delete published.gates["execute-gate"].on_route_back;
@@ -478,7 +478,7 @@ test("a raw 1.2 amendment corrects append-only to the exact packaged 1.3 composi
       authority: {
         kind: "user_request",
         actor: "builder-flow-run-adapter-test",
-        request_ref: "test:packaged-1-3-correction",
+        request_ref: "test:packaged-1-4-correction",
         requested_at: FIXTURE_NOW,
       },
     },
@@ -486,7 +486,7 @@ test("a raw 1.2 amendment corrects append-only to the exact packaged 1.3 composi
 
   const loaded = await loadBuilderBuildRun({ cwd, runId });
   assert.deepEqual(loaded.definition, packaged);
-  assert.equal(loaded.definitionVersion, "1.3");
+  assert.equal(loaded.definitionVersion, "1.4");
   assert.equal(loaded.state.definition_amendments.length, 2);
   assert.equal(loaded.state.definition_amendments[0].successor_definition.version, "1.2");
   assert.equal(loaded.state.definition_amendments[1].successor_definition.digest, definitionDigest(packaged));
@@ -770,7 +770,7 @@ test("result identity comes from the persisted canonical run", async () => {
     assert.equal(result.definitionVersion, persisted.state.definition_version);
   }
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.3");
+  assert.equal(persisted.state.definition_version, "1.4");
 });
 
 test("failed verify evidence routes back only after sequential prefix advancement", async () => {
@@ -821,7 +821,7 @@ test("failed composed CI merge readiness routes implementation defects to execut
         claimType: "builder.merge-ready-ci.readiness",
         subjectType: "pull-request",
         status: "failed",
-        routeReason: "missing_evidence",
+        routeReason: "plan_gap",
         expectationIds: ["ci-merge-readiness"],
         name: "merge-ready-ci-undeclared-reason",
       }),

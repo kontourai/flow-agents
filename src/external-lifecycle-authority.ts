@@ -9,12 +9,14 @@ export const LIFECYCLE_AUTHORITY_HELPER_PATH = "/usr/local/libexec/kontourai/flo
 export const LIFECYCLE_AUTHORITY_SUDO_COMMAND = "/usr/bin/sudo";
 /** Root-provisioned public half of the coordinator completion signing key. */
 export const LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH = "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem";
-const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery", "authorize-workflow-evidence", "execute-sealed-workload"]);
+const ACTIONS = new Set(["cancel", "archive", "resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion", "publish-provisional-delivery", "authorize-workflow-evidence", "execute-sealed-workload", "merge-change"]);
 
 export type ExternalLifecycleAuthorityRequest = Readonly<Record<string, unknown> & { action: string; project_root: string }>;
 export interface ExternalLifecycleMutationResult {
   run_id: string;
   operation_status: "applied" | "replayed";
+  /** Present for merge-change: the signed action authorized by this response. */
+  authorized_action_id?: string;
   /** Immutable coordinator completion, structurally bound by the package without package-side writes. */
   completion: JsonRecord;
   /** A fixed-size execution receipt: bounded policy artifacts, never provider output. */
@@ -312,19 +314,21 @@ function digest(value: unknown): string { return createHash("sha256").update(can
  * immutable completion with the independently provisioned public key. The
  * root-owned coordinator still owns all lifecycle mutations.
  */
-function validateSignedCompletion(value: unknown, action: string, requestSha256: string, runId: string): JsonRecord {
+function validateSignedCompletion(value: unknown, action: string, requestSha256: string, runId: string, authorizedActionId?: string): JsonRecord {
   if (record(value) && (value.action !== action || value.request_sha256 !== requestSha256 || value.run_id !== runId || !["applied", "replayed"].includes(String(value.operation_status)))) throw new Error("lifecycle authority completion does not bind the requested operation");
   const completion = verifyLifecycleAuthorityCompletion(value);
+  if (authorizedActionId !== undefined && completion.authorized_action_id !== authorizedActionId) throw new Error("lifecycle authority completion does not bind the exact merge action");
   return completion;
 }
 
 function verifyLifecycleAuthorityCompletionWithStatuses(value: unknown, operationStatuses: readonly string[], label: string): JsonRecord {
   if (!record(value)) throw new Error(`${label} is missing`);
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature", ...(value.action === "merge-change" ? ["authorized_action_id"] : [])];
   const observed = Object.keys(value).sort();
   if (JSON.stringify(observed) !== JSON.stringify(fields.sort())) throw new Error(`${label} contains unexpected or missing fields`);
   if (value.schema_version !== LIFECYCLE_AUTHORITY_PROTOCOL_VERSION || value.kind !== "kontourai.lifecycle-authority.completion" || !ACTIONS.has(String(value.action)) || typeof value.request_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.request_sha256) || typeof value.run_id !== "string" || !value.run_id || !operationStatuses.includes(String(value.operation_status))) throw new Error(`${label} identity is invalid`);
   for (const key of ["result_core_sha256", "coordinator_runtime_sha256"] as const) if (typeof value[key] !== "string" || !/^[a-f0-9]{64}$/.test(value[key] as string)) throw new Error(`${label} ${key} is invalid`);
+  if (value.action === "merge-change" && (typeof value.authorized_action_id !== "string" || !/^[a-f0-9]{64}$/.test(value.authorized_action_id))) throw new Error(`${label} authorized merge action is invalid`);
   if (typeof value.completed_at !== "string" || !Number.isFinite(Date.parse(value.completed_at))) throw new Error(`${label} timestamp is invalid`);
   if (!record(value.signature) || value.signature.algorithm !== "ed25519" || typeof value.signature.value !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.signature.value)) throw new Error(`${label} signature is invalid`);
   const signatureValue = value.signature.value;
@@ -457,7 +461,7 @@ function trustedHelper(): string {
   return validateLifecycleAuthorityHelperInstallation(LIFECYCLE_AUTHORITY_HELPER_PATH);
 }
 
-export function validateLifecycleAuthorityResponse(output: string, action: string, requestSha256: string): JsonRecord {
+export function validateLifecycleAuthorityResponse(output: string, action: string, requestSha256: string, authorizedActionId?: string): JsonRecord {
   const line = output.endsWith("\n") ? output.slice(0, -1).replace(/\r$/, "") : output;
   if (!line || line.includes("\n") || line.includes("\r") || (output !== line && output !== `${line}\n` && output !== `${line}\r\n`)) throw new Error("lifecycle authority helper must emit exactly one non-empty JSON response line");
   let parsed: unknown;
@@ -471,9 +475,10 @@ export function validateLifecycleAuthorityResponse(output: string, action: strin
   if (!record(parsed.result)) throw new Error("lifecycle authority helper response result must be an object");
   exact(parsed.result, action === "execute-sealed-workload"
     ? ["run_id", "operation_status", "completion", "safe_result"]
-    : ["run_id", "operation_status", "completion"], "lifecycle authority mutation result");
+    : ["run_id", "operation_status", "completion", ...(action === "merge-change" ? ["authorized_action_id"] : [])], "lifecycle authority mutation result");
   if (typeof parsed.result.run_id !== "string" || !parsed.result.run_id || !["applied", "replayed"].includes(String(parsed.result.operation_status))) throw new Error("lifecycle authority mutation result is invalid");
-  const completion = validateSignedCompletion(parsed.result.completion, action, requestSha256, parsed.result.run_id);
+  if (action === "merge-change" && parsed.result.authorized_action_id !== authorizedActionId) throw new Error("lifecycle authority mutation result does not bind the exact merge action");
+  const completion = validateSignedCompletion(parsed.result.completion, action, requestSha256, parsed.result.run_id, authorizedActionId);
   // A replay returns the immutable completion from the original mutation.
   // That completion is necessarily `applied`; the response itself reports
   // `replayed` to describe this invocation. No replayed completion is valid.
@@ -511,6 +516,8 @@ function prepareExternalLifecycleInvocation(request: ExternalLifecycleAuthorityR
       ? ["action", "project_root", "session_dir", "authorization_file", "prior_record_id", "resolving_record_id"]
       : request.action === "execute-sealed-workload"
         ? ["action", "project_root", "session_dir", "authorization_file", "sealed_workload_file"]
+      : request.action === "merge-change"
+        ? ["action", "project_root", "session_dir", "authorization_file", "issued_action_id"]
       : ["action", "project_root", "session_dir", "authorization_file"];
   exact(request as JsonRecord, fields, "lifecycle authority request");
   for (const field of fields.filter((field) => field !== "signature")) if (typeof request[field] !== "string" || !(request[field] as string).length) throw new Error(`lifecycle authority request ${field} must be non-empty text`);
@@ -524,8 +531,8 @@ function prepareExternalLifecycleInvocation(request: ExternalLifecycleAuthorityR
   return { envelope, helper, requestSha256, timeout };
 }
 
-function acceptExternalLifecycleOutput(output: string, request: ExternalLifecycleAuthorityRequest, requestSha256: string): ExternalLifecycleMutationResult {
-  const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256) as unknown as ExternalLifecycleMutationResult;
+function acceptExternalLifecycleOutput(output: string, request: ExternalLifecycleAuthorityRequest, requestSha256: string, authorizedActionId?: string): ExternalLifecycleMutationResult {
+  const result = validateLifecycleAuthorityResponse(output, request.action, requestSha256, authorizedActionId) as unknown as ExternalLifecycleMutationResult;
   const expectedRunId = path.basename(String(request.session_dir));
   if (result.run_id !== expectedRunId) throw new Error("lifecycle authority result run_id does not match the requested session identity");
   return result;
@@ -542,7 +549,8 @@ export function invokeExternalLifecycleAuthority(request: ExternalLifecycleAutho
     const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr.trim() : "";
     throw new Error(stderr || "external lifecycle authority rejected the request");
   }
-  return acceptExternalLifecycleOutput(output, request, requestSha256);
+  const expectedActionId = request.action === "merge-change" ? String(request.issued_action_id) : undefined;
+  return acceptExternalLifecycleOutput(output, request, requestSha256, expectedActionId);
 }
 
 /**

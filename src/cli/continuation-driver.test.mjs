@@ -31,7 +31,7 @@ function snapshot(step, status = "active") {
   return {
     run_id: "run-251",
     definition_id: "builder.build",
-    definition_version: "1.3",
+    definition_version: "1.4",
     definition_digest: TEST_DEFINITION_DIGEST,
     status,
     disposition,
@@ -667,7 +667,7 @@ test("reinvoked missions compare synchronized progress with the durable baseline
 });
 
 test("reinvocation counts one interrupted unchanged turn as no progress exactly once", async () => {
-  const baseline = { current_step: "execute", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_evidence: [], observed_artifacts: [] };
+  const baseline = { current_step: "execute", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, canonical_evidence: [], observed_artifacts: [] };
   const store = memoryStore({
     schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
     adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
@@ -746,7 +746,7 @@ test("interrupted turns are reconciled before waiting and terminal disposition b
     ["waiting", envelopeSnapshot("verify", { status: "paused" }), "waiting"],
     ["terminal", terminalProgressSnapshot("completed", { step: "verify" }), "done"],
   ]) await t.test(name, async () => {
-    const baseline = { current_step: "verify", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
+    const baseline = { current_step: "verify", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
     const store = memoryStore({
       schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
       adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "verify",
@@ -1283,7 +1283,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
   const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-"));
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
-  const canonicalState = { run_id: runId, definition_id: "builder.build", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, current_step: "plan", status: "active" };
+  const canonicalState = { run_id: runId, definition_id: "builder.build", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, current_step: "plan", status: "active" };
   writeAuthorityAssignment(sessionDir, "codex:authority-test", { audit_trail: "x".repeat(20 * 1024) });
   let issued;
 
@@ -1293,7 +1293,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       schema_version: "1.0",
       run_id: runId,
       definition_id: "builder.build",
-      active_turn_definition_version: "1.3",
+      active_turn_definition_version: "1.4",
       active_turn_definition_digest: TEST_DEFINITION_DIGEST,
       max_turns: 2,
       adapter_command_identity: "adapter-identity",
@@ -1307,7 +1307,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       sessionDir,
       runId,
       definitionId: "builder.build",
-      definitionVersion: "1.3",
+      definitionVersion: "1.4",
       definitionDigest: TEST_DEFINITION_DIGEST,
       currentStep: "plan",
       iteration: 1,
@@ -1350,7 +1350,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       runId: issued.runId,
       turnSecret: issued.turnSecret,
       assignmentActor: "codex:authority-test",
-      canonicalState: { ...canonicalState, definition_version: "1.3", definition_digest: "f".repeat(64) },
+      canonicalState: { ...canonicalState, definition_version: "1.4", definition_digest: "f".repeat(64) },
     }).valid, false, "an authority issued before a Flow amendment cannot authorize the amended head");
     assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
       sessionDir,
@@ -1441,7 +1441,7 @@ test("authority cleanup leaves an expiring record when a parent is replaced", (t
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1481,7 +1481,7 @@ test("authority write leaves its temporary record when a parent is replaced", (t
   };
   try {
     assert.throws(() => activeTurnAuthority.issueActiveTurnAuthority({
-      sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+      sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
       adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
     }), /injected parent replacement/);
   } finally {
@@ -1506,7 +1506,7 @@ test("a signed authority rejects a stale lock from an exited driver", (t) => {
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1530,7 +1530,7 @@ test("authority validation rejects an active-turn file atomically replaced after
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1798,7 +1798,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
     active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: installedDefinitionDigest, currentStep: "plan", iteration: 1, maxTurns: 2,
+    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: installedDefinitionDigest, currentStep: "plan", iteration: 1, maxTurns: 2,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "driver-actor", assignmentActorStruct: authorityActorStruct,
     lock, timeoutMs: 30_000,
   });

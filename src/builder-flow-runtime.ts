@@ -890,6 +890,7 @@ async function syncAndProject(
               ...(gateEvidence.failed ? { status: "failed" } : {}),
               ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
               expectationIds: gateEvidence.expectationIds,
+              analytics: { evidence_sha256: snapshot.sha256 },
             },
           });
           attached = true;
@@ -1035,13 +1036,14 @@ function persistPublishChangeResult(
   if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
   const existing = readPublishChangeResultBytes(context);
   if (existing) {
-    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
-      throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
-    }
     if (existing.equals(payload)) return { file, sha256: createHash("sha256").update(existing).digest("hex") };
-    // An interrupted attempt may have fsynced a valid observation before Flow
-    // committed its evidence. Never retain those unauthenticated local bytes:
-    // atomically replace them with this attempt's fresh provider observation.
+    // The existing regular file is an untrusted recovery hint, not authority.
+    // At this point the current action has been revalidated under the subject
+    // lock and the provider has been freshly authenticated and observed. This
+    // permits safe recovery from an interrupted attempt, a prior gate visit, or
+    // forged regular bytes without allowing the old file to select the result.
+    // Unsafe paths (including symlinks) were already rejected by the bounded
+    // no-follow read above.
     const temporary = path.join(context.sessionDir, `.publish-change.result-${randomBytes(16).toString("hex")}.tmp`);
     const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
     try {

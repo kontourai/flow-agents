@@ -40,6 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
+import { definitionDigest, flowRunHead, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -4391,15 +4392,210 @@ function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
   });
 }
 
+type RoutedBackClaimProvenance = {
+  currentRunHead: string | null;
+  claimsById: Map<string, AnyObj[]>;
+};
+
+function routedBackClaimIdentity(claim: AnyObj): AnyObj {
+  return {
+    id: claim.id,
+    subjectType: claim.subjectType,
+    subjectId: claim.subjectId,
+    facet: claim.facet,
+    claimType: claim.claimType,
+    fieldOrBehavior: claim.fieldOrBehavior,
+    value: claim.value,
+    impactLevel: claim.impactLevel,
+    verificationPolicyId: claim.verificationPolicyId,
+    metadata: claim.metadata,
+  };
+}
+
+function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
+  const sidecar = loadJson(path.join(dir, "state.json"), {});
+  const projectedFlow = sidecar?.flow_run;
+  const currentRunHead = typeof projectedFlow?.run_head === "string" ? projectedFlow.run_head : null;
+  const runRef = typeof projectedFlow?.run_ref === "string" ? projectedFlow.run_ref : null;
+  const runId = typeof projectedFlow?.run_id === "string" ? projectedFlow.run_id : null;
+  if (!currentRunHead || !runRef || !runId || runId !== sidecar.task_slug) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const projectRoot = narrativeGuardRoot(dir);
+  const candidateRunDir = path.resolve(projectRoot, runRef);
+  const relativeRunDir = path.relative(projectRoot, candidateRunDir);
+  if (!relativeRunDir || relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)
+    || !fs.existsSync(candidateRunDir) || fs.lstatSync(candidateRunDir).isSymbolicLink()) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const resolvedProjectRoot = fs.realpathSync(projectRoot);
+  const resolvedRunDir = fs.realpathSync(candidateRunDir);
+  const canonicalRunDir = fs.realpathSync(runDir(runId, projectRoot));
+  const resolvedRelative = path.relative(resolvedProjectRoot, resolvedRunDir);
+  if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)
+    || resolvedRunDir !== canonicalRunDir) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (path.basename(resolvedRunDir) !== runId) return { currentRunHead, claimsById: new Map() };
+  const readCanonicalRunBytes = (segments: string[], label: string, maxBytes: number): Buffer => {
+    const candidate = path.join(resolvedRunDir, ...segments);
+    if (typeof fs.constants.O_NOFOLLOW !== "number") {
+      throw new Error(`${label} requires O_NOFOLLOW support`);
+    }
+    const pathBefore = fs.lstatSync(candidate);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile()) {
+      throw new Error(`${label} must be a regular file within the canonical Flow run`);
+    }
+    const resolved = fs.realpathSync(candidate);
+    const relative = path.relative(resolvedRunDir, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`${label} must stay within the canonical Flow run`);
+    }
+    const ancestors = [resolvedRunDir, ...segments.slice(0, -1).map((_, index) =>
+      path.join(resolvedRunDir, ...segments.slice(0, index + 1)))];
+    const ancestorIdentities = ancestors.map((ancestor) => {
+      const stat = fs.lstatSync(ancestor);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} parent path must contain only real directories`);
+      return { path: ancestor, dev: stat.dev, ino: stat.ino };
+    });
+    const descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > maxBytes
+        || stat.dev !== pathBefore.dev || stat.ino !== pathBefore.ino
+        || stat.size !== pathBefore.size || stat.mtimeMs !== pathBefore.mtimeMs
+        || stat.ctimeMs !== pathBefore.ctimeMs) {
+        throw new Error(`${label} exceeds its bounded regular-file limit or changed identity`);
+      }
+      const bytes = Buffer.alloc(Number(stat.size));
+      let offset = 0;
+      while (offset < bytes.length) {
+        const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+        if (count <= 0) throw new Error(`${label} changed while reading`);
+        offset += count;
+      }
+      const after = fs.fstatSync(descriptor);
+      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size
+        || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) {
+        throw new Error(`${label} changed while reading`);
+      }
+      const pathAfter = fs.lstatSync(candidate);
+      if (pathAfter.isSymbolicLink() || !pathAfter.isFile()
+        || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino
+        || pathAfter.size !== after.size || pathAfter.mtimeMs !== after.mtimeMs
+        || pathAfter.ctimeMs !== after.ctimeMs || fs.realpathSync(candidate) !== resolved) {
+        throw new Error(`${label} changed identity while reading`);
+      }
+      for (const ancestor of ancestorIdentities) {
+        const current = fs.lstatSync(ancestor.path);
+        if (current.isSymbolicLink() || !current.isDirectory()
+          || current.dev !== ancestor.dev || current.ino !== ancestor.ino) {
+          throw new Error(`${label} parent path changed while reading`);
+        }
+      }
+      return bytes;
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  };
+  const readCanonicalRunJson = (segments: string[], label: string, maxBytes: number): AnyObj =>
+    JSON.parse(readCanonicalRunBytes(segments, label, maxBytes).toString("utf8"));
+  const startDefinition = readCanonicalRunJson(["definition.json"], "canonical Flow start definition", 2 * 1024 * 1024);
+  const canonicalStateInput = readCanonicalRunJson(["state.json"], "canonical Flow state", 8 * 1024 * 1024);
+  let canonicalState: AnyObj;
+  let effectiveDefinition: AnyObj;
+  try {
+    const validated = validateRunStateConsistency(startDefinition, canonicalStateInput, { runId });
+    canonicalState = validated.state;
+    effectiveDefinition = validated.definition;
+  } catch {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (canonicalState.run_id !== runId || canonicalState.definition_id !== projectedFlow.definition_id
+    || canonicalState.definition_version !== projectedFlow.definition_version
+    || definitionDigest(effectiveDefinition) !== projectedFlow.definition_digest
+    || !Array.isArray(sidecar.work_item_refs) || sidecar.work_item_refs.length !== 1
+    || canonicalState.subject !== sidecar.work_item_refs[0]) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (flowRunHead(canonicalState) !== currentRunHead) return { currentRunHead, claimsById: new Map() };
+  const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest", 32 * 1024 * 1024);
+  // Flow's evidence manifest is anchored to the immutable start definition.
+  // Authorized amendments are authenticated by validateRunStateConsistency
+  // above and advance only the effective state/definition identity.
+  if (manifest.run_id !== runId || manifest.definition_id !== startDefinition.id
+    || manifest.definition_version !== startDefinition.version) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const evidenceById = new Map<string, AnyObj>();
+  for (const evidence of Array.isArray(manifest?.evidence) ? manifest.evidence : []) {
+    if (evidence && typeof evidence.id === "string") evidenceById.set(evidence.id, evidence);
+  }
+  const claimsById = new Map<string, AnyObj[]>();
+  for (const transition of Array.isArray(canonicalState?.transitions) ? canonicalState.transitions : []) {
+    if (!transition || transition.type !== "route_back" || typeof transition.from_step !== "string"
+      || typeof transition.route_reason !== "string" || !Array.isArray(transition.evidence_refs)) continue;
+    for (const evidenceRef of transition.evidence_refs) {
+      const attachment = evidenceById.get(evidenceRef);
+      if (!attachment || attachment.gate_id !== transition.gate_id
+        || typeof attachment.stored_path !== "string"
+        || !/^[a-f0-9]{64}$/i.test(String(attachment.sha256 ?? ""))) continue;
+      const transitionEvidenceSha256 = transition.analytics?.evidence_sha256;
+      if (typeof transitionEvidenceSha256 !== "string"
+        || transitionEvidenceSha256.toLowerCase() !== attachment.sha256.toLowerCase()) continue;
+      let storedBytes: Buffer;
+      let storedBundle: AnyObj;
+      try {
+        storedBytes = readCanonicalRunBytes(attachment.stored_path.split("/"), `canonical Flow evidence ${attachment.id}`, 32 * 1024 * 1024);
+        if (createHash("sha256").update(storedBytes).digest("hex") !== attachment.sha256.toLowerCase()) continue;
+        storedBundle = JSON.parse(storedBytes.toString("utf8"));
+      } catch {
+        continue;
+      }
+      if (!isDeepStrictEqual(storedBundle, attachment.bundle)) continue;
+      const claims = storedBundle.claims;
+      if (!Array.isArray(claims)) continue;
+      for (const historical of claims) {
+        const gateClaim = historical?.metadata?.gate_claim;
+        if (claimOrigin(historical) !== "check" || typeof historical?.id !== "string"
+          || historical.value !== "fail" || historical.status !== "disputed"
+          || gateClaim?.step_id !== transition.from_step
+          || gateClaim?.route_reason !== transition.route_reason
+          || !Array.isArray(transition.expectation_ids)
+          || !transition.expectation_ids.includes(gateClaim?.expectation_id)) continue;
+        const entries = claimsById.get(historical.id) ?? [];
+        entries.push(historical);
+        claimsById.set(historical.id, entries);
+      }
+    }
+  }
+  return { currentRunHead, claimsById };
+}
+
+function historicalRoutedBackCheckClaim(claim: AnyObj, provenance: RoutedBackClaimProvenance): boolean {
+  const gateClaim = claim?.metadata?.gate_claim;
+  return claimOrigin(claim) === "check"
+    && claim.value === "fail"
+    && claim.status === "disputed"
+    && typeof gateClaim?.route_reason === "string"
+    && gateClaim.route_reason.length > 0
+    && typeof gateClaim.flow_run_head === "string"
+    && provenance.currentRunHead !== null
+    && gateClaim.flow_run_head !== provenance.currentRunHead
+    && (provenance.claimsById.get(claim.id) ?? []).some((historical) =>
+      isDeepStrictEqual(routedBackClaimIdentity(historical), routedBackClaimIdentity(claim)));
+}
+
 function checksFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
+  const provenance = routedBackClaimProvenance(dir);
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
   for (const claim of allClaims) requireStampedClaim(claim, dir);
   if (!Array.isArray(bundle.evidence)) return [];
   const claimById = new Map<string, AnyObj>();
-  for (const c of allClaims) if (c && c.id) claimById.set(c.id, c);
+  for (const c of allClaims) if (c && c.id && !historicalRoutedBackCheckClaim(c, provenance)) claimById.set(c.id, c);
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
   const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
@@ -4545,6 +4741,7 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const claim of allClaims) {
     if (!claim) continue;
     if (claimOrigin(claim) !== "check") continue;
+    if (historicalRoutedBackCheckClaim(claim, provenance)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
     const kind = kindOf(claim);
@@ -7263,9 +7460,16 @@ function evidenceClean(dir: string): boolean {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
     if (checkClaims.length === 0) return false;
+    const provenance = routedBackClaimProvenance(dir);
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
-      return v === "pass" || v === "skip";
+      if (v === "pass" || v === "skip") return true;
+      // A failed claim with a route reason is retained as history after Flow
+      // moves to a new canonical head. It must remain auditable without
+      // poisoning a later repaired delivery forever. A failure bound to the
+      // current head, or one without an authenticated head transition, remains
+      // live and therefore non-clean.
+      return historicalRoutedBackCheckClaim(c, provenance);
     });
   }
   // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)

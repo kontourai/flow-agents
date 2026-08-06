@@ -525,13 +525,113 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   } });
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
+  const historicalRouteBack = bundleClaim({
+    expectation: "ci-merge-readiness",
+    claimType: "builder.merge-ready-ci.readiness",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+  });
+  historicalRouteBack.claim.status = "disputed";
+  historicalRouteBack.claim.metadata.gate_claim.step_id = "merge-ready-ci";
+  writeBundle(session.sessionDir, [historicalRouteBack]);
+  const routedBack = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(routedBack.run.state.current_step, "verify");
+  assert.equal(routedBack.run.state.transitions.at(-1).type, "route_back");
+  assert.equal(
+    routedBack.run.state.transitions.at(-1).analytics.evidence_sha256,
+    routedBack.run.manifest.evidence.at(-1).sha256,
+    "canonical route-back state binds the exact attached evidence digest",
+  );
+
   const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
   currentTests.claim.status = "verified";
   currentTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
   const currentPrerequisites = verifiedTestsPrerequisites(session);
   for (const entry of currentPrerequisites) entry.claim.status = "verified";
-  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites]);
+  const forgedHistoricalRouteBack = structuredClone(historicalRouteBack);
+  forgedHistoricalRouteBack.claim.fieldOrBehavior = "forged historical route-back metadata";
+  const canonicalRunDir = runDir(session.slug, session.projectRoot);
+  const canonicalManifestFile = path.join(canonicalRunDir, FLOW_RUN_EVIDENCE_MANIFEST_PATH);
+  const canonicalManifestBytes = fs.readFileSync(canonicalManifestFile);
+  const canonicalManifest = JSON.parse(canonicalManifestBytes);
+  const routedAttachment = canonicalManifest.evidence.find((entry) => entry.id === routedBack.run.state.transitions.at(-1).evidence_refs[0]);
+  const routedStoredFile = path.join(canonicalRunDir, routedAttachment.stored_path);
+  const routedStoredBytes = fs.readFileSync(routedStoredFile);
+  const tamperedStoredBundle = JSON.parse(routedStoredBytes);
+  tamperedStoredBundle.claims = tamperedStoredBundle.claims.map((claim) =>
+    claim.id === forgedHistoricalRouteBack.claim.id ? forgedHistoricalRouteBack.claim : claim);
+  const tamperedStoredBytes = Buffer.from(`${JSON.stringify(tamperedStoredBundle, null, 2)}\n`);
+  routedAttachment.bundle = tamperedStoredBundle;
+  routedAttachment.sha256 = createHash("sha256").update(tamperedStoredBytes).digest("hex");
+  fs.writeFileSync(routedStoredFile, tamperedStoredBytes);
+  writeJson(canonicalManifestFile, canonicalManifest);
+  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
+  try {
+    await workflowSidecarMain([
+      "record-critique", session.sessionDir,
+      "--id", "forged-route-rebuild",
+      "--reviewer", "post-route-reviewer",
+      "--verdict", "pass",
+      "--summary", "A forged route-back lookalike must remain live.",
+      "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
+      "--lane-json", JSON.stringify({
+        id: "forged-route-review",
+        status: "pass",
+        summary: "Exercise forged historical metadata handling.",
+        evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed delivery artifact." }],
+      }),
+    ]);
+  } finally {
+    fs.writeFileSync(routedStoredFile, routedStoredBytes);
+    fs.writeFileSync(canonicalManifestFile, canonicalManifestBytes);
+  }
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) => claim.fieldOrBehavior === "forged historical route-back metadata"),
+    true,
+    "copied identity plus coordinated manifest/stored-byte tampering remains live when it does not match the state-bound digest",
+  );
+  writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
+  const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "post-route-rebuild",
+    "--reviewer", "post-route-reviewer",
+    "--verdict", "pass",
+    "--summary", "Current source remains clean after the historical route-back.",
+    "--artifact-ref", reviewedArtifact,
+    "--lane-json", JSON.stringify({
+      id: "post-route-review",
+      status: "pass",
+      summary: "The repaired current source remains review-clean.",
+      evidence_refs: [{ kind: "artifact", file: path.relative(session.projectRoot, reviewedArtifact), summary: "Reviewed current delivery artifact." }],
+    }),
+  ]);
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) => claim.metadata?.gate_claim?.expectation_id === "ci-merge-readiness"),
+    false,
+    "a compose-safe rebuild removes a historical routed-back failure from the live bundle while Flow retains its attached history",
+  );
+  const repairedTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  repairedTests.claim.status = "verified";
+  repairedTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
+  const repairedPrerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of repairedPrerequisites) entry.claim.status = "verified";
+  const repairedVerification = [repairedTests, ...repairedPrerequisites].map((entry) => withIdentitySuffix(entry, "after-route-back"));
+  assert.equal((await writeAndSync(session, repairedVerification)).run.state.current_step, "merge-ready");
+  const repairedMergeReadiness = withIdentitySuffix(bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" }), "after-route-back");
+  repairedMergeReadiness.claim.status = "verified";
+  assert.equal((await writeAndSync(session, [...repairedVerification, repairedMergeReadiness])).run.state.current_step, "pr-open");
+  const currentAction = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Provisional delivery E2E",
+    body: "Exercise the exact public request and publication path.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action: currentAction });
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
 
   const requestOutput = [];
   const originalLog = console.log;
@@ -544,7 +644,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   assert.equal(requestOutput.length, 1);
   const request = JSON.parse(requestOutput[0]);
   assert.equal(request.authorization.operation, "publish-provisional-delivery");
-  assert.equal(request.authorization.published_head_sha, action.head_sha);
+  assert.equal(request.authorization.published_head_sha, currentAction.head_sha);
 
   const operatorKeys = generateKeyPairSync("ed25519");
   const completionKeys = generateKeyPairSync("ed25519");
@@ -639,8 +739,13 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
 
   execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
   execFileSync("git", ["commit", "-m", "exact provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
-  const learning = await writeAndSync(session, [
+  const repairedCiReadiness = withIdentitySuffix(
     bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
+    "after-route-back",
+  );
+  repairedCiReadiness.claim.status = "verified";
+  const learning = await writeAndSync(session, [
+    repairedCiReadiness,
   ]);
   assert.equal(learning.run.state.current_step, "learn");
   const learningEntries = [
@@ -658,6 +763,94 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   assert.equal(terminalCheckpoint.phase, "release");
   assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events[0].event_hash);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("routed-back provenance keeps the manifest bound to the start definition after an authorized amendment", async () => {
+  const session = makeSession("amended-route-back-provenance");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  initializePublishChangeGitRepository(session.projectRoot);
+  execFileSync("git", ["add", ".gitignore", "package.json", "context", "review-target"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed implementation"], { cwd: session.projectRoot, stdio: "ignore" });
+  await advanceSessionToPrOpen(session);
+  const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Amended route-back provenance",
+    body: "Exercise start-definition manifest identity after an authorized amendment.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
+
+  const historical = bundleClaim({
+    expectation: "ci-merge-readiness",
+    claimType: "builder.merge-ready-ci.readiness",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+  });
+  historical.claim.status = "disputed";
+  historical.claim.metadata.gate_claim.step_id = "merge-ready-ci";
+  writeBundle(session.sessionDir, [historical]);
+  const routed = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(routed.run.state.current_step, "verify");
+
+  const successor = { ...structuredClone(routed.run.definition), version: `${routed.run.definition.version}-amended-provenance-test` };
+  await amendRunDefinition(session.slug, {
+    cwd: session.projectRoot,
+    definition: successor,
+    request: {
+      reason: "exercise immutable start-definition manifest identity",
+      expected_run_head: flowRunHead(routed.run.state),
+      expected_definition: definitionIdentity(routed.run.definition),
+      successor_digest: definitionDigest(successor),
+      authority: {
+        kind: "user_request",
+        actor: "amended-route-back-test",
+        request_ref: "test:amended-route-back-provenance",
+        requested_at: new Date().toISOString(),
+      },
+    },
+  });
+  const amended = await loadRun(session.slug, session.projectRoot);
+  const projected = readJson(path.join(session.sessionDir, "state.json"));
+  projected.flow_run = {
+    ...projected.flow_run,
+    definition_version: successor.version,
+    definition_digest: definitionDigest(successor),
+    run_head: flowRunHead(amended.state),
+  };
+  writeJson(path.join(session.sessionDir, "state.json"), projected);
+
+  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  currentTests.claim.status = "verified";
+  currentTests.claim.metadata.verification_workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  const prerequisites = verifiedTestsPrerequisites(session);
+  for (const entry of prerequisites) entry.claim.status = "verified";
+  writeBundle(session.sessionDir, [currentTests, ...prerequisites, historical]);
+  await workflowSidecarMain([
+    "record-critique", session.sessionDir,
+    "--id", "amended-route-back-review",
+    "--reviewer", "amended-route-back-reviewer",
+    "--verdict", "pass",
+    "--summary", "The amended run retains authenticated start-definition manifest provenance.",
+    "--artifact-ref", path.join(session.projectRoot, "review-target", "delivery.md"),
+    "--lane-json", JSON.stringify({
+      id: "code-review",
+      status: "pass",
+      summary: "Review the amended route-back provenance fixture.",
+      evidence_refs: [{ kind: "artifact", file: "review-target/delivery.md", summary: "Reviewed fixture artifact." }],
+    }),
+  ]);
+  assert.equal(
+    readJson(path.join(session.sessionDir, "trust.bundle")).claims.some((claim) =>
+      claim.metadata?.gate_claim?.expectation_id === "ci-merge-readiness"),
+    false,
+  );
 });
 
 test("provisional delivery journals interrupted replacement until it can deterministically restore or finish", () => {
@@ -3958,21 +4151,25 @@ test("sync attaches the staged trust.bundle bytes when the session bundle is rep
   const originalDigest = createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex");
   let replaceBundle;
   const replaced = new Promise((resolve) => { replaceBundle = resolve; });
-  const watcher = fs.watch(session.sessionDir, (_event, filename) => {
-    if (String(filename) !== ".trust-bundle-snapshots") return;
+  const snapshotDirectory = path.join(session.sessionDir, ".trust-bundle-snapshots");
+  let deadlockTimer;
+  const deadlock = new Promise((_, reject) => {
+    deadlockTimer = setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 10_000);
+  });
+  const watcher = setInterval(() => {
+    if (!fs.existsSync(snapshotDirectory)) return;
+    clearInterval(watcher);
     fs.writeFileSync(bundleFile, "{\"claims\":[]}");
     replaceBundle();
-  });
+  }, 1);
   try {
     const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
-    await Promise.race([
-      replaced,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 2_000)),
-    ]);
+    await Promise.race([replaced, deadlock]);
     const synced = await syncing;
     assert.equal(synced.attached, true);
   } finally {
-    watcher.close();
+    clearInterval(watcher);
+    clearTimeout(deadlockTimer);
   }
   const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
   assert.equal(manifest.evidence.at(-1).sha256, originalDigest);
@@ -4054,7 +4251,7 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
       "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, summary: "selected work" }),
       "--command", `${process.execPath} ${mutator}`,
     ]),
-    /expected canonical builder\.build@1\.3 run, received builder\.build@1\.3-valid-unshipped-test/,
+    /expected canonical builder\.build@1\.4 run, received builder\.build@1\.3-valid-unshipped-test/,
   );
 
   assert.deepEqual(readJson(manifestFile), beforeManifest, "the amendment race must not attach evidence");
@@ -6456,7 +6653,7 @@ test("an amendment successor that is not the shipped Builder definition is rejec
 
   await assert.rejects(
     () => recoverBuilderFlowSession({ sessionDir: session.sessionDir }),
-    /expected canonical builder\.build@1\.3 run, received builder\.build@1\.1-amended-test/,
+    /expected canonical builder\.build@1\.4 run, received builder\.build@1\.1-amended-test/,
   );
 });
 
@@ -7581,7 +7778,7 @@ function assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection) 
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
 }
 
-test("publish-change rejects symlinked and forged persisted results before canonical mutation", async (t) => {
+test("publish-change rejects unsafe result files and replaces untrusted regular recovery hints only after fresh observation", async (t) => {
   await t.test("symlink leaves its external target untouched", async () => {
     const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-symlink");
     const result = path.join(session.sessionDir, "publish-change.result.json");
@@ -7601,19 +7798,17 @@ test("publish-change rejects symlinked and forged persisted results before canon
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 
-  await t.test("forged bytes cannot be accepted as crash recovery", async () => {
+  await t.test("stale or forged regular bytes are replaced by the current authenticated operation", async () => {
     const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-forgery");
     writeJson(path.join(session.sessionDir, "publish-change.result.json"), {
       operation_action_id: "forged-action", provider: "untrusted", change_ref: { number: 999 },
     });
-    const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
-    const beforeProjection = snapshotProjectionTargets(session);
-
-    await assert.rejects(
-      () => createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action }),
-      /already exists with different authenticated operation bytes/,
-    );
-    assertPublishChangeDidNotMutate(session, beforeFlow, beforeProjection);
+    const observation = publishChangeObservation(action);
+    const completed = await createPublishChangeOperationCompleter(() => observation)({ sessionDir: session.sessionDir, action });
+    const persisted = readJson(path.join(session.sessionDir, "publish-change.result.json"));
+    assert.equal(persisted.operation_action_id, action.action_id);
+    assert.equal(persisted.change_ref.provider_record_id, observation.change_ref.provider_record_id);
+    assert.notEqual(completed.run.state.current_step, "pr-open");
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   });
 
