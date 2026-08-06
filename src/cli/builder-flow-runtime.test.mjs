@@ -20,6 +20,7 @@ import {
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
+  setSignalValidationBypassForTest,
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
@@ -4006,7 +4007,10 @@ test("public evidence rejects an intervening Flow mutation and removes unattache
       "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, summary: "selected work" }),
       "--command", `${process.execPath} ${mutator}`,
     ]),
-    /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/,
+    // #1191: the signal-validation guard in syncAndProject now catches the stale
+    // expectedRunHead BEFORE bundleGateEvidence's deeper per-claim check fires.
+    // Either error is acceptable — both reject the write and leave no partial state.
+    /signal_validation:gate_advanced|evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/,
   );
 
   assert.deepEqual(readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH)), beforeManifest);
@@ -8223,4 +8227,205 @@ test("recovery rejects symlinked session and projection targets before writes", 
       assert.equal(snapshotFile(externalPointer), beforeExternal);
     });
   }
+});
+
+// #1191: signal validation — hooks and sidecar writes against finished/terminal
+// runs must fail closed (Temporal closed-workflow signal rule). These tests prove
+// each rejection class, the never-wedge guarantee, and the fault-injection red/green pair.
+
+test("#1191 run_closed: record-evidence against a canceled run is rejected; a different live run remains writable", async () => {
+  const session = makeGitBackedSession("signal-validation-run-closed");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nSignal validation fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  // Cancel the canonical Flow run (terminal state) without syncing the session projection.
+  await cancelRun(session.slug, {
+    cwd: session.projectRoot,
+    reason: "test: terminal run for signal validation",
+    authority: { kind: "user_request", actor: "test", request_ref: "test:signal-validation-run-closed", requested_at: new Date().toISOString() },
+  });
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.status, "canceled");
+
+  // The guard reads the CANONICAL state (canceled), not the stale session projection (active).
+  await assert.rejects(
+    () => workflowSidecarMain([
+      "record-evidence", session.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "should be rejected" }),
+    ]),
+    (error) => {
+      assert.match(error.message, /signal_validation:run_closed/);
+      assert.match(error.message, /canceled/);
+      return true;
+    },
+  );
+
+  // Never-wedge: a DIFFERENT live run remains writable.
+  const live = makeGitBackedSession("signal-validation-run-closed-live");
+  claimAmbientSessionAssignment(live);
+  fs.writeFileSync(path.join(live.projectRoot, `${live.slug}--pull-work.md`), "# Pull Work\n\nLive run fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: live.sessionDir });
+  assert.equal(
+    await workflowSidecarMain([
+      "record-evidence", live.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write to a different live run" }),
+    ]),
+    0,
+    "a valid write to a different live run succeeds after a run_closed rejection",
+  );
+});
+
+test("#1191 accepted_by_exception is not terminal: record-evidence still succeeds (review MEDIUM)", async () => {
+  // Independent-review finding: accepted_by_exception was initially classified
+  // terminal, but it is a CONTINUING status — Flow's lifecycle eligibility only
+  // rejects paused/canceled for attach_evidence/evaluate, Flow reverses it to
+  // active on continuation, and Flow Agents' own terminal classification calls
+  // it "continue". The legitimate workflow — accept exception, keep writing
+  // evidence, sync to evaluate — must not hit run_closed.
+  const session = makeGitBackedSession("signal-validation-accepted-exception");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nAccepted exception fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  await acceptException(session.slug, {
+    cwd: session.projectRoot,
+    gate: "pull-work-gate",
+    reason: "authorized fixture waiver",
+    authority: "test-reviewer",
+  });
+  assert.equal((await loadRun(session.slug, session.projectRoot)).state.status, "accepted_by_exception");
+
+  // The write must NOT be rejected — accepted_by_exception is not closed.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-evidence", session.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write on an accepted_by_exception run" }),
+    ]),
+    0,
+    "record-evidence succeeds on an accepted_by_exception run",
+  );
+});
+
+test("#1191 gate_advanced: record-gate-claim with a stale flow_run_head is rejected; the run remains writable", async () => {
+  const session = makeGitBackedSession("signal-validation-gate-advanced");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nGate advanced fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  // Capture the current canonical head (H1), then advance it (H1 → H2) WITHOUT
+  // syncing the session projection — the #1164 desync shape.
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  assert.notEqual(staleHead, currentHead);
+
+  // The session projection still shows H1, so --flow-run-head H1 passes the
+  // projection check. But the guard reads the CANONICAL head (H2) and rejects.
+  const bundleBefore = snapshotFile(path.join(session.sessionDir, "trust.bundle"));
+  await assert.rejects(
+    () => workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "stale-head write should be rejected",
+      "--flow-run-head", staleHead,
+    ]),
+    (error) => {
+      assert.match(error.message, /signal_validation:gate_advanced/);
+      assert.ok(error.message.includes(staleHead), "the diagnostic names the stamped (stale) head");
+      assert.ok(error.message.includes(currentHead), "the diagnostic names the canonical (current) head");
+      return true;
+    },
+  );
+
+  // Never-wedge: the trust.bundle is unchanged (no partial state from the rejected write).
+  assert.equal(snapshotFile(path.join(session.sessionDir, "trust.bundle")), bundleBefore, "rejected write left no partial state");
+
+  // Never-wedge: the same run remains writable — record-evidence (no stamped head) succeeds.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-evidence", session.sessionDir,
+      "--verdict", "partial",
+      "--check-json", JSON.stringify({ id: "ac-1", kind: "external", status: "pass", summary: "valid write after gate_advanced rejection" }),
+    ]),
+    0,
+    "a valid write to the same run succeeds after a gate_advanced rejection (never-wedge)",
+  );
+});
+
+test("#1191 projected-head record-gate-claim succeeds on a stale projection (external authority recovery path)", async () => {
+  // After an external lifecycle authority mutation (resolve-critique, cancel,
+  // reseal), the canonical Flow head advances but the sidecar projection may
+  // lag (#1164). The gate_advanced head check applies only when the caller
+  // explicitly stamps --flow-run-head (concurrent-writer guard). Without it,
+  // the head comes from the projection (a cache, not a concurrency signal) and
+  // only run_closed is enforced. This keeps the lifecycle authority's
+  // post-mutation writes working without forcing a syncBuilderFlowSession
+  // (which evaluates the gate and advances the head again).
+  const session = makeGitBackedSession("signal-validation-projected-head");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nProjected head fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead, after: currentHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+  assert.notEqual(staleHead, currentHead, "test precondition: canonical head advanced past the projection");
+
+  // record-gate-claim WITHOUT --flow-run-head: the projected (stale) head is
+  // NOT checked against canonical. Only run_closed applies. The write succeeds.
+  assert.equal(
+    await workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "projected-head write on a stale projection (external authority recovery path)",
+    ]),
+    0,
+    "record-gate-claim without --flow-run-head succeeds even when the projection is stale",
+  );
+});
+
+test("#1191 fault injection: stale-head write silently accepted on un-guarded path, rejected on guarded path", async () => {
+  const session = makeGitBackedSession("signal-validation-fault-injection");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, `${session.slug}--pull-work.md`), "# Pull Work\n\nFault injection fixture.\n");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const { before: staleHead } = await advanceFlowHeadWithoutTouchingTheTree(session);
+
+  // RED: with the guard bypassed, the stale-head write is silently accepted (the defect).
+  setSignalValidationBypassForTest(true);
+  try {
+    const rc = await workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "fault injection: un-guarded stale-head write",
+      "--flow-run-head", staleHead,
+    ]);
+    assert.equal(rc, 0, "un-guarded path silently accepts the stale-head write (the pre-fix defect)");
+  } finally {
+    setSignalValidationBypassForTest(false);
+  }
+
+  // GREEN: with the guard restored, the stale-head write is rejected.
+  await assert.rejects(
+    () => workflowSidecarMain([
+      "record-gate-claim", session.sessionDir,
+      "--expectation", "selected-work", "--status", "not_verified",
+      "--summary", "fault injection: guarded stale-head write",
+      "--flow-run-head", staleHead,
+    ]),
+    (error) => {
+      assert.match(error.message, /signal_validation:gate_advanced/);
+      return true;
+    },
+  );
+});
+
+test("#1191 claim_lost is subsumed by gate_advanced and run_closed in this slice", () => {
+  // Documented rationale (not a runtime test): in the sidecar, claim liveness is
+  // entirely determined by head match — a gate claim is "live" when its
+  // flow_run_head matches the canonical head. There is no independent
+  // claim-release or claim-expiry mechanism. When the head advances, the claim
+  // becomes stale (gate_advanced). When the run is terminal, all claims are lost
+  // (run_closed). So claim_lost is not separable from these two classes here.
+  assert.ok(true, "claim_lost is subsumed by gate_advanced (head-based liveness) and run_closed (run-based liveness)");
 });

@@ -96,6 +96,8 @@ CHECKS=(
   "Installed runtime correlation integration|bash evals/integration/test_installed_runtime_correlation.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
   "Console board sync integration|evals/integration/test_console_board_sync.sh"
+  "Console outbox integration|bash evals/integration/test_console_outbox.sh"
+  "Console receipt relay integration|bash evals/integration/test_console_receipt_relay.sh"
   "Capability declarations integration|bash evals/integration/test_capability_declarations.sh"
   "Install identity stamp integration|bash evals/integration/test_install_identity_stamp.sh"
   "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
@@ -226,6 +228,8 @@ LANE_RUNTIME_AND_KIT=(
   "Installed runtime correlation integration"
   "Economics record integration"
   "Console board sync integration"
+  "Console outbox integration"
+  "Console receipt relay integration"
   "Capability declarations integration"
   "Install identity stamp integration"
   "Learning review proposals integration"
@@ -414,7 +418,14 @@ run_check() {
 
   echo "==> $label"
   echo "+ $command" >"$log"
-  if (cd "$ROOT_DIR" && bash -lc "$command") >>"$log" 2>&1; then
+  # #1094 item C: default every eval to a console-free telemetry conf. Stubbing
+  # HOME is NOT isolation in this repo — config.sh resolves the per-workspace
+  # .kontourai/telemetry-console.conf first, and ours carries a real production
+  # endpoint and token, so a forgetful test can post real records from a test
+  # run. Defaulted rather than forced: a test that needs a console sets its own
+  # TELEMETRY_CONFIG_FILE and still wins.
+  local telemetry_conf="${TELEMETRY_CONFIG_FILE:-$ROOT_DIR/evals/fixtures/no-console.telemetry.conf}"
+  if (cd "$ROOT_DIR" && TELEMETRY_CONFIG_FILE="$telemetry_conf" bash -lc "$command") >>"$log" 2>&1; then
     echo -e "$id\t$label\tpass\t$command\t$log" >>"$STATUS_FILE"
     echo "PASS $label"
   else
