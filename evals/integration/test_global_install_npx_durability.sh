@@ -189,9 +189,9 @@ else
 fi
 
 # The actionable init.ts-level message must wrap install-owned-files.js's own clean
-# fail() line ("destination component is not a directory: ..."), not a raw multi-line
+# fail() line ("unable to inspect destination entry: ..."), not a raw multi-line
 # V8 stack trace (plan §5 Risk 4) -- a stack trace has "\n    at " frame lines.
-if grep -q "destination component is not a directory" "$POISON_STDERR" && ! grep -qE '^\s+at ' "$POISON_STDERR"; then
+if grep -q "unable to inspect destination entry" "$POISON_STDERR" && ! grep -qE '^\s+at ' "$POISON_STDERR"; then
   _pass "AC5: underlying failure is install-owned-files.js's clean fail() message, not a raw stack trace"
 else
   _fail "AC5: underlying failure message is missing or looks like a raw stack trace"
