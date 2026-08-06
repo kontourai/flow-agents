@@ -16,7 +16,7 @@
           "owner": "kontourai",
           "name": "flow-agents"
         },
-        "capabilities": ["change.create", "change.observe"],
+        "capabilities": ["change.create", "change.observe", "change.merge"],
         "executor": "gh-cli"
       }
     }

@@ -13,6 +13,8 @@ import {
   type ChangeProviderResult,
 } from "./change-provider.js";
 import type { ChangeProviderSettings } from "./public-contracts.js";
+import type { AuthenticatedMergeChangeObservation, IssuedMergeChangeAction } from "../merge-change-operation-authority.js";
+import { publishChangeProviderConfigurationId } from "../publish-change-operation-authority.js";
 
 const ADAPTER_ID = "github-gh-cli" as const;
 const MAX_PROVIDER_OUTPUT_BYTES = 256 * 1024;
@@ -166,6 +168,279 @@ export async function observeGithubMergedChange(input: Readonly<{
     });
   } finally {
     releaseGithubAuthentication(authenticatedExecution);
+  }
+}
+
+/**
+ * Authenticated destructive merge primitive.  It re-observes the exact terminal
+ * PR head and its checks immediately before the mutation.  The caller cannot
+ * substitute a SHA, strategy, or provider observation after action issuance.
+ */
+export async function mergeGithubChangeExactHead(
+  settings: ChangeProviderSettings,
+  action: IssuedMergeChangeAction,
+  dependencies: GithubChangeProviderDependencies = {},
+): Promise<AuthenticatedMergeChangeObservation> {
+  if (settings.kind !== "github" || settings.executor !== "gh-cli"
+    || settings.repository.owner !== action.repository.owner || settings.repository.name !== action.repository.name) {
+    throw new ChangeProviderError("invalid_request", "merge-change does not match the configured GitHub provider");
+  }
+  if (publishChangeProviderConfigurationId(settings) !== action.provider.configuration_id) {
+    throw new ChangeProviderError("provider_observation_mismatch", "merge-change provider configuration changed after action issuance");
+  }
+  const injectedExecutor = dependencies.executor !== undefined;
+  if (!injectedExecutor && dependencies.executable !== undefined) {
+    throw new ChangeProviderError("invalid_request", "ChangeProvider executable overrides require an injected executor");
+  }
+  const trustedExecutable = injectedExecutor ? null : resolveTrustedGithubExecutableIdentity();
+  const execution: GithubExecutionDependencies = {
+    executor: dependencies.executor ?? execFileArgv,
+    executable: injectedExecutor ? validateExecutable(dependencies.executable ?? "gh") : trustedExecutable!.path,
+    now: dependencies.now ?? (() => new Date().toISOString()),
+    trustedExecutable,
+  };
+  const authenticated = await bindGithubAuthentication(execution);
+  try {
+    const capability = await checkGithubCapability(settings, authenticated);
+    assertExpectedProviderActor(action, capability.provider_actor);
+    const before = await mergeProviderRecord(action, authenticated);
+    assertExactMergeHead(before, action);
+    await assertExactHeadChecks(action, authenticated);
+
+    // Required checks are associated with a PR, not an immutable request
+    // object. Re-observe its exact head immediately after the check query so a
+    // force-push cannot turn a passing observation into a later mutation.
+    const checked = await mergeProviderRecord(action, authenticated);
+    assertExactMergeHead(checked, action);
+    if (checked.merged === true) {
+      assertMutationActor(checked.merged_by, action, "existing merge");
+      return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: providerSha(checked.merge_commit_sha, "existing merge SHA"), observed_at: execution.now() };
+    }
+
+    if (action.intent.strategy === "merge-queue") {
+      const admitted = await observeExactMergeQueueEntry(action, authenticated);
+      if (admitted) return queuedMergeObservation(action, capability.provider_actor, admitted, execution.now());
+      await assertMergeMutationPolicy(settings, action, authenticated);
+      // GitHub routes --auto through a configured merge queue.  The match-head
+      // guard is the server-side compare-and-mutate fence; re-observation below
+      // proves that the queue accepted the very same terminal source head.
+      await invoke(authenticated, ["pr", "merge", String(action.intent.change_number), "--repo", repoSlug(action), "--auto", "--match-head-commit", action.intent.terminal_head_sha]);
+      const queued = await mergeProviderRecord(action, authenticated);
+      assertExactMergeHead(queued, action);
+      if (queued.merged === true) {
+        assertMutationActor(queued.merged_by, action, "merge queue merge");
+        const mergeSha = providerSha(queued.merge_commit_sha, "merge queue merge SHA");
+        return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: mergeSha, observed_at: execution.now() };
+      }
+      const queueEntry = await assertMergeQueueAccepted(action, authenticated);
+      return queuedMergeObservation(action, capability.provider_actor, queueEntry, execution.now());
+    }
+
+    const mergeMethod = action.intent.strategy === "merge-commit" ? "merge" : action.intent.strategy;
+    await assertMergeMutationPolicy(settings, action, authenticated);
+    const result = plainObject(parseProviderJson(await invoke(authenticated, ["api", "--method", "PUT", `repos/${repoSlug(action)}/pulls/${action.intent.change_number}/merge`, "-f", `sha=${action.intent.terminal_head_sha}`, "-f", `merge_method=${mergeMethod}`]), "merge provider result"), "merge provider result");
+    if (result.merged !== true) throw new ChangeProviderError("provider_observation_mismatch", "provider did not merge the exact terminal change head");
+    const after = await mergeProviderRecord(action, authenticated);
+    assertExactMergeHead(after, action);
+    if (after.merged !== true) throw new ChangeProviderError("provider_observation_mismatch", "provider did not confirm the exact merged change");
+    assertMutationActor(after.merged_by, action, "merge");
+    return { schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: capability.provider_actor, state: "merged", merge_sha: providerSha(after.merge_commit_sha ?? result.sha, "merge provider result SHA"), observed_at: execution.now() };
+  } finally {
+    releaseGithubAuthentication(authenticated);
+  }
+}
+
+/** `headCommit` is GitHub's immutable merge-group candidate, not the PR source commit. */
+type QueueEntry = Readonly<{ id: string; headSha: string; admittedMergeGroupSha?: string }>;
+
+function queuedMergeObservation(action: IssuedMergeChangeAction, providerActor: string, entry: QueueEntry, observedAt: string): AuthenticatedMergeChangeObservation {
+  return {
+    schema_version: "1.0", operation: "merge-change", binding: structuredClone(action.binding), repository: structuredClone(action.repository), intent: structuredClone(action.intent), provider: { kind: "github", configuration_id: action.provider.configuration_id, adapter: ADAPTER_ID }, assignment_actor: action.assignment_actor, provider_actor: providerActor,
+    state: "queued", queue_entry: { id: entry.id, head_sha: entry.headSha, ...(entry.admittedMergeGroupSha ? { admitted_merge_group_sha: entry.admittedMergeGroupSha } : {}) }, observed_at: observedAt,
+  };
+}
+
+async function observeExactMergeQueueEntry(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<QueueEntry | null> {
+  return await queryMergeQueueEntry(action, dependencies, false);
+}
+
+async function assertMergeQueueAccepted(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<QueueEntry> {
+  const entry = await queryMergeQueueEntry(action, dependencies, true);
+  if (!entry) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return an immutable merge queue entry for the exact terminal head; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks and retry");
+  return entry;
+}
+
+async function queryMergeQueueEntry(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies, required: boolean): Promise<QueueEntry | null> {
+  const query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid mergeQueueEntry{id state enqueuer{login} headCommit{oid}}}}}";
+  const response = plainObject(parseProviderJson(await invoke(dependencies, [
+    "api", "graphql",
+    "-f", `query=${query}`,
+    "-f", `owner=${action.repository.owner}`,
+    "-f", `name=${action.repository.name}`,
+    "-F", `number=${action.intent.change_number}`,
+  ]), "merge queue observation"), "merge queue observation");
+  const data = plainObject(response.data, "merge queue observation data");
+  const repository = plainObject(data.repository, "merge queue observation repository");
+  const pullRequest = plainObject(repository.pullRequest, "merge queue observation pull request");
+  if (providerSha(pullRequest.headRefOid, "merge queue pull request head SHA") !== action.intent.terminal_head_sha) {
+    throw new ChangeProviderError("provider_observation_mismatch", "merge queue pull request head no longer matches the exact terminal head; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks and retry");
+  }
+  if (pullRequest.mergeQueueEntry === null || pullRequest.mergeQueueEntry === undefined) {
+    if (required) throw new ChangeProviderError("provider_observation_mismatch", "provider did not return an immutable merge queue entry for the exact terminal head; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks and retry");
+    return null;
+  }
+  const entry = plainObject(pullRequest.mergeQueueEntry, "merge queue entry");
+  if (!["AWAITING_CHECKS", "LOCKED", "MERGEABLE", "QUEUED"].includes(String(entry.state))) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider did not confirm admission of the exact terminal head to its merge queue; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks and retry");
+  }
+  assertMutationActor(entry.enqueuer, action, "merge queue admission");
+  const headCommit = entry.headCommit === null || entry.headCommit === undefined ? undefined : plainObject(entry.headCommit, "merge queue merge-group commit");
+  return Object.freeze({ id: providerString(entry.id, "merge queue entry id", 1024), headSha: action.intent.terminal_head_sha, ...(headCommit ? { admittedMergeGroupSha: providerSha(headCommit.oid, "merge queue merge-group SHA") } : {}) });
+}
+
+async function mergeProviderRecord(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<Record<string, unknown>> {
+  return plainObject(parseProviderJson(await invoke(dependencies, ["api", `repos/${repoSlug(action)}/pulls/${action.intent.change_number}`]), "merge provider record"), "merge provider record");
+}
+
+function assertExactMergeHead(record: Record<string, unknown>, action: IssuedMergeChangeAction): void {
+  const base = plainObject(record.base, "merge provider base");
+  const baseRepo = plainObject(base.repo, "merge provider base repository");
+  const head = plainObject(record.head, "merge provider head");
+  const headRepo = plainObject(head.repo, "merge provider head repository");
+  if (baseRepo.full_name !== repoSlug(action) || headRepo.full_name !== repoSlug(action) || base.ref !== action.intent.base_ref || head.ref !== action.intent.head_ref
+    || providerSha(head.sha, "merge provider head SHA") !== action.intent.terminal_head_sha) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider head no longer matches the exact terminal merge action");
+  }
+}
+
+async function assertExactHeadChecks(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<void> {
+  // `gh pr checks --required` is GitHub's authenticated required-check view;
+  // Check Runs alone omit legacy commit-status contexts and cannot identify
+  // which checks branch protection actually requires. Zero required checks is
+  // ambiguous for a destructive operation, so fail closed rather than assume
+  // an unprotected branch is authorization.
+  const checks = parseProviderJson(await invoke(dependencies, ["pr", "checks", String(action.intent.change_number), "--repo", repoSlug(action), "--required", "--json", "bucket,name,link"]), "required terminal-head checks");
+  if (!Array.isArray(checks) || checks.length === 0) {
+    throw new ChangeProviderError("provider_observation_mismatch", "no required provider checks were returned for the exact terminal head");
+  }
+  for (const [index, check] of checks.entries()) {
+    const entry = plainObject(check, `terminal-head check ${index}`);
+    if (entry.bucket !== "pass") {
+      throw new ChangeProviderError("provider_observation_mismatch", "required provider checks are not passing for the exact terminal head");
+    }
+  }
+}
+
+/**
+ * Destructive merge authorization is intentionally stricter than a one-time
+ * `gh auth status`: the actor that publishes the canonical change is part of
+ * the signed merge action and must still be the actor making the mutation.
+ */
+function assertExpectedProviderActor(action: IssuedMergeChangeAction, providerActor: string): void {
+  if (action.expected_provider_actor !== providerActor) {
+    throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed after canonical publish-change observation");
+  }
+}
+
+function assertMutationActor(value: unknown, action: IssuedMergeChangeAction, label: string): void {
+  const actor = plainObject(value, `${label} actor`);
+  if (providerString(actor.login, `${label} actor login`, 512) !== action.expected_provider_actor) {
+    throw new ChangeProviderError("provider_observation_mismatch", `provider ${label} was performed by a different actor`);
+  }
+}
+
+/**
+ * Re-observe the effective branch policy before a destructive call. This
+ * refuses an absent/ambiguous policy rather than treating a passing check as
+ * authorization to bypass review or branch protection.
+ */
+async function assertMergeMutationPolicy(settings: ChangeProviderSettings, action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<void> {
+  const repository = plainObject(parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}`]),
+    "merge repository policy",
+  ), "merge repository policy");
+  const strategyFlag = action.intent.strategy === "squash"
+    ? "allow_squash_merge"
+    : action.intent.strategy === "rebase"
+      ? "allow_rebase_merge"
+      : action.intent.strategy === "merge-commit"
+        ? "allow_merge_commit"
+        : "allow_auto_merge";
+  if (repository[strategyFlag] !== true) {
+    throw new ChangeProviderError("provider_observation_mismatch", `provider policy does not permit the selected ${action.intent.strategy} merge strategy`);
+  }
+
+  // The branch-protection resource is GitHub's provider-authenticated policy
+  // view for this exact target ref. Requiring enforced-admin protection and a
+  // positive approval threshold rejects both no-policy and admin-bypass
+  // ambiguity. Ruleset-only configurations that do not expose an equivalent
+  // no-bypass policy remain deliberately unsupported rather than guessed.
+  const protection = plainObject(parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}/branches/${encodeURIComponent(action.intent.base_ref)}/protection`]),
+    "merge branch protection policy",
+  ), "merge branch protection policy");
+  const enforceAdmins = plainObject(protection.enforce_admins, "merge branch protection enforce-admins");
+  const reviewPolicy = plainObject(protection.required_pull_request_reviews, "merge branch protection review policy");
+  if (enforceAdmins.enabled !== true
+    || !Number.isSafeInteger(reviewPolicy.required_approving_review_count)
+    || Number(reviewPolicy.required_approving_review_count) < 1) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider branch protection does not establish an enforced no-bypass approval policy");
+  }
+
+  // Rulesets can add or supersede classic branch protection. GitHub's
+  // effective-rules endpoint is the provider's branch-specific projection, so
+  // do not infer a ruleset from repository configuration or an older cached
+  // protection response. Requiring a review rule keeps an unobservable bypass
+  // or policy-removal from becoming implicit merge authority.
+  const effectiveRules = parseProviderJson(
+    await invoke(dependencies, ["api", `repos/${repoSlug(action)}/rules/branches/${encodeURIComponent(action.intent.base_ref)}`]),
+    "merge effective ruleset policy",
+  );
+  // GET /rules/branches/{branch} returns the rules themselves as a JSON array,
+  // not a wrapper object. Bound every element and require exactly one applicable
+  // pull-request rule: selecting an arbitrary rule from a conflicting provider
+  // response would turn policy ambiguity into merge authority.
+  if (!Array.isArray(effectiveRules) || effectiveRules.length === 0 || effectiveRules.length > 100) {
+    malformed("merge effective ruleset policy must be a non-empty bounded array");
+  }
+  const reviewRules = effectiveRules.map((rule, index) => {
+    const entry = plainObject(rule, `merge effective ruleset policy rule ${index}`);
+    const type = providerString(entry.type, `merge effective ruleset policy rule ${index} type`, 128);
+    return type === "pull_request" ? entry : null;
+  }).filter((rule): rule is Record<string, unknown> => rule !== null);
+  if (reviewRules.length !== 1) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset returned an ambiguous pull-request review policy");
+  }
+  const rulesetParameters = plainObject(reviewRules[0].parameters, "merge effective ruleset review policy parameters");
+  if (!Number.isSafeInteger(rulesetParameters.required_approving_review_count)
+    || Number(rulesetParameters.required_approving_review_count) < 1) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset does not establish a review policy for the terminal target branch");
+  }
+
+  // This is deliberately the final provider observation before mutation: the
+  // same authenticated GraphQL response binds the current actor, source head,
+  // review decision, and provider mergeability state. A dismissed or stale
+  // approval resolves to a non-APPROVED reviewDecision and is rejected.
+  const query = "query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid isDraft merged mergeable mergeStateStatus reviewDecision}}}";
+  const response = plainObject(parseProviderJson(await invoke(dependencies, [
+    "api", "graphql",
+    "-f", `query=${query}`,
+    "-f", `owner=${settings.repository.owner}`,
+    "-f", `name=${settings.repository.name}`,
+    "-F", `number=${action.intent.change_number}`,
+  ]), "terminal merge policy observation"), "terminal merge policy observation");
+  const viewer = plainObject(response.data, "terminal merge policy data");
+  const actor = plainObject(viewer.viewer, "terminal merge policy actor");
+  assertExpectedProviderActor(action, providerString(actor.login, "terminal merge policy actor login", 512));
+  const repositoryData = plainObject(viewer.repository, "terminal merge policy repository");
+  const pullRequest = plainObject(repositoryData.pullRequest, "terminal merge policy pull request");
+  if (providerSha(pullRequest.headRefOid, "terminal merge policy head SHA") !== action.intent.terminal_head_sha
+    || pullRequest.isDraft === true
+    || pullRequest.merged === true
+    || pullRequest.reviewDecision !== "APPROVED"
+    || pullRequest.mergeable !== "MERGEABLE"
+    || pullRequest.mergeStateStatus !== "CLEAN") {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider terminal-head review, mergeability, or policy observation does not permit merge");
   }
 }
 

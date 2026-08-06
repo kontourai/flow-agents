@@ -3145,7 +3145,7 @@ function readActiveAssignmentSnapshot(sessionDir: string, slug: string): ActiveA
       throw new Error("workflow assignment changed while accepting its active generation");
     }
     const assignment = JSON.parse(raw.toString("utf8")) as JsonRecord;
-    assertActiveAssignmentShape(assignment, slug);
+    assertActiveAssignmentShape(assignment, slug, sessionDir);
     return {
       assignment,
       file,
@@ -3217,12 +3217,18 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
       hostRecovery,
     };
   }
-  throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  throw new Error(
+    "workflow mutation requires the session's active, matching assignment actor\n\n" +
+      assignmentClaimRemediation(sessionDir, slug, assignment),
+  );
 }
 
 function assertOrdinaryMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
-  const { caller, matches } = assignmentActorContext(sessionDir, slug);
-  if (!matches) throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  const { caller, matches, assignment } = assignmentActorContext(sessionDir, slug);
+  if (!matches) throw new Error(
+    "workflow mutation requires the session's active, matching assignment actor\n\n" +
+      assignmentClaimRemediation(sessionDir, slug, assignment),
+  );
   return caller;
 }
 
@@ -3244,13 +3250,16 @@ function normalizeAssignmentActor(value: unknown): JsonRecord | null {
 
 function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
   const assignment = readAssignment(sessionDir, slug);
-  assertActiveAssignmentShape(assignment, slug);
+  assertActiveAssignmentShape(assignment, slug, sessionDir);
   return assignment;
 }
 
-function assertActiveAssignmentShape(assignment: JsonRecord, slug: string): void {
+function assertActiveAssignmentShape(assignment: JsonRecord, slug: string, sessionDir: string): void {
   if (assignment.status !== "claimed" || assignment.artifact_dir !== slug || typeof assignment.actor_key !== "string" || !assignment.actor_key || !assignment.actor || typeof assignment.actor !== "object" || Array.isArray(assignment.actor)) {
-    throw new Error("workflow mutation requires the session's active implementation assignment");
+    throw new Error(
+      "workflow mutation requires the session's active implementation assignment\n\n" +
+        assignmentClaimRemediation(sessionDir, slug, assignment),
+    );
   }
 }
 
@@ -3267,6 +3276,23 @@ function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType
     );
   }
   return caller;
+}
+
+function assignmentClaimRemediation(sessionDir: string, slug: string, assignment: JsonRecord | null): string {
+  const artifactRoot = path.dirname(sessionDir);
+  const branchValue = assignment?.branch;
+  const branch = typeof branchValue === "string" && branchValue.trim() ? branchValue : "<branch>";
+  const dirValue = assignment?.artifact_dir;
+  const artifactDir = typeof dirValue === "string" && dirValue.trim() ? dirValue : slug;
+  const command = [
+    "flow-agents", "assignment-provider", "claim",
+    "--provider", "local-file",
+    "--artifact-root", artifactRoot,
+    "--subject-id", slug,
+    "--branch", branch,
+    "--artifact-dir", artifactDir,
+  ].join(" ");
+  return `To claim this session, run:\n${command}\nPass --actor-json <path-to-actor.json> (or set FLOW_AGENTS_ACTOR) if no environment actor resolves.`;
 }
 
 function immutableReport<T>(value: T): T {

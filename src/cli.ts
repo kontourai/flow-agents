@@ -16,6 +16,7 @@ import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as providerBootstrap } from "./cli/provider-bootstrap.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
+import { main as mergeChange } from "./cli/merge-change.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
 import { main as workItemMutationProvider } from "./cli/work-item-mutation-provider.js";
 import { main as narrativeRender } from "./cli/narrative-render.js";
@@ -57,6 +58,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["provider-bootstrap", providerBootstrap],
   ["publish-change", publishChange],
+  ["merge-change", mergeChange],
   ["pull-work-provider", pullWorkProvider],
   ["work-item-mutation-provider", workItemMutationProvider],
   ["runtime-adapter", runtimeAdapter],
@@ -90,6 +92,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-narrative-render", "narrative-render"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
+  ["flow-agents-merge-change", "merge-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],
   ["flow-agents-work-item-mutation-provider", "work-item-mutation-provider"],
   ["flow-agents-runtime-adapter", "runtime-adapter"],

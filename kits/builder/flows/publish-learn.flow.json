@@ -46,6 +46,8 @@
     "merge-ready-ci-gate": {
       "step": "merge-ready-ci",
       "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify",
         "implementation_defect": "execute"
       },
       "route_back_policy": {
