@@ -19,8 +19,17 @@ case "$RUNTIME" in
   claude|claude-code)
     exec bash "$SCRIPT_DIR/claude-provider.sh" "$@"
     ;;
+  opencode)
+    exec bash "$SCRIPT_DIR/opencode-provider.sh" "$@"
+    ;;
+  pi)
+    exec bash "$SCRIPT_DIR/pi-provider.sh" "$@"
+    ;;
+  strands|strands-local)
+    exec bash "$SCRIPT_DIR/strands-provider.sh" "$@"
+    ;;
   *)
-    echo "Unsupported FLOW_AGENTS_EVAL_RUNTIME='$RUNTIME' (expected kiro, codex, or claude)" >&2
+    echo "Unsupported FLOW_AGENTS_EVAL_RUNTIME='$RUNTIME' (expected kiro, codex, claude, opencode, pi, strands)" >&2
     exit 2
     ;;
 esac
