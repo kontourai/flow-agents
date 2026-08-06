@@ -70,6 +70,22 @@ for (const checkId of ciCheckIds) {
       covered.set(test, `${check.label} (${suiteScript})`);
     }
   }
+
+  // A lane may invoke an integration eval through a `node --test` wrapper rather than naming the
+  // .sh directly. Follow that one level, exactly as the suite-script branch above already does, so
+  // a wrapped eval counts as covered instead of looking orphaned. Without this the only ways to
+  // register a wrapped eval are to run it twice or to claim an exemption that says "not covered"
+  // about something that is — both worse than teaching this check what a wrapper is.
+  const wrappers = [...check.command.matchAll(/evals\/integration\/[A-Za-z0-9_-]+\.test\.mjs/g)].map((m) => m[0]);
+  for (const wrapper of wrappers) {
+    const wrapperPath = path.join(root, wrapper);
+    if (!fs.existsSync(wrapperPath)) {
+      throw new Error(`CI check '${check.label}' references missing wrapper: ${wrapper}`);
+    }
+    for (const test of integrationTestsIn(fs.readFileSync(wrapperPath, 'utf8'))) {
+      covered.set(test, `${check.label} (${wrapper})`);
+    }
+  }
 }
 
 const problems = [];

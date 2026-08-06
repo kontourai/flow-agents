@@ -41,9 +41,6 @@
     "conformance:self": "node ../../packaging/conformance/run-conformance.js --self",
     "conformance": "node ../../packaging/conformance/run-conformance.js --adapter-cmd \"node bin/conformance-shim.mjs\" --level L2"
   },
-  "dependencies": {
-    "@kontourai/console-telemetry": "^0.1.0"
-  },
   "peerDependencies": {
     "@strands-agents/sdk": ">=1.0.0"
   },

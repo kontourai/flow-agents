@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "5.4.0",
+  "version": "5.9.0",
   "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
@@ -33,6 +33,18 @@
       "types": "./build/src/console-contract.d.ts",
       "import": "./build/src/console-contract.js"
     },
+    "./kit-observability-contract": {
+      "types": "./build/src/kit-observability-contract.d.ts",
+      "import": "./build/src/kit-observability-contract.js"
+    },
+    "./kit-observability-conformance": {
+      "types": "./build/src/kit-observability-conformance.d.ts",
+      "import": "./build/src/kit-observability-conformance.js"
+    },
+    "./sealed-execution": {
+      "types": "./build/src/sealed-execution.d.ts",
+      "import": "./build/src/sealed-execution.js"
+    },
     "./package.json": "./package.json",
     "./schemas/*.json": "./schemas/*.json"
   },
@@ -58,9 +70,11 @@
     "flow-agents-context-map": "build/src/cli.js",
     "flow-agents-effective-backlog-settings": "build/src/cli.js",
     "flow-agents-effective-change-provider-settings": "build/src/cli.js",
+    "flow-agents-effective-flow-agents-config": "build/src/cli.js",
     "flow-agents-fixture-retirement-audit": "build/src/cli.js",
     "flow-agents-promote-workflow-artifact": "build/src/cli.js",
     "flow-agents-publish-change": "build/src/cli.js",
+    "flow-agents-merge-change": "build/src/cli.js",
     "flow-agents-pull-work-provider": "build/src/cli.js",
     "flow-agents-runtime-adapter": "build/src/cli.js",
     "flow-agents-telemetry-doctor": "build/src/cli.js",
@@ -113,7 +127,7 @@
     "!build/src/cli/workflow.test-support.js"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only",
+    "build": "tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only && node build/src/tools/generate-install-identity.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "npm run build --silent && node scripts/build-test-support.mjs && node --test src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
@@ -132,9 +146,11 @@
     "assignment-provider": "npm run build --silent && node build/src/cli.js assignment-provider",
     "effective-assignment-provider-settings": "npm run build --silent && node build/src/cli.js effective-assignment-provider-settings",
     "effective-change-provider-settings": "npm run build --silent && node build/src/cli.js effective-change-provider-settings",
+    "effective-flow-agents-config": "npm run build --silent && node build/src/cli.js effective-flow-agents-config",
     "provider-bootstrap": "npm run build --silent && node build/src/cli.js provider-bootstrap",
     "pull-work-provider": "npm run build --silent && node build/src/cli.js pull-work-provider",
     "publish-change": "npm run build --silent && node build/src/cli.js publish-change",
+    "merge-change": "npm run build --silent && node build/src/cli.js merge-change",
     "promote-workflow-artifact": "npm run build --silent && node build/src/cli.js promote-workflow-artifact",
     "usage-feedback": "npm run build --silent && node build/src/cli.js usage-feedback",
     "runtime-adapter": "npm run build --silent && node build/src/cli.js runtime-adapter",

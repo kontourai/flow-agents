@@ -19,6 +19,8 @@ CHECKS=(
   "Capability matrix drift|npm run capability-matrix -- --check"
   "Host conformance drift|npm run host-conformance:check --"
   "Static eval suite|bash evals/run.sh static"
+  "Public API unit tests|node --test src/cli/public-api.test.mjs"
+  "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
   "Evidence command serialization integration|bash evals/integration/test_evidence_command_serialization.sh"
@@ -51,8 +53,11 @@ CHECKS=(
   "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
   "Console tenant isolation integration|bash evals/integration/test_console_tenant_isolation.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
+  "Goal Fit committed config integration|bash evals/integration/test_goal_fit_config.sh"
+  "Effective Flow Agents config unit|node --test src/cli/effective-flow-agents-config.test.mjs"
   "Goal Fit escape hatch integration|bash evals/integration/test_goal_fit_escape_hatch.sh"
   "Plain stop messaging integration|bash evals/integration/test_plain_stop_messaging.sh"
+  "Stop gate actor-scoped completion integration|bash evals/integration/test_stop_gate_actor_scoped_completion.sh"
   "Goal Fit narrative exclusion integration|env -u FLOW_AGENTS_GOAL_FIT_MODE bash evals/integration/test_goal_fit_narrative_exclusion.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -60,6 +65,7 @@ CHECKS=(
   "Flow Kit repository integration|bash evals/integration/test_flow_kit_repository.sh"
   "Kit provisioning integration|bash evals/integration/test_kit_provisioning.sh"
   "Runtime adapter activation integration|bash evals/integration/test_runtime_adapter_activation.sh"
+  "Runtime hook parity integration|node --test evals/integration/runtime-hook-parity.test.mjs"
   "Bundle install integration|bash evals/integration/test_bundle_install.sh"
   "Published Codex install integration|bash evals/integration/test_published_codex_install.sh"
   "Public workflow CLI integration|bash evals/integration/test_public_workflow_cli.sh"
@@ -89,8 +95,11 @@ CHECKS=(
   "Telemetry task slug integration|bash evals/integration/test_telemetry_task_slug.sh"
   "Installed runtime correlation integration|bash evals/integration/test_installed_runtime_correlation.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
-  "Console board sync integration|bash evals/integration/test_console_board_sync.sh"
+  "Console board sync integration|evals/integration/test_console_board_sync.sh"
+  "Console outbox integration|bash evals/integration/test_console_outbox.sh"
+  "Console receipt relay integration|bash evals/integration/test_console_receipt_relay.sh"
   "Capability declarations integration|bash evals/integration/test_capability_declarations.sh"
+  "Install identity stamp integration|bash evals/integration/test_install_identity_stamp.sh"
   "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
@@ -106,12 +115,13 @@ CHECKS=(
   "Gate review inquiry records integration|bash evals/integration/test_gate_review_inquiry_records.sh"
   "Install merge integration|bash evals/integration/test_install_merge.sh"
   "Kit identity trust integration|bash evals/integration/test_kit_identity_trust.sh"
-  "Liveness worktree root integration|bash evals/integration/test_liveness_worktree_root.sh"
+  "Liveness worktree root integration|node --test evals/integration/liveness-worktree-root.test.mjs"
   "Migrate local artifacts integration|bash evals/integration/test_migrate_local_artifacts.sh"
   "Model routing escalation integration|bash evals/integration/test_model_routing_escalation.sh"
   "Promote gate integration|bash evals/integration/test_promote_gate.sh"
   "Pull work board integration|bash evals/integration/test_pull_work_board.sh"
   "Routing efficiency integration|bash evals/integration/test_routing_efficiency.sh"
+  "Terminal before merge integration|bash evals/integration/test_terminal_before_merge.sh"
   "Session resume roundtrip integration|bash evals/integration/test_session_resume_roundtrip.sh"
   "Skill drift check integration|bash evals/integration/test_skill_drift_check.sh"
   "Trust reconcile trailer diagnostic integration|bash evals/integration/test_trust_reconcile_trailer_diagnostic.sh"
@@ -136,6 +146,8 @@ LANE_SOURCE_AND_STATIC=(
   "Capability matrix drift"
   "Host conformance drift"
   "Static eval suite"
+  "Public API unit tests"
+  "Liveness fleet unit tests"
 )
 
 LANE_WORKFLOW_CONTRACTS=(
@@ -177,8 +189,11 @@ LANE_WORKFLOW_CONTRACTS=(
 
 LANE_RUNTIME_AND_KIT=(
   "Goal Fit hook integration"
+  "Goal Fit committed config integration"
+  "Effective Flow Agents config unit"
   "Goal Fit escape hatch integration"
   "Plain stop messaging integration"
+  "Stop gate actor-scoped completion integration"
   "Goal Fit narrative exclusion integration"
   "Hook category behavior integration"
   "Workflow steering hook integration"
@@ -186,6 +201,7 @@ LANE_RUNTIME_AND_KIT=(
   "Flow Kit repository integration"
   "Kit provisioning integration"
   "Runtime adapter activation integration"
+  "Runtime hook parity integration"
   "Bundle install integration"
   "Published Codex install integration"
   "Public workflow CLI integration"
@@ -213,7 +229,10 @@ LANE_RUNTIME_AND_KIT=(
   "Installed runtime correlation integration"
   "Economics record integration"
   "Console board sync integration"
+  "Console outbox integration"
+  "Console receipt relay integration"
   "Capability declarations integration"
+  "Install identity stamp integration"
   "Learning review proposals integration"
   "Utterance check integration"
   "Pull work provider integration"
@@ -239,6 +258,7 @@ LANE_INTEGRATION_COVERAGE=(
   "Promote gate integration"
   "Pull work board integration"
   "Routing efficiency integration"
+  "Terminal before merge integration"
   "Session resume roundtrip integration"
   "Skill drift check integration"
   "Trust reconcile trailer diagnostic integration"
@@ -400,7 +420,14 @@ run_check() {
 
   echo "==> $label"
   echo "+ $command" >"$log"
-  if (cd "$ROOT_DIR" && bash -lc "$command") >>"$log" 2>&1; then
+  # #1094 item C: default every eval to a console-free telemetry conf. Stubbing
+  # HOME is NOT isolation in this repo — config.sh resolves the per-workspace
+  # .kontourai/telemetry-console.conf first, and ours carries a real production
+  # endpoint and token, so a forgetful test can post real records from a test
+  # run. Defaulted rather than forced: a test that needs a console sets its own
+  # TELEMETRY_CONFIG_FILE and still wins.
+  local telemetry_conf="${TELEMETRY_CONFIG_FILE:-$ROOT_DIR/evals/fixtures/no-console.telemetry.conf}"
+  if (cd "$ROOT_DIR" && TELEMETRY_CONFIG_FILE="$telemetry_conf" bash -lc "$command") >>"$log" 2>&1; then
     echo -e "$id\t$label\tpass\t$command\t$log" >>"$STATUS_FILE"
     echo "PASS $label"
   else

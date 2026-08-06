@@ -14,8 +14,9 @@
  *   UserPromptSubmit → workflow-steering.js
  *   Stop           → stop-goal-fit.js
  *
- * For PostToolUse, workflow-steering.js is checked first (for InvokeSubagents).
- * If it injects content (non-empty injection), that's included in stdout.
+ * For PostToolUse, workflow-steering.js is still chained first so any future PostToolUse
+ * steering is picked up, but it injects nothing there today (#1172 removed the InvokeSubagents
+ * phase-transition table; the hook is wired to SessionStart/UserPromptSubmit in every runtime).
  */
 
 'use strict';
@@ -172,11 +173,10 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // PostToolUse → run workflow-steering.js first (handles InvokeSubagents),
-  //               then quality-gate.js
+  // PostToolUse → run workflow-steering.js first, then quality-gate.js.
   //
-  // The conformance runner checks stdout_contains for the workflow-steering
-  // fixture so we must return the output of workflow-steering when it fires.
+  // workflow-steering emits nothing on PostToolUse today (#1172); the chaining is kept so the
+  // shim's routing stays a faithful mirror of the production adapter's HOOK_MAP.
   // -------------------------------------------------------------------------
 
   if (hookEventName === 'posttooluse') {
@@ -185,7 +185,7 @@ async function main() {
       process.exit(0);
     }
 
-    // Run workflow-steering first — may inject EXECUTION COMPLETE for subagent calls
+    // Run workflow-steering first (a no-op on PostToolUse since #1172)
     const steeringResult = invokeViaSubprocess('workflow-steering', 'workflow-steering.js', raw);
     const steeringOut = steeringResult.stdout || '';
     if (steeringResult.stderr) process.stderr.write(steeringResult.stderr);

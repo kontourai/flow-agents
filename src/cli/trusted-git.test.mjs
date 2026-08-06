@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { resolveTrustedLocalGitCommit } from "../../build/src/lib/trusted-git.js";
+import { execTrustedGitSync, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../../build/src/lib/trusted-git.js";
 
 const systemGit = process.platform === "win32" ? "git" : "/usr/bin/git";
 
@@ -35,6 +35,47 @@ test("trusted Git resolution ignores ambient repository and configuration contro
   } finally {
     for (const key of Object.keys(process.env)) if (key.toUpperCase().startsWith("GIT_")) delete process.env[key];
     Object.assign(process.env, prior);
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("trusted immutable blob reads ignore replacement objects and ambient Git redirection", () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-blob-"));
+  const target = path.join(fixture, "target");
+  const foreign = path.join(fixture, "foreign");
+  try {
+    const targetSha = initializeRepository(target, "committed policy\n");
+    initializeRepository(foreign, "foreign\n");
+    const originalBlob = execFileSync(systemGit, ["-C", target, "rev-parse", "HEAD:README.md"], { encoding: "utf8" }).trim();
+    const replacement = execFileSync(systemGit, ["-C", target, "hash-object", "-w", "--stdin"], { input: "hostile replacement\n", encoding: "utf8" }).trim();
+    execFileSync(systemGit, ["-C", target, "replace", originalBlob, replacement]);
+    const prior = process.env.GIT_DIR;
+    process.env.GIT_DIR = path.join(foreign, ".git");
+    try {
+      assert.equal(readTrustedGitBlobSync(target, targetSha, "README.md").toString("utf8"), "committed policy\n");
+    } finally {
+      if (prior === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = prior;
+    }
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("trusted Git never launches a repository-local fsmonitor command", () => {
+  if (process.platform === "win32") return;
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-git-fsmonitor-"));
+  try {
+    initializeRepository(fixture, "fixture\n");
+    const marker = path.join(fixture, "fsmonitor-ran");
+    const monitor = path.join(fixture, "fsmonitor.sh");
+    fs.writeFileSync(monitor, `#!/bin/sh\nprintf invoked > ${JSON.stringify(marker)}\n`);
+    fs.chmodSync(monitor, 0o755);
+    execFileSync(systemGit, ["-C", fixture, "config", "core.fsmonitor", monitor]);
+
+    execTrustedGitSync(fixture, ["status", "--porcelain=v1"]);
+    assert.equal(fs.existsSync(marker), false);
+  } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

@@ -107,6 +107,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite
 
+      - name: Public API unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
+
+      - name: Liveness fleet unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
@@ -329,6 +337,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
 
+      - name: Goal Fit committed config integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-committed-config-integration
+
+      - name: Effective Flow Agents config unit
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check effective-flow-agents-config-unit
+
       - name: Goal Fit escape hatch integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-escape-hatch-integration
@@ -336,6 +352,10 @@ jobs:
       - name: Plain stop messaging integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check plain-stop-messaging-integration
+
+      - name: Stop gate actor-scoped completion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check stop-gate-actor-scoped-completion-integration
 
       - name: Goal Fit narrative exclusion integration
         continue-on-error: true
@@ -364,6 +384,10 @@ jobs:
       - name: Runtime adapter activation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check runtime-adapter-activation-integration
+
+      - name: Runtime hook parity integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check runtime-hook-parity-integration
 
       - name: Bundle install integration
         continue-on-error: true
@@ -461,9 +485,21 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-board-sync-integration
 
+      - name: Console outbox integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-outbox-integration
+
+      - name: Console receipt relay integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-receipt-relay-integration
+
       - name: Capability declarations integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
+
+      - name: Install identity stamp integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check install-identity-stamp-integration
 
       - name: Learning review proposals integration
         continue-on-error: true
@@ -608,6 +644,10 @@ jobs:
       - name: Routing efficiency integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check routing-efficiency-integration
+
+      - name: Terminal before merge integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check terminal-before-merge-integration
 
       - name: Session resume roundtrip integration
         continue-on-error: true

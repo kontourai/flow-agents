@@ -130,6 +130,7 @@ run_static() {
   echo "╚══════════════════════════════════════╝"
   local result=0
   bash "$EVAL_DIR/static/test_package.sh" || result=1
+  bash "$EVAL_DIR/static/test_eval_console_isolation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_universal_bundles.sh" || result=1
   echo ""
@@ -206,6 +207,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_usage_feedback_global.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_hook.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_goal_fit_config.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
   echo ""
