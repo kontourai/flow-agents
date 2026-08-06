@@ -157,6 +157,106 @@ type TrustBundleSnapshot = {
   sha256: string;
 };
 
+// #1191: signal validation — hooks and sidecar writes against finished/terminal
+// runs must fail closed (Temporal closed-workflow signal rule). A mutation that
+// lands after the run is closed, or after the gate has advanced past the head the
+// write was stamped against, is a stale-signal write. The guard reads the CANONICAL
+// Flow state via the public interface (loadBuilderFlowRun / flowRunHead) — never a
+// sidecar-local projection, which may lag the canonical head (#1164).
+//
+// The terminal set mirrors Flow's lifecycle eligibility (flow-run-lifecycle.ts):
+// attach_evidence/evaluate reject only paused and canceled, and accepted_by_exception
+// is a CONTINUING status — the run still evaluates the excepted gate and Flow
+// reverses it to active on continuation (flow-run-store.ts claim-admission path);
+// Flow Agents' own terminal classification test calls it "continue". Only
+// completed/canceled/failed are closed for every mutation. "archived" is a
+// sidecar-level status, not a Flow run status, and is not included here.
+export const TERMINAL_FLOW_STATUSES = ["completed", "canceled", "failed"];
+
+export type SignalValidationCode = "run_closed" | "gate_advanced";
+
+export class SignalValidationError extends Error {
+  readonly code: SignalValidationCode;
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly stampedHead: string | null;
+  readonly canonicalHead: string;
+
+  constructor(
+    code: SignalValidationCode,
+    details: { runId: string; runStatus: string; stampedHead: string | null; canonicalHead: string },
+  ) {
+    const headDetail = details.stampedHead
+      ? ` (stamped head ${details.stampedHead} != canonical head ${details.canonicalHead})`
+      : ` (canonical head ${details.canonicalHead})`;
+    super(
+      `signal_validation:${code}: run ${details.runId} is ${details.runStatus}${headDetail} — `
+      + `${code === "run_closed" ? "the run is terminal/closed" : "the gate has advanced"}; `
+      + `mutations against a closed Flow run are rejected (Temporal closed-workflow signal rule).`,
+    );
+    this.name = "SignalValidationError";
+    this.code = code;
+    this.runId = details.runId;
+    this.runStatus = details.runStatus;
+    this.stampedHead = details.stampedHead;
+    this.canonicalHead = details.canonicalHead;
+  }
+}
+
+// #1191 test seam for fault injection: allows tests to prove the un-guarded path
+// silently accepts a stale-head write. Never set outside tests.
+let signalValidationBypassForTest = false;
+export function setSignalValidationBypassForTest(value: boolean): void {
+  signalValidationBypassForTest = value;
+}
+
+/**
+ * Check an already-loaded canonical run for write-time signal validity (#1191).
+ * Throws `SignalValidationError` (machine-readable `code` property) when the run
+ * is terminal or the stamped head has been advanced past. Synchronous — use with
+ * a run that was already loaded via the public Flow interface.
+ */
+export function assertRunMutableForWrite(
+  run: BuilderFlowRunResult,
+  stampedFlowRunHead: string | null | undefined,
+  runId: string,
+): void {
+  if (signalValidationBypassForTest) return;
+  const status = run.state.status;
+  const canonicalHead = flowRunHead(run.state);
+  if (TERMINAL_FLOW_STATUSES.includes(status)) {
+    throw new SignalValidationError("run_closed", { runId, runStatus: status, stampedHead: stampedFlowRunHead ?? null, canonicalHead });
+  }
+  if (stampedFlowRunHead && stampedFlowRunHead.toLowerCase() !== canonicalHead) {
+    throw new SignalValidationError("gate_advanced", { runId, runStatus: status, stampedHead: stampedFlowRunHead, canonicalHead });
+  }
+}
+
+export interface AssertMutationWritableInput {
+  runId: string;
+  cwd: string;
+  /** The flow_run_head the write is stamped against, if any. */
+  stampedFlowRunHead?: string | null;
+}
+
+/**
+ * Load the canonical Flow run via the public interface and validate that a
+ * mutation against it is permitted (#1191). For sessions with no Flow run
+ * (legacy/no-Flow layout, or the run was never started), the guard is a no-op —
+ * there is no canonical run to close. This keeps legacy/tmp sessions writable.
+ */
+export async function assertMutationWritable(input: AssertMutationWritableInput): Promise<void> {
+  if (signalValidationBypassForTest) return;
+  let run: BuilderFlowRunResult;
+  try {
+    run = await loadBuilderFlowRun({ runId: input.runId, cwd: input.cwd });
+  } catch (error) {
+    if (isRunNotFound(error)) return;
+    throw error;
+  }
+  assertRunMutableForWrite(run, input.stampedFlowRunHead, input.runId);
+}
+
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
@@ -748,6 +848,11 @@ async function syncAndProject(
     throw new BuilderBuildRunInputError("flow_run.open_gates", `expected exactly one gate for active step ${run.state.current_step}, found ${gates.length}`);
   }
   if (gates.length === 1 && (stagedTrustBundle || fs.existsSync(context.bundleFile))) {
+    // #1191: signal validation — reject mutations against terminal/closed runs or
+    // stale heads BEFORE any Flow mutation (evaluateBuilderFlowRun below). A clean
+    // rejection here means no partial state: the evidence manifest, run state, and
+    // session projection are all untouched (never-wedge guarantee).
+    assertRunMutableForWrite(run, expectedRunHead, context.slug);
     const snapshot = stagedTrustBundle ? verifiedStagedTrustBundleSnapshot(context, stagedTrustBundle) : stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
