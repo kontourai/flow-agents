@@ -244,17 +244,23 @@ export interface AssertMutationWritableInput {
  * mutation against it is permitted (#1191). For sessions with no Flow run
  * (legacy/no-Flow layout, or the run was never started), the guard is a no-op —
  * there is no canonical run to close. This keeps legacy/tmp sessions writable.
+ *
+ * Returns the canonical `flow_run_head` when a run exists (the authoritative
+ * head the write lands against), or null when there was no run. This lets the
+ * taxonomy retry wrapper stamp the claim with the canonical head even when the
+ * caller derived its head from a (possibly lagging) projection.
  */
-export async function assertMutationWritable(input: AssertMutationWritableInput): Promise<void> {
-  if (signalValidationBypassForTest) return;
+export async function assertMutationWritable(input: AssertMutationWritableInput): Promise<string | null> {
+  if (signalValidationBypassForTest) return input.stampedFlowRunHead ?? null;
   let run: BuilderFlowRunResult;
   try {
     run = await loadBuilderFlowRun({ runId: input.runId, cwd: input.cwd });
   } catch (error) {
-    if (isRunNotFound(error)) return;
+    if (isRunNotFound(error)) return null;
     throw error;
   }
   assertRunMutableForWrite(run, input.stampedFlowRunHead, input.runId);
+  return flowRunHead(run.state);
 }
 
 // #1192: failure taxonomy — distinguish retryable infrastructure failure from
@@ -379,7 +385,9 @@ export interface AssertMutationWritableWithRetryResult {
    * The effective flow_run_head to stamp the write with. On a successful
    * transient retry, this is the CANONICAL head (re-read after the desync),
    * which may differ from the input `stampedFlowRunHead`. On a first-attempt
-   * success, it matches the input. Null when the input carried no head.
+   * success, it is the canonical head (the authoritative read), which equals
+   * the input when a `stampedFlowRunHead` was supplied. Null only when there is
+   * no canonical Flow run to reconcile against (legacy/no-Flow session).
    */
   effectiveFlowRunHead: string | null;
   /** Number of attempts taken (1 = first attempt succeeded). */
@@ -416,8 +424,8 @@ export async function assertMutationWritableWithRetry(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await assertMutationWritable({ runId: input.runId, cwd: input.cwd, stampedFlowRunHead: stampedHead ?? undefined });
-      return { effectiveFlowRunHead: stampedHead, attempts: attempt };
+      const canonicalHead = await assertMutationWritable({ runId: input.runId, cwd: input.cwd, stampedFlowRunHead: stampedHead ?? undefined });
+      return { effectiveFlowRunHead: canonicalHead ?? stampedHead, attempts: attempt };
     } catch (error) {
       if (!(error instanceof SignalValidationError)) throw error;
       const classification = classifySignalValidationFailure(error.code);
