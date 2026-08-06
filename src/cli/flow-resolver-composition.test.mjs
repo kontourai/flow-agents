@@ -58,13 +58,13 @@ test("composed merge-ready-ci gate can refresh evidence after the reviewed diff 
   const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
   assert.ok(definition);
   const gate = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
-  assert.deepEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" });
+  assert.deepEqual(gate.on_route_back, { implementation_defect: "execute", missing_evidence: "verify", default: "verify" });
   assert.deepEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
   assert.doesNotThrow(() => validateDefinition(definition));
   const step = resolveFlowStep("builder.build", "merge-ready-ci", REPO_ROOT);
   assert.ok(step);
   assert.equal(step.gateId, "builder.publish-learn:merge-ready-ci-gate");
-  assert.deepEqual([...step.routeBackReasons].sort(), ["default", "missing_evidence"]);
+  assert.deepEqual([...step.routeBackReasons].sort(), ["default", "implementation_defect", "missing_evidence"]);
 });
 
 test("installed package definitions resolve when a consumer repo has no kits directory", () => {

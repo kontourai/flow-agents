@@ -821,7 +821,7 @@ test("failed composed CI merge readiness routes implementation defects to execut
         claimType: "builder.merge-ready-ci.readiness",
         subjectType: "pull-request",
         status: "failed",
-        routeReason: "missing_evidence",
+        routeReason: "plan_gap",
         expectationIds: ["ci-merge-readiness"],
         name: "merge-ready-ci-undeclared-reason",
       }),
