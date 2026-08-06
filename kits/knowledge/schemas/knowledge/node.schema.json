@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/node.schema.json",
+  "title": "Knowledge Graph Node",
+  "description": "A typed node in the Knowledge Kit graph model. type is EXTENSIBLE: the recommended core vocabulary is note, decision, issue, session, person, but providers MAY emit additional types. Every node carries provenance so any assertion can be traced back to the store it came from.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "title", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Provider-scoped stable identifier, unique within a single readGraph result."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Node type. Recommended core vocabulary: note, decision, issue, session, person. Extensible — unknown types MUST NOT be rejected."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable title used for display and duplicate detection."
+    },
+    "body": {
+      "type": "string",
+      "description": "Primary content. Format is provider/type-specific."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Provider-specific structured fields (e.g. issue state/labels, decision status, note category/tags)."
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "source", "retrieved_at"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "description": "Provider id that produced this element (e.g. markdown-vault, git-repo, work-item)." },
+        "source": { "type": "string", "minLength": 1, "description": "The concrete origin: a file path, an issue ref, or a URL." },
+        "locator": { "type": "string", "description": "Optional finer locator within the source (line, anchor, frontmatter field)." },
+        "retrieved_at": { "type": "string", "minLength": 1, "description": "ISO-8601 timestamp the element was read." },
+        "agent": { "type": "string", "description": "Optional agent/process id that performed the read." }
+      }
+    }
+  }
+}

@@ -77,6 +77,11 @@ test("resolveTelemetryConfigFile: mirrors config.sh's precedence", async () => {
   const previousHome = process.env.HOME;
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fa-home-"));
   process.env.HOME = fakeHome;
+  // Isolate TELEMETRY_CONFIG_FILE the same way: CI's eval harness defaults it
+  // to a console-free fixture (evals/ci/run-baseline.sh), which would otherwise
+  // win over every file-precedence branch this test asserts.
+  const previousTelemetryConfigFile = process.env.TELEMETRY_CONFIG_FILE;
+  delete process.env.TELEMETRY_CONFIG_FILE;
   try {
 
   // Nothing trusted anywhere -> the shipped default, as before.
@@ -119,6 +124,8 @@ test("resolveTelemetryConfigFile: mirrors config.sh's precedence", async () => {
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    if (previousTelemetryConfigFile === undefined) delete process.env.TELEMETRY_CONFIG_FILE;
+    else process.env.TELEMETRY_CONFIG_FILE = previousTelemetryConfigFile;
     fs.rmSync(fakeHome, { recursive: true, force: true });
   }
   fs.rmSync(dest, { recursive: true, force: true });

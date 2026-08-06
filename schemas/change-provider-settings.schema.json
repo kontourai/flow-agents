@@ -46,7 +46,7 @@
           "type": "array",
           "minItems": 2,
           "uniqueItems": true,
-          "items": { "enum": ["change.create", "change.observe"] },
+          "items": { "enum": ["change.create", "change.observe", "change.merge"] },
           "allOf": [
             { "contains": { "const": "change.create" } },
             { "contains": { "const": "change.observe" } }

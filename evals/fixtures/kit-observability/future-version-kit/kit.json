@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "id": "future-observe",
+  "name": "Future Observability Fixture",
+  "flows": [
+    { "id": "future-observe.review", "path": "flows/review.flow.json" }
+  ],
+  "observability_contribution": { "path": "kit-observability.contribution.json" }
+}

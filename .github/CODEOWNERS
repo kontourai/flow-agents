@@ -32,9 +32,17 @@
 /scripts/hooks/config-protection.js @briananderson1222
 /scripts/hooks/lib/config-protection-remedies.js @briananderson1222
 /scripts/hooks/evidence-capture.js  @briananderson1222
+/scripts/hooks/lib/effective-flow-agents-config.js @briananderson1222
+/context/scripts/hooks/stop-goal-fit.js @briananderson1222
+/context/scripts/hooks/lib/effective-flow-agents-config.js @briananderson1222
+/schemas/flow-agents-*-config.schema.json @briananderson1222
+/.flow-agents/config/              @briananderson1222
 
 # FlowDefinition resolution + the trust producer/checkpoint/signing the gate depends on
 /src/lib/flow-resolver.ts       @briananderson1222
+/src/lib/trusted-git.ts         @briananderson1222
+/src/lib/effective-flow-agents-config.ts @briananderson1222
+/src/cli/effective-flow-agents-config.ts @briananderson1222
 /src/cli/workflow-sidecar.ts    @briananderson1222
 # Modules decomposed out of workflow-sidecar.ts (ops#22) keep the same ownership.
 /src/cli/sidecar-*.ts           @briananderson1222

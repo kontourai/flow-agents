@@ -7,8 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
-import { flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import * as pinnedFlow from "../../node_modules/@kontourai/flow/dist/index.js";
+import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
 
 const COORDINATOR = path.resolve("packaging/lifecycle-authority/coordinator.mjs");
@@ -34,12 +35,188 @@ async function loadProtectedReadFromCoordinator({ registryFile, completionKeyFil
   if (registryFile) source = source.replace(/export const REGISTRY_FILE = .*?;/, `export const REGISTRY_FILE = ${JSON.stringify(registryFile)};`);
   if (completionKeyFile) source = source.replace(/export const COMPLETION_PUBLIC_KEY_FILE = .*?;/, `export const COMPLETION_PUBLIC_KEY_FILE = ${JSON.stringify(completionKeyFile)};`);
   if (stateRoot) source = source.replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`);
-  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
+  fs.writeFileSync(path.join(directory, "coordinator.mjs"), `${source}\nexport { protectedRegularFile, protectedJson, loadResolutionEventLedger, loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent, assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage, verifyAuthorization, verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor, installCompletionReceipt, durableCompletionRecord, reconcileCompletedNonce, assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages, assertMergeChangeRequestAction, assertMergeChangeVerificationRefreshProvenance, assertPreparedMergeAuthorizationCurrent, HISTORY_REPAIR_AUTHORIZATION_FIELDS, EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS };\n`);
   const module = await import(`${pathToFileURL(path.join(directory, "coordinator.mjs")).href}?test=${Date.now()}-${Math.random()}`);
-  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
+  return { directory, protectedRegularFile: module.protectedRegularFile, protectedJson: module.protectedJson, loadResolutionEventLedger: module.loadResolutionEventLedger, loadProvisionalDeliveryLedger: module.loadProvisionalDeliveryLedger, recoverPreparedProvisionalDeliveryEvent: module.recoverPreparedProvisionalDeliveryEvent, validateProvisionalDeliveryTransport: module.validateProvisionalDeliveryTransport, assertResolutionEventLedgerPreimage: module.assertResolutionEventLedgerPreimage, assertAuthorizedBundlePreimage: module.assertAuthorizedBundlePreimage, verifyAuthorization: module.verifyAuthorization, verifyCurrentLifecycleCompletion: module.verifyCurrentLifecycleCompletion, verifyHistoricalLifecycleCompletion: module.verifyHistoricalLifecycleCompletion, lifecycleAuthorityResultDigest: module.lifecycleAuthorityResultDigest, deriveHistoricalRepairBridge: module.deriveHistoricalRepairBridge, verifyHistoricalDurableAnchor: module.verifyHistoricalDurableAnchor, installCompletionReceipt: module.installCompletionReceipt, durableCompletionRecord: module.durableCompletionRecord, reconcileCompletedNonce: module.reconcileCompletedNonce, assertPrivilegedAuthorizationShape: module.assertPrivilegedAuthorizationShape, assertCanonicalFlowPostimages: module.assertCanonicalFlowPostimages, assertMergeChangeRequestAction: module.assertMergeChangeRequestAction, assertMergeChangeVerificationRefreshProvenance: module.assertMergeChangeVerificationRefreshProvenance, assertPreparedMergeAuthorizationCurrent: module.assertPreparedMergeAuthorizationCurrent, historyRepairAuthorizationFields: module.HISTORY_REPAIR_AUTHORIZATION_FIELDS, recoveryAuthorizationFields: module.EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS, canonicalJson: module.canonicalJson, sha256: module.sha256 };
 }
 
 const rawSha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+test("coordinator resolves effective definition identity through authorized amendments", async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "coordinator-effective-definition-"));
+  const runId = "effective-definition";
+  await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+    cwd: projectRoot,
+    runId,
+    params: { subject: "kontourai/flow-agents#1000" },
+  });
+  const started = await loadRun(runId, projectRoot);
+  const successor = { ...structuredClone(started.definition), version: `${started.definition.version}-coordinator-test` };
+  await amendRunDefinition(runId, {
+    cwd: projectRoot,
+    definition: successor,
+    request: {
+      reason: "exercise privileged effective-definition resolution",
+      expected_run_head: flowRunHead(started.state),
+      expected_definition: definitionIdentity(started.definition),
+      successor_digest: definitionDigest(successor),
+      authority: {
+        kind: "user_request",
+        actor: "coordinator-test",
+        request_ref: "test:coordinator-effective-definition",
+        requested_at: new Date().toISOString(),
+      },
+    },
+  });
+  const amended = await loadRun(runId, projectRoot);
+  const resolved = resolveCanonicalFlowRunIdentity(
+    pinnedFlow,
+    JSON.parse(fs.readFileSync(path.join(amended.dir, "definition.json"), "utf8")),
+    JSON.parse(fs.readFileSync(path.join(amended.dir, "state.json"), "utf8")),
+    runId,
+  );
+  assert.equal(resolved.definition.version, successor.version);
+  assert.equal(definitionDigest(resolved.definition), definitionDigest(successor));
+  assert.equal(flowRunHead(resolved.state), flowRunHead(amended.state));
+});
+
+test("canonical Flow synchronization attaches through an authorized amended gate", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "coordinator-amended-gate-"));
+  const projectRoot = path.join(root, "project");
+  const installRoot = path.join(root, "installed");
+  const runId = "amended-gate";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  try {
+    fs.mkdirSync(projectRoot, { recursive: true });
+    copyPinnedFlowClosure(installRoot);
+    fs.copyFileSync(RUNTIME, path.join(installRoot, "runtime-v1.mjs"));
+    const source = fs.readFileSync(COORDINATOR, "utf8");
+    fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), `${source}\nexport { prepareCanonicalFlowSynchronization };\n`);
+    const coordinator = await import(`${pathToFileURL(path.join(installRoot, "coordinator.mjs")).href}?amended-gate=${Date.now()}-${Math.random()}`);
+    await startRun(path.resolve("kits/builder/flows/build.flow.json"), {
+      cwd: projectRoot,
+      runId,
+      params: { subject: "kontourai/flow-agents#1000" },
+    });
+    const started = await loadRun(runId, projectRoot);
+    const successor = structuredClone(started.definition);
+    successor.version = `${started.definition.version}-amended-gate`;
+    successor.gates["amended-verify-gate"] = { ...successor.gates["verify-gate"] };
+    delete successor.gates["verify-gate"];
+    await amendRunDefinition(runId, {
+      cwd: projectRoot,
+      definition: successor,
+      request: {
+        reason: "exercise effective gate resolution in canonical synchronization",
+        expected_run_head: flowRunHead(started.state),
+        expected_definition: definitionIdentity(started.definition),
+        successor_digest: definitionDigest(successor),
+        authority: {
+          kind: "user_request",
+          actor: "coordinator-test",
+          request_ref: "test:coordinator-amended-gate",
+          requested_at: new Date().toISOString(),
+        },
+      },
+    });
+    const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
+    const stateFile = path.join(flowRoot, "state.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    state.current_step = "verify";
+    state.next_action = "attach amended verify gate evidence";
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    fs.mkdirSync(sessionDir, { recursive: true });
+
+    const prepared = await coordinator.prepareCanonicalFlowSynchronization(
+      { projectRoot, sessionDir, runId },
+      { schemaVersion: 5, source: "coordinator-amended-gate-test", claims: [], evidence: [], policies: [], events: [] },
+      { request_sha256: "a".repeat(64) },
+    );
+    const manifestPostimage = prepared.postimages.find(({ file }) => file === path.join(flowRoot, "evidence", "manifest.json"));
+    assert.ok(manifestPostimage, "synchronization emits the canonical manifest postimage");
+    const manifest = JSON.parse(manifestPostimage.bytes.toString("utf8"));
+    const attachment = manifest.evidence.find(({ id }) => id === prepared.attachment_id);
+    assert.equal(attachment.gate_id, "amended-verify-gate");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("merge-change requires an exact signed request action and post-amendment verify pass", async () => {
+  const loaded = await loadProtectedReadFromCoordinator();
+  const actionId = "a".repeat(64);
+  const authorization = { issued_action: { action_id: actionId } };
+  assert.equal(loaded.assertMergeChangeRequestAction({ request: { issued_action_id: actionId } }, authorization), actionId);
+  assert.throws(
+    () => loaded.assertMergeChangeRequestAction({ request: { issued_action_id: "b".repeat(64) } }, authorization),
+    /does not bind the signed exact issued action/,
+  );
+
+  const definition = { id: "builder.build", version: "1.4" };
+  const digest = "c".repeat(64);
+  const amendment = {
+    type: "definition_amended",
+    at: "2026-07-27T12:00:00.000Z",
+    successor_definition: { ...definition, digest },
+  };
+  const stalePass = {
+    definition_digest: digest,
+    definition_amendments: [amendment],
+    gate_outcome_history: [{ gate_id: "verify-gate", status: "pass", transition_validation: { transition: { at: "2026-07-27T11:59:59.000Z" } } }],
+  };
+  assert.throws(
+    () => loaded.assertMergeChangeVerificationRefreshProvenance(stalePass, definition, digest),
+    /accepted verify-gate pass ordered after the definition amendment/,
+  );
+  const refreshedPass = structuredClone(stalePass);
+  refreshedPass.gate_outcome_history[0].transition_validation.transition.at = "2026-07-27T12:00:01.000Z";
+  assert.doesNotThrow(() => loaded.assertMergeChangeVerificationRefreshProvenance(refreshedPass, definition, digest));
+  assert.doesNotThrow(() => loaded.assertMergeChangeVerificationRefreshProvenance({ definition_digest: digest, definition_amendments: [] }, definition, digest));
+});
+
+test("prepared merge-change recovery cannot outlive its signed authorization", async () => {
+  const keys = generateKeyPairSync("ed25519");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "prepared-merge-expiry-"));
+  const registry = path.join(root, "keys.json");
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [{ id: "fixture", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) }] }), { mode: 0o600 });
+  const loaded = await loadProtectedReadFromCoordinator({ registryFile: registry });
+  const now = Date.now();
+  const unsigned = {
+    schema_version: "1.0", operation: "merge-change", project_root: root, run_id: "run-1", subject: "kontourai/flow-agents#1000",
+    flow_definition_id: "builder.build", flow_definition_version: "1.4", flow_definition_digest: "a".repeat(64),
+    flow_run_head: "b".repeat(64), flow_manifest_sha256: "c".repeat(64), issued_action: {},
+    issued_action_sha256: "d".repeat(64), nonce: "prepared-expired", requested_at: new Date(now - 120_000).toISOString(),
+    expires_at: new Date(now - 60_000).toISOString(),
+  };
+  const authorization = {
+    ...unsigned,
+    signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(unsigned)), keys.privateKey).toString("base64") },
+  };
+  assert.throws(
+    () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "merge-change" }, authorization),
+    /authorization is expired/,
+  );
+  const currentUnsigned = { ...unsigned, requested_at: new Date(now).toISOString(), expires_at: new Date(now + 60_000).toISOString() };
+  const current = {
+    ...currentUnsigned,
+    signature: { algorithm: "ed25519", key_id: "fixture", value: sign(null, Buffer.from(JSON.stringify(currentUnsigned)), keys.privateKey).toString("base64") },
+  };
+  fs.writeFileSync(registry, JSON.stringify({ schema_version: "1.0", keys: [
+    { id: "fixture", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) },
+    { id: "fixture-alias", algorithm: "ed25519", public_key_pem: keys.publicKey.export({ type: "spki", format: "pem" }) },
+  ] }), { mode: 0o600 });
+  assert.throws(
+    () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "merge-change" }, current),
+    /duplicate key ids or cryptographic identities/,
+    "one signature cannot become a second authority identity through a registry alias",
+  );
+  assert.doesNotThrow(
+    () => loaded.assertPreparedMergeAuthorizationCurrent({ action: "archive" }, authorization),
+    "non-provider lifecycle recovery retains its existing exact-state semantics",
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(loaded.directory, { recursive: true, force: true });
+});
 
 function provisionalAuthorization(overrides = {}) {
   const now = new Date();
@@ -446,9 +623,13 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   copyPinnedFlowClosure(installRoot);
 
   const { privateKey: operatorPrivate, publicKey: operatorPublic } = generateKeyPairSync("ed25519");
+  const { privateKey: historyPrivate, publicKey: historyPublic } = generateKeyPairSync("ed25519");
   const { privateKey: completionPrivate, publicKey: completionPublic } = generateKeyPairSync("ed25519");
   const pem = (key, type) => key.export({ type, format: "pem" });
-  fs.writeFileSync(path.join(configRoot, "keys.json"), `${JSON.stringify({ schema_version: "1.0", keys: ["fixture-operator", "test-key"].map((id) => ({ id, algorithm: "ed25519", public_key_pem: pem(operatorPublic, "spki") })) })}\n`, { mode: 0o644 });
+  fs.writeFileSync(path.join(configRoot, "keys.json"), `${JSON.stringify({ schema_version: "1.0", keys: [
+    { id: "fixture-operator", algorithm: "ed25519", public_key_pem: pem(operatorPublic, "spki") },
+    { id: "test-key", algorithm: "ed25519", public_key_pem: pem(historyPublic, "spki") },
+  ] })}\n`, { mode: 0o644 });
   fs.writeFileSync(path.join(configRoot, "completion-signing-key.pem"), pem(completionPrivate, "pkcs8"), { mode: 0o600 });
   fs.writeFileSync(path.join(configRoot, "completion-verification-key.pem"), pem(completionPublic, "spki"), { mode: 0o644 });
 
@@ -493,7 +674,7 @@ async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
     prior_head_sha: "none", resolving_head_sha: "none", prior_bundle_sha256: "0".repeat(64), requested_at: "2026-07-24T00:00:00.000Z", nonce: "fixture-resolution", signature: { algorithm: "ed25519", key_id: "fixture-operator", value: "unused" },
   };
   const historical = resolveCritiqueTransition({ bundle: { ...seed, claims: [...seed.claims, prior, resolving] }, resolution_events: [], authorization: resolutionAuthorization, prior_record_id: prior.metadata.critique_record_id, resolving_record_id: resolving.metadata.critique_record_id });
-  const signedEvent = resignHistoricalEvent(structuredClone(historical.resolution_events[0]), historical.bundle, operatorPrivate);
+  const signedEvent = resignHistoricalEvent(structuredClone(historical.resolution_events[0]), historical.bundle, historyPrivate);
   const priorWithEdge = historical.bundle.claims.find((claim) => claim.id === prior.id);
   priorWithEdge.metadata.critique_resolution = signedEvent.edge;
   const later = structuredClone(resolving);

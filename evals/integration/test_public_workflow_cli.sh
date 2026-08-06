@@ -320,7 +320,7 @@ set +e
 UNRELATED_EVIDENCE="$(run_candidate_as unrelated-caller evidence --session-dir "$RELEASE_SESSION" --expectation implementation-scope --status pass --summary rejected 2>&1)"
 UNRELATED_EVIDENCE_RC=$?
 set -e
-[[ "$UNRELATED_EVIDENCE_RC" -ne 0 && "$UNRELATED_EVIDENCE" == *"active, matching assignment actor"* ]] || fail "public evidence allowed a non-holder to impersonate the assignment actor"
+[[ "$UNRELATED_EVIDENCE_RC" -ne 0 && "$UNRELATED_EVIDENCE" == *"active, matching assignment actor"* && "$UNRELATED_EVIDENCE" == *"assignment-provider claim"* ]] || fail "public evidence allowed a non-holder to impersonate the assignment actor"
 pass "evidence rejects callers that do not match the exact session assignment"
 
 STALE_STATE="$TMP/stale-state.json"
@@ -442,7 +442,7 @@ set +e
 ACTOR_MISMATCH_PUBLISH="$(run_candidate_as unrelated-publisher publish-delivery --session-dir "$RELEASE_SESSION" 2>&1)"
 ACTOR_MISMATCH_RC=$?
 set -e
-[[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
+[[ "$ACTOR_MISMATCH_RC" -ne 0 && "$ACTOR_MISMATCH_PUBLISH" == *"active, matching assignment actor"* && "$ACTOR_MISMATCH_PUBLISH" == *"assignment-provider claim"* && ! -e "$CONSUMER/delivery/$(basename "$RELEASE_SESSION")" ]] || fail "public delivery publishing allowed a non-holder or wrote before actor validation"
 pass "public delivery publishing requires the exact ordinary assignment actor"
 printf 'source snapshot B\n' > "$CONSUMER/source-b.txt"
 (cd "$CONSUMER" && git add source-b.txt && git commit -qm 'source snapshot B after initial verification')

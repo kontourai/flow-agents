@@ -1,22 +1,42 @@
 import * as child_process from "node:child_process";
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
+import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
+const REPOSITORIES_REL_POSIX = "kits/local/repositories";
+const MAX_RECORD_SOURCE_LENGTH = 1024;
+// These Unicode categories can alter terminal/log rendering or provenance display.
+// Property escapes are standardized in supported Node runtimes, so this remains
+// deterministic without maintaining a partial hand-written Unicode range table.
+const UNSAFE_RECORD_SOURCE_CHARACTER_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+export type KitCliTestHooks = {
+  beforeCopy?: (source: string, target: string) => void;
+  afterCopy?: (source: string, target: string) => void;
+  writeRegistry?: (root: string, registryFile: string, registry: Record<string, unknown>) => void;
+  cleanupBackup?: (backup: string) => void;
+};
+
+let testHooks: KitCliTestHooks | undefined;
+
+/** Test-only deterministic race seam. Production callers never set this. */
+export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): void {
+  testHooks = hooks;
+}
 
 const KIT_USAGE: Record<string, string> = {
-  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]",
+  install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
   validate: "usage: flow-agents kit validate [<kit-dir>]",
   provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
@@ -39,7 +59,11 @@ Commands:
   provision  Copy a kit's declared provisions into a target repository.
   inspect    Report a kit's conformance and consumer targets.
   list       List locally installed Flow Kits.
-  status     Report local Flow Kit installation status.`);
+  status     Report local Flow Kit installation status.
+
+Install notes:
+  --record-source <locator> is local-path-only caller-declared provenance metadata.
+  The recorded hash, not --record-source, verifies copied Kit bytes.`);
 }
 
 function printCommandUsage(command: keyof typeof KIT_USAGE): void {
@@ -48,6 +72,7 @@ function printCommandUsage(command: keyof typeof KIT_USAGE): void {
 
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
+function installedPathRelative(kitId: string): string { return `${REPOSITORIES_REL_POSIX}/${kitId}`; }
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
   const explicit = flagString(flags, "dest");
   return path.resolve(explicit ?? defaultCodexHome());
@@ -85,6 +110,145 @@ function loadRegistry(dest: string): { schema_version: string; kits: Record<stri
   return { schema_version: data.schema_version ?? "1.0", kits: Array.isArray(data.kits) ? data.kits.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [] };
 }
 
+type InstalledKitRegistry = ReturnType<typeof loadRegistry>;
+
+/**
+ * Make the copied target and registry entry one transaction. The target swap
+ * remains reversible until the registry's atomic write has completed, so a
+ * registry failure cannot leave an unregistered replacement on disk.
+ */
+function installCopiedKit(options: {
+  source: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  registry: InstalledKitRegistry;
+  existing: Record<string, unknown> | undefined;
+  sourceText: string;
+  update: boolean;
+}): void {
+  const { source, dest, target, manifest, registry, existing, sourceText, update } = options;
+  const transaction = copyDirAtomicTransaction(dest, source, target, (completedTarget) => {
+    testHooks?.afterCopy?.(source, completedTarget);
+    const targetObservation = observeKitContentHash(completedTarget, { trustedRoot: dest });
+    if (targetObservation.state !== "observed") throw new Error(targetObservation.diagnostic);
+    return targetObservation.observed_hash;
+  }, { removeBackup: testHooks?.cleanupBackup });
+  if (!transaction.value) {
+    transaction.rollback();
+    throw new Error("completed copied kit did not produce a content hash");
+  }
+
+  const entry: Record<string, unknown> = {
+    id: String(manifest.id),
+    source: sourceText,
+    hash: transaction.value,
+    installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
+    installed_path: installedPathRelative(String(manifest.id)),
+    state: "installed",
+  };
+  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
+  registry.kits = existing ? registry.kits.map((item) => item.id === entry.id ? entry : item) : [...registry.kits, entry];
+
+  try {
+    const file = registryPath(dest);
+    if (testHooks?.writeRegistry) testHooks.writeRegistry(dest, file, registry);
+    else atomicWriteJson(dest, file, registry);
+  } catch (error) {
+    try {
+      transaction.rollback();
+    } catch (rollbackError) {
+      throw new Error(`registry write failed and target rollback also failed: ${(error as Error).message}; ${(rollbackError as Error).message}`);
+    }
+    throw new Error(`registry write failed; target rolled back: ${(error as Error).message}`);
+  }
+  const cleanupError = transaction.commit();
+  if (cleanupError) {
+    console.warn(`warning: kit '${String(manifest.id)}' is installed and registered, but cleanup of its replaced target failed: ${cleanupError.message}; a later install will retry cleanup`);
+  }
+}
+
+function cleanStaleInstallArtifacts(dest: string, target: string, existing: Record<string, unknown> | undefined): void {
+  if (!existing || typeof existing.hash !== "string") return;
+  const observed = observeKitContentHash(target, { trustedRoot: dest });
+  if (observed.state !== "observed" || observed.observed_hash !== existing.hash) return;
+  for (const cleanupError of cleanupDirectoryCopyBackups(dest, target)) {
+    console.warn(`warning: could not clean stale installer artifact for '${path.basename(target)}': ${cleanupError.message}; a later install will retry cleanup`);
+  }
+}
+
+function acquireInstallRegistryLock(dest: string): () => Error | undefined {
+  const lock = path.join(ensureSafeDirectory(dest, path.dirname(registryPath(dest))), ".installed-kits.flow-agents.lock");
+  try {
+    fs.mkdirSync(lock, { mode: 0o700 });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+      const error = new Error(`destination install/registry transaction is active or requires recovery: ${lock}`) as Error & { code?: string };
+      error.code = "INSTALL_REGISTRY_LOCKED";
+      throw error;
+    }
+    throw cause;
+  }
+  return () => {
+    try {
+      fs.rmdirSync(lock);
+      return undefined;
+    } catch (cause) {
+      return cause instanceof Error ? cause : new Error(String(cause));
+    }
+  };
+}
+
+function withInstallRegistryLock<T>(dest: string, action: () => T): T {
+  const release = acquireInstallRegistryLock(dest);
+  let completed = false;
+  try {
+    const result = action();
+    completed = true;
+    return result;
+  } finally {
+    const releaseError = release();
+    if (releaseError) {
+      console.warn(`warning: destination install/registry lock cleanup failed${completed ? " after the install transaction completed" : " while preserving the primary transaction outcome"}: ${releaseError.message}; later installs will fail closed until recovery`);
+    }
+  }
+}
+
+type RegistryInstallOutcome =
+  | { status: "installed"; existing: boolean }
+  | { status: "idempotent" }
+  | { status: "conflict"; source: unknown };
+
+/**
+ * Serialize every registry-dependent install decision before taking the
+ * narrower target-copy lock. The ordering is always registry then target.
+ */
+function installWithRegistryTransaction(options: {
+  source: string;
+  manifestPath: string;
+  dest: string;
+  target: string;
+  manifest: Record<string, unknown>;
+  sourceText: string;
+  hash: string;
+  update: boolean;
+  force: boolean;
+}): RegistryInstallOutcome {
+  const { source, manifestPath, dest, target, manifest, sourceText, hash, update, force } = options;
+  return withInstallRegistryLock(dest, () => {
+    warnUninstalledDependencies(manifest, manifestPath, dest);
+    const registry = loadRegistry(dest);
+    const kitId = String(manifest.id);
+    const existing = registry.kits.find((entry) => entry.id === kitId);
+    cleanStaleInstallArtifacts(dest, target, existing);
+    if (existing && existing.source !== sourceText && !update) return { status: "conflict", source: existing.source };
+    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force && !update) return { status: "idempotent" };
+    testHooks?.beforeCopy?.(source, target);
+    installCopiedKit({ source, dest, target, manifest, registry, existing, sourceText, update });
+    return { status: "installed", existing: Boolean(existing) };
+  });
+}
+
 /**
  * Emit a non-blocking warning for each declared kit dependency that is not present
  * in the destination's LOCAL registry.
@@ -118,34 +282,6 @@ async function printKitValidationWarnings(kitDir: string): Promise<void> {
   for (const warning of (await validateKitRepositoryDiagnostics(kitDir)).warnings) console.log(`warning: ${warning}`);
 }
 
-function contentHash(root: string): string {
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const rel = path.relative(root, file).split(path.sep).join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
-/** Content hash that excludes .git and other VCS/cache directories (for install git clones). */
-function kitContentHash(root: string): string {
-  const EXCLUDE_DIRS = new Set([".git", "__pycache__", ".pytest_cache"]);
-  const hash = crypto.createHash("sha256");
-  for (const file of walkFiles(root)) {
-    const parts = path.relative(root, file).split(path.sep);
-    if (parts.some((p) => EXCLUDE_DIRS.has(p))) continue;
-    const rel = parts.join("/");
-    hash.update(rel);
-    hash.update("\0");
-    hash.update(fs.readFileSync(file));
-    hash.update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
-}
-
 /**
  * install <source> [--dest <path>] [--force] [--update] [--ref <branch|tag|sha>]
  *
@@ -161,7 +297,7 @@ async function install(argv: string[]): Promise<number> {
   const source = args.positionals[0] ?? "";
   if (!source) {
     console.error("install: missing <source> argument");
-    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--force] [--update]");
+    console.error("usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]");
     return 2;
   }
 
@@ -174,9 +310,27 @@ async function install(argv: string[]): Promise<number> {
   return await installLocalSource(resolveCatalogKitSource(source) ?? path.resolve(source), argv);
 }
 
+function resolveLocalRecordSource(flags: ReturnType<typeof parseArgs>["flags"], source: string): string | null {
+  if (!Object.hasOwn(flags, "record-source")) return source;
+  const recordSource = flagString(flags, "record-source");
+  if (
+    typeof recordSource !== "string"
+    || !recordSource.trim()
+    || recordSource !== recordSource.trim()
+    || recordSource.length > MAX_RECORD_SOURCE_LENGTH
+    || UNSAFE_RECORD_SOURCE_CHARACTER_RE.test(recordSource)
+  ) {
+    console.error(`install: --record-source must be a trimmed non-blank locator no longer than ${MAX_RECORD_SOURCE_LENGTH} characters and must not contain unsafe Unicode control, format, or separator characters`);
+    return null;
+  }
+  return recordSource;
+}
+
 async function installLocalSource(source: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const dest = resolveDest(args.flags);
+  const sourceText = resolveLocalRecordSource(args.flags, source);
+  if (sourceText === null) return 2;
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
@@ -202,37 +356,50 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.error(`install: unsafe source or destination: ${(error as Error).message}`);
     return 1;
   }
-  warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
-  const hash = contentHash(source);
-  const registry = loadRegistry(dest);
-  const existing = registry.kits.find((entry) => entry.id === kitId);
-  const sourceText = source;
-  if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
-    console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
+  const hashObservation = observeKitContentHash(source);
+  if (hashObservation.state !== "observed") {
+    console.error(`install: cannot safely observe kit content: ${hashObservation.diagnostic}`);
+    return 1;
+  }
+  const hash = hashObservation.observed_hash;
+  let outcome: RegistryInstallOutcome;
+  try {
+    outcome = installWithRegistryTransaction({
+      source,
+      manifestPath: path.join(source, "kit.json"),
+      dest,
+      target,
+      manifest,
+      sourceText,
+      hash,
+      update: flagBool(args.flags, "update") ?? false,
+      force: flagBool(args.flags, "force") ?? false,
+    });
+  } catch (error) {
+    console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
+    return 1;
+  }
+  if (outcome.status === "conflict") {
+    console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
     return 2;
   }
-  if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !flagBool(args.flags, "force")) {
+  if (outcome.status === "idempotent") {
     console.log(`kit '${kitId}' is already installed from ${sourceText}`);
     return 0;
   }
-  copyDirAtomic(dest, source, target);
-  const entry: Record<string, unknown> = {
-    id: kitId,
-    source: sourceText,
-    hash,
-    installed_at: existing && existing.source === sourceText && !flagBool(args.flags, "update") ? existing.installed_at : isoNow(),
-    installed_path: target,
-    state: "installed",
-  };
-  if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-  registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-  atomicWriteJson(dest, registryPath(dest), registry);
-  console.log(`${existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
+  const sourceNote = Object.hasOwn(args.flags, "record-source")
+    ? `; recorded caller-declared source metadata '${sourceText}' (hash verifies copied bytes)`
+    : "";
+  console.log(`${outcome.existing ? "updated" : "installed"} local kit '${kitId}' at ${target}${sourceNote}`);
   return 0;
 }
 
 async function installGitSource(rawUrl: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
+  if (Object.hasOwn(args.flags, "record-source")) {
+    console.error("install: --record-source is supported only for local path installs; Git installs record their URL and ref");
+    return 2;
+  }
 
   // Parse ref: #fragment in URL takes precedence over --ref flag.
   let repoUrl = rawUrl;
@@ -279,10 +446,12 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
 
     // Delegate to the shared install logic (copy + registry update).
     const kitId = String(manifest.id);
-    warnUninstalledDependencies(manifest, path.join(tmpBase, "kit.json"), dest);
-    const hash = kitContentHash(tmpBase);
-    const registry = loadRegistry(dest);
-    const existing = registry.kits.find((entry) => entry.id === kitId);
+    const hashObservation = observeKitContentHash(tmpBase);
+    if (hashObservation.state !== "observed") {
+      console.error(`install: cannot safely observe cloned kit content: ${hashObservation.diagnostic}`);
+      return 1;
+    }
+    const hash = hashObservation.observed_hash;
     const target = installedPath(dest, kitId);
     try {
       ensureSafeDirectory(dest, dest);
@@ -298,27 +467,32 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       return 1;
     }
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
-    if (existing && existing.source !== sourceText && !update) {
-      console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
+    let outcome: RegistryInstallOutcome;
+    try {
+      outcome = installWithRegistryTransaction({
+        source: tmpBase,
+        manifestPath: path.join(tmpBase, "kit.json"),
+        dest,
+        target,
+        manifest,
+        sourceText,
+        hash,
+        update,
+        force,
+      });
+    } catch (error) {
+      console.error(`install: copied kit or registry transaction failed: ${(error as Error).message}`);
+      return 1;
+    }
+    if (outcome.status === "conflict") {
+      console.log(`conflict: kit '${kitId}' is already installed from ${outcome.source}; rerun with --update to replace it`);
       return 2;
     }
-    if (existing && existing.source === sourceText && existing.hash === hash && fs.existsSync(target) && !force) {
+    if (outcome.status === "idempotent") {
       console.log(`kit '${kitId}' is already installed from ${sourceText}`);
       return 0;
     }
-    copyDirAtomic(dest, tmpBase, target);
-    const entry: Record<string, unknown> = {
-      id: kitId,
-      source: sourceText,
-      hash,
-      installed_at: existing && existing.source === sourceText && !update ? existing.installed_at : isoNow(),
-      installed_path: target,
-      state: "installed",
-    };
-    if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
-    registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-    atomicWriteJson(dest, registryPath(dest), registry);
-    console.log(`${existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
+    console.log(`${outcome.existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
     return 0;
   } finally {
     fs.rmSync(tmpBase, { recursive: true, force: true });
@@ -356,7 +530,14 @@ function status(argv: string[]): number {
     return 0;
   }
   for (const entry of entries.sort((a, b) => String(a.id ?? "").localeCompare(String(b.id ?? "")))) {
-    console.log(JSON.stringify({ ...entry, state: fs.existsSync(String(entry.installed_path ?? "")) ? "installed" : "missing" }, null, 2));
+    const integrity = observeInstalledKitIntegrity(entry, dest);
+    console.log(JSON.stringify({
+      ...entry,
+      state: integrity.state,
+      recorded_hash: integrity.recorded_hash,
+      observed_hash: integrity.observed_hash,
+      ...(integrity.diagnostic ? { diagnostic: integrity.diagnostic } : {}),
+    }, null, 2));
   }
   return 0;
 }

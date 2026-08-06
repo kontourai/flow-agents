@@ -1,23 +1,84 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { generateKeyPairSync, sign } from "node:crypto";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { createRequire, syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
+import * as packageApi from "../../build/src/index.js";
+import * as sealedExecutionApi from "../../build/src/sealed-execution.js";
 
 const {
   LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH,
   LIFECYCLE_AUTHORITY_HELPER_PATH,
   LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
   invokeExternalLifecycleAuthority,
+  invokeExternalSealedLifecycleAuthority,
+  sealedExecutionTransportTimeout,
   lifecycleAuthorityCompletionBindsExactState,
   lifecycleAuthorityResultDigest,
+  sealedExecutionProvenance,
+  sealedInvocationManifestSha256,
+  validateSealedExecutionSafeResult,
   validateLifecycleAuthorityHelperInstallation,
   validateLifecycleAuthorityResponse,
   verifyHistoricalLifecycleAuthorityCompletion,
   verifyLifecycleAuthorityCompletion,
   verifyProvisionalDeliveryLifecycleCompletion,
 } = lifecycleAuthority;
+
+function sealedSafeResult(overrides = {}) {
+  const artifactContent = Buffer.from(JSON.stringify({ calibration: { primary_agreement: 1, policy_digest: "a".repeat(64) } }));
+  const projection = {
+    schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "threshold_fail",
+    metrics: { primary_agreement: 1, validated_calls: 32 },
+    artifacts: [{ id: "r4.policy", sha256: createHash("sha256").update(artifactContent).digest("hex"), bytes: artifactContent.length, media_type: "application/json", content_base64: artifactContent.toString("base64") }],
+    policy_chain: [{ id: "r4-preregistered-policy", sha256: "b".repeat(64) }],
+  };
+  return {
+    status: "ok", exit_code: 0, runtime_ms: 52_000, stdout_bytes: 123, stderr_bytes: 0,
+    stdout_sha256: "c".repeat(64), stderr_sha256: "d".repeat(64),
+    projection, projection_sha256: lifecycleAuthorityResultDigest(projection), ...overrides,
+  };
+}
+
+test("sealed execution clients reject projection tampering, size-cap bypasses, and private result material", () => {
+  assert.equal(validateSealedExecutionSafeResult(sealedSafeResult()).status, "ok");
+  const privateArtifact = Buffer.from(JSON.stringify({ transcript: "must not leave the sealed stage" }));
+  const privateProjection = sealedSafeResult();
+  privateProjection.projection.artifacts = [{ id: "private", sha256: createHash("sha256").update(privateArtifact).digest("hex"), bytes: privateArtifact.length, media_type: "application/json", content_base64: privateArtifact.toString("base64") }];
+  privateProjection.projection_sha256 = lifecycleAuthorityResultDigest(privateProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(privateProjection), /free-form text/);
+  let deeplyNested = "must not survive the public validator";
+  for (let depth = 0; depth < 34; depth += 1) deeplyNested = { nested: deeplyNested };
+  const deepArtifact = Buffer.from(JSON.stringify(deeplyNested));
+  const deepProjection = sealedSafeResult();
+  deepProjection.projection.artifacts = [{ id: "deep", sha256: createHash("sha256").update(deepArtifact).digest("hex"), bytes: deepArtifact.length, media_type: "application/json", content_base64: deepArtifact.toString("base64") }];
+  deepProjection.projection_sha256 = lifecycleAuthorityResultDigest(deepProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(deepProjection), /nesting exceeds/);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ stdout_bytes: 256 * 1024, stderr_bytes: 1 })), /sealed execution result is invalid/);
+  const oversized = Buffer.from(JSON.stringify({ policy: "x".repeat(65 * 1024) }));
+  const oversizedProjection = sealedSafeResult();
+  oversizedProjection.projection.artifacts = [{ id: "oversized", sha256: createHash("sha256").update(oversized).digest("hex"), bytes: oversized.length, media_type: "application/json", content_base64: oversized.toString("base64") }];
+  oversizedProjection.projection_sha256 = lifecycleAuthorityResultDigest(oversizedProjection.projection);
+  assert.throws(() => validateSealedExecutionSafeResult(oversizedProjection), /sealed execution artifact is invalid/);
+  assert.throws(() => validateSealedExecutionSafeResult({ ...sealedSafeResult(), unexpected: true }), /unexpected or missing fields/);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ projection_sha256: "0".repeat(64) })), /projection digest/);
+});
+
+test("sealed execution provenance is exact when present and legacy receipts remain readable", () => {
+  const provenance = { invocation_manifest_sha256: "e".repeat(64), controller_state_sha256: "f".repeat(64) };
+  assert.deepEqual(sealedExecutionProvenance(sealedSafeResult({ execution_provenance: provenance })), provenance);
+  assert.throws(() => validateSealedExecutionSafeResult(sealedSafeResult({ execution_provenance: { ...provenance, extra: true } })), /provenance/);
+  assert.throws(() => sealedExecutionProvenance(sealedSafeResult()), /provenance is unavailable/);
+  const workload = { runtime: { sha256: "1".repeat(64) }, controller: { logical_path: "r4/controller.mjs", sha256: "2".repeat(64) }, provider: { sha256: "3".repeat(64) }, inputs: [{ id: "plan", source: { logical_path: "data/plan.json", sha256: "4".repeat(64) } }] };
+  const authorization = { runner_entrypoint: "coordinator:sealed-runner-v1", max_runtime_ms: 1, max_output_bytes: 2, max_provider_calls: 3, max_cost_microusd: 4, max_tokens: 5 };
+  assert.match(sealedInvocationManifestSha256(workload, authorization), /^[a-f0-9]{64}$/);
+  assert.notEqual(sealedInvocationManifestSha256({ ...workload, provider: { sha256: "0".repeat(64) } }, authorization), sealedInvocationManifestSha256(workload, authorization));
+});
 
 const action = "cancel";
 const digest = "a".repeat(64);
@@ -195,6 +256,12 @@ function withCompletionVerificationKey(callback) {
 }
 
 test("lifecycle authority helper identity is immutable and ignores caller executable selection", () => {
+  assert.equal(packageApi.SEALED_EXECUTION_API_REVISION, "flow-agents.sealed-execution-api.v1", "package root identifies the sealed execution API contract");
+  assert.equal(packageApi.invokeExternalSealedLifecycleAuthority, invokeExternalSealedLifecycleAuthority, "package root exports the cancellable sealed transport");
+  assert.equal(packageApi.lifecycleAuthorityResultDigest, lifecycleAuthorityResultDigest, "package root exports the canonical lifecycle digest helper");
+  assert.equal(sealedExecutionApi.invokeExternalSealedLifecycleAuthority, invokeExternalSealedLifecycleAuthority, "minimal sealed entrypoint exports the cancellable transport");
+  assert.equal(sealedExecutionApi.lifecycleAuthorityResultDigest, lifecycleAuthorityResultDigest, "minimal sealed entrypoint exports the canonical digest helper");
+  assert.equal(sealedExecutionApi.sealedInvocationManifestSha256, sealedInvocationManifestSha256, "minimal sealed entrypoint exports the exact manifest digest helper");
   process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER = "/usr/bin/true";
   assert.equal(LIFECYCLE_AUTHORITY_HELPER_PATH, "/usr/local/libexec/kontourai/flow-agents-lifecycle-authority-v1");
   assert.notEqual(LIFECYCLE_AUTHORITY_HELPER_PATH, process.env.FLOW_AGENTS_LIFECYCLE_AUTHORITY_HELPER);
@@ -375,6 +442,27 @@ test("lifecycle authority response accepts completed replays only with an authen
   }
 }));
 
+test("merge-change response and signed completion bind the requested issued action", () => withCompletionVerificationKey(() => {
+  const actionId = "d".repeat(64);
+  const completion = signedCompletion({ action: "merge-change", authorized_action_id: actionId });
+  const response = {
+    schema_version: LIFECYCLE_AUTHORITY_PROTOCOL_VERSION,
+    action: "merge-change",
+    request_sha256: digest,
+    status: "accepted",
+    result: { run_id: "run-1", operation_status: "replayed", authorized_action_id: actionId, completion },
+  };
+  assert.deepEqual(validateLifecycleAuthorityResponse(`${JSON.stringify(response)}\n`, "merge-change", digest, actionId), response.result);
+  assert.throws(
+    () => validateLifecycleAuthorityResponse(`${JSON.stringify({ ...response, result: { ...response.result, authorized_action_id: "e".repeat(64) } })}\n`, "merge-change", digest, actionId),
+    /does not bind the exact merge action/,
+  );
+  assert.throws(
+    () => validateLifecycleAuthorityResponse(`${JSON.stringify(response)}\n`, "merge-change", digest, "e".repeat(64)),
+    /does not bind the exact merge action/,
+  );
+}));
+
 test("strict current consumers reject a correctly signed replayed completion while historical authentication retains it", () => withCompletionVerificationKey(() => {
   const replayed = signedCompletion({ action: "resolve-critique", operation_status: "replayed" });
   assert.throws(
@@ -457,4 +545,77 @@ test("package-side bundle validation cannot turn a helper response into authoriz
   const verifyBase = { ...valid, action: "verify-authorization", result: { verified: true } };
   assert.throws(() => validateLifecycleAuthorityResponse(`${JSON.stringify(verifyBase)}\n`, "verify-authorization", digest), /mutation result/);
   assert.throws(() => invokeExternalLifecycleAuthority({ action: "verify-authorization", project_root: "/tmp/project", payload: "forged", signature: {} }), /unsupported lifecycle authority action/);
+});
+
+test("sealed execution transport follows the signed runtime budget rather than the ordinary 30-second helper timeout", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-transport-"));
+  const file = path.join(directory, "authorization.json");
+  try {
+    fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
+    assert.equal(sealedExecutionTransportTimeout(file), 91_000);
+    const transportSource = fs.readFileSync(new URL("../../src/external-lifecycle-authority.ts", import.meta.url), "utf8");
+    assert.match(transportSource, /timeout - SEALED_TRANSPORT_CLEANUP_MS/, "graceful termination starts at signed runtime, leaving one cleanup allowance before the hard bound");
+    fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 30 * 60_000 + 1, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }));
+    assert.throws(() => sealedExecutionTransportTimeout(file), /authorization is invalid/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("public sealed transport remains responsive and forwards parent cancellation", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-cancellable-transport-"));
+  const authorizationFile = path.join(directory, "authorization.json");
+  fs.writeFileSync(authorizationFile, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
+  const mutableFs = createRequire(import.meta.url)("node:fs");
+  const mutableChildProcess = createRequire(import.meta.url)("node:child_process");
+  const fsMethods = ["lstatSync", "accessSync", "openSync", "fstatSync", "readFileSync", "closeSync"];
+  const originalFs = Object.fromEntries(fsMethods.map((method) => [method, mutableFs[method]]));
+  const originalSpawn = mutableChildProcess.spawn;
+  const helperDescriptor = 987654;
+  const kills = [];
+  let spawnedChild = null;
+  class FakeChild extends EventEmitter {
+    stdin = new PassThrough(); stdout = new PassThrough(); stderr = new PassThrough(); closed = false;
+    kill(signal) {
+      kills.push(signal);
+      if (!this.closed) {
+        this.closed = true;
+        this.stderr.end("cancelled by parent"); this.stdout.end();
+        setImmediate(() => this.emit("close", 1, null));
+      }
+      return true;
+    }
+  }
+  try {
+    mutableFs.lstatSync = (file) => {
+      if (file === LIFECYCLE_AUTHORITY_HELPER_PATH) return protectedExecutable();
+      if (LIFECYCLE_AUTHORITY_HELPER_PATH.startsWith(`${file}/`)) return protectedDirectory();
+      return originalFs.lstatSync(file);
+    };
+    mutableFs.accessSync = (file, mode) => {
+      if (file === LIFECYCLE_AUTHORITY_HELPER_PATH || LIFECYCLE_AUTHORITY_HELPER_PATH.startsWith(`${file}/`)) { const error = new Error("EACCES"); error.code = "EACCES"; throw error; }
+      return originalFs.accessSync(file, mode);
+    };
+    mutableFs.openSync = (file, flags) => file === LIFECYCLE_AUTHORITY_HELPER_PATH ? helperDescriptor : originalFs.openSync(file, flags);
+    mutableFs.fstatSync = (descriptor) => descriptor === helperDescriptor ? protectedExecutable() : originalFs.fstatSync(descriptor);
+    mutableFs.readFileSync = (file, ...args) => originalFs.readFileSync(file, ...args);
+    mutableFs.closeSync = (descriptor) => descriptor === helperDescriptor ? undefined : originalFs.closeSync(descriptor);
+    mutableChildProcess.spawn = () => (spawnedChild = new FakeChild());
+    syncBuiltinESMExports();
+    const before = process.listenerCount("SIGTERM");
+    const pending = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
+    process.emit("SIGTERM");
+    process.emit("SIGTERM");
+    await assert.rejects(pending, /cancelled by parent/);
+    assert.deepEqual(kills, ["SIGTERM", "SIGTERM"], "repeated parent signals remain owned until child cleanup completes");
+    assert.equal(process.listenerCount("SIGTERM"), before, "transport removes its parent signal handler after cleanup");
+    kills.length = 0;
+    const pipeFailure = invokeExternalSealedLifecycleAuthority({ action: "execute-sealed-workload", project_root: directory, session_dir: path.join(directory, "run"), authorization_file: authorizationFile, sealed_workload_file: path.join(directory, "workload.json") });
+    spawnedChild.stdin.emit("error", Object.assign(new Error("EPIPE"), { code: "EPIPE" }));
+    await assert.rejects(pipeFailure, /cancelled by parent/);
+    assert.deepEqual(kills, ["SIGTERM"], "request-pipe failure is contained through the same bounded cancellation path");
+  } finally {
+    for (const method of fsMethods) mutableFs[method] = originalFs[method];
+    mutableChildProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

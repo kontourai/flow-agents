@@ -10,17 +10,68 @@ const TRUSTED_GIT_EXECUTABLES = process.platform === "darwin"
     ? ["C:\\Program Files\\Git\\cmd\\git.exe"]
     : ["/usr/bin/git", "/run/current-system/sw/bin/git", "/usr/local/bin/git"];
 
+const TRUSTED_GIT_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
+
 /** Execute bounded Git argv with replacement objects and caller configuration disabled. */
-export function execTrustedGitSync(projectRoot: string, argv: readonly string[], encoding: "utf8" | "buffer" = "utf8"): string | Buffer {
+export function execTrustedGitSync(projectRoot: string, argv: readonly string[], encoding: "utf8" | "buffer" = "utf8", maxBuffer = 1024 * 1024): string | Buffer {
   const executable = resolveTrustedGitIdentity();
   revalidateTrustedGitIdentity(executable);
-  const output = execFileSync(executable.path, ["--no-replace-objects", "-C", projectRoot, ...argv], {
+  const output = execFileSync(executable.path, trustedGitArgv(projectRoot, argv), {
     encoding: encoding === "buffer" ? "buffer" : "utf8",
     env: trustedGitEnvironment(),
     stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer,
   });
   revalidateTrustedGitIdentity(executable);
   return output;
+}
+
+/** Read a bounded blob addressed by an already-resolved immutable commit. */
+export function readTrustedGitBlobSync(projectRoot: string, commit: string, relativePath: string, maxBytes = 1024 * 1024): Buffer {
+  if (!/^[0-9a-f]{40,64}$/u.test(commit) || !isSafeGitRelativePath(relativePath)) {
+    throw new Error("unsafe immutable Git blob reference");
+  }
+  try {
+    const output = execTrustedGitSync(projectRoot, ["cat-file", "blob", `${commit}:${relativePath}`], "buffer", maxBytes + 1);
+    if (!Buffer.isBuffer(output) || output.length > maxBytes) throw new Error("immutable Git blob exceeds size limit");
+    return output;
+  } catch {
+    throw new Error("could not read immutable Git blob with trusted Git");
+  }
+}
+
+function isSafeGitRelativePath(value: string): boolean {
+  return value.length > 0
+    && value.length <= 240
+    && !value.startsWith("/")
+    && !value.includes("\\")
+    && value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".." && !part.includes("\0"));
+}
+
+/**
+ * Repository config is untrusted input for every caller of this helper. Keep
+ * executable configuration disabled even for read-only commands: fsmonitor is
+ * consulted by status, diff drivers can launch external commands, and a future
+ * caller must not gain hook execution merely by adding a mutating Git verb.
+ */
+function trustedGitArgv(projectRoot: string, argv: readonly string[]): string[] {
+  const command = argv[0];
+  if (command === "diff" && argv.some((argument) => argument === "--ext-diff" || argument === "--textconv")) {
+    throw new Error("trusted Git refuses external diff and text conversion options");
+  }
+  const hardened = command === "diff" ? appendSafeDiffOptions(argv) : [...argv];
+  return [
+    "--no-replace-objects",
+    "-c", "core.fsmonitor=false",
+    "-c", `core.hooksPath=${TRUSTED_GIT_NULL_DEVICE}`,
+    "-c", "diff.external=",
+    "-C", projectRoot,
+    ...hardened,
+  ];
+}
+
+function appendSafeDiffOptions(argv: readonly string[]): string[] {
+  return [argv[0]!, "--no-ext-diff", "--no-textconv", ...argv.slice(1)];
 }
 
 export function resolveTrustedLocalGitCommit(projectRoot: string, ref: string): string {

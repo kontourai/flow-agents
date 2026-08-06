@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT_DIR/scripts/telemetry/console-presets.sh"
+# This test exercises init's post-install summary, whose in-process
+# telemetry-doctor must resolve each temp dest's own conf -- so it must not
+# inherit the eval harness's console-free TELEMETRY_CONFIG_FILE default
+# (evals/ci/run-baseline.sh), which would shadow every fixture and render
+# every console sink "local-only".
+unset TELEMETRY_CONFIG_FILE
 LOCAL_KONTOUR_CONSOLE_URL="$(flow_agents_local_kontour_console_url)"
 KONTOUR_HOSTED_CONSOLE_URL="$(flow_agents_kontour_hosted_console_url)"
 TMPDIR_EVAL="$(mktemp -d /tmp/universal-bundle-install.XXXXXX)"

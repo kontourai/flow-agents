@@ -5,6 +5,7 @@ import path from "node:path";
 import { validateKitRepository as validateFlowKitRepository } from "../flow-kit/validate.js";
 import { codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { loadJson, readText, rel, root, walkFiles } from "./common.js";
+import { INSTALL_IDENTITY_SCHEMA_VERSION, INSTALL_IDENTITY_STAMP_REL } from "./generate-install-identity.js";
 
 class Reporter {
   errors: string[] = [];
@@ -25,6 +26,10 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/telemetry/run-usage-scope.js", { mirror: "context/scripts/telemetry/run-usage-scope.js", allowedDifferences: [] }],
   ["scripts/telemetry/lib/config.sh", { mirror: "context/scripts/telemetry/lib/config.sh", allowedDifferences: [] }],
   ["scripts/telemetry/lib/session.sh", { mirror: "context/scripts/telemetry/lib/session.sh", allowedDifferences: [] }],
+  // #970: the shared producer-identity resolver, sourced by BOTH telemetry.sh (event stamp)
+  // and economics-record.sh (durable record stamp). Enforce byte-identical mirror so the two
+  // callers can never resolve against a drifted copy.
+  ["scripts/telemetry/lib/install-identity.sh", { mirror: "context/scripts/telemetry/lib/install-identity.sh", allowedDifferences: [] }],
   ["scripts/telemetry/telemetry.conf", { mirror: "context/scripts/telemetry/telemetry.conf", allowedDifferences: [] }],
   ["scripts/telemetry/console-presets.sh", { mirror: "context/scripts/telemetry/console-presets.sh", allowedDifferences: [] }],
   ["scripts/telemetry/install-console-config.sh", { mirror: "context/scripts/telemetry/install-console-config.sh", allowedDifferences: [] }],
@@ -36,9 +41,11 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   // fails `npm run validate:source` instead of silently accumulating.
   ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/effective-flow-agents-config.js", { mirror: "context/scripts/hooks/lib/effective-flow-agents-config.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/unstarted-delivery.js", { mirror: "context/scripts/hooks/lib/unstarted-delivery.js", allowedDifferences: [] }],
   ["scripts/hooks/stop-goal-fit.js", { mirror: "context/scripts/hooks/stop-goal-fit.js", allowedDifferences: [] }],
   ["scripts/hooks/run-hook.js", { mirror: "context/scripts/hooks/run-hook.js", allowedDifferences: [] }],
   ["scripts/hooks/workflow-steering.js", { mirror: "context/scripts/hooks/workflow-steering.js", allowedDifferences: [] }],
@@ -97,9 +104,12 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/denial-escalation.js", { category: "shared hook library", requiredNeedles: ["recordDenial", "buildDenialResponse", "denialIdentity"] }],
   ["scripts/hooks/lib/denial-guidance.js", { category: "shared hook library", requiredNeedles: ["shapeDenialMessage", "stripIncidentRegister"] }],
+  ["scripts/hooks/lib/effective-flow-agents-config.js", { category: "shared hook library", requiredNeedles: ["Committed-only goal-fit configuration", "resolveGoalFitConfig"] }],
   ["scripts/hooks/lib/declared-artifact-roots.js", { category: "shared hook library", requiredNeedles: ["isCandidateWithinDeclaredRoots", "FAIL-CLOSED"] }],
   ["scripts/hooks/lib/flow-recovery-fence.js", { category: "shared hook library", requiredNeedles: ["assertFlowRecoveryFenceOpen", "flow.run-recovery-fence.v1"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
+  ["scripts/hooks/lib/install-freshness.js", { category: "shared hook library", requiredNeedles: ["installFreshnessAdvisory", "checkoutStaleness", "registryStaleness"] }],
+  ["scripts/hooks/lib/stop-escalation.js", { category: "shared hook library", requiredNeedles: ["STOP_CONTROL_PREFIX", "stopTurnDecision", "recordStopBlock"] }],
   ["scripts/hooks/lib/read-only-grammar.js", { category: "shared hook library", requiredNeedles: ["isProvablyReadOnlyCommand", "fail closed"] }],
   ["scripts/hooks/lib/kit-catalog.js", { category: "shared hook library", requiredNeedles: ["readKitManifests", "workflowTriggersFor"] }],
   ["scripts/hooks/lib/liveness-heartbeat.js", { category: "shared hook library", requiredNeedles: ["maybeEmitHeartbeat", "resolveHeartbeatThrottleSeconds"] }],
@@ -111,6 +121,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
   ["scripts/hooks/lib/runnable-command.js", { category: "shared hook library", requiredNeedles: ["isRunnableCommandText"] }],
   ["scripts/hooks/lib/skill-drift.js", { category: "shared hook library", requiredNeedles: ["compareSkillDrift", "buildManifest"] }],
+  ["scripts/hooks/lib/unstarted-delivery.js", { category: "shared hook library", requiredNeedles: ["unstartedDeliveryWarning", "UNSTARTED_DELIVERY_PATTERN"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
   ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh", "evals/integration/test_ensure_session_ownership_guard.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture" }],
@@ -123,6 +134,7 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/economics", { owners: ["evals/integration/test_economics_record.sh"], classification: "per-run kit-economics record fixtures (#349): a transcript with .message.usage blocks, state.json/acceptance.json/critique.json join sources, a session.usage event, and the golden expected kontour.console.economics record" }],
   ["evals/fixtures/flow-kit-repository", { owners: ["evals/integration/test_flow_kit_repository.sh", "evals/integration/test_local_flow_kit_install.sh", "evals/integration/test_runtime_adapter_activation.sh", "evals/integration/test_activate_npx_context.sh", "evals/integration/test_flow_kit_install_git.sh", "evals/static/test_validate_source_kit_asset_scope.sh", "evals/static/test_workflow_skills.sh"], classification: "Flow Kit repository contract fixtures" }],
   ["evals/fixtures/kit-conformance-levels", { owners: ["evals/integration/test_kit_conformance_levels.sh"], classification: "K-level conformance and consumer-target derivation fixtures" }],
+  ["evals/fixtures/kit-observability", { owners: ["evals/static/test_kit_observability_contract.sh"], classification: "host-neutral Kit observability descriptor and third-party compatibility fixtures (#911)" }],
   ["evals/fixtures/hook-influence", { owners: ["evals/integration/test_hook_influence_cases.sh", "evals/static/test_workflow_skills.sh", "scripts/validate-hook-influence-cases.js"], classification: "hook influence behavioral cases" }],
   ["evals/fixtures/learning-review-proposals", { owners: ["evals/integration/test_learning_review_proposals.sh"], classification: "learning-review kit/gate tuning proposal fixtures (#352): pattern-present (engineered cost-inflation + gate false-block-rate pattern, with sessions/ trust.bundle + gate-review.inquiries.json joins and a hand-computed expected-aggregates.json), balanced (proportional cost/findings movement -> zero proposals), under-threshold (below LR_MIN_WINDOW_SAMPLE), repeat-window (idempotency), and effect-follow-up (later-window effect-fill pass for a ratified proposal)" }],
   ["evals/fixtures/narrative-sources", { owners: ["evals/integration/test_narrative_source_contract.sh", "evals/integration/test_narrative_runtime_projection.sh", "evals/integration/test_narrative_grounded_envelope.sh", "evals/integration/test_narrative_redaction_failclosed.sh", "evals/integration/test_narrative_trust_isolation.sh"], classification: "narrative source snapshot, offline resolution, integrity, completeness, fail-closed redaction, grounded runtime projection, grounded execution narrative, and trust-isolation fixtures (#613, #617, #618, #619)" }],
@@ -463,6 +475,31 @@ function validatePackageCommandSurface(reporter: Reporter): void {
     }
   }
 }
+/**
+ * Pack-time truth assertion for the install-identity stamp (#1180).
+ *
+ * `validate:source` runs inside `prepack`, so this is the last gate between a stamp and a
+ * published tarball. Telemetry reads `package_version` from this file verbatim and reports it as
+ * the producer's identity; a stale stamp would therefore not fail loudly, it would LIE quietly in
+ * every event — attributing one release's behavior to another. The assertion converts that into a
+ * pack failure: the stamp must exist, declare the current schema version, and name exactly the
+ * package and version package.json declares.
+ */
+function validateInstallIdentityStamp(reporter: Reporter): void {
+  const stampFile = path.join(root, INSTALL_IDENTITY_STAMP_REL);
+  if (!fs.existsSync(stampFile)) {
+    reporter.fail(`${INSTALL_IDENTITY_STAMP_REL}: install-identity stamp is missing; run npm run build`);
+    return;
+  }
+  const stamp = tryLoadJson(stampFile, reporter);
+  if (!stamp || typeof stamp !== "object") return;
+  const pkg = tryLoadJson(path.join(root, "package.json"), reporter);
+  if (!pkg || typeof pkg !== "object") return;
+  reporter.check(stamp.schema_version === INSTALL_IDENTITY_SCHEMA_VERSION, `${INSTALL_IDENTITY_STAMP_REL}: schema_version must be '${INSTALL_IDENTITY_SCHEMA_VERSION}', got '${stamp.schema_version}'`);
+  reporter.check(stamp.package_name === pkg.name, `${INSTALL_IDENTITY_STAMP_REL}: package_name '${stamp.package_name}' does not match package.json '${pkg.name}'; the stamp is stale — run npm run build`);
+  reporter.check(stamp.package_version === pkg.version, `${INSTALL_IDENTITY_STAMP_REL}: package_version '${stamp.package_version}' does not match package.json '${pkg.version}'; the stamp is stale — run npm run build`);
+  reporter.check(typeof stamp.content_fingerprint === "string" && /^sha256:[0-9a-f]{64}$/.test(stamp.content_fingerprint), `${INSTALL_IDENTITY_STAMP_REL}: content_fingerprint must be 'sha256:<64 hex>', got '${stamp.content_fingerprint}'`);
+}
 function isExcludedPythonPath(file: string): boolean {
   return path.relative(root, file).split(path.sep).some((part) => pythonInventoryExcludes.has(part));
 }
@@ -521,6 +558,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   validateAdrNumbers(reporter);
   validateFixtureOwnership(reporter);
   validatePackageCommandSurface(reporter);
+  validateInstallIdentityStamp(reporter);
   validateNoFirstPartyPythonFiles(reporter);
   validateNoFirstPartyPythonCommands(reporter);
   if (reporter.errors.length) { console.log("Source tree validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }
