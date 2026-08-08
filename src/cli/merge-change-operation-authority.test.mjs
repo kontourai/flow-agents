@@ -64,6 +64,18 @@ test("public package exports cannot construct or execute a merge outside the ses
   }
 });
 
+// This hand-writes the legacy flat `evidence.authority_trace` field. Flow 5.0
+// removed `authorityTrace` as an attachEvidence option, so no real Flow 5.x
+// write path can produce this shape anymore — this now exercises only the
+// deliberate backward-compatibility fallback in
+// resultDigestClaimedByCanonicalRun (merge-change.ts), which still recognizes
+// a legacy record so a long-running session's evidence attached before an
+// in-place flow-agents upgrade remains recoverable. The primary, real-write-
+// path representation (a claim-scoped authorityRef embedded in the attached
+// TrustBundle's own authorityTrace array) is proven end-to-end against a
+// genuine Flow-5.x-produced manifest by builder-flow-runtime.test.mjs's
+// "resultDigestClaimedByCanonicalRun authenticates a real Flow-5.x-attached
+// publish-change record end-to-end".
 test("canonical completed-run evidence authenticates the publish action identity and exact result digest", () => {
   const publishedAction = "a".repeat(64);
   const digest = "b".repeat(64);

@@ -370,8 +370,17 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
 function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: KitFlowStepActionEntry): DerivedGateRequirements {
   const gates = openGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
   const acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"] = [];
+  // Evaluate at the actual current instant, not Flow's own fallback default of
+  // `state.updated_at`. `state.updated_at` only advances when a transition is
+  // recorded (a status change) — evidence attached during a re-evaluation that
+  // does not itself flip the gate outcome (the common "still missing one more
+  // piece" case) leaves it stale. Flow 5.0 now fails-closed on any claim/event
+  // timestamped after its evaluation clock (flow-gates.ts reconciliationForClaim),
+  // so projecting this envelope against a stale `state.updated_at` would mark
+  // exactly-just-attached evidence unresolved even though it is current.
+  const now = new Date().toISOString();
   const requirements = gates.flatMap((gate) => {
-    const outcome = evaluateGate(input.definition, input.run.state, input.run.manifest, gate.id, input.run.config);
+    const outcome = evaluateGate(input.definition, input.run.state, input.run.manifest, gate.id, input.run.config, now);
     if (typeof outcome.accepted_exception_id === "string") {
       acceptedExceptions.push({ gate_id: gate.id, exception_id: outcome.accepted_exception_id });
     }
