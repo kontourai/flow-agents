@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "9228fc1dfd81b59f5ea466887bccbcde6e799ecb2d7198eab5d1943c79e2976e"
+        "sha256": "91d2704c9df50d83707b9edb569a85e7b42976fb3ad94f20334dd828fd193688"
       }
     }
   ],
@@ -14,15 +14,15 @@
     "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
     "claims": [
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z",
+        "id": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z",
         "subjectType": "work-item",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-selected-work",
         "facet": "flow-agents.workflow",
         "claimType": "builder.pull-work.selected",
-        "fieldOrBehavior": "Work Item kontourai/flow-agents#1214 is durably assigned to the active workflow actor (assignment sha256:baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd).",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#1214 is durably assigned to the active workflow actor (assignment sha256:fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e).",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
         "metadata": {
@@ -38,7 +38,7 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-1214.json",
-              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd."
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e."
             },
             {
               "kind": "artifact",
@@ -50,8 +50,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "64c52a52d9c5ef5ede977b00b6bda59d5a3bcc04571d91b437d527c9974585f9",
-            "head_sha": "64980c8f1408d0762bc48e3d8511900e941d2fed"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "selected-work",
@@ -59,22 +59,22 @@
             "subject_type": "work-item",
             "step_id": "pull-work",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:22:36Z",
-            "flow_run_head": "ab0358084661edea9171b437025842ecc5186bbb8180122245407ae265ba463d"
+            "recorded_at": "2026-08-08T18:50:54Z",
+            "flow_run_head": "2392ce81e7722bea10853e3a11c71ef8bddd1ea8ae5cd46b0cd9dc53a8dd5cab"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z",
+        "id": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z",
         "subjectType": "work-item",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-pickup-probe-readiness",
         "facet": "flow-agents.workflow",
         "claimType": "builder.design-probe.pickup-readiness",
-        "fieldOrBehavior": "Pickup probe complete for #1214: defect live-reproduced in the #1213 dogfood (385 edges -> 0 links), root causes located with file evidence (edgeTypeFor missing blocks case; no ingest machinery), assignment claimed by this session's actor, branch cut from fresh origin/main@64980c8f, no overlapping lane. Planning readiness PASS.",
+        "fieldOrBehavior": "Pickup probe for #1214, re-recorded on the sixth run at head 300ef777 (contains upstream #1215 and #1220, node_modules synced via npm ci; prior runs closed by signed lifecycle authority). Probe evidence unchanged: defect live-reproduced in #1213, root causes located, assignment held. Planning readiness PASS.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:test_output",
         "metadata": {
@@ -90,12 +90,12 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--pull-work.md",
-              "summary": "Selection, readiness, WIP/conflict, ownership, scope."
+              "summary": "Selection and preflight."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--pickup-probe.json",
-              "summary": "Goal fit, risks, six decisions, conflict scan."
+              "summary": "Probe record."
             }
           ],
           "output_digest": {
@@ -113,8 +113,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "64c52a52d9c5ef5ede977b00b6bda59d5a3bcc04571d91b437d527c9974585f9",
-            "head_sha": "64980c8f1408d0762bc48e3d8511900e941d2fed"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "pickup-probe-readiness",
@@ -122,22 +122,22 @@
             "subject_type": "work-item",
             "step_id": "design-probe",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:23:08.042Z",
-            "flow_run_head": "128d27bf76c69e289b781942c68244e1b011c15522cc1ef7191ca5b8f7428b78"
+            "recorded_at": "2026-08-08T18:52:36.356Z",
+            "flow_run_head": "4282be5e01093560859e3ed8d6d18d15b552e1399f50fca7d1b894fd8e14e904"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z",
+        "id": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z",
         "subjectType": "decision",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-probe-decisions-or-accepted-gaps",
         "facet": "flow-agents.workflow",
         "claimType": "builder.design-probe.decisions",
-        "fieldOrBehavior": "Six design decisions ratified for #1214: blocks case in edgeTypeFor; shared ingest helper at adapters/shared/ingest-graph.js with providerId->recordId mapping and skip-and-report on unknown endpoints; link-kind mapping as the exact inverse of edgeTypeFor; empty-body normalization to title; SKILL step-3 wording; CI registration of the new suite in both the static-lane script and the knowledge-integration-suites manifest command. Zero unresolved questions, zero accepted gaps.",
+        "fieldOrBehavior": "Six ratified decisions plus review-driven refinements; zero unresolved; #1217 the one routed efficiency gap.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.decisions:test_output",
         "metadata": {
@@ -153,12 +153,12 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--pull-work.md",
-              "summary": "Selection + probe record."
+              "summary": "Selection and preflight."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--pickup-probe.json",
-              "summary": "Decision list."
+              "summary": "Probe record."
             }
           ],
           "output_digest": {
@@ -176,8 +176,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "64c52a52d9c5ef5ede977b00b6bda59d5a3bcc04571d91b437d527c9974585f9",
-            "head_sha": "64980c8f1408d0762bc48e3d8511900e941d2fed"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "probe-decisions-or-accepted-gaps",
@@ -185,22 +185,22 @@
             "subject_type": "decision",
             "step_id": "design-probe",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:23:16.961Z",
-            "flow_run_head": "128d27bf76c69e289b781942c68244e1b011c15522cc1ef7191ca5b8f7428b78"
+            "recorded_at": "2026-08-08T18:52:48.243Z",
+            "flow_run_head": "4282be5e01093560859e3ed8d6d18d15b552e1399f50fca7d1b894fd8e14e904"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z",
+        "id": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z",
         "subjectType": "artifact",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-implementation-plan",
         "facet": "flow-agents.workflow",
         "claimType": "builder.plan.implementation",
-        "fieldOrBehavior": "Implementation plan recorded for #1214: four waves (blocks case in edgeTypeFor; shared ingestProviderGraph helper with inverse-mapping link kinds, empty-body normalization, and skip-and-report semantics; SKILL step-3 wording; end-to-end tests asserting the projection is no longer structurally blind, registered in both CI touchpoints) with acceptance mapping and fault-injection verification discipline.",
+        "fieldOrBehavior": "Four-wave plan with acceptance mapping, anchored with the criterion seeded from the deliver artifact at session creation. Recorded at head 300ef777.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.plan.implementation:test_output",
         "metadata": {
@@ -216,7 +216,7 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--plan-work.md",
-              "summary": "Durable plan with wave breakdown and acceptance mapping."
+              "summary": "Plan."
             }
           ],
           "output_digest": {
@@ -234,8 +234,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "64c52a52d9c5ef5ede977b00b6bda59d5a3bcc04571d91b437d527c9974585f9",
-            "head_sha": "64980c8f1408d0762bc48e3d8511900e941d2fed"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "acceptance_contract": {
             "version": 1,
@@ -254,22 +254,22 @@
             "subject_type": "artifact",
             "step_id": "plan",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:23:56.235Z",
-            "flow_run_head": "868ea9071610425a870ac82581642021e213324dc432169bceba59f5bf3cc7eb"
+            "recorded_at": "2026-08-08T18:52:59.738Z",
+            "flow_run_head": "65e9d36a4036e6232a1a6cd7afab1040fb2dce0dad13ad08dd10152161aedaf3"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z",
+        "id": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z",
         "subjectType": "change",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-implementation-scope",
         "facet": "flow-agents.workflow",
         "claimType": "builder.execute.scope",
-        "fieldOrBehavior": "Implementation complete for #1214 at head 7efa6a08: blocks case in edgeTypeFor; shared ingestProviderGraph helper (inverse kind mapping, empty-body normalization, skip-and-report); SKILL step-3 wording naming the helper; 7-test suite registered in both CI touchpoints. Orchestrator sentinels: full knowledge suite 514 pass/1 pre-existing skip/0 fail; static script pass; validate:source pass. Scope confined to planned files.",
+        "fieldOrBehavior": "Implementation complete at head 300ef777 (authored 7efa6a08+0be38ef9+e9b013b1, delivery 2f5afe96, clean upstream merges — scope files untouched; full knowledge suite on fresh deps: 524 pass/0 fail).",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.execute.scope:test_output",
         "metadata": {
@@ -285,12 +285,12 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--deliver.md",
-              "summary": "Execution record with waves, commit, and sentinels."
+              "summary": "Execution record."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--plan-work.md",
-              "summary": "Plan followed."
+              "summary": "Plan."
             }
           ],
           "output_digest": {
@@ -308,8 +308,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "2276dca16291d36737ed9cb03238fe21295ed2e0152b7030044ea540a96b4abe",
-            "head_sha": "7efa6a089dc167406cc32302864e6ab77fee4b66"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "implementation-scope",
@@ -317,22 +317,22 @@
             "subject_type": "change",
             "step_id": "execute",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:28:33.578Z",
-            "flow_run_head": "31de737fdb31eabc630f91bb4753d4e75336d7ca846f092c021671ec95833c17"
+            "recorded_at": "2026-08-08T18:53:12.262Z",
+            "flow_run_head": "2b67bb4937695378ae631ee836cb4eeb4d195dde3c1c0d36d2413e787e7da51b"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z",
+        "id": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z",
         "subjectType": "workflow-critique",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-clean-critique",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.critique.review",
-        "fieldOrBehavior": "Independent review APPROVED at head e9b013b1 after three rounds (7 original findings + 2 fix-introduced defects, all probe-verified fixed; one MEDIUM efficiency finding routed to #1217 as disclosed follow-up rather than absorbed).",
+        "fieldOrBehavior": "Independent review APPROVED; current at head 300ef777.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.critique.review:test_output",
         "metadata": {
@@ -366,8 +366,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "clean-critique",
@@ -375,22 +375,22 @@
             "subject_type": "workflow-critique",
             "step_id": "verify",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:53:06.267Z",
-            "flow_run_head": "43caabe57ef61301e6b19524dd70f97a24c61f646c7ae6d95b352073d1c21c4a"
+            "recorded_at": "2026-08-08T18:53:43.447Z",
+            "flow_run_head": "9d892aff48d5f208ee2fd7804e79c6a67a34ecca49224f98e19145ca91da5329"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z",
+        "id": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-acceptance-criteria",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
-        "fieldOrBehavior": "Independent fresh-context verifier: all 5 acceptance criteria of #1214 PASS with command-backed evidence at head e9b013b1; four required fault injections (blocks vocabulary, stale-link reconciliation, ownership guard, wikilink suppression) each reddened the suite and restored green — zero uncaught injections.",
+        "fieldOrBehavior": "Independent verifier: all 5 ACs PASS at e9b013b1 with four caught fault injections; orchestrator re-confirmed suite and manifest integrity at 300ef777 (both upstream deltas contain no knowledge-kit content).",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -408,7 +408,7 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/verification-report.md",
-              "summary": "Per-criterion verdicts and injection record."
+              "summary": "Per-criterion verdicts and injections."
             }
           ],
           "output_digest": {
@@ -426,8 +426,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "acceptance-criteria",
@@ -435,22 +435,22 @@
             "subject_type": "flow-step",
             "step_id": "verify",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:53:13.171Z",
-            "flow_run_head": "43caabe57ef61301e6b19524dd70f97a24c61f646c7ae6d95b352073d1c21c4a"
+            "recorded_at": "2026-08-08T18:53:55.289Z",
+            "flow_run_head": "9d892aff48d5f208ee2fd7804e79c6a67a34ecca49224f98e19145ca91da5329"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z",
+        "id": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-tests-evidence",
         "facet": "flow-agents.workflow",
         "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Tests evidence at head e9b013b1: the recorded command is the manifest's knowledge-integration-suites required-lane check (extended with the new ingest-graph suite in this change), 78 tests. Full knowledge-kit corpus additionally green: 525 tests, 524 pass, 0 fail, 1 pre-existing env-gated skip, run independently by orchestrator, reviewer (three rounds), and verifier (twice). Four fault injections each reddened their suite and restored green.",
+        "fieldOrBehavior": "Tests evidence at head 300ef777 on fresh npm ci: the manifest knowledge-integration-suites required-lane check (78 tests), exit 0. Full corpus 524 pass / 0 fail; four fault injections previously caught at e9b013b1; upstream deltas contain no knowledge-kit content.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.verify.tests:test_output",
         "metadata": {
@@ -468,23 +468,23 @@
             {
               "kind": "command",
               "excerpt": "node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
-              "summary": "The five knowledge suites incl. ingest-graph, exit 0."
+              "summary": "Five knowledge suites, exit 0 at 300ef777."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/verification-report.md",
-              "summary": "Suite sentinels and injection record."
+              "summary": "Per-criterion verdicts and injections."
             }
           ],
           "output_digest": {
             "algorithm": "sha256",
-            "hex": "dde5467f3e5c111a71a30827db3ba14b3b69192cb6cf00197b6ea5dd15f2367a"
+            "hex": "d0182baac687a6e3680260ff1cc2fa2a914bc25d070996ba896fe3a891dca3ec"
           },
           "observed_commands": [
             {
               "command": "node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
               "exit_code": 0,
-              "output_sha256": "dde5467f3e5c111a71a30827db3ba14b3b69192cb6cf00197b6ea5dd15f2367a",
+              "output_sha256": "d0182baac687a6e3680260ff1cc2fa2a914bc25d070996ba896fe3a891dca3ec",
               "test_count": 79,
               "execution_proof": {
                 "kind": "local-process-exit",
@@ -497,8 +497,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "tests-evidence",
@@ -506,22 +506,22 @@
             "subject_type": "flow-step",
             "step_id": "verify",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:53:28.236Z",
-            "flow_run_head": "43caabe57ef61301e6b19524dd70f97a24c61f646c7ae6d95b352073d1c21c4a"
+            "recorded_at": "2026-08-08T18:54:07.655Z",
+            "flow_run_head": "9d892aff48d5f208ee2fd7804e79c6a67a34ecca49224f98e19145ca91da5329"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z",
+        "id": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z",
         "subjectType": "change",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-merge-readiness",
         "facet": "flow-agents.workflow",
         "claimType": "builder.merge-ready.readiness",
-        "fieldOrBehavior": "Merge-readiness assessed for the #1214 change at head e9b013b1: scope integrity confirmed; evidence stack complete and layered (three-round adversarial review APPROVED with live probes; independent verification all 5 ACs PASS with four caught fault injections; 525-test corpus green across three roles); one MEDIUM efficiency gap routed to #1217 as disclosed follow-up. PR and provider CI next; merge gated on green checks.",
+        "fieldOrBehavior": "Merge-readiness at head 300ef777 for PR #1218: evidence snapshot-current; scope integrity verified; #1217 routed. Bundle publication and provider CI are the remaining gates.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.merge-ready.readiness:test_output",
         "metadata": {
@@ -555,8 +555,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "merge-readiness",
@@ -564,22 +564,22 @@
             "subject_type": "change",
             "step_id": "merge-ready",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:53:51.178Z",
-            "flow_run_head": "71f9f981978bdb738f16b78f1fd0423246666f9b5cae6494dc94fff3f4bfeea0"
+            "recorded_at": "2026-08-08T18:54:10.480Z",
+            "flow_run_head": "bbc8ebb7c6823d05ce2328f1e304e368ac495991193a5808e94d2d42a5bfedde"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z",
+        "id": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z",
         "subjectType": "pull-request",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-ci-merge-readiness",
         "facet": "flow-agents.workflow",
         "claimType": "builder.merge-ready-ci.readiness",
-        "fieldOrBehavior": "CI and review status support proceeding to merge publication for PR kontourai/flow-agents#1218 at head e9b013b1: review APPROVED after three probe-verified rounds; verification all 5 ACs PASS with four caught fault injections; provider CI running on the PR with Trust Reconcile expected red until this session's delivery bundle publishes (the immediate next step). Merge remains gated on all provider checks green including the post-publication Trust Reconcile re-run.",
+        "fieldOrBehavior": "CI and review status support merge publication for PR #1218 at head 300ef777: review APPROVED with both upstream merge-deltas assessed; verification all 5 ACs PASS; Trust Reconcile red solely pending this bundle publication — the immediate next step. Merge gated on all checks green after publication.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.merge-ready-ci.readiness:test_output",
         "metadata": {
@@ -595,12 +595,12 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/release.json",
-              "summary": "Release decision record: merge, scope, basis, hold conditions."
+              "summary": "Release decision."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--evidence-gate.md",
-              "summary": "Evidence-gate confidence report."
+              "summary": "Confidence report."
             }
           ],
           "output_digest": {
@@ -618,8 +618,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "ci-merge-readiness",
@@ -627,22 +627,22 @@
             "subject_type": "pull-request",
             "step_id": "merge-ready-ci",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:54:59.993Z",
-            "flow_run_head": "e1aec42ef2da909bc12c8749ece57764812aff8f891f511101ca3349cd5787dc"
+            "recorded_at": "2026-08-08T18:55:38.269Z",
+            "flow_run_head": "f894566f96cfff48e0bb50c3a2d2c6bc9437fd06f5bc66cb49bdab64716f99b5"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z",
+        "id": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z",
         "subjectType": "decision",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-decision-evidence",
         "facet": "flow-agents.workflow",
         "claimType": "builder.learn.decisions",
-        "fieldOrBehavior": "Durable decision evidence for #1214: six ratified design decisions (blocks/merged-into vocabulary completion; shared upsert-by-alias helper with per-field ownership semantics — provider-owned title/body/tags/links replaced wholesale, non-owned records structurally protected; untrusted-body wikilink suppression; board-snapshot mechanism backing the SKILL TTL loop; CI registration) plus the merge decision with hold conditions in release.json.",
+        "fieldOrBehavior": "Durable decision evidence: six ratified design decisions plus ownership-model refinements; merge decision with hold conditions in release.json.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.learn.decisions:test_output",
         "metadata": {
@@ -659,12 +659,12 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/learning.json",
-              "summary": "Learning records including decision facts."
+              "summary": "Learning records."
             },
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--pickup-probe.json",
-              "summary": "Original decision record."
+              "summary": "Decision record."
             },
             {
               "kind": "artifact",
@@ -687,8 +687,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "decision-evidence",
@@ -696,22 +696,22 @@
             "subject_type": "decision",
             "step_id": "learn",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:55:46.200Z",
-            "flow_run_head": "30beab9f07545801f2eca4093f034211709a47ee590e6d6364e3ff660f331e26"
+            "recorded_at": "2026-08-08T18:55:48.709Z",
+            "flow_run_head": "2e7d4a3a6f384a87b9c386de90e67816373d1beafa52caf13f0988d378880f5e"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z",
+        "id": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z",
         "subjectType": "release",
         "subjectId": "kontourai-flow-agents-1214/gate-claim-learning-evidence",
         "facet": "flow-agents.workflow",
         "claimType": "builder.learn.evidence",
-        "fieldOrBehavior": "Learning evidence for #1214: the fixes-introduce-defects pattern hit again (5-for-5 across recent arcs — delta review of fix rounds is mandatory); upsert machinery designed without enumerating non-owned key collisions was the root process gap, with a concrete prevention (per-field ownership statement + pre-existing non-owned fixture in every upsert plan); ingest of third-party text is an injection surface (wikilinks became graph edges); write amplification on mandated recurring paths measured and routed to #1217. Routed: PR #1218 merge pending checks; #1217 deferred with measurements.",
+        "fieldOrBehavior": "Learning evidence: fixes-introduce-defects again (delta review mandatory); upsert-without-ownership-enumeration the root gap with prevention; third-party-text ingest is an injection surface; write amplification measured and routed (#1217); two kit lifecycle traps surfaced for filing. Routed: PR #1218 pending checks; #1217 deferred.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "updatedAt": "2026-08-08T13:55:52.265Z",
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "updatedAt": "2026-08-08T18:55:58.202Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.learn.evidence:test_output",
         "metadata": {
@@ -728,7 +728,7 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/learning.json",
-              "summary": "Durable learning records with correction and prevention."
+              "summary": "Durable learning records."
             }
           ],
           "output_digest": {
@@ -746,8 +746,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-            "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+            "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+            "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
           },
           "gate_claim": {
             "expectation_id": "learning-evidence",
@@ -755,22 +755,22 @@
             "subject_type": "release",
             "step_id": "learn",
             "identity_version": 2,
-            "recorded_at": "2026-08-08T13:55:52.265Z",
-            "flow_run_head": "30beab9f07545801f2eca4093f034211709a47ee590e6d6364e3ff660f331e26"
+            "recorded_at": "2026-08-08T18:55:58.202Z",
+            "flow_run_head": "2e7d4a3a6f384a87b9c386de90e67816373d1beafa52caf13f0988d378880f5e"
           }
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z",
+        "id": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1214/complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "Complete the requested outcome: Deliver kontourai/flow-agents#1214 through builder.build",
         "value": "pass",
-        "createdAt": "2026-08-08T13:53:28.236Z",
-        "updatedAt": "2026-08-08T13:53:28.236Z",
+        "createdAt": "2026-08-08T18:54:07.655Z",
+        "updatedAt": "2026-08-08T18:54:07.655Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -783,19 +783,19 @@
               {
                 "kind": "command",
                 "excerpt": "node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
-                "summary": "Manifest check knowledge-integration-suites (source-and-static required lane, extended with ingest-graph.test.js in 7efa6a08), 78 tests green at head e9b013b1."
+                "summary": "Manifest check knowledge-integration-suites, 78 tests green at 300ef777."
               },
               {
                 "kind": "artifact",
                 "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/verification-report.md",
-                "summary": "Independent verifier: all 5 ACs PASS, four fault injections caught."
+                "summary": "Verifier record."
               }
             ],
             "observed_commands": [
               {
                 "command": "node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
                 "exit_code": 0,
-                "output_sha256": "dde5467f3e5c111a71a30827db3ba14b3b69192cb6cf00197b6ea5dd15f2367a",
+                "output_sha256": "d0182baac687a6e3680260ff1cc2fa2a914bc25d070996ba896fe3a891dca3ec",
                 "test_count": 79,
                 "execution_proof": {
                   "kind": "local-process-exit",
@@ -805,43 +805,43 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-08-08T13:53:28.236Z"
+            "verified_at": "2026-08-08T18:54:07.655Z"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1214"
         },
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1214-review.flow-agents-workflow.fresh-context-report-only-review-across-three-rounds-at-head-e9b013b1-round-1-changes-requested-7-findings-incl-high-duplicate-on-re-ingest-probed-live-round-2-changes-requested-fixes-introduced-2-new-probed-defects-append-only-stale-links-ownership-less-upsert-round-3-approved-all-findings-closed-with-per-finding-probe-verification-write-amplification-assessed-honestly-and-routed-to-follow-up-1217-reviewer-distinct-from-the-implementing-orchestrator-reviewed-2026-08-08t13-53-05-160z",
+        "id": "kontourai-flow-agents-1214-review.flow-agents-workflow.review-current-at-head-300ef777-authored-content-approved-across-three-probe-verified-rounds-at-e9b013b1-delta-since-mechanical-delivery-commit-clean-merges-of-independently-reviewed-upstream-1215-and-1220-dep-major-knowledge-suites-green-on-fresh-npm-ci-scope-files-untouched-by-both-no-unreviewed-authored-content-at-this-head-reviewed-2026-08-08t18-53-40-778z",
         "subjectType": "workflow-critique",
         "subjectId": "kontourai-flow-agents-1214/review",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.critique.review",
-        "fieldOrBehavior": "Fresh-context report-only review across three rounds at head e9b013b1: round 1 CHANGES_REQUESTED (7 findings incl. HIGH duplicate-on-re-ingest, probed live); round 2 CHANGES_REQUESTED (fixes introduced 2 new probed defects: append-only stale links, ownership-less upsert); round 3 APPROVED — all findings closed with per-finding probe verification, write-amplification assessed honestly and routed to follow-up #1217. Reviewer distinct from the implementing orchestrator.",
+        "fieldOrBehavior": "Review current at head 300ef777: authored content APPROVED across three probe-verified rounds at e9b013b1; delta since = mechanical delivery commit + clean merges of independently-reviewed upstream #1215 and #1220 (dep-major; knowledge suites green on fresh npm ci), scope files untouched by both. No unreviewed authored content at this head.",
         "value": "pass",
-        "createdAt": "2026-08-08T13:53:05.160Z",
-        "updatedAt": "2026-08-08T13:53:05.160Z",
+        "createdAt": "2026-08-08T18:53:40.778Z",
+        "updatedAt": "2026-08-08T18:53:40.778Z",
         "impactLevel": "medium",
         "verificationPolicyId": "policy:workflow.critique.review",
         "metadata": {
           "origin": "critique",
           "reviewer": "claude-reviewer-a53f5479",
-          "reviewed_at": "2026-08-08T13:53:05.160Z",
+          "reviewed_at": "2026-08-08T18:53:40.778Z",
           "identity_version": 2,
           "critique_sequence": 1,
           "critique_predecessor_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-          "critique_record_hash": "7fe8e27373df6a2a2f2a375a093f21b7d8627977c2cde104d5a67ac3f4cecdeb",
+          "critique_record_hash": "c0f4b29368b5261470dbc4f333a3392efd86665fbee44c0a97738629f8c78352",
           "findings": [],
           "lanes": [
             {
               "id": "adversarial-review",
               "status": "pass",
-              "summary": "Three-round adversarial review with live store probes each round; all seven original findings plus both fix-introduced defect classes closed; docstrings claim exactly what the code does.",
+              "summary": "Three-round adversarial review with live store probes; both merge-deltas assessed non-interacting.",
               "evidence_refs": [
                 {
                   "kind": "artifact",
                   "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/review-round-1.md",
-                  "summary": "Full review with round 2-3 addenda and per-finding verdicts."
+                  "summary": "Full three-round review record."
                 }
               ]
             }
@@ -850,46 +850,46 @@
             "artifacts": [
               {
                 "file": ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--deliver.md",
-                "sha256": "b8068f7e8c26544606d3213fe56ab431562f2ed3fca8740845258c5dca9e075f"
+                "sha256": "b444e3b15f1f3cd00e9039e56707a184cda3feb115ccdf1de71e0d8ad6440f25"
               }
             ],
             "workspace_snapshot": {
               "version": 1,
               "kind": "git-worktree",
               "algorithm": "sha256",
-              "digest": "9e6c13b8b1d81ca3000723a5906e88d590c19800ee91f9fab1efe3ed2e210868",
-              "head_sha": "e9b013b1025c25963c6763e0f33d1728afe99585"
+              "digest": "396f97193a16717db5d3720af94f1d16f45321af6df06478b19c6710594d3e22",
+              "head_sha": "300ef77743bf12fa52b93c57b04ab704959e82e7"
             }
           },
           "artifact_refs": [
             ".kontourai/flow-agents/kontourai-flow-agents-1214/kontourai-flow-agents-1214--deliver.md"
           ],
           "workflow_subject_ref": "kontourai/flow-agents#1214",
-          "critique_record_id": "critique:7fe8e27373df6a2a2f2a375a093f21b7d8627977c2cde104d5a67ac3f4cecdeb"
+          "critique_record_id": "critique:c0f4b29368b5261470dbc4f333a3392efd86665fbee44c0a97738629f8c78352"
         },
         "status": "verified"
       }
     ],
     "evidence": [
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z",
         "evidenceType": "attestation",
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1214/evidence.json",
-        "excerptOrSummary": "Work Item kontourai/flow-agents#1214 is durably assigned to the active workflow actor (assignment sha256:baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd).",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#1214 is durably assigned to the active workflow actor (assignment sha256:fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e).",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Pickup probe complete for #1214: defect live-reproduced in the #1213 dogfood (385 edges -> 0 links), root causes located with file evidence (edgeTypeFor missing blocks case; no ingest machinery), assignment claimed by this session's actor, branch cut from fresh origin/main@64980c8f, no overlapping lane. Planning readiness PASS.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Pickup probe for #1214, re-recorded on the sixth run at head 300ef777 (contains upstream #1215 and #1220, node_modules synced via npm ci; prior runs closed by signed lifecycle authority). Probe evidence unchanged: defect live-reproduced in #1213, root causes located, assignment held. Planning readiness PASS.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -900,13 +900,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Six design decisions ratified for #1214: blocks case in edgeTypeFor; shared ingest helper at adapters/shared/ingest-graph.js with providerId->recordId mapping and skip-and-report on unknown endpoints; link-kind mapping as the exact inverse of edgeTypeFor; empty-body normalization to title; SKILL step-3 wording; CI registration of the new suite in both the static-lane script and the knowledge-integration-suites manifest command. Zero unresolved questions, zero accepted gaps.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Six ratified decisions plus review-driven refinements; zero unresolved; #1217 the one routed efficiency gap.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -917,13 +917,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Implementation plan recorded for #1214: four waves (blocks case in edgeTypeFor; shared ingestProviderGraph helper with inverse-mapping link kinds, empty-body normalization, and skip-and-report semantics; SKILL step-3 wording; end-to-end tests asserting the projection is no longer structurally blind, registered in both CI touchpoints) with acceptance mapping and fault-injection verification discipline.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Four-wave plan with acceptance mapping, anchored with the criterion seeded from the deliver artifact at session creation. Recorded at head 300ef777.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -934,13 +934,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Implementation complete for #1214 at head 7efa6a08: blocks case in edgeTypeFor; shared ingestProviderGraph helper (inverse kind mapping, empty-body normalization, skip-and-report); SKILL step-3 wording naming the helper; 7-test suite registered in both CI touchpoints. Orchestrator sentinels: full knowledge suite 514 pass/1 pre-existing skip/0 fail; static script pass; validate:source pass. Scope confined to planned files.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Implementation complete at head 300ef777 (authored 7efa6a08+0be38ef9+e9b013b1, delivery 2f5afe96, clean upstream merges — scope files untouched; full knowledge suite on fresh deps: 524 pass/0 fail).",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -951,13 +951,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Independent review APPROVED at head e9b013b1 after three rounds (7 original findings + 2 fix-introduced defects, all probe-verified fixed; one MEDIUM efficiency finding routed to #1217 as disclosed follow-up rather than absorbed).",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Independent review APPROVED; current at head 300ef777.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -968,13 +968,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Independent fresh-context verifier: all 5 acceptance criteria of #1214 PASS with command-backed evidence at head e9b013b1; four required fault injections (blocks vocabulary, stale-link reconciliation, ownership guard, wikilink suppression) each reddened the suite and restored green — zero uncaught injections.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Independent verifier: all 5 ACs PASS at e9b013b1 with four caught fault injections; orchestrator re-confirmed suite and manifest integrity at 300ef777 (both upstream deltas contain no knowledge-kit content).",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -985,13 +985,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Tests evidence at head e9b013b1: the recorded command is the manifest's knowledge-integration-suites required-lane check (extended with the new ingest-graph suite in this change), 78 tests. Full knowledge-kit corpus additionally green: 525 tests, 524 pass, 0 fail, 1 pre-existing env-gated skip, run independently by orchestrator, reviewer (three rounds), and verifier (twice). Four fault injections each reddened their suite and restored green.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Tests evidence at head 300ef777 on fresh npm ci: the manifest knowledge-integration-suites required-lane check (78 tests), exit 0. Full corpus 524 pass / 0 fail; four fault injections previously caught at e9b013b1; upstream deltas contain no knowledge-kit content.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -1002,13 +1002,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Merge-readiness assessed for the #1214 change at head e9b013b1: scope integrity confirmed; evidence stack complete and layered (three-round adversarial review APPROVED with live probes; independent verification all 5 ACs PASS with four caught fault injections; 525-test corpus green across three roles); one MEDIUM efficiency gap routed to #1217 as disclosed follow-up. PR and provider CI next; merge gated on green checks.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Merge-readiness at head 300ef777 for PR #1218: evidence snapshot-current; scope integrity verified; #1217 routed. Bundle publication and provider CI are the remaining gates.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -1019,13 +1019,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "CI and review status support proceeding to merge publication for PR kontourai/flow-agents#1218 at head e9b013b1: review APPROVED after three probe-verified rounds; verification all 5 ACs PASS with four caught fault injections; provider CI running on the PR with Trust Reconcile expected red until this session's delivery bundle publishes (the immediate next step). Merge remains gated on all provider checks green including the post-publication Trust Reconcile re-run.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "CI and review status support merge publication for PR #1218 at head 300ef777: review APPROVED with both upstream merge-deltas assessed; verification all 5 ACs PASS; Trust Reconcile red solely pending this bundle publication — the immediate next step. Merge gated on all checks green after publication.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -1036,13 +1036,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Durable decision evidence for #1214: six ratified design decisions (blocks/merged-into vocabulary completion; shared upsert-by-alias helper with per-field ownership semantics — provider-owned title/body/tags/links replaced wholesale, non-owned records structurally protected; untrusted-body wikilink suppression; board-snapshot mechanism backing the SKILL TTL loop; CI registration) plus the merge decision with hold conditions in release.json.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Durable decision evidence: six ratified design decisions plus ownership-model refinements; merge decision with hold conditions in release.json.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -1053,13 +1053,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z",
+        "id": "ev:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/command-log.jsonl",
-        "excerptOrSummary": "Learning evidence for #1214: the fixes-introduce-defects pattern hit again (5-for-5 across recent arcs — delta review of fix rounds is mandatory); upsert machinery designed without enumerating non-owned key collisions was the root process gap, with a concrete prevention (per-field ownership statement + pre-existing non-owned fixture in every upsert plan); ingest of third-party text is an injection surface (wikilinks became graph edges); write amplification on mandated recurring paths measured and routed to #1217. Routed: PR #1218 merge pending checks; #1217 deferred with measurements.",
-        "observedAt": "2026-08-08T13:55:52.265Z",
+        "excerptOrSummary": "Learning evidence: fixes-introduce-defects again (delta review mandatory); upsert-without-ownership-enumeration the root gap with prevention; third-party-text ingest is an injection surface; write amplification measured and routed (#1217); two kit lifecycle traps surfaced for filing. Routed: PR #1218 pending checks; #1217 deferred.",
+        "observedAt": "2026-08-08T18:55:58.202Z",
         "collectedBy": "flow-agents/evidence-capture",
         "passing": true,
         "execution": {
@@ -1070,13 +1070,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z:c9e3f29c712647a4",
-        "claimId": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z",
+        "id": "ev:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z:c9e3f29c712647a4",
+        "claimId": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1214/observed-command",
         "excerptOrSummary": "node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
-        "observedAt": "2026-08-08T13:53:28.236Z",
+        "observedAt": "2026-08-08T18:54:07.655Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true,
         "execution": {
@@ -1344,170 +1344,170 @@
     ],
     "events": [
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-baf760a16d7d5e1ce8aed9395aa4463457f982b169f380353036e708465970bd-gate-visit-2026-08-08t13-22-36z"
+          "ev:kontourai-flow-agents-1214-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1214-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-fc91ac88a20298037976da295b4ab934da4eb63f1120516642fb859ceadff74e-gate-visit-2026-08-08t18-50-54z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-complete-for-1214-defect-live-reproduced-in-the-1213-dogfood-385-edges-0-links-root-causes-located-with-file-evidence-edgetypefor-missing-blocks-case-no-ingest-machinery-assignment-claimed-by-this-session-s-actor-branch-cut-from-fresh-origin-main-64980c8f-no-overlapping-lane-planning-readiness-pass-gate-visit-2026-08-08t13-23-08-042z"
+          "ev:kontourai-flow-agents-1214-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-for-1214-re-recorded-on-the-sixth-run-at-head-300ef777-contains-upstream-1215-and-1220-node-modules-synced-via-npm-ci-prior-runs-closed-by-signed-lifecycle-authority-probe-evidence-unchanged-defect-live-reproduced-in-1213-root-causes-located-assignment-held-planning-readiness-pass-gate-visit-2026-08-08t18-52-36-356z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-design-decisions-ratified-for-1214-blocks-case-in-edgetypefor-shared-ingest-helper-at-adapters-shared-ingest-graph-js-with-providerid-recordid-mapping-and-skip-and-report-on-unknown-endpoints-link-kind-mapping-as-the-exact-inverse-of-edgetypefor-empty-body-normalization-to-title-skill-step-3-wording-ci-registration-of-the-new-suite-in-both-the-static-lane-script-and-the-knowledge-integration-suites-manifest-command-zero-unresolved-questions-zero-accepted-gaps-gate-visit-2026-08-08t13-23-16-961z"
+          "ev:kontourai-flow-agents-1214-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.six-ratified-decisions-plus-review-driven-refinements-zero-unresolved-1217-the-one-routed-efficiency-gap-gate-visit-2026-08-08t18-52-48-243z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-for-1214-four-waves-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-with-inverse-mapping-link-kinds-empty-body-normalization-and-skip-and-report-semantics-skill-step-3-wording-end-to-end-tests-asserting-the-projection-is-no-longer-structurally-blind-registered-in-both-ci-touchpoints-with-acceptance-mapping-and-fault-injection-verification-discipline-gate-visit-2026-08-08t13-23-56-235z"
+          "ev:kontourai-flow-agents-1214-gate-claim-implementation-plan.flow-agents-workflow.four-wave-plan-with-acceptance-mapping-anchored-with-the-criterion-seeded-from-the-deliver-artifact-at-session-creation-recorded-at-head-300ef777-gate-visit-2026-08-08t18-52-59-738z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-for-1214-at-head-7efa6a08-blocks-case-in-edgetypefor-shared-ingestprovidergraph-helper-inverse-kind-mapping-empty-body-normalization-skip-and-report-skill-step-3-wording-naming-the-helper-7-test-suite-registered-in-both-ci-touchpoints-orchestrator-sentinels-full-knowledge-suite-514-pass-1-pre-existing-skip-0-fail-static-script-pass-validate-source-pass-scope-confined-to-planned-files-gate-visit-2026-08-08t13-28-33-578z"
+          "ev:kontourai-flow-agents-1214-gate-claim-implementation-scope.flow-agents-workflow.implementation-complete-at-head-300ef777-authored-7efa6a08-0be38ef9-e9b013b1-delivery-2f5afe96-clean-upstream-merges-scope-files-untouched-full-knowledge-suite-on-fresh-deps-524-pass-0-fail-gate-visit-2026-08-08t18-53-12-262z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-at-head-e9b013b1-after-three-rounds-7-original-findings-2-fix-introduced-defects-all-probe-verified-fixed-one-medium-efficiency-finding-routed-to-1217-as-disclosed-follow-up-rather-than-absorbed-gate-visit-2026-08-08t13-53-06-267z"
+          "ev:kontourai-flow-agents-1214-gate-claim-clean-critique.flow-agents-workflow.independent-review-approved-current-at-head-300ef777-gate-visit-2026-08-08t18-53-43-447z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-fresh-context-verifier-all-5-acceptance-criteria-of-1214-pass-with-command-backed-evidence-at-head-e9b013b1-four-required-fault-injections-blocks-vocabulary-stale-link-reconciliation-ownership-guard-wikilink-suppression-each-reddened-the-suite-and-restored-green-zero-uncaught-injections-gate-visit-2026-08-08t13-53-13-171z"
+          "ev:kontourai-flow-agents-1214-gate-claim-acceptance-criteria.flow-agents-workflow.independent-verifier-all-5-acs-pass-at-e9b013b1-with-four-caught-fault-injections-orchestrator-re-confirmed-suite-and-manifest-integrity-at-300ef777-both-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-53-55-289z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-e9b013b1-the-recorded-command-is-the-manifest-s-knowledge-integration-suites-required-lane-check-extended-with-the-new-ingest-graph-suite-in-this-change-78-tests-full-knowledge-kit-corpus-additionally-green-525-tests-524-pass-0-fail-1-pre-existing-env-gated-skip-run-independently-by-orchestrator-reviewer-three-rounds-and-verifier-twice-four-fault-injections-each-reddened-their-suite-and-restored-green-gate-visit-2026-08-08t13-53-28-236z"
+          "ev:kontourai-flow-agents-1214-gate-claim-tests-evidence.flow-agents-workflow.tests-evidence-at-head-300ef777-on-fresh-npm-ci-the-manifest-knowledge-integration-suites-required-lane-check-78-tests-exit-0-full-corpus-524-pass-0-fail-four-fault-injections-previously-caught-at-e9b013b1-upstream-deltas-contain-no-knowledge-kit-content-gate-visit-2026-08-08t18-54-07-655z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-assessed-for-the-1214-change-at-head-e9b013b1-scope-integrity-confirmed-evidence-stack-complete-and-layered-three-round-adversarial-review-approved-with-live-probes-independent-verification-all-5-acs-pass-with-four-caught-fault-injections-525-test-corpus-green-across-three-roles-one-medium-efficiency-gap-routed-to-1217-as-disclosed-follow-up-pr-and-provider-ci-next-merge-gated-on-green-checks-gate-visit-2026-08-08t13-53-51-178z"
+          "ev:kontourai-flow-agents-1214-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-at-head-300ef777-for-pr-1218-evidence-snapshot-current-scope-integrity-verified-1217-routed-bundle-publication-and-provider-ci-are-the-remaining-gates-gate-visit-2026-08-08t18-54-10-480z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-proceeding-to-merge-publication-for-pr-kontourai-flow-agents-1218-at-head-e9b013b1-review-approved-after-three-probe-verified-rounds-verification-all-5-acs-pass-with-four-caught-fault-injections-provider-ci-running-on-the-pr-with-trust-reconcile-expected-red-until-this-session-s-delivery-bundle-publishes-the-immediate-next-step-merge-remains-gated-on-all-provider-checks-green-including-the-post-publication-trust-reconcile-re-run-gate-visit-2026-08-08t13-54-59-993z"
+          "ev:kontourai-flow-agents-1214-gate-claim-ci-merge-readiness.flow-agents-workflow.ci-and-review-status-support-merge-publication-for-pr-1218-at-head-300ef777-review-approved-with-both-upstream-merge-deltas-assessed-verification-all-5-acs-pass-trust-reconcile-red-solely-pending-this-bundle-publication-the-immediate-next-step-merge-gated-on-all-checks-green-after-publication-gate-visit-2026-08-08t18-55-38-269z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-for-1214-six-ratified-design-decisions-blocks-merged-into-vocabulary-completion-shared-upsert-by-alias-helper-with-per-field-ownership-semantics-provider-owned-title-body-tags-links-replaced-wholesale-non-owned-records-structurally-protected-untrusted-body-wikilink-suppression-board-snapshot-mechanism-backing-the-skill-ttl-loop-ci-registration-plus-the-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t13-55-46-200z"
+          "ev:kontourai-flow-agents-1214-gate-claim-decision-evidence.flow-agents-workflow.durable-decision-evidence-six-ratified-design-decisions-plus-ownership-model-refinements-merge-decision-with-hold-conditions-in-release-json-gate-visit-2026-08-08t18-55-48-709z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z",
-        "claimId": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z",
+        "id": "evt:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z",
+        "claimId": "kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-for-1214-the-fixes-introduce-defects-pattern-hit-again-5-for-5-across-recent-arcs-delta-review-of-fix-rounds-is-mandatory-upsert-machinery-designed-without-enumerating-non-owned-key-collisions-was-the-root-process-gap-with-a-concrete-prevention-per-field-ownership-statement-pre-existing-non-owned-fixture-in-every-upsert-plan-ingest-of-third-party-text-is-an-injection-surface-wikilinks-became-graph-edges-write-amplification-on-mandated-recurring-paths-measured-and-routed-to-1217-routed-pr-1218-merge-pending-checks-1217-deferred-with-measurements-gate-visit-2026-08-08t13-55-52-265z"
+          "ev:kontourai-flow-agents-1214-gate-claim-learning-evidence.flow-agents-workflow.learning-evidence-fixes-introduce-defects-again-delta-review-mandatory-upsert-without-ownership-enumeration-the-root-gap-with-prevention-third-party-text-ingest-is-an-injection-surface-write-amplification-measured-and-routed-1217-two-kit-lifecycle-traps-surfaced-for-filing-routed-pr-1218-pending-checks-1217-deferred-gate-visit-2026-08-08t18-55-58-202z"
         ],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z",
-        "claimId": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z",
+        "id": "evt:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z",
+        "claimId": "kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t13-53-28-236z:c9e3f29c712647a4"
+          "ev:kontourai-flow-agents-1214-complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-1214-through-builder-build-verified-2026-08-08t18-54-07-655z:c9e3f29c712647a4"
         ],
-        "createdAt": "2026-08-08T13:53:28.236Z",
-        "verifiedAt": "2026-08-08T13:53:28.236Z"
+        "createdAt": "2026-08-08T18:54:07.655Z",
+        "verifiedAt": "2026-08-08T18:54:07.655Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1214-review.flow-agents-workflow.fresh-context-report-only-review-across-three-rounds-at-head-e9b013b1-round-1-changes-requested-7-findings-incl-high-duplicate-on-re-ingest-probed-live-round-2-changes-requested-fixes-introduced-2-new-probed-defects-append-only-stale-links-ownership-less-upsert-round-3-approved-all-findings-closed-with-per-finding-probe-verification-write-amplification-assessed-honestly-and-routed-to-follow-up-1217-reviewer-distinct-from-the-implementing-orchestrator-reviewed-2026-08-08t13-53-05-160z",
-        "claimId": "kontourai-flow-agents-1214-review.flow-agents-workflow.fresh-context-report-only-review-across-three-rounds-at-head-e9b013b1-round-1-changes-requested-7-findings-incl-high-duplicate-on-re-ingest-probed-live-round-2-changes-requested-fixes-introduced-2-new-probed-defects-append-only-stale-links-ownership-less-upsert-round-3-approved-all-findings-closed-with-per-finding-probe-verification-write-amplification-assessed-honestly-and-routed-to-follow-up-1217-reviewer-distinct-from-the-implementing-orchestrator-reviewed-2026-08-08t13-53-05-160z",
+        "id": "evt:kontourai-flow-agents-1214-review.flow-agents-workflow.review-current-at-head-300ef777-authored-content-approved-across-three-probe-verified-rounds-at-e9b013b1-delta-since-mechanical-delivery-commit-clean-merges-of-independently-reviewed-upstream-1215-and-1220-dep-major-knowledge-suites-green-on-fresh-npm-ci-scope-files-untouched-by-both-no-unreviewed-authored-content-at-this-head-reviewed-2026-08-08t18-53-40-778z",
+        "claimId": "kontourai-flow-agents-1214-review.flow-agents-workflow.review-current-at-head-300ef777-authored-content-approved-across-three-probe-verified-rounds-at-e9b013b1-delta-since-mechanical-delivery-commit-clean-merges-of-independently-reviewed-upstream-1215-and-1220-dep-major-knowledge-suites-green-on-fresh-npm-ci-scope-files-untouched-by-both-no-unreviewed-authored-content-at-this-head-reviewed-2026-08-08t18-53-40-778z",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-08-08T13:55:52.265Z",
-        "verifiedAt": "2026-08-08T13:55:52.265Z"
+        "createdAt": "2026-08-08T18:55:58.202Z",
+        "verifiedAt": "2026-08-08T18:55:58.202Z"
       }
     ]
   }
