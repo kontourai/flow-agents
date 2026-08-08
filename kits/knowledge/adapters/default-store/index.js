@@ -750,6 +750,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -796,6 +799,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -837,6 +843,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
 
@@ -1085,6 +1094,14 @@ export class DefaultKnowledgeStore {
       if (slugs.length) registerAliases(rebuiltAliases, record.id, slugs);
     }
     saveAliasIndex(this._aliasPath, rebuiltAliases);
+
+    // Invalidate cache only when the rebuilt graph differs from what was on
+    // disk (recovery path — a no-op reindex must not bump readers off a
+    // still-valid cache). The alias index is derived from the same record
+    // set as the graph, so in practice a drifted alias index accompanies a
+    // drifted graph; this does not independently detect an alias-only drift
+    // (disclosed; covered by cache-version.test.js).
+    if (changed) this._incrementCacheVersion();
 
     return {
       records: records.length,

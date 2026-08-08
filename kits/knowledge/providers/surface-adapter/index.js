@@ -28,16 +28,33 @@ function claimTypeFor(recordType) {
 }
 
 /**
- * Map Knowledge record status → Surface claim status (pre-fold)
+ * Map Knowledge record status → Surface claim status.
+ *
+ * Deliberately narrow: `retired` records are `superseded`; everything else
+ * is `proposed` (producer-asserted, not verified). Knowledge Kit records
+ * are never independently verified by this adapter, so no record status
+ * ever earns the `verified` label here — that would fabricate trust. Staleness
+ * (expiry) is NOT computed locally either: `expiresAt`/`ttlSeconds` are passed
+ * through on the claim so Surface derives freshness itself.
  */
-function statusFor(recordStatus, expiresAt, nowMs) {
+function statusFor(recordStatus) {
   if (recordStatus === "retired") return "superseded";
-  if (recordStatus === "implemented") return "verified";
-  if (expiresAt) {
-    const expiryMs = new Date(expiresAt).getTime();
-    if (!isNaN(expiryMs) && nowMs > expiryMs) return "stale";
-  }
   return "proposed";
+}
+
+/**
+ * Build a compact, schema-agnostic summary of a record's mutation_log for
+ * carrying as claim metadata. Only the fields common to every mutation-log
+ * entry shape (see DefaultKnowledgeStore) are surfaced — op/at/agent — so
+ * this never depends on op-specific evidence shapes.
+ */
+function compactMutationLog(mutationLog) {
+  return mutationLog.map((entry) => ({
+    op: entry.op,
+    at: entry.at,
+    agent: entry.agent,
+    ...(entry.note ? { note: entry.note } : {}),
+  }));
 }
 
 /**
@@ -63,14 +80,14 @@ export async function buildKnowledgeTrustBundle(options = {}) {
   } = options;
 
   const provider = store
-    ? { readNodes: async () => (await store.readGraph()).nodes, readEdges: async () => (await store.readGraph()).edges }
+    ? { readGraph: () => store.readGraph() }
     : new MarkdownVaultProvider({ storeRoot, agent });
 
   const now = new Date();
-  const nowMs = now.getTime();
   const nowIso = now.toISOString();
 
   const { nodes, edges } = await provider.readGraph();
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
   // Filter nodes
   let filteredNodes = nodes;
@@ -95,13 +112,39 @@ export async function buildKnowledgeTrustBundle(options = {}) {
 
   const builder = new TrustBundleBuilder({ source: "knowledge-kit" });
 
+  // nodeId -> claimId, populated as claims are emitted below. Used both to
+  // replace O(n^2) node lookups and to skip identity links whose endpoints
+  // never received a claim.
+  const claimIdByNodeId = new Map();
+
   // Nodes → Claims
   for (const node of filteredNodes) {
-    const { record_type, category: cat, status, expires_at, ttl_seconds, tags, mutation_log } =
-      node.attributes;
+    const {
+      record_type,
+      category: cat,
+      status,
+      expires_at,
+      ttl_seconds,
+      mutation_log,
+      created_at,
+      updated_at,
+    } = node.attributes;
 
     const claimId = `knowledge:${record_type}.${cat || "uncategorized"}#${node.id}`;
-    const claimStatus = statusFor(status, expires_at, nowMs);
+    const claimStatus = statusFor(status);
+    claimIdByNodeId.set(node.id, claimId);
+
+    const createdAt = created_at || node.provenance?.retrieved_at || nowIso;
+    const updatedAt = updated_at || node.provenance?.retrieved_at || nowIso;
+
+    const metadata = {
+      knowledgeRecordType: record_type,
+      knowledgeCategory: cat,
+      knowledgeStatus: status,
+    };
+    if (Array.isArray(mutation_log) && mutation_log.length) {
+      metadata.knowledgeMutationLog = compactMutationLog(mutation_log);
+    }
 
     builder.addClaim({
       id: claimId,
@@ -111,33 +154,30 @@ export async function buildKnowledgeTrustBundle(options = {}) {
       claimType: claimTypeFor(record_type),
       fieldOrBehavior: "content",
       value: node.body || node.title,
-      createdAt: node.provenance?.retrievedAt || nowIso,
-      updatedAt: node.provenance?.retrievedAt || nowIso,
+      status: claimStatus,
+      createdAt,
+      updatedAt,
+      ...(expires_at ? { expiresAt: expires_at } : {}),
+      ...(ttl_seconds !== undefined && ttl_seconds !== null ? { ttlSeconds: ttl_seconds } : {}),
       impactLevel: "medium",
-      metadata: {
-        knowledgeRecordType: record_type,
-        knowledgeCategory: cat,
-        knowledgeStatus: status,
-        knowledgeExpiresAt: expires_at,
-        knowledgeTtlSeconds: ttl_seconds,
-      },
+      metadata,
     });
 
     // Evidence: source links (raw → compiled, etc.)
     const sourceEdges = filteredEdges.filter((e) => e.to === node.id && e.type === "evidence-of");
     for (const edge of sourceEdges) {
-      const sourceNode = nodes.find((n) => n.id === edge.from);
+      const sourceNode = nodeById.get(edge.from);
       if (!sourceNode) continue;
 
       const evidenceId = `${claimId}.evidence.${sourceNode.id}`;
       builder.addEvidence({
         id: evidenceId,
-        evidenceType: "document",
+        evidenceType: "document_citation",
         method: "extraction",
         sourceRef: sourceNode.provenance?.source || `knowledge:${sourceNode.id}`,
         sourceLocator: sourceNode.provenance?.locator || sourceNode.attributes.record_type,
         excerptOrSummary: sourceNode.body?.slice(0, 500) || sourceNode.title,
-        observedAt: sourceNode.provenance?.retrievedAt || nowIso,
+        observedAt: sourceNode.provenance?.retrieved_at || nowIso,
         collectedBy: "knowledge-kit",
       }).linkTo(claimId);
     }
@@ -145,14 +185,14 @@ export async function buildKnowledgeTrustBundle(options = {}) {
     // Policy: supersedes edges
     const supersedesEdges = filteredEdges.filter((e) => e.from === node.id && e.type === "supersedes");
     for (const edge of supersedesEdges) {
-      const targetNode = nodes.find((n) => n.id === edge.to);
+      const targetNode = nodeById.get(edge.to);
       if (!targetNode) continue;
 
       const policyId = `policy:supersedes.${node.id}.${targetNode.id}`;
       builder.addPolicy({
         id: policyId,
         claimType: claimTypeFor(record_type),
-        requiredEvidence: ["document"],
+        requiredEvidence: ["document_citation"],
         requiredMethods: ["extraction"],
         requiresCorroboration: false,
         acceptanceCriteria: [`supersedes ${targetNode.id}`],
@@ -163,34 +203,33 @@ export async function buildKnowledgeTrustBundle(options = {}) {
         impactLevel: "medium",
       });
     }
-
-    // Events: mutation log
-    if (Array.isArray(mutation_log)) {
-      for (const log of mutation_log) {
-        const eventId = `${claimId}.event.${log.at}`;
-        builder.addEvent({
-          id: eventId,
-          claimId,
-          type: "status-transition",
-          status: log.to === "retired" ? "superseded" : "proposed",
-          actor: log.authority || "knowledge-kit",
-          method: "mutation",
-          evidenceIds: [],
-          createdAt: log.at,
-          metadata: { from: log.from, to: log.to },
-        });
-      }
-    }
   }
 
-  // Edges → Identity links (for cross-record references)
+  // Edges → Identity links (for cross-record references).
+  //
+  // Surface's identityLink schema carries `subjects: [{subjectType,
+  // subjectId}, ...]` (co-reference between claim subjects) — it has no
+  // `from`/`to`/`confidence` fields. Every claim's subjectType is
+  // "knowledge" and subjectId is the node id, so subjects mirror that
+  // exactly. Links are only emitted between endpoints that both received a
+  // claim (via claimIdByNodeId); `reason` records the originating edge type
+  // without overclaiming a specific Surface `relation` (none of the closed
+  // relation enum — equivalent/subsumes/converts — accurately describes a
+  // knowledge-graph "relates"/"mentions" edge, so `relation` is left unset
+  // rather than misrepresented).
   for (const edge of filteredEdges) {
     if (edge.type === "relates" || edge.type === "mentions") {
+      const fromClaimId = claimIdByNodeId.get(edge.from);
+      const toClaimId = claimIdByNodeId.get(edge.to);
+      if (!fromClaimId || !toClaimId) continue;
+
       builder.addIdentityLink({
-        from: `knowledge:${nodes.find((n) => n.id === edge.from)?.attributes?.record_type || "record"}.${edge.from}`,
-        to: `knowledge:${nodes.find((n) => n.id === edge.to)?.attributes?.record_type || "record"}.${edge.to}`,
-        relation: edge.type,
-        confidence: 0.8,
+        id: `identity:${edge.type}.${edge.from}.${edge.to}`,
+        subjects: [
+          { subjectType: "knowledge", subjectId: edge.from },
+          { subjectType: "knowledge", subjectId: edge.to },
+        ],
+        reason: `knowledge graph "${edge.type}" edge (${fromClaimId} <-> ${toClaimId})`,
       });
     }
   }

@@ -52,16 +52,10 @@ export class MarkdownVaultProvider {
     this.storeRoot = storeRoot || "(injected store)";
     this.agent = agent;
     this.id = PROVIDER_ID;
-    this._cache = null;
-    this._cacheVersion = null;
-  }
-
-  _checkCache() {
-    const currentVersion = this.store.getCacheVersion?.();
-    if (currentVersion !== undefined && currentVersion !== this._cacheVersion) {
-      this._cache = null;
-      this._cacheVersion = currentVersion;
-    }
+    // Memoized record list, keyed on the store's cache version. Populated by
+    // _allRecords() below — covers readNodes/readEdges/readGraph/queryByType
+    // (they all funnel through _allRecords()).
+    this._recordsMemo = null; // { version, records } | null
   }
 
   capabilities() {
@@ -77,22 +71,43 @@ export class MarkdownVaultProvider {
   }
 
   async _allRecords() {
+    const currentVersion = this.store.getCacheVersion?.();
+    if (
+      currentVersion !== undefined &&
+      this._recordsMemo &&
+      this._recordsMemo.version === currentVersion
+    ) {
+      return this._recordsMemo.records;
+    }
+
     const out = [];
     for (const t of ALL_RECORD_TYPES) {
       const recs = await this.store.listByType(t, { includeRetired: true });
       for (const r of recs) out.push(r);
     }
+
+    // No version support on the injected store -> never cache (always
+    // refetch), so a store with no `getCacheVersion()` stays correct without
+    // opting in to memoization.
+    this._recordsMemo = currentVersion !== undefined ? { version: currentVersion, records: out } : null;
     return out;
   }
 
   async readNodes(options = {}) {
-    this._checkCache();
     const records = await this._allRecords();
     const nodes = records.map((r) => {
       const attributes = { record_type: r.type };
       if (r.category) attributes.category = r.category;
       if (r.status) attributes.status = r.status;
       if (Array.isArray(r.tags) && r.tags.length) attributes.tags = r.tags;
+      // Freshness + history + timestamps, when the record carries them
+      // (issue #341 fields; consumed by the surface-adapter for claim
+      // expiresAt/ttlSeconds/metadata/createdAt/updatedAt).
+      if (r.expires_at) attributes.expires_at = r.expires_at;
+      if (r.ttl_seconds !== undefined && r.ttl_seconds !== null) attributes.ttl_seconds = r.ttl_seconds;
+      if (Array.isArray(r.mutation_log) && r.mutation_log.length) attributes.mutation_log = r.mutation_log;
+      if (r.created_at) attributes.created_at = r.created_at;
+      if (r.updated_at) attributes.updated_at = r.updated_at;
       return node({
         id: r.id,
         type: nodeTypeFor(r.type),
