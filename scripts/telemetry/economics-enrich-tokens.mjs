@@ -78,12 +78,21 @@ function findWindow(windows, tsMs) {
 // the transcript shape scripts/telemetry/lib/usage.sh's usage_parse_transcript already reads:
 // one JSON object per line, assistant turns carry `.message.usage` (real Anthropic usage block)
 // and a top-level `.timestamp` (ISO 8601) recording when that turn was emitted.
+//
+// isSidechain (review finding 6, disclosed design decision): real Claude Code transcripts also
+// carry an `isSidechain` boolean on every assistant turn (subagent/delegated turns). This tool
+// deliberately does NOT filter on it -- sidechain turns are INCLUDED in phase sums, matching
+// /Users/brian/dev/github/kontourai/builder-rebuild/baseline/BASELINE.md's Phase-0 burn
+// definition (burn = total token consumption regardless of orchestrator-vs-delegated turn, not
+// an orchestrator-only subset). `sidechain_usage_lines_included` below discloses how many of the
+// matched lines were sidechain turns so a consumer can see the inclusion, not just infer it.
 async function sliceTranscript(transcriptPath, windows) {
   const byPhase = new Map();
   let linesRead = 0;
   let malformedLinesSkipped = 0;
   let assistantUsageLinesMatched = 0;
   let linesOutsideWindows = 0;
+  let sidechainUsageLinesIncluded = 0;
 
   const rl = createInterface({ input: createReadStream(transcriptPath, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of rl) {
@@ -110,6 +119,7 @@ async function sliceTranscript(transcriptPath, windows) {
       continue;
     }
     assistantUsageLinesMatched += 1;
+    if (obj.isSidechain === true) sidechainUsageLinesIncluded += 1;
     if (!byPhase.has(win.phase)) {
       byPhase.set(win.phase, {
         input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
@@ -133,6 +143,7 @@ async function sliceTranscript(transcriptPath, windows) {
 
   return {
     phases, linesRead, malformedLinesSkipped, assistantUsageLinesMatched, linesOutsideWindows,
+    sidechainUsageLinesIncluded,
   };
 }
 
@@ -180,6 +191,7 @@ async function main() {
     malformed_lines_skipped: sliced.malformedLinesSkipped,
     assistant_usage_lines_matched: sliced.assistantUsageLinesMatched,
     lines_outside_windows: sliced.linesOutsideWindows,
+    sidechain_usage_lines_included: sliced.sidechainUsageLinesIncluded,
   })}\n`);
   process.exitCode = 0;
 }

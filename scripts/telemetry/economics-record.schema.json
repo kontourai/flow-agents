@@ -47,6 +47,7 @@
     "cost": {
       "type": "object",
       "additionalProperties": true,
+      "description": "Review finding 3 fix: leaf fields allow null, matching phases[]. `cost` stays a REQUIRED key (present as an object) even when every leaf is null -- widening the leaves to null, rather than making the whole `cost` block optional/absent, was chosen deliberately so the R7 Goodhart guard ('cost and defects are co-required' -- see the top-level allOf/required and docs/specs/economics-record-contract.md) stays structurally intact, and so an existing consumer keeps the same `.cost.input_tokens` access path and only needs to add a null check (identical to how phases[] already teaches the same pattern), rather than also needing an existence check on `cost` itself. A record where every phase's token fields are null AND tokens_unattributed:true MUST carry null (not a coalesced 0) in every corresponding top-level cost.* leaf -- a real 0 and 'we don't know' must never be byte-identical here.",
       "required": [
         "input_tokens",
         "output_tokens",
@@ -56,11 +57,11 @@
         "by_model"
       ],
       "properties": {
-        "input_tokens": { "type": "number" },
-        "output_tokens": { "type": "number" },
-        "cache_creation_input_tokens": { "type": "number" },
-        "cache_read_input_tokens": { "type": "number" },
-        "estimated_cost_usd": { "type": "number" },
+        "input_tokens": { "type": ["number", "null"] },
+        "output_tokens": { "type": ["number", "null"] },
+        "cache_creation_input_tokens": { "type": ["number", "null"] },
+        "cache_read_input_tokens": { "type": ["number", "null"] },
+        "estimated_cost_usd": { "type": ["number", "null"] },
         "by_model": { "type": "array" }
       }
     },
@@ -87,6 +88,10 @@
           "cache_read_input_tokens": { "type": ["number", "null"] },
           "estimated_cost_usd": { "type": ["number", "null"] },
           "wall_clock_s": { "type": "number" },
+          "human_wait_s": {
+            "type": "number",
+            "description": "Review finding 2 fix: real lifecycle pause/resume time that overlapped THIS phase's window, already subtracted out of wall_clock_s (which is now genuinely ACTIVE time, not raw calendar time). Best-effort per-phase attribution of the same total the top-level time.human_wait_s reports; may sum to slightly less than that top-level total in the one disclosed edge case where a pause falls in the undropped pre-first-transition gap (no phase window exists yet to attribute it to -- see docs/specs/economics-record-contract.md). Optional/additive; 0 when no pause overlapped this phase or the producer does not compute pause attribution (e.g. the legacy session-usage source)."
+          },
           "source": {
             "type": "string",
             "enum": ["session-usage", "flow-run-record", "transcript-slice"],

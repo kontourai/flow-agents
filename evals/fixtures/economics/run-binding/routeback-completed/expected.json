@@ -15,7 +15,8 @@
     "route_backs": 1
   },
   "defects": {
-    "gate_fires": 1,
+    "gate_fires": 2,
     "verification_verdict": "PASS"
-  }
+  },
+  "_gate_fires_note": "This fixture also carries a real-shaped gate_outcome_history (9 entries: 6 pass + 1 block + 1 route-back + the final pass) so the PRIMARY gate_fires derivation path (deriveGateFires's history branch) is exercised, not just the legacy transitions[].status==blocked fallback (which alone would compute 1 from this fixture's single blocked transition). 2 == count of block+route-back entries in gate_outcome_history; a history.length mutation would wrongly report 9."
 }

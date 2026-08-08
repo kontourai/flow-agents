@@ -80,5 +80,16 @@
     }
   ],
   "lifecycle": [],
-  "exceptions": []
+  "exceptions": [],
+  "gate_outcome_history": [
+    { "gate_id": "pull-work-gate", "status": "pass", "summary": "A ready work item is selected with scope and acceptance context. satisfied", "evidence_refs": ["ev.1"] },
+    { "gate_id": "design-probe-gate", "status": "pass", "summary": "Pickup Probe evidence is recorded before planning. satisfied", "evidence_refs": ["ev.2"] },
+    { "gate_id": "plan-gate", "status": "pass", "summary": "The implementation plan names files, changes, acceptance evidence, and sequencing. satisfied", "evidence_refs": ["ev.3"] },
+    { "gate_id": "execute-gate", "status": "pass", "summary": "The implementation scope records changed files and excludes unrelated work. satisfied", "evidence_refs": ["ev.4"] },
+    { "gate_id": "verify-gate", "status": "block", "summary": "Verification found a defect; route back to execute.", "evidence_refs": ["ev.5"] },
+    { "gate_id": "execute-gate", "status": "pass", "summary": "The implementation scope records changed files and excludes unrelated work (retry). satisfied", "evidence_refs": ["ev.6"] },
+    { "gate_id": "verify-gate", "status": "route-back", "summary": "A second, distinct planning gap surfaced; route back to plan.", "evidence_refs": ["ev.7"] },
+    { "gate_id": "verify-gate", "status": "pass", "summary": "A distinct reviewer recorded a current clean critique of the delivered change. satisfied", "evidence_refs": ["ev.8"] },
+    { "gate_id": "merge-ready-gate", "status": "pass", "summary": "The change is ready for merge review based on scope, evidence, and unresolved risks. satisfied", "evidence_refs": ["ev.9"] }
+  ]
 }

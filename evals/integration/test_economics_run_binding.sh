@@ -263,6 +263,34 @@ TELEMETRY_ECONOMICS_LOG_FILE="$LOG3" bash "$EMITTER" --flow-run-dir "$TMP/does-n
 [[ ! -e "$LOG3" ]] && pass "a missing flow-run-dir writes nothing (no-op, never a guessed/incomplete record)" \
   || fail "a missing flow-run-dir unexpectedly wrote a record"
 
+# ── AC8: bash-3.2 portability (review finding 1) — macOS's stock /bin/bash treats a
+# zero-element array as unbound under `set -u`, silently crashing the --flow-run-dir path (no
+# --now is EVER passed on a real invocation, only by this eval's own determinism flag) and
+# swallowing the failure into a clean exit-0 no-op. GitHub Actions' ubuntu-latest ships a
+# modern bash, so this class of regression is invisible there — run the producer explicitly
+# under /bin/bash whenever it self-reports a pre-4.4 version so it can't hide behind CI.
+echo "--- AC8: economics-record.sh --flow-run-dir survives macOS's stock bash (unbound-array regression guard) ---"
+if [[ -x /bin/bash ]]; then
+  bash_major="$(/bin/bash -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null || echo 0)"
+  bash_minor="$(/bin/bash -c 'echo "${BASH_VERSINFO[1]}"' 2>/dev/null || echo 0)"
+  if [[ "$bash_major" -lt 4 || ( "$bash_major" -eq 4 && "$bash_minor" -lt 4 ) ]]; then
+    LOG8="$TMP/econ-bash32.jsonl"
+    OUT8="$TMP/econ-bash32.out"
+    TELEMETRY_ECONOMICS_LOG_FILE="$LOG8" /bin/bash "$EMITTER" --flow-run-dir "$FIX/routeback-completed" --task-slug x > "$OUT8" 2>&1
+    if grep -qi 'unbound variable' "$OUT8"; then
+      fail "/bin/bash ($bash_major.$bash_minor) still crashes with 'unbound variable' — see $OUT8"
+    elif [[ -e "$LOG8" ]] && jq -e '.schema == "kontour.console.economics"' "$LOG8" >/dev/null 2>&1; then
+      pass "/bin/bash ($bash_major.$bash_minor, no --now passed — the real invocation shape) produces a real record, no unbound-variable crash"
+    else
+      fail "/bin/bash ($bash_major.$bash_minor) produced no record and no 'unbound variable' text — unexpected failure: $(cat "$OUT8")"
+    fi
+  else
+    echo "  [SKIP] /bin/bash reports $bash_major.$bash_minor (>= 4.4); this host cannot reproduce the bash-3.2 unbound-array hazard locally"
+  fi
+else
+  echo "  [SKIP] /bin/bash not present on this host"
+fi
+
 # ── AC7: economics-enrich-tokens.mjs — exact sums, malformed-line accounting ----------------------
 echo "--- AC7: economics-enrich-tokens.mjs transcript slicing ---"
 ENRICHED="$TMP/enriched.json"
@@ -274,8 +302,12 @@ ok7="$(jq -e '.ok == true' "$ENRICHED" >/dev/null 2>&1 && echo true || echo fals
 
 dp_in="$(jq -r '.phases[] | select(.phase=="design-probe") | .input_tokens' "$ENRICHED")"
 dp_out="$(jq -r '.phases[] | select(.phase=="design-probe") | .output_tokens' "$ENRICHED")"
-[[ "$dp_in" == "10" && "$dp_out" == "40" ]] && pass "design-probe window sums exactly (input=10, output=40)" \
+[[ "$dp_in" == "15" && "$dp_out" == "55" ]] && pass "design-probe window sums exactly (input=15, output=55, INCLUDING one isSidechain:true line)" \
   || fail "design-probe sums wrong: input=$dp_in output=$dp_out"
+
+sidechain_included="$(jq -r '.sidechain_usage_lines_included' "$ENRICHED")"
+[[ "$sidechain_included" == "1" ]] && pass "sidechain_usage_lines_included == 1 (review finding 6: isSidechain turns are INCLUDED and disclosed, matching the Phase-0 baseline's burn definition)" \
+  || fail "sidechain_usage_lines_included mismatch: got $sidechain_included want 1"
 
 plan_in="$(jq -r '.phases[] | select(.phase=="plan") | .input_tokens' "$ENRICHED")"
 plan_out="$(jq -r '.phases[] | select(.phase=="plan") | .output_tokens' "$ENRICHED")"
@@ -291,6 +323,10 @@ malformed="$(jq -r '.malformed_lines_skipped' "$ENRICHED")"
 [[ "$malformed" == "2" ]] && pass "malformed_lines_skipped == 2 (invalid JSON + missing timestamp), never fatal" \
   || fail "malformed_lines_skipped mismatch: got $malformed want 2"
 
+matched="$(jq -r '.assistant_usage_lines_matched' "$ENRICHED")"
+[[ "$matched" == "4" ]] && pass "assistant_usage_lines_matched == 4 (design-probe x2 incl. sidechain, plan x2)" \
+  || fail "assistant_usage_lines_matched mismatch: got $matched want 4"
+
 outside="$(jq -r '.lines_outside_windows' "$ENRICHED")"
 [[ "$outside" == "1" ]] && pass "lines_outside_windows == 1 (a real usage line outside every window is disclosed, not silently dropped or misattributed)" \
   || fail "lines_outside_windows mismatch: got $outside want 1"
@@ -301,6 +337,136 @@ node "$ENRICH" --transcript "$TMP/no-such-transcript.jsonl" --windows-json "$FIX
 mok="$(jq -r '.ok' "$MISSING_OUT")"
 [[ "$mok" == "false" ]] && pass "missing transcript -> ok:false, no phases[] fabricated" \
   || fail "missing transcript did not degrade to ok:false: $(cat "$MISSING_OUT")"
+
+# ── AC9: top-level cost.* preserves null, never coalesces to a fabricated 0 (review finding 3) ---
+echo "--- AC9: top-level cost.* stays null when tokens_unattributed (never a fabricated 0) ---"
+for field in input_tokens output_tokens cache_creation_input_tokens cache_read_input_tokens estimated_cost_usd; do
+  v="$(jq -r ".cost.${field}" "$RECORD1" 2>/dev/null)"
+  [[ "$v" == "null" ]] && pass "cost.$field is null (not a coalesced 0) when tokens_unattributed" \
+    || fail "cost.$field should be null, got: $v"
+done
+
+# ── AC10: phase-level wall_clock_s excludes lifecycle pause time (review finding 2) --------------
+echo "--- AC10: pause-adjusted phase wall_clock_s / human_wait_s (canceled-with-pause + paused-mid-execute) ---"
+EXP3="$FIX/canceled-with-pause/expected.json"
+for phase in design-probe plan; do
+  actual_wc="$(jq -r --arg p "$phase" '.phases[] | select(.phase == $p) | .wall_clock_s' "$DERIVED3")"
+  expected_wc="$(jq -r --arg p "$phase" '.phase_wall_clock_s[$p]' "$EXP3")"
+  actual_hw="$(jq -r --arg p "$phase" '.phases[] | select(.phase == $p) | .human_wait_s' "$DERIVED3")"
+  expected_hw="$(jq -r --arg p "$phase" '.phase_human_wait_s[$p]' "$EXP3")"
+  if [[ "$actual_wc" == "$expected_wc" && "$actual_hw" == "$expected_hw" ]]; then
+    pass "phase '$phase': wall_clock_s(active)=$expected_wc, human_wait_s(pause)=$expected_hw"
+  else
+    fail "phase '$phase': wall_clock_s got $actual_wc want $expected_wc; human_wait_s got $actual_hw want $expected_hw"
+  fi
+done
+
+# Real-shape mirror of the live, currently-paused kontourai-flow-agents-944 production run
+# (~99.995% of its raw execute-phase span is pause time). RED-proved against the pre-fix
+# committed code below; this is the GREEN half.
+NOW_PME="$(cat "$FIX/paused-mid-execute/now.txt")"
+DERIVED_PME="$TMP/derived-pme.json"
+node "$FLOW_RUN_ECON" --flow-run-dir "$FIX/paused-mid-execute" --now "$NOW_PME" > "$DERIVED_PME"
+EXP_PME="$FIX/paused-mid-execute/expected.json"
+pme_wc="$(jq -r '.phases[] | select(.phase=="execute") | .wall_clock_s' "$DERIVED_PME")"
+pme_hw="$(jq -r '.phases[] | select(.phase=="execute") | .human_wait_s' "$DERIVED_PME")"
+pme_wc_exp="$(jq -r '.phase_wall_clock_s.execute' "$EXP_PME")"
+pme_hw_exp="$(jq -r '.phase_human_wait_s.execute' "$EXP_PME")"
+if [[ "$pme_wc" == "$pme_wc_exp" && "$pme_hw" == "$pme_hw_exp" ]]; then
+  pass "GREEN (mirrors real kontourai-flow-agents-944): execute.wall_clock_s == ${pme_wc_exp}s (real activity), execute.human_wait_s == ${pme_hw_exp}s (the pause), NOT a ~1,000,058s inflated phase duration"
+else
+  fail "paused-mid-execute mismatch: wall_clock_s got $pme_wc want $pme_wc_exp; human_wait_s got $pme_hw want $pme_hw_exp"
+fi
+
+# RED: the pre-fix committed version of flow-run-economics.mjs (before this fix round), run
+# read-only via `git show HEAD:...` against a temp file -- never touches the working tree.
+PRE_FIX_SCRIPT="$TMP/pre-fix-flow-run-economics.mjs"
+if git -C "$ROOT" show HEAD:scripts/telemetry/flow-run-economics.mjs > "$PRE_FIX_SCRIPT" 2>/dev/null && [[ -s "$PRE_FIX_SCRIPT" ]]; then
+  PRE_FIX_OUT="$TMP/pre-fix-pme.json"
+  node "$PRE_FIX_SCRIPT" --flow-run-dir "$FIX/paused-mid-execute" --now "$NOW_PME" > "$PRE_FIX_OUT" 2>/dev/null
+  pre_wc="$(jq -r '.phases[] | select(.phase=="execute") | .wall_clock_s // "MISSING"' "$PRE_FIX_OUT" 2>/dev/null)"
+  if [[ "$pre_wc" != "$pme_wc_exp" ]]; then
+    pass "RED: the pre-fix committed code reports execute.wall_clock_s=$pre_wc (raw calendar span, includes the pause) -- proves this assertion has power"
+  else
+    fail "RED proof inconclusive: pre-fix code already reported $pre_wc (expected the inflated raw span, not $pme_wc_exp) — HEAD may already carry this fix"
+  fi
+else
+  fail "could not read pre-fix flow-run-economics.mjs from HEAD for the RED proof"
+fi
+
+# ── AC11: window-boundary mutation power (review finding 4a) — RED/GREEN -------------------------
+echo "--- AC11: zero-duration transitions never spawn a phantom phase window (RED/GREEN) ---"
+NOW_ZDB="$(cat "$FIX/zero-duration-boundary/now.txt")"
+DERIVED_ZDB="$TMP/derived-zdb.json"
+node "$FLOW_RUN_ECON" --flow-run-dir "$FIX/zero-duration-boundary" --now "$NOW_ZDB" > "$DERIVED_ZDB"
+zdb_dp_count="$(jq -r '[.phases[] | select(.phase=="design-probe")] | length' "$DERIVED_ZDB")"
+[[ "$zdb_dp_count" == "0" ]] && pass "GREEN: a zero-duration transition (identical timestamps) never spawns a design-probe phase entry" \
+  || fail "GREEN case failed: design-probe entry count == $zdb_dp_count, want 0"
+
+BROKEN_ZDB="$TMP/flow-run-economics.boundary-broken.mjs"
+sed -E 's/endMs > startMs/endMs >= startMs/g' "$FLOW_RUN_ECON" > "$BROKEN_ZDB"
+if ! diff -q "$FLOW_RUN_ECON" "$BROKEN_ZDB" >/dev/null 2>&1; then
+  BROKEN_ZDB_OUT="$TMP/derived-zdb-broken.json"
+  node "$BROKEN_ZDB" --flow-run-dir "$FIX/zero-duration-boundary" --now "$NOW_ZDB" > "$BROKEN_ZDB_OUT" 2>/dev/null
+  broken_dp_count="$(jq -r '[.phases[] | select(.phase=="design-probe")] | length' "$BROKEN_ZDB_OUT" 2>/dev/null)"
+  if [[ "$broken_dp_count" == "1" ]]; then
+    pass "RED: an endMs>=startMs boundary mutation DOES spawn the phantom design-probe entry — proves this assertion has power"
+  else
+    fail "RED proof inconclusive: broken copy produced design-probe count=$broken_dp_count, expected 1 — injection did not take"
+  fi
+else
+  fail "RED fault injection did not modify the script (sed pattern no longer matches source)"
+fi
+
+# ── AC12: unrecognized Flow status is REFUSED, never silently bucketed (review finding 5a) -------
+echo "--- AC12: unrecognized Flow run status refuses the record (never a silent active_abandoned bucket) ---"
+UNKNOWN_OUT="$TMP/unknown-status.json"
+node "$FLOW_RUN_ECON" --flow-run-dir "$FIX/unknown-status" > "$UNKNOWN_OUT"
+unk_ok="$(jq -r '.ok' "$UNKNOWN_OUT")"
+[[ "$unk_ok" == "false" ]] && pass "an unrecognized status (\"rejected\") is refused (ok:false), not folded into active_abandoned" \
+  || fail "unrecognized status was not refused: $(cat "$UNKNOWN_OUT")"
+unk_reason="$(jq -r '.reason' "$UNKNOWN_OUT")"
+[[ "$unk_reason" == *"unrecognized status"* ]] && pass "refusal reason names the problem clearly (\"$unk_reason\")" \
+  || fail "refusal reason does not clearly name the problem: $unk_reason"
+
+LOG_UNK="$TMP/econ-unknown-status.jsonl"
+bash "$EMITTER" --flow-run-dir "$FIX/unknown-status" >/dev/null 2>&1
+TELEMETRY_ECONOMICS_LOG_FILE="$LOG_UNK" bash "$EMITTER" --flow-run-dir "$FIX/unknown-status" >/dev/null 2>&1
+[[ ! -e "$LOG_UNK" ]] && pass "economics-record.sh writes nothing for a refused/unrecognized-status run" \
+  || fail "economics-record.sh unexpectedly wrote a record for an unrecognized status"
+
+# ── AC13: active multi_cursor claims are REFUSED, never silently mis-windowed (review finding 5d) -
+echo "--- AC13: active multi_cursor concurrent step claims refuse the record ---"
+MC_OUT="$TMP/multi-cursor.json"
+node "$FLOW_RUN_ECON" --flow-run-dir "$FIX/multi-cursor-active" > "$MC_OUT"
+mc_ok="$(jq -r '.ok' "$MC_OUT")"
+[[ "$mc_ok" == "false" ]] && pass "an active multi_cursor ledger is refused (ok:false), never silently single-cursor-derived" \
+  || fail "active multi_cursor was not refused: $(cat "$MC_OUT")"
+mc_reason="$(jq -r '.reason' "$MC_OUT")"
+[[ "$mc_reason" == *"multi_cursor"* ]] && pass "refusal reason names multi_cursor clearly (\"$mc_reason\")" \
+  || fail "refusal reason does not name multi_cursor: $mc_reason"
+
+# ── AC14: schema additivity — old-shape golden record still validates under the NEW schema
+# (review finding 7 / coordinator item 5c: forward-compatibility is the claim actually made by
+# this change ("old records/readers are unaffected") — pin it as a regression guard, not just
+# prose) -----------------------------------------------------------------------------------------
+echo "--- AC14: the pre-existing golden v0.2 record (session-usage source) still validates under the NEW schema ---"
+OLD_GOLDEN="$ROOT/evals/fixtures/economics/expected-record.json"
+if [[ -f "$OLD_GOLDEN" ]]; then
+  old_valid="$(node -e '
+const Ajv=require("ajv/dist/2020").default; const a=new Ajv({allErrors:true,strict:false});
+a.addSchema(require(process.argv[1]));
+const validate=a.compile(require(process.argv[2]));
+const record=require(process.argv[3]);
+const ok=validate(record);
+if(!ok) console.error(JSON.stringify(validate.errors));
+console.log(ok);
+' "$ROOT/schemas/run-correlation-envelope.schema.json" "$SCHEMA" "$OLD_GOLDEN" 2>"$TMP/ajv-old-err.log")"
+  [[ "$old_valid" == "true" ]] && pass "old-shape golden record (no terminal_status, no tokens_unattributed, numeric-only cost.*) still validates under the new schema" \
+    || fail "old-shape golden record FAILED the new schema (breaks additivity): $(cat "$TMP/ajv-old-err.log" 2>/dev/null)"
+else
+  echo "  [SKIP] $OLD_GOLDEN not found"
+fi
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then

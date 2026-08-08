@@ -92,7 +92,12 @@ if [[ -n "$flow_run_dir" ]]; then
   fi
   now_arg=()
   [[ -n "$flow_run_now" ]] && now_arg=(--now "$flow_run_now")
-  derived="$("$node_bin" "$helper" --flow-run-dir "$flow_run_dir" "${now_arg[@]}" 2>/dev/null)" || exit 0
+  # Portability (review finding 1): expand as "${now_arg[@]+"${now_arg[@]}"}" rather than the
+  # plain "${now_arg[@]}" -- macOS's stock /bin/bash (3.2, pre-GPLv3) treats a zero-element
+  # array as unbound under `set -u` and aborts with "unbound variable" (this script's shebang
+  # resolves whichever `bash` PATH finds first, which is not guaranteed to be >= 4.4). Same
+  # documented idiom as scripts/telemetry/console-board-sync.sh:60-64.
+  derived="$("$node_bin" "$helper" --flow-run-dir "$flow_run_dir" "${now_arg[@]+"${now_arg[@]}"}" 2>/dev/null)" || exit 0
   printf '%s' "$derived" | jq -e '.ok == true' >/dev/null 2>&1 || exit 0
 
   # --- producer identity (#970), resolved the same way as the legacy path below. -------------------
@@ -113,6 +118,13 @@ if [[ -n "$flow_run_dir" ]]; then
     . as $d
     | ($d.phases // []) as $phases
     | ({critical:0, high:0, medium:0, low:0}) as $sev
+    # Review finding 3 fix: a real zero and "we do not know" must never be byte-identical.
+    # tokens_unattributed is true iff ANY phase has null token fields -- in that case the
+    # top-level cost.* token fields are ALSO null (never a coalesced 0-sum of partial/absent
+    # data); only when EVERY phase carries real, attributed tokens does cost.* sum them.
+    # estimated_cost_usd is unconditionally null in this mode: pricing is never attempted here
+    # regardless of token attribution (see docs/specs/economics-record-contract.md).
+    | (([$phases[] | select(.input_tokens == null)] | length) > 0) as $tokens_unattributed
     | {
         schema: "kontour.console.economics",
         version: "0.2",
@@ -131,11 +143,11 @@ if [[ -n "$flow_run_dir" ]]; then
         model: null,
         pricing_version: null,
         cost: {
-          input_tokens: ([$phases[].input_tokens // 0] | add // 0 | bounded_number),
-          output_tokens: ([$phases[].output_tokens // 0] | add // 0 | bounded_number),
-          cache_creation_input_tokens: ([$phases[].cache_creation_input_tokens // 0] | add // 0 | bounded_number),
-          cache_read_input_tokens: ([$phases[].cache_read_input_tokens // 0] | add // 0 | bounded_number),
-          estimated_cost_usd: 0,
+          input_tokens: (if $tokens_unattributed then null else ([$phases[].input_tokens] | add // 0) end),
+          output_tokens: (if $tokens_unattributed then null else ([$phases[].output_tokens] | add // 0) end),
+          cache_creation_input_tokens: (if $tokens_unattributed then null else ([$phases[].cache_creation_input_tokens] | add // 0) end),
+          cache_read_input_tokens: (if $tokens_unattributed then null else ([$phases[].cache_read_input_tokens] | add // 0) end),
+          estimated_cost_usd: null,
           by_model: []
         },
         time: {
@@ -143,7 +155,7 @@ if [[ -n "$flow_run_dir" ]]; then
           human_wait_s: ($d.time.human_wait_s | bounded_number)
         },
         phases: $phases,
-        tokens_unattributed: (([$phases[] | select(.input_tokens == null)] | length) > 0),
+        tokens_unattributed: $tokens_unattributed,
         iterations: {
           count: ($d.iterations.count | bounded_number),
           route_backs: ($d.iterations.route_backs | bounded_number)
@@ -166,16 +178,21 @@ if [[ -n "$flow_run_dir" ]]; then
   [[ -z "$record" || "$record" == "null" ]] && exit 0
 
   # Structural sanity check before the local-first write (mirrors the legacy path's guard).
+  # Review finding 3: cost.* token/cost leaves may be null (tokens_unattributed) -- never
+  # required to be a real number here. Review finding 11 (defense-in-depth): also pin
+  # terminal_status to the closed #925 taxonomy before it ever reaches the local log.
   if ! printf '%s' "$record" | jq -e '
     def number: type == "number" and . >= 0;
+    def number_or_null: (type == "number" and . >= 0) or . == null;
     .schema == "kontour.console.economics"
     and .version == "0.2"
     and (.run_id | type == "string")
-    and (.cost.input_tokens | number)
-    and (.cost.estimated_cost_usd | number)
+    and (.cost.input_tokens | number_or_null)
+    and (.cost.estimated_cost_usd | number_or_null)
     and (.time.wall_clock_s | number)
     and (.iterations.count | number)
     and (.defects.gate_fires | number)
+    and (.terminal_status as $t | ["completed","canceled","failed","accepted_by_exception","active_abandoned"] | index($t) != null)
   ' >/dev/null 2>&1; then
     exit 0
   fi

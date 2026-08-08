@@ -41,6 +41,17 @@ const TERMINAL_STATUS_VALUES = [
   'active_abandoned',
 ];
 
+// Review finding 5 (MEDIUM): every Flow `status` value this tool knows how to map. A value
+// outside this set is REFUSED (deriveFlowRunEconomics returns ok:false) rather than silently
+// folded into active_abandoned — the installed Flow schema's status enum has already grown once
+// (paused/canceled/lifecycle/gate_outcome_history/multi_cursor are all new since an earlier
+// working copy), so a future new status value must surface loudly, not vanish into a bucket
+// indistinguishable from a genuinely-observed active/blocked/needs_decision/paused run.
+const KNOWN_FLOW_STATUSES = new Set([
+  'active', 'blocked', 'needs_decision', 'paused',
+  'canceled', 'completed', 'failed', 'accepted_by_exception',
+]);
+
 function deriveTerminalStatus(flowStatus) {
   switch (flowStatus) {
     case 'completed':
@@ -112,26 +123,82 @@ function derivePhaseWindows(transitions, flowStatus, updatedAtIso, nowIso) {
   return windows;
 }
 
-function mergePhaseWindowsIntoPhases(windows) {
+// --- pause intervals: real pause->resume (or pause->cancel, or a still-open pause->now)
+// windows from the lifecycle ledger. Shared by both the top-level time.human_wait_s total
+// (deriveHumanWaitSeconds) and the per-phase active/pause split below (review finding 2) — one
+// computation, two consumers, so they can never drift against each other.
+function derivePauseIntervals(lifecycle, nowIso) {
+  const events = [...lifecycle]
+    .filter((e) => e && typeof e.at === 'string' && typeof e.action === 'string')
+    .sort((a, b) => (toMillis(a.at) ?? 0) - (toMillis(b.at) ?? 0));
+  const intervals = [];
+  let pendingPauseAt = null;
+  for (const e of events) {
+    if (e.action === 'pause') {
+      pendingPauseAt = e.at;
+    } else if ((e.action === 'resume' || e.action === 'cancel') && pendingPauseAt) {
+      const s = toMillis(pendingPauseAt);
+      const en = toMillis(e.at);
+      if (s !== null && en !== null && en > s) intervals.push({ startMs: s, endMs: en });
+      pendingPauseAt = null;
+    }
+  }
+  // Still-open pause with no resume/cancel recorded yet: count up to `now`.
+  if (pendingPauseAt) {
+    const s = toMillis(pendingPauseAt);
+    const en = toMillis(nowIso);
+    if (s !== null && en !== null && en > s) intervals.push({ startMs: s, endMs: en });
+  }
+  return intervals;
+}
+
+function overlapSeconds(startMs, endMs, pauseIntervals) {
+  let total = 0;
+  for (const iv of pauseIntervals) {
+    const s = Math.max(startMs, iv.startMs);
+    const e = Math.min(endMs, iv.endMs);
+    if (e > s) total += (e - s) / 1000;
+  }
+  return total;
+}
+
+// Review finding 2 (HIGH, confirmed against real 14.5-day-paused production data): a raw
+// inter-transition window's calendar duration is NOT "how long that phase took to work" when a
+// lifecycle pause falls inside it — it can be almost entirely idle time. Subtract each window's
+// overlap with the real pause intervals before attributing wall_clock_s (now genuinely ACTIVE
+// time), and surface the subtracted portion as that phase's own human_wait_s so a consumer can
+// see exactly which phase absorbed how much pause without needing to correlate against the
+// top-level aggregate by hand.
+function mergePhaseWindowsIntoPhases(windows, pauseIntervals) {
   const order = [];
   const byPhase = new Map();
   for (const w of windows) {
     if (!byPhase.has(w.phase)) {
-      byPhase.set(w.phase, 0);
+      byPhase.set(w.phase, { activeS: 0, pauseS: 0 });
       order.push(w.phase);
     }
-    byPhase.set(w.phase, byPhase.get(w.phase) + w.wall_clock_s);
+    const startMs = toMillis(w.start);
+    const endMs = toMillis(w.end);
+    const pauseS = (startMs !== null && endMs !== null) ? overlapSeconds(startMs, endMs, pauseIntervals) : 0;
+    const activeS = Math.max(0, w.wall_clock_s - pauseS);
+    const bucket = byPhase.get(w.phase);
+    bucket.activeS += activeS;
+    bucket.pauseS += pauseS;
   }
-  return order.map((phase) => ({
-    phase,
-    input_tokens: null,
-    output_tokens: null,
-    cache_creation_input_tokens: null,
-    cache_read_input_tokens: null,
-    estimated_cost_usd: null,
-    wall_clock_s: byPhase.get(phase),
-    source: 'flow-run-record',
-  }));
+  return order.map((phase) => {
+    const b = byPhase.get(phase);
+    return {
+      phase,
+      input_tokens: null,
+      output_tokens: null,
+      cache_creation_input_tokens: null,
+      cache_read_input_tokens: null,
+      estimated_cost_usd: null,
+      wall_clock_s: b.activeS,
+      human_wait_s: b.pauseS,
+      source: 'flow-run-record',
+    };
+  });
 }
 
 // --- iterations / route-backs: transitions of type "route_back" are the canonical route-back
@@ -174,37 +241,28 @@ function deriveVerificationVerdict(transitions, terminalStatus) {
   return 'NOT_VERIFIED';
 }
 
-// --- time.human_wait_s: real pause/resume (and pause/cancel) intervals from the lifecycle ledger.
-// Never estimated — a pause with no matching resume/cancel contributes nothing (still-paused tail
-// is covered by the active_abandoned phase-window tail above, not double-counted here).
-function deriveHumanWaitSeconds(lifecycle, nowIso) {
-  const events = [...lifecycle]
-    .filter((e) => e && typeof e.at === 'string' && typeof e.action === 'string')
-    .sort((a, b) => (toMillis(a.at) ?? 0) - (toMillis(b.at) ?? 0));
-  let total = 0;
-  let pendingPauseAt = null;
-  for (const e of events) {
-    if (e.action === 'pause') {
-      pendingPauseAt = e.at;
-    } else if (e.action === 'resume' && pendingPauseAt) {
-      const s = toMillis(pendingPauseAt);
-      const en = toMillis(e.at);
-      if (s !== null && en !== null && en > s) total += (en - s) / 1000;
-      pendingPauseAt = null;
-    } else if (e.action === 'cancel' && pendingPauseAt) {
-      const s = toMillis(pendingPauseAt);
-      const en = toMillis(e.at);
-      if (s !== null && en !== null && en > s) total += (en - s) / 1000;
-      pendingPauseAt = null;
-    }
-  }
-  // Still-open pause with no resume/cancel recorded yet: count up to `now`.
-  if (pendingPauseAt) {
-    const s = toMillis(pendingPauseAt);
-    const en = toMillis(nowIso);
-    if (s !== null && en !== null && en > s) total += (en - s) / 1000;
-  }
-  return total;
+// --- time.human_wait_s: the TRUE total of real pause/resume (and pause/cancel, and a still-open
+// pause) intervals from the lifecycle ledger — independent of phase-window attribution, so it
+// stays correct even when a pause falls in the undropped pre-first-transition gap (see
+// derivePhaseWindows) where no phase window exists to attribute it to. phases[].human_wait_s
+// (mergePhaseWindowsIntoPhases) is the best-effort PER-PHASE breakdown of this same total and may
+// sum to slightly less than it in that one disclosed edge case.
+function deriveHumanWaitSeconds(pauseIntervals) {
+  return pauseIntervals.reduce((sum, iv) => sum + (iv.endMs - iv.startMs) / 1000, 0);
+}
+
+// --- multi_cursor (review finding 5, MEDIUM->refusal): the installed Flow schema supports
+// durable concurrent step claims (active_claims/claim_history). This tool's single-cursor,
+// one-phase-active-between-any-two-transitions model has no awareness of concurrent claims — if
+// one is genuinely active, the phase-window derivation above would silently attribute wrong,
+// overlapping windows. Refuse rather than guess: every real run inspected today has an empty,
+// inert multi_cursor ledger, so this never fires in practice yet.
+function multiCursorActive(state) {
+  const mc = state.multi_cursor;
+  if (!mc || typeof mc !== 'object') return false;
+  const activeClaims = Array.isArray(mc.active_claims) ? mc.active_claims.length : 0;
+  const claimHistory = Array.isArray(mc.claim_history) ? mc.claim_history.length : 0;
+  return activeClaims > 0 || claimHistory > 0;
 }
 
 export function deriveFlowRunEconomics(state, { nowIso = new Date().toISOString() } = {}) {
@@ -220,16 +278,30 @@ export function deriveFlowRunEconomics(state, { nowIso = new Date().toISOString(
   if (!Array.isArray(state.transitions)) {
     return { ok: false, reason: 'flow run state.json "transitions" is not an array' };
   }
+  if (!KNOWN_FLOW_STATUSES.has(state.status)) {
+    return {
+      ok: false,
+      reason: `flow run state.json has an unrecognized status "${state.status}" — refusing rather than silently bucketing it into active_abandoned (flow-agents#925)`,
+    };
+  }
+  if (multiCursorActive(state)) {
+    return {
+      ok: false,
+      reason: 'flow run state.json carries active multi_cursor concurrent step claims; single-cursor phase-window derivation is not supported for this run (flow-agents#922 follow-up)',
+    };
+  }
 
   const transitions = state.transitions;
   const lifecycle = Array.isArray(state.lifecycle) ? state.lifecycle : [];
   const terminalStatus = deriveTerminalStatus(state.status);
+  const pauseIntervals = derivePauseIntervals(lifecycle, nowIso);
   const windows = derivePhaseWindows(transitions, state.status, state.updated_at ?? null, nowIso);
-  const phases = mergePhaseWindowsIntoPhases(windows);
+  const phases = mergePhaseWindowsIntoPhases(windows, pauseIntervals);
   const iterations = deriveIterations(transitions);
   const gateFires = deriveGateFires(state, transitions);
   const verificationVerdict = deriveVerificationVerdict(transitions, terminalStatus);
-  const humanWaitS = deriveHumanWaitSeconds(lifecycle, nowIso);
+  const humanWaitS = deriveHumanWaitSeconds(pauseIntervals);
+  // ACTIVE total: sum of phases[].wall_clock_s, which is now pause-EXCLUDED per phase (finding 2).
   const wallClockS = phases.reduce((sum, p) => sum + (p.wall_clock_s || 0), 0);
   // The record's own "as-of" timestamp: for a terminal run this is the last real state mutation
   // (state.updated_at); for a still-active run it is the moment THIS record is produced (nowIso) —

@@ -4,7 +4,11 @@
   "human_wait_s": 40,
   "phase_wall_clock_s": {
     "design-probe": 50,
-    "plan": 55
+    "plan": 15
+  },
+  "phase_human_wait_s": {
+    "design-probe": 0,
+    "plan": 40
   },
   "iterations": {
     "count": 1,
@@ -14,5 +18,5 @@
     "gate_fires": 0,
     "verification_verdict": "NOT_VERIFIED"
   },
-  "total_wall_clock_s": 105
+  "total_wall_clock_s": 65
 }
