@@ -47,6 +47,11 @@
 //     ordinary "user modified this") -- both exit 0, consistent with this file's existing
 //     content-hash TOCTOU preserve design; the report's "Preserved" section always names the
 //     specific reason, so this is a coarser exit code, not a report accuracy gap.
+//   - `--dry-run` reports the PLAN, not a simulation of apply-time re-verification: a file whose
+//     content drifts (or whose parent containment would fail) between plan and a hypothetical
+//     apply is printed as "would be removed" even though a real run's apply-time re-checks would
+//     preserve it. The error direction is conservative (dry-run over-states removal; the real run
+//     never removes more than dry-run showed), and no eval currently exercises dry-run fidelity.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
