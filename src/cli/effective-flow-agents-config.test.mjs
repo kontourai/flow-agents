@@ -201,3 +201,61 @@ test("Kit proposals reject authority outside Flow gate expectation overrides", (
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Flow 5.0 (docs/migrations/5.0.0.md: "trusted-producer authority is embedded,
+// scoped TrustBundle data") removed `authority_traces`/`authority_refs` as
+// opaque attachment metadata and renamed the project-config field
+// `authority_refs`. A Kit proposal authored before this migration may still
+// carry the legacy `authority_traces` name. Before the schema was amended to
+// drop it, this name still validated against the committed Kit schema, so it
+// only failed later at previewFlowConfigMerge (Flow's own recursive
+// rejectLegacyAuthorityTraces) — a real Flow config merge exception,
+// swallowed into `kits[].diagnostics` by inspectEffectiveFlowAgentsConfig's
+// generic try/catch, indistinguishable there from any other unexpected merge
+// failure. This proves the field is now caught EARLY with a diagnostic that
+// names the exact path and the migration ("rename to authority_refs"),
+// never silently falling through to previewFlowConfigMerge at all.
+test("a legacy authority_traces field in a committed Kit proposal fails closed with a clear, actionable migration diagnostic", () => {
+  const root = fixture();
+  try {
+    writeJson(path.join(root, ".flow-agents/config/builder.kit.config.json"), {
+      schema_version: "1.0",
+      kit_id: "builder",
+      gate_overrides: {
+        "verify-gate": { expectations: { "tests-evidence": { required: true, authority_traces: ["fixture:release"] } } },
+      },
+    });
+    commit(root, "legacy authority_traces kit config");
+    const report = inspectEffectiveFlowAgentsConfig(root);
+    assert.equal(report.fail_closed, true);
+    assert.equal(report.kits[0].state, "invalid");
+    assert.equal(report.kits[0].diagnostics.length, 1, "must name exactly the legacy field, not a generic schema dump");
+    assert.match(report.kits[0].diagnostics[0], /gate_overrides\.verify-gate\.expectations\.tests-evidence\.authority_traces/);
+    assert.match(report.kits[0].diagnostics[0], /removed/);
+    assert.match(report.kits[0].diagnostics[0], /authority_refs/, "must name the migration target, not just reject");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the renamed authority_refs field is accepted and previews cleanly against Flow's own vocabulary", () => {
+  const root = fixture();
+  try {
+    writeJson(path.join(root, ".flow-agents/config/builder.kit.config.json"), {
+      schema_version: "1.0",
+      kit_id: "builder",
+      gate_overrides: {
+        "verify-gate": { expectations: { "tests-evidence": { required: true, authority_refs: ["fixture:release"] } } },
+      },
+    });
+    writeJson(path.join(root, ".flow/config.json"), { schema_version: "0.1" });
+    commit(root, "authority_refs kit config");
+    activate(root, ["builder"]);
+    const report = inspectEffectiveFlowAgentsConfig(root);
+    assert.equal(report.fail_closed, false);
+    assert.equal(report.kits[0].state, "committed");
+    assert.equal(report.kits[0].flow_merge_preview.status, "ready");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

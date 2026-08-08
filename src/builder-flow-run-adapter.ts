@@ -49,7 +49,6 @@ export interface BuilderBuildTrustBundleEvidenceInput {
   expectedSha256?: string;
   status?: "passed" | "failed";
   producer?: string;
-  authorityTrace?: string;
   routeReason?: string;
   expectationIds?: string[];
   supersede?: string | string[];
@@ -510,7 +509,7 @@ function trustBundleAttachOptions(
   expectedSha256: string,
   expectedRunHead: string,
   correlation: RunCorrelationPresence,
-): JsonObject {
+): JsonObject & { gate: string; file: string } {
   const analytics = {
     ...(evidence.analytics ?? {}),
     run_correlation: correlation.status === "present"
@@ -527,7 +526,11 @@ function trustBundleAttachOptions(
     bundle: true,
     ...(evidence.status ? { status: evidence.status } : {}),
     ...(evidence.producer ? { producer: evidence.producer } : {}),
-    ...(evidence.authorityTrace ? { authorityTrace: evidence.authorityTrace } : {}),
+    // authorityTrace is no longer an attachEvidence option under Flow 5.0 (it
+    // throws on unknown keys); the operation-authority binding is now embedded
+    // in the bundle content itself before this function is ever called — see
+    // publishChangeAuthorityRef / writePublishChangeEvidence in
+    // builder-flow-runtime.ts.
     ...(evidence.routeReason ? { route_reason: evidence.routeReason } : {}),
     ...(evidence.expectationIds ? { expectation_ids: evidence.expectationIds } : {}),
     ...(evidence.supersede ? { supersede: evidence.supersede } : {}),
