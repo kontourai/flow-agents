@@ -413,6 +413,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check init-uninstall-integration
 
+      - name: Kit activation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-activation-integration
+
       - name: Activate npx context integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check activate-npx-context-integration

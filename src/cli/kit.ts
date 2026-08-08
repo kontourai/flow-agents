@@ -4,13 +4,36 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, pruneEmptyDirs, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
-import { defaultCodexHome } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, claudeCodeGlobalDest } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
+import {
+  hashFile,
+  listOwnedTree,
+  readOwnedFilesManifest,
+  writeOwnedFilesManifest,
+  mergeOwnedFilesManifestEntries,
+  removeOwnedFilesManifestEntries,
+  resolveManifestEntryPath,
+  resolveManifestEntrySha256,
+  assertManifestEntryParentContained,
+  ManifestContainmentViolationError,
+  type OwnedFileEntry,
+} from "../lib/owned-files-manifest.js";
+import {
+  catalogKitIds as registryCatalogKitIds,
+  loadCatalogKitManifest,
+  kitDependencyIds,
+  catalogKitSkillNames,
+  readActiveKitsValidated,
+  writeActiveKits,
+  readPackageVersion,
+  type ActiveKitEntry,
+} from "../lib/kit-registry.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
@@ -37,7 +60,9 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 
 const KIT_USAGE: Record<string, string> = {
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
-  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
+    + "   or: flow-agents kit activate <kit-id> (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
+  deactivate: "usage: flow-agents kit deactivate <kit-id> (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)",
   validate: "usage: flow-agents kit validate [<kit-dir>]",
   provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
   inspect: "usage: flow-agents kit inspect [<kit-dir>] [--json]",
@@ -50,11 +75,13 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
-  activate   Write runtime projections for installed and built-in kits.
+  activate   Write runtime projections for installed and built-in kits, OR (with a <kit-id>
+             positional) activate one built-in kit for a claude-code install.
+  deactivate Deactivate one built-in kit (<kit-id>) for a claude-code install.
   validate   Validate a Flow Kit repository.
   provision  Copy a kit's declared provisions into a target repository.
   inspect    Report a kit's conformance and consumer targets.
@@ -562,6 +589,519 @@ function activate(argv: string[]): number {
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
 
+// ─── Built-in kit activation lifecycle ─────────────────────────────────────────────────────
+//
+// `flow-agents kit activate <kit-id>` / `flow-agents kit deactivate <kit-id>` give a BUILT-IN
+// kit (kits/catalog.json: builder, knowledge, release-evidence) a real on/off switch for a
+// claude-code install, distinct from the third-party install/activate machinery above (which
+// targets `dest/kits/local/` and codex/strands runtime projections). Scope, deliberately:
+//   - claude-code only (--global | --dest), mirroring `flow-agents init --uninstall`'s own
+//     runtime scope and reusing its dest-resolution shape.
+//   - Requires a manifest-backed install (`.flow-agents/owned-files.json`, written by every
+//     current `flow-agents init --runtime claude-code` install). A legacy pre-manifest install
+//     has no per-file ownership record to safely add to or remove from, so both verbs fail
+//     closed with a clear message rather than guessing; this is a disclosed scope decision, not
+//     an oversight (see kontourai/flow-agents kit-activation-registry delivery notes).
+//   - Only touches SKILL files a kit's own `kit.json` `skills` array declares (the flat
+//     `.claude/skills/<name>/` or `skills/<name>/` directories a compiled bundle installs them
+//     into -- see src/tools/build-universal-bundles.ts's collectAllSkills()). The ENGINE
+//     (hooks, telemetry, agents/) is never touched by either verb.
+
+type BuiltinKitDestResult = { ok: true; dest: string; global: boolean } | { ok: false; error: string };
+
+function resolveBuiltinKitDest(flags: ReturnType<typeof parseArgs>["flags"]): BuiltinKitDestResult {
+  const isGlobal = flagBool(flags, "global") ?? false;
+  const destFlag = flagString(flags, "dest");
+  if (isGlobal && destFlag) return { ok: false, error: "kit activate/deactivate: --global and --dest are mutually exclusive" };
+  if (!isGlobal && !destFlag) return { ok: false, error: "kit activate/deactivate: provide --global or --dest <path>" };
+  return { ok: true, dest: isGlobal ? claudeCodeGlobalDest() : path.resolve(destFlag as string), global: isGlobal };
+}
+
+/**
+ * Resolve the compiled claude-code bundle directory (`dist/claude-code`), which
+ * `flow-agents kit activate <id>` copies a built-in kit's skill files FROM. Deliberately does
+ * NOT auto-build it (unlike `src/cli/init.ts`'s `ensureBundle`, which falls back to invoking
+ * `build-universal-bundles.ts`) -- that fallback statically imports esbuild, and importing it
+ * from this module would break `scripts/kit.js` when it runs standalone from an installed
+ * destination that ships no node_modules (e.g. a Codex home install -- see kontourai/flow-agents
+ * kit-activation-registry delivery notes). A missing bundle here is reported as an actionable
+ * error instead.
+ */
+function resolveClaudeCodeBundleDir(): string {
+  const bundle = path.join(root, "dist", "claude-code");
+  if (!fs.existsSync(path.join(bundle, "install.sh"))) {
+    throw new Error(`compiled claude-code bundle not found at ${bundle}; run 'npm run build:bundles' first`);
+  }
+  return bundle;
+}
+
+function skillsPrefixFor(global: boolean): string {
+  return global ? "skills" : ".claude/skills";
+}
+
+function knownBuiltinKitIds(): Set<string> {
+  return new Set(registryCatalogKitIds(root));
+}
+
+function unknownBuiltinKitError(command: string, kitId: string): string {
+  const known = [...knownBuiltinKitIds()].sort();
+  return `kit ${command}: unknown built-in kit '${kitId}'; known kits: ${known.join(", ") || "(none)"}`;
+}
+
+type ActivateFilePlan = { skillName: string; rel: string; manifestPath: string; srcFile: string; destFile: string };
+
+/**
+ * Classify every file a kit's skills would install against the current destination state,
+ * BEFORE any copy happens (r1 review HIGH finding: `copyDirMerge` used to overwrite any
+ * differing dest file unconditionally, silently clobbering a file `kit deactivate` had just
+ * preserved and reported as user-modified).
+ *
+ * A file is a CONFLICT (preserved, not overwritten, unless `force`) when it exists at dest, its
+ * content differs from the incoming bundle content, AND EITHER there is no existing manifest
+ * record for it OR the manifest's recorded hash does not match the file's current content -- i.e.
+ * it was modified since it was last (or would have been) recorded, exactly uninstall.ts's own
+ * "content modified since install (sha256 mismatch)" signal, reused here on the write side. A
+ * file whose current content matches what the manifest already recorded is NOT a conflict even
+ * though it differs from the new bundle content -- that is an ordinary kit-content update
+ * (a newer bundle shipping different skill text), safe to overwrite exactly like a normal
+ * reinstall already does.
+ */
+type ActivateFileConflict = { plan: ActivateFilePlan; reason: string };
+
+function planActivateFiles(
+  dest: string,
+  skillNames: string[],
+  skillsSourceRoot: string,
+  skillsDestRoot: string,
+  skillsPrefix: string,
+  manifestByPath: Map<string, OwnedFileEntry>,
+): { toCopy: ActivateFilePlan[]; conflicts: ActivateFileConflict[] } {
+  const toCopy: ActivateFilePlan[] = [];
+  const conflicts: ActivateFileConflict[] = [];
+  for (const name of skillNames) {
+    const sourceDir = path.join(skillsSourceRoot, name);
+    const destDir = path.join(skillsDestRoot, name);
+    const { files } = listOwnedTree(sourceDir);
+    for (const rel of files) {
+      const srcFile = path.join(sourceDir, ...rel.split("/"));
+      const destFile = path.join(destDir, ...rel.split("/"));
+      const manifestPath = `${skillsPrefix}/${name}/${rel}`;
+      const plan: ActivateFilePlan = { skillName: name, rel, manifestPath, srcFile, destFile };
+      // PLAN-TIME containment, reusing assertManifestEntryParentContained -- the exact primitive
+      // deactivateBuiltinKit/uninstall.ts use for removal, not a re-implementation -- BEFORE any
+      // lstat-based classification below. r2 review HIGH finding: classification used to run off
+      // fs.lstatSync(destFile) on the FINAL path component only; if the skill DIRECTORY itself
+      // had been replaced by a symlink to a location that does not yet contain the file,
+      // lstatSync(destFile) threw ENOENT (nothing exists at the resolved-through-symlink
+      // location), silently treated as "ordinary new file, safe to copy" -- the OS transparently
+      // resolves a symlinked ancestor, so this check must run unconditionally for every planned
+      // file, not only ones that already exist. Throws on the first violation, aborting the WHOLE
+      // activate call before any write (propagates to activateBuiltinKit's try/catch) -- exactly
+      // how a poisoned manifest entry aborts the whole uninstall/deactivate plan, never partially
+      // proceeding on files planned before the bad one.
+      assertManifestEntryParentContained(dest, destFile, manifestPath);
+      let destStat: fs.Stats | undefined;
+      try {
+        destStat = fs.lstatSync(destFile);
+      } catch {
+        destStat = undefined;
+      }
+      if (!destStat) {
+        toCopy.push(plan);
+        continue;
+      }
+      if (destStat.isSymbolicLink() || !destStat.isFile()) {
+        conflicts.push({ plan, reason: "existing destination is not a regular file; preserved" });
+        continue;
+      }
+      const destHash = hashFile(destFile);
+      const srcHash = hashFile(srcFile);
+      if (destHash === srcHash) {
+        toCopy.push(plan); // already identical; harmless to (re-)write
+        continue;
+      }
+      const manifestEntry = manifestByPath.get(manifestPath);
+      if (manifestEntry && manifestEntry.sha256 === destHash) {
+        toCopy.push(plan); // matches what was recorded installed -- an ordinary kit-content update
+        continue;
+      }
+      conflicts.push({ plan, reason: "content modified since install (sha256 mismatch); preserved" });
+    }
+  }
+  return { toCopy, conflicts };
+}
+
+/**
+ * Write one file, NEVER following a symlink (or any non-regular-file) sitting at `destFile`
+ * itself: if one is present, it is unlinked first so a fresh regular file is created AT that
+ * exact path, never through it to wherever it points. r2 review HIGH-adjacent finding: `--force`
+ * used to fold a symlinked-file conflict straight into a plain `fs.copyFileSync(src, destFile)`,
+ * which follows the symlink and overwrites its EXTERNAL target while the CLI reported
+ * `overwritten (--force): <in-dest manifest path>` as if the write had landed inside `dest`.
+ * Returns whether an existing symlink/non-regular-file was replaced, so the caller can report
+ * truthfully what actually happened rather than what was merely planned.
+ */
+function writeActivateFileNeverFollowingSymlink(plan: ActivateFilePlan): { replacedSymlink: boolean } {
+  let existingStat: fs.Stats | undefined;
+  try {
+    existingStat = fs.lstatSync(plan.destFile);
+  } catch {
+    existingStat = undefined;
+  }
+  const replacedSymlink = Boolean(existingStat && (existingStat.isSymbolicLink() || !existingStat.isFile()));
+  if (replacedSymlink) fs.rmSync(plan.destFile, { force: true });
+  fs.mkdirSync(path.dirname(plan.destFile), { recursive: true });
+  fs.copyFileSync(plan.srcFile, plan.destFile);
+  return { replacedSymlink };
+}
+
+async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const dryRun = flagBool(args.flags, "dry-run") ?? false;
+  const force = flagBool(args.flags, "force") ?? false;
+  const destResult = resolveBuiltinKitDest(args.flags);
+  if (!destResult.ok) {
+    console.error(destResult.error);
+    return 2;
+  }
+  const { dest, global } = destResult;
+
+  const catalogIds = knownBuiltinKitIds();
+  if (!catalogIds.has(kitId)) {
+    console.error(unknownBuiltinKitError("activate", kitId));
+    return 2;
+  }
+  if (!fs.existsSync(dest)) {
+    console.error(`kit activate: destination does not exist: ${dest}`);
+    return 1;
+  }
+  const manifest = readOwnedFilesManifest(dest);
+  if (!manifest) {
+    console.error(`kit activate: no ownership manifest found at ${dest}; built-in kit activation requires a manifest-backed claude-code install (run 'flow-agents init --runtime claude-code' first)`);
+    return 1;
+  }
+  if (manifest.runtime !== "claude-code") {
+    console.error(`kit activate: durable ownership manifest at ${dest} belongs to runtime '${manifest.runtime}', not claude-code`);
+    return 1;
+  }
+
+  // Validate the registry BEFORE any filesystem mutation (r1 review MEDIUM finding: a single
+  // corrupt/hand-edited entry anywhere in active_kits used to only surface as an unhandled
+  // exception thrown by writeActiveKits AFTER files had already been copied).
+  const activeKitsResult = readActiveKitsValidated(dest, root);
+  if (!activeKitsResult.ok) {
+    console.error(`kit activate: active_kits registry at ${dest} is corrupt, refusing before any change: ${activeKitsResult.errors.join("; ")}`);
+    return 1;
+  }
+  const activeKits = activeKitsResult.entries;
+  if (activeKits.some((entry) => entry.id === kitId)) {
+    console.log(`kit '${kitId}' is already active at ${dest}`);
+    return 0;
+  }
+
+  const loaded = loadCatalogKitManifest(root, kitId);
+  if (!loaded) {
+    console.error(`kit activate: could not load kit.json for catalog kit '${kitId}'`);
+    return 1;
+  }
+  const skillNames = catalogKitSkillNames(root, kitId);
+  let bundle: string;
+  try {
+    bundle = resolveClaudeCodeBundleDir();
+  } catch (error) {
+    console.error(`kit activate: ${(error as Error).message}`);
+    return 1;
+  }
+  const skillsPrefix = skillsPrefixFor(global);
+  const skillsDestRoot = path.join(dest, ...skillsPrefix.split("/"));
+  const skillsSourceRoot = path.join(bundle, ".claude", "skills");
+
+  const missingSource = skillNames.find((name) => !fs.existsSync(path.join(skillsSourceRoot, name, "SKILL.md")));
+  if (missingSource) {
+    console.error(`kit activate: kit '${kitId}' declares skill '${missingSource}' but it is missing from the compiled claude-code bundle`);
+    return 1;
+  }
+
+  const manifestByPath = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  let toCopy: ActivateFilePlan[];
+  let conflicts: ActivateFileConflict[];
+  try {
+    ({ toCopy, conflicts } = planActivateFiles(dest, skillNames, skillsSourceRoot, skillsDestRoot, skillsPrefix, manifestByPath));
+  } catch (error) {
+    // r2 review HIGH finding: a plan-time containment violation (a symlinked skill directory
+    // pointing outside dest) must hard-abort the WHOLE call before any write, naming the entry --
+    // never partially proceed on files planned before the bad one.
+    console.error(`kit activate: ${(error as Error).message}`);
+    return 2;
+  }
+  // With --force, a conflict is overwritten instead of preserved -- fold it into the copy set.
+  const preserved = force ? [] : conflicts;
+  const forced = force ? conflicts : [];
+  const filesToWrite: ActivateFilePlan[] = [...toCopy, ...forced.map((c) => c.plan)];
+
+  if (dryRun) {
+    for (const plan of filesToWrite) console.log(`would copy: ${plan.srcFile} -> ${plan.destFile}`);
+    for (const entry of preserved) console.log(`  would preserve: ${entry.plan.manifestPath}  [${entry.reason}]`);
+    for (const entry of forced) console.log(`  would overwrite (--force): ${entry.plan.manifestPath}  [${entry.reason}]`);
+    console.log(`dry-run: would activate kit '${kitId}' (${skillNames.length} skill(s), ${filesToWrite.length} file(s) to copy, ${preserved.length} preserved) at ${dest}`);
+    return 0;
+  }
+
+  const newManifestEntries: OwnedFileEntry[] = [];
+  const applyPreserved: { relPath: string; reason: string }[] = [];
+  const replacedSymlinkPaths = new Set<string>();
+  for (const plan of filesToWrite) {
+    // APPLY-TIME containment re-check (TOCTOU), same class and same reused primitive as
+    // deactivateBuiltinKit's own apply-time re-check: violation here does NOT abort the rest of
+    // the run (plan-time already ruled out every OTHER entry) -- preserve-not-write this one file
+    // and continue, matching uninstall.ts's own apply-vs-plan asymmetry (plan aborts everything;
+    // apply preserves just the one entry that changed underneath it).
+    try {
+      assertManifestEntryParentContained(dest, plan.destFile, plan.manifestPath);
+    } catch (error) {
+      const reason = error instanceof ManifestContainmentViolationError
+        ? "parent directory now resolves outside the install root through a symlink"
+        : `could not verify parent directory containment: ${(error as Error).message}`;
+      applyPreserved.push({ relPath: plan.manifestPath, reason: `${reason}; preserved (re-checked immediately before write)` });
+      continue;
+    }
+    // r2 review HIGH-adjacent finding: NEVER follow a symlink (or write through any non-regular-
+    // file) sitting at the exact destination path -- --force used to fold a symlinked-FILE
+    // conflict into a plain fs.copyFileSync, which follows the symlink and overwrites its
+    // EXTERNAL target while the report claimed the in-dest manifest path was overwritten.
+    const { replacedSymlink } = writeActivateFileNeverFollowingSymlink(plan);
+    if (replacedSymlink) replacedSymlinkPaths.add(plan.manifestPath);
+    newManifestEntries.push({ path: plan.manifestPath, sha256: hashFile(plan.destFile) });
+  }
+  writeOwnedFilesManifest(dest, mergeOwnedFilesManifestEntries(manifest, newManifestEntries));
+
+  const pkgVersion = readPackageVersion(root);
+  const nextActiveKits: ActiveKitEntry[] = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
+  writeActiveKits(dest, root, nextActiveKits);
+
+  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s), ${newManifestEntries.length} file(s) copied) at ${dest}`);
+  if (preserved.length) {
+    console.log(`${preserved.length} file(s) were user-modified and NOT overwritten (rerun with --force to overwrite):`);
+    for (const entry of preserved) console.log(`  preserved: ${entry.plan.manifestPath}  [${entry.reason}]`);
+  }
+  if (applyPreserved.length) {
+    console.log(`${applyPreserved.length} file(s) were preserved due to a containment check immediately before write:`);
+    for (const entry of applyPreserved) console.log(`  preserved: ${entry.relPath}  [${entry.reason}]`);
+  }
+  if (forced.length) {
+    // Truthful report (r2 review): say what ACTUALLY happened at write time (recorded in
+    // replacedSymlinkPaths), never just restate the plan-time classification reason.
+    console.log(`${forced.length} conflicting file(s) were overwritten because --force was given:`);
+    for (const entry of forced) {
+      const wasPreservedAtApply = applyPreserved.some((p) => p.relPath === entry.plan.manifestPath);
+      if (wasPreservedAtApply) continue; // already reported above; --force cannot override a containment violation
+      const action = replacedSymlinkPaths.has(entry.plan.manifestPath)
+        ? "replaced symlink with a regular file (--force)"
+        : "overwritten (--force)";
+      console.log(`  ${action}: ${entry.plan.manifestPath}  [${entry.reason}]`);
+    }
+  }
+
+  // Dependency awareness (non-blocking): suggest, never auto-install.
+  const depIds = kitDependencyIds(loaded.manifest, loaded.manifestPath);
+  const activeIdSet = new Set(nextActiveKits.map((entry) => entry.id));
+  const destArg = global ? "--global" : `--dest ${dest}`;
+  for (const dep of depIds) {
+    if (!activeIdSet.has(dep)) {
+      console.log(`suggestion: kit '${kitId}' declares a dependency on '${dep}' which is not active; consider 'flow-agents kit activate ${dep} ${destArg}'`);
+    }
+  }
+  return 0;
+}
+
+type DeactivatePlanEntry = { relPath: string; absPath: string; expectedSha256: string };
+
+/**
+ * Classify each planned removal against the CURRENT on-disk state, without mutating anything --
+ * the accurate removed/preserved split, shared by `--dry-run` (report only) and the real apply
+ * path (report AND actually remove). r1 review MEDIUM finding: `--dry-run` used to print `would
+ * remove: X` for every planned entry unconditionally, overclaiming for any file a real run would
+ * preserve because it was user-modified -- this is the single source of truth both paths now read
+ * from, matching uninstall.ts's own dry-run/apply parity (`dryRunOutcome` there is fed from the
+ * same plan-time hash-checked split apply uses, never a separate weaker check).
+ */
+function classifyDeactivateEntries(planned: DeactivatePlanEntry[]): { toRemove: DeactivatePlanEntry[]; preserved: { relPath: string; reason: string }[] } {
+  const toRemove: DeactivatePlanEntry[] = [];
+  const preserved: { relPath: string; reason: string }[] = [];
+  for (const entry of planned) {
+    if (!fs.existsSync(entry.absPath)) {
+      toRemove.push(entry); // already gone -- counts as "removed" (no-op) for both dry-run and apply
+      continue;
+    }
+    const stat = fs.lstatSync(entry.absPath);
+    if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
+      preserved.push({ relPath: entry.relPath, reason: "content modified since install (sha256 mismatch); preserved" });
+      continue;
+    }
+    toRemove.push(entry);
+  }
+  return { toRemove, preserved };
+}
+
+async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const dryRun = flagBool(args.flags, "dry-run") ?? false;
+  const force = flagBool(args.flags, "force") ?? false;
+  const destResult = resolveBuiltinKitDest(args.flags);
+  if (!destResult.ok) {
+    console.error(destResult.error);
+    return 2;
+  }
+  const { dest, global } = destResult;
+
+  const catalogIds = knownBuiltinKitIds();
+  if (!catalogIds.has(kitId)) {
+    console.error(unknownBuiltinKitError("deactivate", kitId));
+    return 2;
+  }
+  if (!fs.existsSync(dest)) {
+    console.error(`kit deactivate: nothing to deactivate (destination does not exist): ${dest}`);
+    return 3;
+  }
+  const manifest = readOwnedFilesManifest(dest);
+  if (!manifest) {
+    console.error(`kit deactivate: no ownership manifest found at ${dest}; built-in kit deactivation requires a manifest-backed claude-code install`);
+    return 1;
+  }
+  // Parity with activateBuiltinKit's own check (r1 review LOW finding). Currently unreachable in
+  // practice -- owned-files.json is only ever written on claude-code install paths -- but a
+  // future manifest-writing runtime must not silently let deactivate touch its files.
+  if (manifest.runtime !== "claude-code") {
+    console.error(`kit deactivate: durable ownership manifest at ${dest} belongs to runtime '${manifest.runtime}', not claude-code`);
+    return 1;
+  }
+
+  // Validate the registry BEFORE any filesystem mutation (same rationale as activateBuiltinKit).
+  const activeKitsResult = readActiveKitsValidated(dest, root);
+  if (!activeKitsResult.ok) {
+    console.error(`kit deactivate: active_kits registry at ${dest} is corrupt, refusing before any change: ${activeKitsResult.errors.join("; ")}`);
+    return 1;
+  }
+  const activeKits = activeKitsResult.entries;
+  if (!activeKits.some((entry) => entry.id === kitId)) {
+    console.log(`kit '${kitId}' is not active at ${dest}`);
+    return 3;
+  }
+
+  // Dependency awareness: deactivating a dependency of another ACTIVE kit is blocked unless
+  // --force. The dependent kit's own activation record is left untouched either way -- this
+  // only warns/blocks removing what it depends on.
+  const dependents: string[] = [];
+  for (const other of activeKits) {
+    if (other.id === kitId) continue;
+    const loadedOther = loadCatalogKitManifest(root, other.id);
+    if (!loadedOther) continue;
+    if (kitDependencyIds(loadedOther.manifest, loadedOther.manifestPath).includes(kitId)) dependents.push(other.id);
+  }
+  if (dependents.length && !force) {
+    console.error(`kit deactivate: '${kitId}' is a dependency of active kit(s): ${dependents.join(", ")}; rerun with --force to deactivate anyway (their workflows may break)`);
+    return 1;
+  }
+  if (dependents.length && force) {
+    console.log(`warning: deactivating '${kitId}' which active kit(s) ${dependents.join(", ")} depend on; those kits' workflows may now be broken`);
+  }
+
+  const skillNames = catalogKitSkillNames(root, kitId);
+  const skillsPrefix = skillsPrefixFor(global);
+  const ownedPrefixes = skillNames.map((name) => `${skillsPrefix}/${name}/`);
+  const relevantEntries = manifest.files.filter((entry) => ownedPrefixes.some((prefix) => entry.path.startsWith(prefix)));
+
+  const planned: DeactivatePlanEntry[] = [];
+  try {
+    for (const entry of relevantEntries) {
+      const absPath = resolveManifestEntryPath(dest, entry.path);
+      const expectedSha256 = resolveManifestEntrySha256(entry.path, entry.sha256);
+      assertManifestEntryParentContained(dest, absPath, entry.path);
+      planned.push({ relPath: entry.path, absPath, expectedSha256 });
+    }
+  } catch (error) {
+    // r2 review MEDIUM finding: this plan-time loop's three throwing calls (a malformed manifest
+    // path/sha256, or a poisoned entry whose parent resolves outside dest -- e.g. the r2 activate
+    // HIGH finding's exact poisoned-manifest byproduct) were previously unguarded, reaching
+    // kit.ts's top-level `.catch` and printing a raw Node stack trace with internal file paths.
+    // uninstall.ts's own equivalent plan-time call is protected by its caller's try/catch
+    // (buildPlan() wrapped in main()); this mirrors that -- a clean, defined CLI error before any
+    // removal, matching uninstall.ts's own "malformed manifest entry" exit code (2).
+    console.error(`kit deactivate: ${(error as Error).message}`);
+    return 2;
+  }
+
+  if (dryRun) {
+    const { toRemove, preserved } = classifyDeactivateEntries(planned);
+    for (const entry of toRemove) console.log(`would remove: ${entry.relPath}`);
+    for (const entry of preserved) console.log(`  would preserve: ${entry.relPath}  [${entry.reason}]`);
+    console.log(`dry-run: would deactivate kit '${kitId}' (${toRemove.length} file(s) to remove, ${preserved.length} preserved) at ${dest}`);
+    return 0;
+  }
+
+  // TEST-ONLY hook (mirrors uninstall.ts's FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_*):
+  // simulate an external actor swapping a planned entry's parent directory for a symlink escaping
+  // `dest` between planning and removal, so the apply-time containment re-check below can be
+  // exercised deterministically without racing a real background process. Never read outside this
+  // module's own eval fixtures; not part of the public CLI surface.
+  const toctouSwapPath = process.env["FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_PATH"];
+  const toctouSwapTarget = process.env["FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_TARGET"];
+  if (toctouSwapPath && toctouSwapTarget) {
+    fs.rmSync(toctouSwapPath, { recursive: true, force: true });
+    fs.symlinkSync(toctouSwapTarget, toctouSwapPath);
+  }
+
+  const { toRemove, preserved } = classifyDeactivateEntries(planned);
+  const removedRelPaths = new Set<string>();
+  const removedParentDirs = new Set<string>();
+  const failed: { relPath: string; reason: string }[] = [];
+  for (const entry of toRemove) {
+    try {
+      if (!fs.existsSync(entry.absPath)) {
+        removedRelPaths.add(entry.relPath); // already gone: treat as removed for manifest purposes
+        continue;
+      }
+      // Apply-time re-check #1 (r1 review MEDIUM finding): re-verify the REAL (symlink-resolved)
+      // parent directory still sits inside `dest` immediately before touching anything --
+      // `owned-files-manifest.ts`'s own docstring for assertManifestEntryParentContained mandates
+      // this at BOTH plan time (above) and apply time (here), since an intermediate directory
+      // could be swapped for an escaping symlink during the window between the two. Reuses
+      // uninstall.ts's exact helper and classification, not a re-implementation.
+      try {
+        assertManifestEntryParentContained(dest, entry.absPath, entry.relPath);
+      } catch (error) {
+        const reason = error instanceof ManifestContainmentViolationError
+          ? "parent directory now resolves outside the install root through a symlink"
+          : `could not verify parent directory containment: ${(error as Error).message}`;
+        preserved.push({ relPath: entry.relPath, reason: `${reason}; preserved (re-checked immediately before removal)` });
+        continue;
+      }
+      // Apply-time re-check #2: content hash TOCTOU re-check, same class as uninstall.ts's own
+      // apply loop (redundant with classifyDeactivateEntries under normal conditions; exists for
+      // the race window between classification and this removal).
+      const stat = fs.lstatSync(entry.absPath);
+      if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
+        preserved.push({ relPath: entry.relPath, reason: "content changed since the plan was computed; preserved (re-checked immediately before removal)" });
+        continue;
+      }
+      fs.rmSync(entry.absPath);
+      removedRelPaths.add(entry.relPath);
+      removedParentDirs.add(path.dirname(entry.absPath));
+    } catch (error) {
+      failed.push({ relPath: entry.relPath, reason: (error as Error).message });
+    }
+  }
+  pruneEmptyDirs(dest, removedParentDirs);
+
+  writeOwnedFilesManifest(dest, removeOwnedFilesManifestEntries(manifest, removedRelPaths));
+  writeActiveKits(dest, root, activeKits.filter((entry) => entry.id !== kitId));
+
+  console.log(`deactivated kit '${kitId}': removed ${removedRelPaths.size} file(s), preserved ${preserved.length} modified file(s), failed ${failed.length}`);
+  for (const entry of preserved) console.log(`  preserved: ${entry.relPath}  [${entry.reason}]`);
+  for (const entry of failed) console.log(`  failed: ${entry.relPath}  [${entry.reason}]`);
+  return failed.length > 0 ? 4 : 0;
+}
+
 async function validate(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const kitDir = path.resolve(args.positionals[0] ?? ".");
@@ -669,6 +1209,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     printCommandUsage("activate");
     return 0;
   }
+  if (command === "deactivate" && hasHelp(rest)) {
+    printCommandUsage("deactivate");
+    return 0;
+  }
   if (command === "validate" && hasHelp(rest)) {
     printCommandUsage("validate");
     return 0;
@@ -695,11 +1239,29 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "install-git") return await installGitSource(rest[0] ?? "", rest);
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
-  if (command === "activate") return activate(rest);
+  // `kit activate` overloads on argument shape: a leading non-flag positional is a built-in kit
+  // id (the new activation-lifecycle verb); no positional (only flags, e.g. --adapter) is the
+  // pre-existing runtime-projection verb. Third-party/local kits have no per-id activation verb
+  // (activateCodexLocal/activateStrandsLocal already operate over the whole installed inventory),
+  // so this overload is unambiguous: a positional here can only mean a built-in kit id.
+  if (command === "activate") {
+    const [maybeKitId, ...activateRest] = rest;
+    if (maybeKitId && !maybeKitId.startsWith("-")) return await activateBuiltinKit(maybeKitId, activateRest);
+    return activate(rest);
+  }
+  if (command === "deactivate") {
+    const [kitId, ...deactivateRest] = rest;
+    if (!kitId || kitId.startsWith("-")) {
+      console.error("deactivate: missing <kit-id> argument");
+      console.error(KIT_USAGE.deactivate);
+      return 2;
+    }
+    return await deactivateBuiltinKit(kitId, deactivateRest);
+  }
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> ...");
   return 2;
 }
 
