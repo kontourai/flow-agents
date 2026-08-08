@@ -50,7 +50,9 @@ TMP="$(mktemp -d)"
 # driver file itself lives inside the repo tree (Node's ESM resolver walks up from
 # the importing file's own directory, not the process cwd, to find
 # node_modules). It is written under ROOT and removed on exit.
-DRIVER="$ROOT/.eval-tmp-test-builder-flow-completion-driver.mjs"
+# Per-invocation randomized name: this file must live inside the repo tree for ESM bare-specifier
+# resolution, and a fixed name would let concurrent sibling-session runs delete it mid-run.
+DRIVER="$(mktemp "$ROOT/.eval-tmp-builder-flow-completion-driver-XXXXXX")" && mv "$DRIVER" "$DRIVER.mjs" && DRIVER="$DRIVER.mjs"
 trap 'rm -rf "$TMP" "$DRIVER"' EXIT
 
 errors=0
