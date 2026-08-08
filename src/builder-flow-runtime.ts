@@ -618,7 +618,10 @@ async function advancePublishChangeGate(
         expectedSha256: evidenceFile.sha256,
         expectationIds: ["pull-request-opened"],
         producer: "publish-change-operation-authority",
-        authorityTrace: issued.action_id,
+        // The action_id binding is now embedded in the attached TrustBundle's
+        // own authorityTrace record (see writePublishChangeEvidence), not
+        // passed as an attachEvidence option — Flow 5.0 throws on unknown
+        // attachment options and authorityTrace is no longer one of them.
       },
     });
     if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
@@ -643,6 +646,46 @@ function projectCompletedPublishChange(
   return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection, gateActionEnvelope, progressSnapshot, attached: true, action, observation };
 }
 
+/** Collect the `authorityRef` values from a `trust.bundle` evidence entry's embedded, Flow-5.0-shaped authorityTrace array. */
+function evidenceBundleAuthorityRefs(entry: AnyRecord): Set<string> {
+  const refs = new Set<string>();
+  const bundle = entry.bundle;
+  if (isRecord(bundle) && Array.isArray(bundle.authorityTrace)) {
+    for (const trace of bundle.authorityTrace) {
+      if (isRecord(trace) && typeof trace.authorityRef === "string") refs.add(trace.authorityRef);
+    }
+  }
+  return refs;
+}
+
+/**
+ * Authenticate that a persisted evidence entry was produced by the exact
+ * publish-change action identified by `actionId`.
+ *
+ * Primary path (Flow 5.0+): the action_id is bound as a claim-scoped
+ * `authorityRef` inside the attached TrustBundle's own `authorityTrace` array
+ * (see publishChangeAuthorityRef / writePublishChangeEvidence) — the
+ * replacement for the removed `authorityTrace` attachEvidence option.
+ *
+ * Legacy fallback: evidence attached by flow-agents before this migration
+ * wrote the binding as a flat `authority_trace` string on the evidence entry
+ * (Flow 3.9 accepted that as an attachEvidence option, though Flow itself
+ * documented it as "never used to authorize a gate" — see flow
+ * docs/migrations/5.0.0.md). A long-running builder.build session whose
+ * evidence was attached before an in-place `@kontourai/flow-agents` upgrade
+ * must still be recoverable, so an exact legacy match is still honored on
+ * read. action_id is a locally-computed SHA-256 digest of the full canonical
+ * request (publish-change-operation-authority.ts issuePublishChangeAction),
+ * never an externally-asserted authority — recognizing it here does not
+ * reopen the opaque-authority trust Flow 5.0 closed, it is flow-agents' own
+ * idempotent-replay receipt, orthogonal to Flow's gate-level producer
+ * authorization.
+ */
+function entryAuthenticatesPublishChangeAction(entry: AnyRecord, actionId: string): boolean {
+  if (evidenceBundleAuthorityRefs(entry).has(publishChangeAuthorityRef(actionId))) return true;
+  return entry.authority_trace === actionId;
+}
+
 async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
   const bytes = readPublishChangeResultBytes(context);
   if (!bytes) return false;
@@ -656,7 +699,7 @@ async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext,
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority"
-    && entry.authority_trace === action.action_id
+    && entryAuthenticatesPublishChangeAction(entry, action.action_id)
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
     && entry.expectation_ids[0] === "pull-request-opened"
     && publishChangeEvidenceCarriesDigest(entry, resultDigest));
@@ -1180,7 +1223,15 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
+  // Evaluate at the actual current instant, not Flow's fallback default of
+  // `state.updated_at` (which only advances on a recorded transition, not on
+  // every evidence attachment). Flow 5.0 fails closed on any claim/event
+  // timestamped after its evaluation clock (flow-gates.ts
+  // reconciliationForClaim); using a stale `state.updated_at` here could make
+  // this pre-check under-report readiness (return false when a real
+  // evaluateRun — which does use a live clock — would pass), silently
+  // skipping the sync's real evaluate call below and leaving the run stuck.
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config, new Date().toISOString());
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -1348,6 +1399,19 @@ async function recoverCommittedPublishChange(
   };
 }
 
+/**
+ * Flow 5.0 removed the `authorityTrace` attachEvidence option (opaque, unscoped
+ * metadata); the replacement is a validated, claim-scoped `authorityTrace` record
+ * embedded directly in the attached TrustBundle (Hachure `authorityTrace` array —
+ * see @kontourai/surface schemas/trust-bundle.schema.json). This ref format is the
+ * read side's (hasCommittedPublishChangeRecoveryReceipt, merge-change.ts
+ * resultDigestClaimedByCanonicalRun) authoritative binding between a persisted
+ * evidence entry and the specific publish-change action_id that produced it.
+ */
+export function publishChangeAuthorityRef(actionId: string): string {
+  return `publish-change-operation-authority:${actionId}`;
+}
+
 async function writePublishChangeEvidence(
   context: SessionContext,
   action: IssuedPublishChangeAction,
@@ -1356,8 +1420,9 @@ async function writePublishChangeEvidence(
 ): Promise<{ file: string; sha256: string }> {
   const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
   const timestamp = observation.observed_at;
+  const checkId = `publish-change-${action.action_id}`;
   const check = {
-    id: `publish-change-${action.action_id}`,
+    id: checkId,
     kind: "external",
     status: "pass",
     summary: `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`,
@@ -1380,6 +1445,22 @@ async function writePublishChangeEvidence(
     { flowId: action.binding.definition_id, stepId: action.binding.step_id },
   );
   if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
+  const boundClaim = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyRecord[]).find((claim) => claim && claim.subjectId === `${context.slug}/${checkId}`)
+    : undefined;
+  if (!boundClaim || typeof boundClaim.id !== "string" || typeof boundClaim.subjectType !== "string" || typeof boundClaim.subjectId !== "string") {
+    throw new BuilderBuildRunInputError("publish-change", "operation-bound trust bundle did not produce the expected claim to scope the authority trace to");
+  }
+  bundle.authorityTrace = [{
+    id: `authority.publish-change.${action.action_id}`,
+    subject: { subjectType: boundClaim.subjectType, subjectId: boundClaim.subjectId },
+    actorRef: "flow-agents/publish-change-operation-authority",
+    authorityType: "system",
+    authorityRef: publishChangeAuthorityRef(action.action_id),
+    sourceRef: "publish-change-operation-authority",
+    observedAt: timestamp,
+    claimIds: [boundClaim.id],
+  }];
   const validation = await validateTrustBundle(bundle);
   if (validation.available && !validation.valid) throw new BuilderBuildRunInputError("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
   const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);

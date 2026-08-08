@@ -52,6 +52,33 @@ function validateConfig(file: string, value: unknown, schemaName: string): strin
   return issues.map((issue) => issue.message);
 }
 
+/**
+ * A committed Kit config authored before this Flow 5.0 migration may still
+ * carry the removed `authority_traces` field name (Flow 5.0 renamed it
+ * `authority_refs` — see docs/migrations/5.0.0.md's "trusted-producer
+ * authority is embedded, scoped TrustBundle data"). Once the schema stops
+ * accepting the old name, that config would otherwise fail with only the
+ * generic "<path>.authority_traces is not allowed" schema diagnostic, which
+ * does not say what changed or what to do. Detect it up front and report a
+ * clear, actionable migration message instead of a bare schema rejection.
+ */
+function legacyAuthorityTracesPaths(value: unknown, path = "$"): string[] {
+  const found: string[] = [];
+  const stack: Array<{ value: unknown; path: string }> = [{ value, path }];
+  const visited = new WeakSet<object>();
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (!current.value || typeof current.value !== "object" || Array.isArray(current.value)) continue;
+    if (visited.has(current.value)) continue;
+    visited.add(current.value);
+    for (const [key, entry] of Object.entries(current.value as Record<string, unknown>)) {
+      if (key === "authority_traces") found.push(`${current.path}.${key}`);
+      stack.push({ value: entry, path: `${current.path}.${key}` });
+    }
+  }
+  return found.sort();
+}
+
 function sha256(value: Buffer): string { return crypto.createHash("sha256").update(value).digest("hex"); }
 
 function configPathsAtHead(root: string, commit: string): string[] {
@@ -237,6 +264,14 @@ export function inspectEffectiveFlowAgentsConfig(root: string, options: { enviro
       const value = JSON.parse(bytes.toString("utf8")) as { kit_id: string; gate_overrides: Record<string, unknown> };
       const filenameKitId = path.basename(rel, ".kit.config.json");
       if (value.kit_id !== filenameKitId) return { path: rel, state: "invalid", activation: "not-active", diagnostics: ["Kit config filename stem must exactly match kit_id"] };
+      const legacyAuthorityTraces = legacyAuthorityTracesPaths(value.gate_overrides, `${rel}$.gate_overrides`);
+      if (legacyAuthorityTraces.length) {
+        return {
+          path: rel,
+          state: "invalid",
+          diagnostics: legacyAuthorityTraces.map((at) => `${at} is removed (Flow 5.0); rename it to authority_refs`),
+        };
+      }
       const errors = validateConfig(rel, value, "flow-agents-kit-config.schema.json");
       if (errors.length) return { path: rel, state: "invalid", diagnostics: errors };
       if (activation.diagnostic) return { path: rel, state: "invalid", activation: "not-active", diagnostics: [activation.diagnostic] };
@@ -248,7 +283,7 @@ export function inspectEffectiveFlowAgentsConfig(root: string, options: { enviro
       const flow_merge_preview = previewFlowConfigMerge(flowAuthority.config, {
         schema_version: "0.1",
         gate_overrides: value.gate_overrides,
-      }, { mode: "preview", proposalPath: rel });
+      }, { proposalPath: rel });
       return { path: rel, state: "committed", kit_id: value.kit_id, activation: "active-proposal-only", flow_merge_preview };
     } catch (error) { return { path: rel, state: "invalid", diagnostics: [(error as Error).message || "committed Kit configuration is not valid JSON"] }; }
   });

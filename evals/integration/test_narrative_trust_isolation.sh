@@ -371,10 +371,18 @@ import { evaluateGate } from '@kontourai/flow';
 const definition={id:'isolation',version:'1',steps:[{id:'verify',next:null}],gates:{gate:{step:'verify',expects:[{id:'trust',kind:'trust.bundle',required:true,bundle_claim:{claimType:'builder.execute.scope',subjectType:'change'}}]}}};
 const state={status:'active',current_step:'verify',exceptions:[],transitions:[],gate_outcomes:[]};
 const narrative={id:'narrative',gate_id:'gate',kind:'artifact',requested_kind:'artifact',status:'passed',original_path:'.kontourai/narrative/run/n1/rendered.md'};
-const blocked=evaluateGate(definition,state,{schema_version:'1',evidence:[narrative]},'gate');
+const now=new Date().toISOString();
+const blocked=evaluateGate(definition,state,{schema_version:'1',evidence:[narrative]},'gate',undefined,now);
 if (blocked.status==='pass') process.exit(1);
-const trust={id:'trust',gate_id:'gate',kind:'trust.bundle',requested_kind:'trust.bundle',status:'passed',bundle:{schemaVersion:5,source:'positive',claims:[],evidence:[],policies:[],events:[]},bundle_report:{claims:[{id:'scope',claimType:'builder.execute.scope',subjectType:'change',status:'verified'}]}};
-const passed=evaluateGate(definition,state,{schema_version:'1',evidence:[trust]},'gate');
+// Flow 5.0 always re-derives the claim report from the attached bundle's own
+// claims/evidence/events at evaluation time (never a separately supplied,
+// possibly-stale bundle_report, and never an omitted evaluation clock) — so
+// the positive control must be a genuinely valid, self-consistent bundle.
+const scopeClaim={id:'scope',subjectType:'change',subjectId:'isolation/scope',claimType:'builder.execute.scope',fieldOrBehavior:'positive control fixture',value:'pass',createdAt:now,updatedAt:now};
+const scopeEvidence={id:'evidence.scope',claimId:scopeClaim.id,evidenceType:'human_attestation',method:'attestation',sourceRef:'test_narrative_trust_isolation.sh',excerptOrSummary:'positive control fixture',observedAt:now,collectedBy:'flow-agents-eval'};
+const scopeEvent={id:'event.scope',claimId:scopeClaim.id,status:'verified',actor:'flow-agents-eval',method:'attestation',evidenceIds:[scopeEvidence.id],createdAt:now,verifiedAt:now};
+const trust={id:'trust',gate_id:'gate',kind:'trust.bundle',requested_kind:'trust.bundle',status:'passed',bundle:{schemaVersion:5,source:'positive',claims:[scopeClaim],evidence:[scopeEvidence],policies:[],events:[scopeEvent]}};
+const passed=evaluateGate(definition,state,{schema_version:'1',evidence:[trust]},'gate',undefined,now);
 if (passed.status!=='pass') process.exit(2);
 NODE
 then
