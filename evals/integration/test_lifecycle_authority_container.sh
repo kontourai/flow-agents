@@ -51,7 +51,7 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 3.9.0 reducer closure, and that pin is
+# The privileged coordinator is pinned to the audited Flow 5.0.0 reducer closure, and that pin is
 # a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
 # clock, not a control.
 #
@@ -584,10 +584,10 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 3.9.0 mutation after reseal',
+  reason: 'installed Flow 5.0.0 mutation after reseal',
   authority: {
     kind: 'operator_request',
-    actor: 'installed-flow-3.9.0-container',
+    actor: 'installed-flow-5.0.0-container',
     request_ref: 'container:reseal-native-lock',
     requested_at: '2026-07-20T00:20:00Z'
   },
@@ -623,7 +623,7 @@ const runRoot = path.join(project, '.kontourai', 'flow', 'runs', runId);
 const pinnedFlowRoot = process.env.PINNED_FLOW_ROOT;
 if (!pinnedFlowRoot || !fs.realpathSync(pinnedFlowRoot).startsWith(path.dirname(process.env.LIFECYCLE_HELPER_PATH))) throw new Error('pinned Flow root is not the helper-installed closure');
 const packageJson = JSON.parse(fs.readFileSync(path.join(pinnedFlowRoot, 'package.json'), 'utf8'));
-if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '3.9.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@3.9.0');
+if (packageJson.name !== '@kontourai/flow' || packageJson.version !== '5.0.0') throw new Error('reseal interoperability must use installed exact @kontourai/flow@5.0.0');
 if (fs.realpathSync(pinnedFlowRoot).startsWith('/work/node_modules')) throw new Error('local Flow dependency substituted for the installed closure');
 const lockRoot = path.join(runRoot, '.mutation.lock'), readyFile = '/tmp/reseal-lock-ready', releaseFile = '/tmp/reseal-lock-release';
 for (const file of [readyFile, releaseFile]) if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -640,7 +640,7 @@ const spawnAsNode = (script, args) => {
 };
 const installedStore = await import(pathToFileURL(path.join(pinnedFlowRoot, 'dist', 'index.js')).href);
 if (['withRunRecoveryLock', 'writeRunRecoveryFence', 'finalizeRunRecoveryFence'].some((name) => typeof installedStore[name] !== 'function')) {
-  throw new Error('installed exact @kontourai/flow@3.9.0 does not expose the public recovery contract');
+  throw new Error('installed exact @kontourai/flow@5.0.0 does not expose the public recovery contract');
 }
 const waitFor = async (label, predicate) => {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -655,24 +655,24 @@ const ticketCount = () => fs.existsSync(lockRoot)
 const ledgerBefore = fs.readFileSync(path.join(session, 'lifecycle-authority.resolution-events.json'));
 const holder = spawnAsNode('/work/pinned-flow-lock-holder.mjs', [pinnedFlowRoot, project, runId, readyFile, releaseFile]);
 await Promise.race([
-  waitFor('installed 3.9.0 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
-  holder.result.then((result) => { throw new Error(`installed 3.9.0 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed 5.0.0 holder ticket', () => fs.existsSync(readyFile) && ticketCount() === 1),
+  holder.result.then((result) => { throw new Error(`installed 5.0.0 holder exited before readiness: ${result.stdout}${result.stderr}`); }),
 ]);
 const reseal = spawnAsNode('/work/reseal-invoke.mjs', [project, session, '/root/lifecycle-authorizations/reseal.json']);
 await Promise.race([
-  waitFor('root reseal ticket behind installed 3.9.0 holder', () => ticketCount() === 2),
-  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 3.9.0: ${result.stdout}${result.stderr}`); }),
+  waitFor('root reseal ticket behind installed 5.0.0 holder', () => ticketCount() === 2),
+  reseal.result.then((result) => { throw new Error(`root reseal exited before queuing behind installed 5.0.0: ${result.stdout}${result.stderr}`); }),
 ]);
 const pause = spawnAsNode('/work/pinned-flow-pause.mjs', [pinnedFlowRoot, project, runId]);
 await Promise.race([
-  waitFor('installed 3.9.0 public pause behind reseal', () => ticketCount() === 3),
-  pause.result.then((result) => { throw new Error(`installed 3.9.0 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
+  waitFor('installed 5.0.0 public pause behind reseal', () => ticketCount() === 3),
+  pause.result.then((result) => { throw new Error(`installed 5.0.0 pause exited before queuing: ${result.stdout}${result.stderr}`); }),
 ]);
 fs.writeFileSync(releaseFile, 'release\n');
 const [holderResult, resealResult, pauseResult] = await Promise.all([holder.result, reseal.result, pause.result]);
-if (holderResult.status !== 0) throw new Error(`installed 3.9.0 holder failed: ${holderResult.stderr}`);
-if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 3.9.0 lock: ${resealResult.stdout}${resealResult.stderr}`);
-if (pauseResult.status !== 0) throw new Error(`installed 3.9.0 pause failed behind reseal: ${pauseResult.stderr}`);
+if (holderResult.status !== 0) throw new Error(`installed 5.0.0 holder failed: ${holderResult.stderr}`);
+if (resealResult.status !== 0) throw new Error(`root reseal failed behind installed 5.0.0 lock: ${resealResult.stdout}${resealResult.stderr}`);
+if (pauseResult.status !== 0) throw new Error(`installed 5.0.0 pause failed behind reseal: ${pauseResult.stderr}`);
 const resealReceipt = JSON.parse(resealResult.stdout);
 if (resealReceipt.operation_status !== 'applied') throw new Error('installed-closure reseal was not applied');
 const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
@@ -684,11 +684,11 @@ if (completionResult.status !== 0) throw new Error(`unprivileged completion veri
 const completion = JSON.parse(completionResult.stdout);
 if (completion.action !== 'reseal-verification-evidence') throw new Error('reseal did not install its exact completion');
 const state = JSON.parse(fs.readFileSync(path.join(runRoot, 'state.json'), 'utf8'));
-if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 3.9.0 public mutation was not preserved');
+if (state.status !== 'paused' || state.lifecycle.at(-1)?.authority?.request_ref !== 'container:reseal-native-lock') throw new Error('waiting installed 5.0.0 public mutation was not preserved');
 const manifest = JSON.parse(fs.readFileSync(path.join(runRoot, 'evidence', 'manifest.json'), 'utf8'));
 if (manifest.evidence.filter((entry) => entry.id === `lifecycle-authority:${completion.request_sha256}`).length !== 1) throw new Error('reseal attachment is absent or duplicated');
 if (ticketCount() !== 0) throw new Error('native Flow tickets were not released');
-console.log('PASS: installed exact @kontourai/flow@3.9.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
+console.log('PASS: installed exact @kontourai/flow@5.0.0 holder, root reseal, and installed public pause share one FIFO mutation lock; reseal and foreign mutation are preserved');
 NODE
 node /work/reseal-native-lock-e2e.mjs
 

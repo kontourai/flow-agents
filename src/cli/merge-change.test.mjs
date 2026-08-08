@@ -276,6 +276,16 @@ test("public merge-change request accepts effective amended bindings while retai
     const manifestFile = path.join(flowDir, "evidence", "manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
     const summary = `Authenticated publish-change operation ${issued.action_id} observed open provider record PR_fixture`;
+    // This fixture hand-writes the manifest (including the legacy flat
+    // `authority_trace` field) rather than going through a real Flow 5.x
+    // attachEvidence call; that's fine here because this test isn't exercising
+    // authority-trace authentication at all — it's plumbing to reach the
+    // *later* terminal-delivery validation step in merge-change request. Flow
+    // 5.x's real write path can no longer produce `authority_trace` (see
+    // builder-flow-runtime.test.mjs's authorityTrace-option-removed test); the
+    // legacy field here still round-trips because
+    // resultDigestClaimedByCanonicalRun deliberately keeps recognizing it as a
+    // backward-compatibility fallback (merge-change.ts).
     manifest.evidence.push({
       id: "publish-change-fixture", gate_id: publishBinding.gate_ids[0], kind: "custom", requested_kind: "custom", status: "passed", attached_at: "2026-07-27T12:00:03.000Z",
       producer: "publish-change-operation-authority", authority_trace: issued.action_id, expectation_ids: ["pull-request-opened"],
