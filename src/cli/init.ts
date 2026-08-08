@@ -13,6 +13,14 @@ import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
+import { copyDirMerge } from "../lib/fs.js";
+import {
+  catalogKitIds as registryCatalogKitIds,
+  readPackageVersion,
+  validateActiveKitEntries,
+  type ActiveKitEntry,
+  type KitScope,
+} from "../lib/kit-registry.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
@@ -158,13 +166,7 @@ function parseProviderProject(value: string | undefined): number | undefined {
 }
 
 function catalogKitIds(): string[] {
-  const catalogPath = path.join(root, "kits", "catalog.json");
-  if (!fs.existsSync(catalogPath)) return [];
-  const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as { kits?: unknown[] };
-  if (!Array.isArray(catalog.kits)) return [];
-  return catalog.kits
-    .map((entry) => typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).id ?? "") : "")
-    .filter(Boolean);
+  return registryCatalogKitIds(root);
 }
 
 function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): string[] {
@@ -174,12 +176,45 @@ function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
   return [];
 }
 
+/**
+ * Compute the `active_kits` durable-record field (kontourai/flow-agents kit activation
+ * registry): a richer, explicit companion to the pre-existing `active_kit_ids: string[]` field
+ * (kept unchanged for backward compatibility -- opencode/codex installs already key runtime asset
+ * selection off it, and existing evals assert its exact shape).
+ *
+ * - When the caller made an explicit kit selection (`activeKitIds` non-empty, via
+ *   `--activate-kit`/`--activate-kits`), that selection is what gets recorded, for every runtime.
+ * - Otherwise (the common default-flags case), claude-code records EVERY catalog kit: that has
+ *   always been the actual physical install behavior (installBundle's `.claude/skills` sync is
+ *   unconditional, not filtered by kit selection -- see copyDirMerge's caller above), and this
+ *   makes that implicit "all built-ins active" behavior explicit and queryable rather than
+ *   leaving `active_kit_ids` empty while the skills are, in fact, all present on disk. Other
+ *   runtimes install no kit-specific assets by default (opencode/codex only provision kit
+ *   content when a selection is made), so their default `active_kits` stays empty, matching
+ *   what is actually on disk for them too.
+ */
+function computeActiveKits(runtime: Runtime, global: boolean | undefined, activeKitIds: string[], version: string, installedAt: string): ActiveKitEntry[] {
+  const scope: KitScope = global ? "global" : "project";
+  const ids = activeKitIds.length > 0 ? activeKitIds : (runtime === "claude-code" ? catalogKitIds() : []);
+  const entries = ids.map((id) => ({ id, version, activated_at: installedAt, scope }));
+  // Defensive only: `ids` is always either the catalog itself or a caller-supplied selection that
+  // downstream kit-activation code (activateKits/activateCodexLocal) independently validates
+  // before it can affect what's actually installed -- this must never fire in practice, but a
+  // record this function itself computed incorrectly should fail loudly, not get silently
+  // persisted as a bogus `active_kits` value.
+  const invalid = validateActiveKitEntries(entries, new Set(catalogKitIds()));
+  if (invalid.length) throw new Error(`internal error computing active_kits: ${invalid.join("; ")}`);
+  return entries;
+}
+
 function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = []): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
-  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-  const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds };
+  const version = readPackageVersion(root);
+  const installedAt = new Date().toISOString();
+  const activeKits = computeActiveKits(runtime, global, activeKitIds, version, installedAt);
+  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits };
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
   fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   fs.renameSync(recordTmp, recordPath);
@@ -770,39 +805,6 @@ function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): vo
     }
     rewriteCommandsForGlobalInstall(obj[key], sourceRoot);
   }
-}
-
-/**
- * Additively copy every file under srcDir into destDir, creating directories
- * as needed and overwriting files whose content changed. Never deletes files
- * in destDir that srcDir does not own — destDir may contain unrelated content
- * (other kits, other tools) that this sync must not touch.
- */
-function copyDirMerge(srcDir: string, destDir: string): { added: number; updated: number } {
-  let added = 0;
-  let updated = 0;
-  if (!fs.existsSync(srcDir)) return { added, updated };
-  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    const srcPath = path.join(srcDir, entry.name);
-    const destPath = path.join(destDir, entry.name);
-    if (entry.isDirectory()) {
-      const nested = copyDirMerge(srcPath, destPath);
-      added += nested.added;
-      updated += nested.updated;
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const content = fs.readFileSync(srcPath);
-    if (fs.existsSync(destPath)) {
-      if (Buffer.compare(fs.readFileSync(destPath), content) === 0) continue;
-      updated += 1;
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      added += 1;
-    }
-    fs.writeFileSync(destPath, content);
-  }
-  return { added, updated };
 }
 
 function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeKitIds: string[]): string[] {

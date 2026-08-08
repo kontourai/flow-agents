@@ -203,10 +203,43 @@ function workflowTriggerValidationErrors(manifest, manifestPath) {
   return errors;
 }
 
+/**
+ * Read the built-in kit activation registry (`<root>/.flow-agents/install.json`'s `active_kits`
+ * field -- see src/lib/kit-registry.ts) and return the set of active BUILT-IN kit ids, or null
+ * when no filtering decision can be made: the durable install record is absent, unreadable, or
+ * (a legacy pre-activation-registry install) simply has no `active_kits` field at all. Callers
+ * treat null as "leave current behavior unchanged" -- deliberately fail-open, never fail-closed,
+ * so an install that predates this feature (or one whose install.json is momentarily
+ * unreadable) keeps steering every installed built-in kit exactly as it always has.
+ */
+function readActiveBuiltinKitIds(root) {
+  try {
+    const installJsonPath = path.join(root, '.flow-agents', 'install.json');
+    if (!fs.existsSync(installJsonPath)) return null;
+    const record = readJson(installJsonPath);
+    if (!record || !Array.isArray(record.active_kits)) return null;
+    const ids = new Set();
+    for (const entry of record.active_kits) {
+      if (entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id) ids.add(entry.id);
+    }
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
 function workflowTriggersFor(root, when) {
   const result = [];
   const inventory = readKitManifests(root);
+  // Built-in-kit activation lifecycle (kontourai/flow-agents kit-activation-registry): a
+  // deactivated BUILT-IN kit's workflow_triggers are not loaded, so a deactivated kit stops
+  // steering sessions toward it without any engine code needing to know its name. Scoped to
+  // `source_kind === 'builtin'` only -- a locally-installed third-party kit
+  // (`kits/local/installed-kits.json`) already has its own independent activation lifecycle
+  // (presence in that registry IS its activation), so it is never filtered here.
+  const activeBuiltinKitIds = readActiveBuiltinKitIds(root);
   for (const kit of inventory.kits) {
+    if (kit.source_kind === 'builtin' && activeBuiltinKitIds && !activeBuiltinKitIds.has(kit.kit_id)) continue;
     const triggers = kit.manifest.workflow_triggers;
     if (!Array.isArray(triggers)) continue;
     const manifestPath = path.join(root, kit.source_kind === 'local' ? 'kits/local/repositories' : 'kits', kit.kit_id, 'kit.json');
@@ -232,4 +265,5 @@ module.exports = {
   renderKitSteering,
   readKitManifests,
   workflowTriggersFor,
+  readActiveBuiltinKitIds,
 };

@@ -132,6 +132,67 @@ export function copyDir(src: string, dest: string): void {
   });
 }
 
+/**
+ * Additively copy every file under srcDir into destDir, creating directories as needed and
+ * overwriting files whose content changed. Never deletes files in destDir that srcDir does not
+ * own -- destDir may contain unrelated content (other kits, other tools) that this sync must not
+ * touch. Shared by `flow-agents init`'s --global skills/agents sync and `flow-agents kit
+ * activate`'s built-in kit skill install -- deliberately kept in this dependency-light module
+ * (no esbuild/build-tooling imports) rather than in src/cli/init.ts, so a consumer that must stay
+ * runnable from a stripped install destination (no node_modules, no dist/) -- e.g. src/cli/kit.ts,
+ * shipped standalone into a Codex home install -- can use it without pulling in
+ * build-universal-bundles.ts's esbuild dependency through init.ts's module graph.
+ */
+export function copyDirMerge(srcDir: string, destDir: string): { added: number; updated: number } {
+  let added = 0;
+  let updated = 0;
+  if (!fs.existsSync(srcDir)) return { added, updated };
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = copyDirMerge(srcPath, destPath);
+      added += nested.added;
+      updated += nested.updated;
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const content = fs.readFileSync(srcPath);
+    if (fs.existsSync(destPath)) {
+      if (Buffer.compare(fs.readFileSync(destPath), content) === 0) continue;
+      updated += 1;
+    } else {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      added += 1;
+    }
+    fs.writeFileSync(destPath, content);
+  }
+  return { added, updated };
+}
+
+/**
+ * Walk up from every entry in `startDirs`, removing each now-empty directory until reaching
+ * `root` (exclusive) or a non-empty directory. Shared by `flow-agents init --uninstall` and
+ * `flow-agents kit deactivate`'s manifest-backed skill removal, both of which need to prune a
+ * skill's now-empty directory after removing its files without touching anything still occupied.
+ * Kept in this dependency-light module for the same reason as copyDirMerge above.
+ */
+export function pruneEmptyDirs(root: string, startDirs: Iterable<string>): void {
+  const rootResolved = path.resolve(root);
+  const sorted = [...new Set(startDirs)].sort((a, b) => b.length - a.length);
+  for (const start of sorted) {
+    let current = path.resolve(start);
+    while (current !== rootResolved && current.startsWith(`${rootResolved}${path.sep}`)) {
+      try {
+        fs.rmdirSync(current);
+      } catch {
+        break; // not empty, or already gone -- stop walking up this branch
+      }
+      current = path.dirname(current);
+    }
+  }
+}
+
 function copiedTreeDigest(root: string): string {
   const hash = crypto.createHash("sha256");
   for (const file of walkFiles(root)) {

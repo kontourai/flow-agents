@@ -127,6 +127,29 @@ export function buildOwnedFilesManifest(params: {
   };
 }
 
+/**
+ * Merge additional owned-file entries into an existing manifest, replacing any existing entry at
+ * the same path and keeping the result sorted by path. Used by `flow-agents kit activate` to add
+ * a built-in kit's newly-installed skill files to the durable ownership manifest incrementally,
+ * without discarding entries the manifest already carries for unrelated files (other kits,
+ * agents/, other skills).
+ */
+export function mergeOwnedFilesManifestEntries(manifest: OwnedFilesManifest, newEntries: OwnedFileEntry[]): OwnedFilesManifest {
+  const byPath = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  for (const entry of newEntries) byPath.set(entry.path, entry);
+  return { ...manifest, generated_at: new Date().toISOString(), files: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/**
+ * Remove owned-file entries whose path is in `removePaths` from an existing manifest. Used by
+ * `flow-agents kit deactivate` after successfully removing a built-in kit's skill files from
+ * disk, so the durable ownership manifest never keeps claiming ownership of a file that is no
+ * longer there.
+ */
+export function removeOwnedFilesManifestEntries(manifest: OwnedFilesManifest, removePaths: Set<string>): OwnedFilesManifest {
+  return { ...manifest, generated_at: new Date().toISOString(), files: manifest.files.filter((entry) => !removePaths.has(entry.path)) };
+}
+
 export function writeOwnedFilesManifest(dest: string, manifest: OwnedFilesManifest): void {
   const manifestPath = ownedFilesManifestPath(dest);
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });

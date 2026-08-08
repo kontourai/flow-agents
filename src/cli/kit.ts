@@ -4,13 +4,35 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, readJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, copyDirMerge, ensureSafeDirectory, isoNow, pruneEmptyDirs, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
-import { defaultCodexHome } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, claudeCodeGlobalDest } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
+import {
+  hashFile,
+  readOwnedFilesManifest,
+  writeOwnedFilesManifest,
+  buildOwnedFilesManifest,
+  mergeOwnedFilesManifestEntries,
+  removeOwnedFilesManifestEntries,
+  resolveManifestEntryPath,
+  resolveManifestEntrySha256,
+  assertManifestEntryParentContained,
+  type OwnedFileEntry,
+} from "../lib/owned-files-manifest.js";
+import {
+  catalogKitIds as registryCatalogKitIds,
+  loadCatalogKitManifest,
+  kitDependencyIds,
+  catalogKitSkillNames,
+  readActiveKits,
+  writeActiveKits,
+  readPackageVersion,
+  type ActiveKitEntry,
+} from "../lib/kit-registry.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
@@ -37,7 +59,9 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 
 const KIT_USAGE: Record<string, string> = {
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
-  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]",
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
+    + "   or: flow-agents kit activate <kit-id> (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
+  deactivate: "usage: flow-agents kit deactivate <kit-id> (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)",
   validate: "usage: flow-agents kit validate [<kit-dir>]",
   provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
   inspect: "usage: flow-agents kit inspect [<kit-dir>] [--json]",
@@ -50,11 +74,13 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
-  activate   Write runtime projections for installed and built-in kits.
+  activate   Write runtime projections for installed and built-in kits, OR (with a <kit-id>
+             positional) activate one built-in kit for a claude-code install.
+  deactivate Deactivate one built-in kit (<kit-id>) for a claude-code install.
   validate   Validate a Flow Kit repository.
   provision  Copy a kit's declared provisions into a target repository.
   inspect    Report a kit's conformance and consumer targets.
@@ -562,6 +588,264 @@ function activate(argv: string[]): number {
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
 
+// ─── Built-in kit activation lifecycle ─────────────────────────────────────────────────────
+//
+// `flow-agents kit activate <kit-id>` / `flow-agents kit deactivate <kit-id>` give a BUILT-IN
+// kit (kits/catalog.json: builder, knowledge, release-evidence) a real on/off switch for a
+// claude-code install, distinct from the third-party install/activate machinery above (which
+// targets `dest/kits/local/` and codex/strands runtime projections). Scope, deliberately:
+//   - claude-code only (--global | --dest), mirroring `flow-agents init --uninstall`'s own
+//     runtime scope and reusing its dest-resolution shape.
+//   - Requires a manifest-backed install (`.flow-agents/owned-files.json`, written by every
+//     current `flow-agents init --runtime claude-code` install). A legacy pre-manifest install
+//     has no per-file ownership record to safely add to or remove from, so both verbs fail
+//     closed with a clear message rather than guessing; this is a disclosed scope decision, not
+//     an oversight (see kontourai/flow-agents kit-activation-registry delivery notes).
+//   - Only touches SKILL files a kit's own `kit.json` `skills` array declares (the flat
+//     `.claude/skills/<name>/` or `skills/<name>/` directories a compiled bundle installs them
+//     into -- see src/tools/build-universal-bundles.ts's collectAllSkills()). The ENGINE
+//     (hooks, telemetry, agents/) is never touched by either verb.
+
+type BuiltinKitDestResult = { ok: true; dest: string; global: boolean } | { ok: false; error: string };
+
+function resolveBuiltinKitDest(flags: ReturnType<typeof parseArgs>["flags"]): BuiltinKitDestResult {
+  const isGlobal = flagBool(flags, "global") ?? false;
+  const destFlag = flagString(flags, "dest");
+  if (isGlobal && destFlag) return { ok: false, error: "kit activate/deactivate: --global and --dest are mutually exclusive" };
+  if (!isGlobal && !destFlag) return { ok: false, error: "kit activate/deactivate: provide --global or --dest <path>" };
+  return { ok: true, dest: isGlobal ? claudeCodeGlobalDest() : path.resolve(destFlag as string), global: isGlobal };
+}
+
+/**
+ * Resolve the compiled claude-code bundle directory (`dist/claude-code`), which
+ * `flow-agents kit activate <id>` copies a built-in kit's skill files FROM. Deliberately does
+ * NOT auto-build it (unlike `src/cli/init.ts`'s `ensureBundle`, which falls back to invoking
+ * `build-universal-bundles.ts`) -- that fallback statically imports esbuild, and importing it
+ * from this module would break `scripts/kit.js` when it runs standalone from an installed
+ * destination that ships no node_modules (e.g. a Codex home install -- see kontourai/flow-agents
+ * kit-activation-registry delivery notes). A missing bundle here is reported as an actionable
+ * error instead.
+ */
+function resolveClaudeCodeBundleDir(): string {
+  const bundle = path.join(root, "dist", "claude-code");
+  if (!fs.existsSync(path.join(bundle, "install.sh"))) {
+    throw new Error(`compiled claude-code bundle not found at ${bundle}; run 'npm run build:bundles' first`);
+  }
+  return bundle;
+}
+
+function skillsPrefixFor(global: boolean): string {
+  return global ? "skills" : ".claude/skills";
+}
+
+function knownBuiltinKitIds(): Set<string> {
+  return new Set(registryCatalogKitIds(root));
+}
+
+function unknownBuiltinKitError(command: string, kitId: string): string {
+  const known = [...knownBuiltinKitIds()].sort();
+  return `kit ${command}: unknown built-in kit '${kitId}'; known kits: ${known.join(", ") || "(none)"}`;
+}
+
+async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const dryRun = flagBool(args.flags, "dry-run") ?? false;
+  const destResult = resolveBuiltinKitDest(args.flags);
+  if (!destResult.ok) {
+    console.error(destResult.error);
+    return 2;
+  }
+  const { dest, global } = destResult;
+
+  const catalogIds = knownBuiltinKitIds();
+  if (!catalogIds.has(kitId)) {
+    console.error(unknownBuiltinKitError("activate", kitId));
+    return 2;
+  }
+  if (!fs.existsSync(dest)) {
+    console.error(`kit activate: destination does not exist: ${dest}`);
+    return 1;
+  }
+  const manifest = readOwnedFilesManifest(dest);
+  if (!manifest) {
+    console.error(`kit activate: no ownership manifest found at ${dest}; built-in kit activation requires a manifest-backed claude-code install (run 'flow-agents init --runtime claude-code' first)`);
+    return 1;
+  }
+  if (manifest.runtime !== "claude-code") {
+    console.error(`kit activate: durable ownership manifest at ${dest} belongs to runtime '${manifest.runtime}', not claude-code`);
+    return 1;
+  }
+
+  const activeKits = readActiveKits(dest) ?? [];
+  if (activeKits.some((entry) => entry.id === kitId)) {
+    console.log(`kit '${kitId}' is already active at ${dest}`);
+    return 0;
+  }
+
+  const loaded = loadCatalogKitManifest(root, kitId);
+  if (!loaded) {
+    console.error(`kit activate: could not load kit.json for catalog kit '${kitId}'`);
+    return 1;
+  }
+  const skillNames = catalogKitSkillNames(root, kitId);
+  let bundle: string;
+  try {
+    bundle = resolveClaudeCodeBundleDir();
+  } catch (error) {
+    console.error(`kit activate: ${(error as Error).message}`);
+    return 1;
+  }
+  const skillsPrefix = skillsPrefixFor(global);
+  const skillsDestRoot = path.join(dest, ...skillsPrefix.split("/"));
+  const skillsSourceRoot = path.join(bundle, ".claude", "skills");
+
+  const missingSource = skillNames.find((name) => !fs.existsSync(path.join(skillsSourceRoot, name, "SKILL.md")));
+  if (missingSource) {
+    console.error(`kit activate: kit '${kitId}' declares skill '${missingSource}' but it is missing from the compiled claude-code bundle`);
+    return 1;
+  }
+
+  if (dryRun) {
+    for (const name of skillNames) console.log(`would copy: ${path.join(skillsSourceRoot, name)} -> ${path.join(skillsDestRoot, name)}`);
+    console.log(`dry-run: would activate kit '${kitId}' (${skillNames.length} skill(s)) at ${dest}`);
+    return 0;
+  }
+
+  const newManifestEntries: OwnedFileEntry[] = [];
+  for (const name of skillNames) {
+    const sourceDir = path.join(skillsSourceRoot, name);
+    const destDir = path.join(skillsDestRoot, name);
+    copyDirMerge(sourceDir, destDir);
+    const built = buildOwnedFilesManifest({
+      mappings: [{ sourceDir, destDir, prefix: `${skillsPrefix}/${name}` }],
+      runtime: "claude-code",
+      version: manifest.version,
+      global,
+    });
+    newManifestEntries.push(...built.files);
+  }
+  writeOwnedFilesManifest(dest, mergeOwnedFilesManifestEntries(manifest, newManifestEntries));
+
+  const pkgVersion = readPackageVersion(root);
+  const nextActiveKits: ActiveKitEntry[] = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
+  writeActiveKits(dest, root, nextActiveKits);
+
+  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s)) at ${dest}`);
+
+  // Dependency awareness (non-blocking): suggest, never auto-install.
+  const depIds = kitDependencyIds(loaded.manifest, loaded.manifestPath);
+  const activeIdSet = new Set(nextActiveKits.map((entry) => entry.id));
+  const destArg = global ? "--global" : `--dest ${dest}`;
+  for (const dep of depIds) {
+    if (!activeIdSet.has(dep)) {
+      console.log(`suggestion: kit '${kitId}' declares a dependency on '${dep}' which is not active; consider 'flow-agents kit activate ${dep} ${destArg}'`);
+    }
+  }
+  return 0;
+}
+
+async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const dryRun = flagBool(args.flags, "dry-run") ?? false;
+  const force = flagBool(args.flags, "force") ?? false;
+  const destResult = resolveBuiltinKitDest(args.flags);
+  if (!destResult.ok) {
+    console.error(destResult.error);
+    return 2;
+  }
+  const { dest, global } = destResult;
+
+  const catalogIds = knownBuiltinKitIds();
+  if (!catalogIds.has(kitId)) {
+    console.error(unknownBuiltinKitError("deactivate", kitId));
+    return 2;
+  }
+  if (!fs.existsSync(dest)) {
+    console.error(`kit deactivate: nothing to deactivate (destination does not exist): ${dest}`);
+    return 3;
+  }
+  const manifest = readOwnedFilesManifest(dest);
+  if (!manifest) {
+    console.error(`kit deactivate: no ownership manifest found at ${dest}; built-in kit deactivation requires a manifest-backed claude-code install`);
+    return 1;
+  }
+
+  const activeKits = readActiveKits(dest) ?? [];
+  if (!activeKits.some((entry) => entry.id === kitId)) {
+    console.log(`kit '${kitId}' is not active at ${dest}`);
+    return 3;
+  }
+
+  // Dependency awareness: deactivating a dependency of another ACTIVE kit is blocked unless
+  // --force. The dependent kit's own activation record is left untouched either way -- this
+  // only warns/blocks removing what it depends on.
+  const dependents: string[] = [];
+  for (const other of activeKits) {
+    if (other.id === kitId) continue;
+    const loadedOther = loadCatalogKitManifest(root, other.id);
+    if (!loadedOther) continue;
+    if (kitDependencyIds(loadedOther.manifest, loadedOther.manifestPath).includes(kitId)) dependents.push(other.id);
+  }
+  if (dependents.length && !force) {
+    console.error(`kit deactivate: '${kitId}' is a dependency of active kit(s): ${dependents.join(", ")}; rerun with --force to deactivate anyway (their workflows may break)`);
+    return 1;
+  }
+  if (dependents.length && force) {
+    console.log(`warning: deactivating '${kitId}' which active kit(s) ${dependents.join(", ")} depend on; those kits' workflows may now be broken`);
+  }
+
+  const skillNames = catalogKitSkillNames(root, kitId);
+  const skillsPrefix = skillsPrefixFor(global);
+  const ownedPrefixes = skillNames.map((name) => `${skillsPrefix}/${name}/`);
+  const relevantEntries = manifest.files.filter((entry) => ownedPrefixes.some((prefix) => entry.path.startsWith(prefix)));
+
+  const planned: { relPath: string; absPath: string; expectedSha256: string }[] = [];
+  for (const entry of relevantEntries) {
+    const absPath = resolveManifestEntryPath(dest, entry.path);
+    const expectedSha256 = resolveManifestEntrySha256(entry.path, entry.sha256);
+    assertManifestEntryParentContained(dest, absPath, entry.path);
+    planned.push({ relPath: entry.path, absPath, expectedSha256 });
+  }
+
+  if (dryRun) {
+    for (const entry of planned) console.log(`would remove: ${entry.relPath}`);
+    console.log(`dry-run: would deactivate kit '${kitId}' (${planned.length} file(s)) at ${dest}`);
+    return 0;
+  }
+
+  const removedRelPaths = new Set<string>();
+  const removedParentDirs = new Set<string>();
+  const preserved: { relPath: string; reason: string }[] = [];
+  const failed: { relPath: string; reason: string }[] = [];
+  for (const entry of planned) {
+    try {
+      if (!fs.existsSync(entry.absPath)) {
+        removedRelPaths.add(entry.relPath); // already gone: treat as removed for manifest purposes
+        continue;
+      }
+      const stat = fs.lstatSync(entry.absPath);
+      if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
+        preserved.push({ relPath: entry.relPath, reason: "content modified since install (sha256 mismatch); preserved" });
+        continue;
+      }
+      fs.rmSync(entry.absPath);
+      removedRelPaths.add(entry.relPath);
+      removedParentDirs.add(path.dirname(entry.absPath));
+    } catch (error) {
+      failed.push({ relPath: entry.relPath, reason: (error as Error).message });
+    }
+  }
+  pruneEmptyDirs(dest, removedParentDirs);
+
+  writeOwnedFilesManifest(dest, removeOwnedFilesManifestEntries(manifest, removedRelPaths));
+  writeActiveKits(dest, root, activeKits.filter((entry) => entry.id !== kitId));
+
+  console.log(`deactivated kit '${kitId}': removed ${removedRelPaths.size} file(s), preserved ${preserved.length} modified file(s), failed ${failed.length}`);
+  for (const entry of preserved) console.log(`  preserved: ${entry.relPath}  [${entry.reason}]`);
+  for (const entry of failed) console.log(`  failed: ${entry.relPath}  [${entry.reason}]`);
+  return failed.length > 0 ? 4 : 0;
+}
+
 async function validate(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const kitDir = path.resolve(args.positionals[0] ?? ".");
@@ -669,6 +953,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     printCommandUsage("activate");
     return 0;
   }
+  if (command === "deactivate" && hasHelp(rest)) {
+    printCommandUsage("deactivate");
+    return 0;
+  }
   if (command === "validate" && hasHelp(rest)) {
     printCommandUsage("validate");
     return 0;
@@ -695,11 +983,29 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "install-git") return await installGitSource(rest[0] ?? "", rest);
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
-  if (command === "activate") return activate(rest);
+  // `kit activate` overloads on argument shape: a leading non-flag positional is a built-in kit
+  // id (the new activation-lifecycle verb); no positional (only flags, e.g. --adapter) is the
+  // pre-existing runtime-projection verb. Third-party/local kits have no per-id activation verb
+  // (activateCodexLocal/activateStrandsLocal already operate over the whole installed inventory),
+  // so this overload is unambiguous: a positional here can only mean a built-in kit id.
+  if (command === "activate") {
+    const [maybeKitId, ...activateRest] = rest;
+    if (maybeKitId && !maybeKitId.startsWith("-")) return await activateBuiltinKit(maybeKitId, activateRest);
+    return activate(rest);
+  }
+  if (command === "deactivate") {
+    const [kitId, ...deactivateRest] = rest;
+    if (!kitId || kitId.startsWith("-")) {
+      console.error("deactivate: missing <kit-id> argument");
+      console.error(KIT_USAGE.deactivate);
+      return 2;
+    }
+    return await deactivateBuiltinKit(kitId, deactivateRest);
+  }
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> ...");
   return 2;
 }
 

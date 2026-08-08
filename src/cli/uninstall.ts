@@ -60,6 +60,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { root } from "../tools/common.js";
 import { durableFlowAgentsRoot } from "../lib/local-artifact-root.js";
+import { pruneEmptyDirs } from "../lib/fs.js";
 import {
   hashFile,
   listOwnedTree,
@@ -589,22 +590,6 @@ function planIsEmpty(plan: UninstallPlan): boolean {
 }
 
 // ─── Execution ──────────────────────────────────────────────────────────────────────────────
-
-function pruneEmptyDirs(root: string, startDirs: Iterable<string>): void {
-  const rootResolved = path.resolve(root);
-  const sorted = [...new Set(startDirs)].sort((a, b) => b.length - a.length);
-  for (const start of sorted) {
-    let current = path.resolve(start);
-    while (current !== rootResolved && current.startsWith(`${rootResolved}${path.sep}`)) {
-      try {
-        fs.rmdirSync(current);
-      } catch {
-        break; // not empty, or already gone -- stop walking up this branch
-      }
-      current = path.dirname(current);
-    }
-  }
-}
 
 type ApplyOutcome = {
   settingsBackupPath: string | null;

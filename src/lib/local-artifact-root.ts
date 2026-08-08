@@ -22,6 +22,22 @@ export function defaultCodexHome(env: NodeJS.ProcessEnv = process.env, homedir: 
 }
 
 /**
+ * Default claude-code global install destination: `~/.claude`, honoring
+ * `FLOW_AGENTS_USER_CLAUDE_SETTINGS` (points at the settings.json FILE) for test isolation --
+ * the same override `checkScopeCollision`/`globalDest` (src/cli/init.ts) already use. Kept in
+ * this dependency-light module (no esbuild/build-tooling imports) rather than only inline in
+ * init.ts's `globalDest`, so `src/cli/kit.ts`'s built-in kit activation verbs can resolve the
+ * same destination without importing init.ts's module graph (which pulls in
+ * build-universal-bundles.ts's esbuild dependency -- unavailable in a stripped install
+ * destination, e.g. a Codex home install that ships kit.js standalone with no node_modules).
+ */
+export function claudeCodeGlobalDest(env: NodeJS.ProcessEnv = process.env, homedir: string = os.homedir()): string {
+  const override = env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"];
+  if (override) return path.dirname(override);
+  return path.join(homedir, ".claude");
+}
+
+/**
  * #357: resolve the SHARED, git-common-dir-anchored `.kontourai/flow-agents` root for `cwd`.
  *
  * `git rev-parse --git-common-dir` returns the ONE `.git` directory shared by every worktree
