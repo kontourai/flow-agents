@@ -7,11 +7,21 @@
  * board's 385 edges previously ingested to zero links, leaving the Surface
  * projection structurally blind and blocker data provider-only).
  *
+ * OWNERSHIP MODEL: records in `itemCategory` (and the board record in its
+ * category) are PROVIDER-OWNED — on re-ingest their title, body, tags, and
+ * links are replaced wholesale from the provider graph (stale links from
+ * resolved blockers disappear; stale tags clear). Records OUTSIDE the ingest
+ * categories are never touched: an alias that resolves to a record of a
+ * different category or type is skipped and reported, so ingest cannot
+ * overwrite human-curated notes that happen to share a slug.
+ *
  * Re-ingest is an UPSERT, not a duplicate: each provider node id is slugified
- * into a store alias, and a node whose alias already resolves updates the
- * existing record in place (title/body/tags refresh, `updated_at` bumps —
- * which is exactly what the pull-work TTL check reads). The alias also gives
- * records a durable provider identity across sessions.
+ * into a store alias, and a node whose alias already resolves to a
+ * provider-owned record updates it in place (`updated_at` bumps — which is
+ * exactly what the pull-work TTL check reads). The alias also gives records a
+ * durable provider identity across sessions. Distinct provider ids that
+ * slugify to the same alias are an in-run collision: the first wins, the rest
+ * are skipped and reported.
  *
  * Provider bodies are untrusted text: ingest suppresses the store's
  * [[wikilink]] extraction (`parse_wikilinks: false`) so issue bodies cannot
@@ -62,16 +72,18 @@ function tagsForNode(node) {
  * Ingest a provider graph into a knowledge store, preserving edges as links.
  *
  * Nodes are upserted first (building a provider-node-id → record-id map), then
- * edges are grouped by source record and written with `store.link()` (itself an
- * idempotent merge, so re-ingesting the same edges is a no-op). Failures are
- * collected and reported, never thrown mid-batch: a partly unusable graph still
- * ingests its usable part, and the report says exactly what was skipped and why.
+ * each provider-owned record's links are set WHOLESALE from this graph's edges
+ * (created records get `store.link()`; updated records get a full `links`
+ * replacement so edges that vanished upstream vanish here too). Failures are
+ * collected and reported, never thrown mid-batch: a partly unusable graph
+ * still ingests its usable part, and the report says exactly what was skipped
+ * and why.
  *
  * @param {Object} store - KnowledgeStoreAdapter (create/update/link/get, e.g. DefaultKnowledgeStore)
  * @param {{ nodes: Array, edges: Array }} graph - Provider graph (readGraph() shape)
  * @param {Object} options
  * @param {string} options.agent - Provenance agent (required by the store)
- * @param {string} [options.itemCategory="backlog.item"] - Category for node records
+ * @param {string} [options.itemCategory="backlog.item"] - Category for node records (provider-owned)
  * @param {string} [options.itemType="raw"] - Record type for node records
  * @param {number} [options.bodyLimit=4000] - Truncate node bodies to this length
  * @param {Object} [options.board] - Board snapshot record to upsert alongside the
@@ -96,19 +108,43 @@ export async function ingestProviderGraph(store, graph, options = {}) {
   const edges = Array.isArray(graph?.edges) ? graph.edges : [];
 
   const byNodeId = new Map();
+  const updatedRecordIds = new Set();
   const skipped = [];
   let created = 0;
   let updated = 0;
 
-  const upsert = async ({ nodeRef, alias, title, body, tags, type, category }) => {
-    const existing = alias ? await store.get(alias) : null;
+  /**
+   * Upsert one provider-owned record. Returns the record id, or null when the
+   * alias is held by a record OUTSIDE the ingest ownership (category/type
+   * mismatch) — reported by the caller, never overwritten.
+   */
+  const upsert = async ({ ref, kind, alias, title, body, tags, type, category }) => {
+    let existing = null;
+    if (alias) {
+      try {
+        existing = await store.get(alias);
+      } catch (err) {
+        // AMBIGUOUS_ID from prefix resolution etc. — treat as unresolvable.
+        skipped.push({ kind, ref, reason: `alias resolution failed: ${err?.message || err}` });
+        return null;
+      }
+    }
     if (existing) {
+      if (existing.category !== category || existing.type !== type) {
+        skipped.push({
+          kind,
+          ref,
+          reason: `alias "${alias}" is held by a record outside ingest ownership (type=${existing.type}, category=${existing.category}); not touched`,
+        });
+        return null;
+      }
       await store.update(
         existing.id,
-        { title, body, ...(tags.length ? { tags } : {}), parse_wikilinks: false },
+        { title, body, tags, parse_wikilinks: false },
         { agent, note: "ingest-graph refresh" },
       );
       updated += 1;
+      updatedRecordIds.add(existing.id);
       return existing.id;
     }
     const recordId = await store.create({
@@ -127,36 +163,54 @@ export async function ingestProviderGraph(store, graph, options = {}) {
 
   // Pass 1: nodes → records (upsert by alias). Empty bodies normalize to the
   // title (the store requires a body; no content is invented beyond the node's
-  // own title).
+  // own title). Distinct provider ids colliding on one alias: first wins.
+  const aliasOwner = new Map();
   for (const node of nodes) {
     if (byNodeId.has(node?.id)) {
       skipped.push({ kind: "node", ref: String(node?.id), reason: "duplicate node id in graph" });
+      continue;
+    }
+    const alias = aliasForNodeId(node?.id);
+    if (alias && aliasOwner.has(alias)) {
+      skipped.push({
+        kind: "node",
+        ref: String(node?.id),
+        reason: `alias collision: "${alias}" already claimed by node "${aliasOwner.get(alias)}" in this graph`,
+      });
       continue;
     }
     const title = typeof node?.title === "string" && node.title.trim() ? node.title : String(node?.id ?? "untitled");
     const rawBody = typeof node?.body === "string" && node.body.trim() ? node.body : title;
     try {
       const recordId = await upsert({
-        nodeRef: node?.id,
-        alias: aliasForNodeId(node?.id),
+        ref: String(node?.id),
+        kind: "node",
+        alias,
         title: title.slice(0, 200),
         body: rawBody.slice(0, bodyLimit),
         tags: tagsForNode(node),
         type: itemType,
         category: itemCategory,
       });
-      byNodeId.set(node.id, recordId);
+      if (recordId !== null) {
+        byNodeId.set(node.id, recordId);
+        if (alias) aliasOwner.set(alias, String(node.id));
+      }
     } catch (err) {
       skipped.push({ kind: "node", ref: String(node?.id), reason: err?.message || String(err) });
     }
   }
 
   // Board snapshot upsert (optional): gives the pull-work TTL loop its record.
+  // Counted separately from item created/updated tallies.
   let boardRecordId = null;
   if (board && typeof board === "object") {
+    const beforeCreated = created;
+    const beforeUpdated = updated;
     try {
       boardRecordId = await upsert({
-        nodeRef: "board",
+        ref: String(board.alias ?? "board"),
+        kind: "board",
         alias: aliasForNodeId(board.alias ?? "board"),
         title: String(board.title ?? "board snapshot").slice(0, 200),
         body: String(board.body ?? `${byNodeId.size} items ingested`).slice(0, bodyLimit),
@@ -167,10 +221,15 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     } catch (err) {
       skipped.push({ kind: "board", ref: String(board.alias ?? "board"), reason: err?.message || String(err) });
     }
+    created = beforeCreated;
+    updated = beforeUpdated;
+    if (boardRecordId) updatedRecordIds.delete(boardRecordId);
   }
 
-  // Pass 2: edges → links, grouped by source record. store.link() merges
-  // idempotently on (target_id, kind), so re-ingested edges do not duplicate.
+  // Pass 2: edges → links. Provider-owned records get their link set from THIS
+  // graph: updated records receive a wholesale replacement (stale links from
+  // edges that vanished upstream are removed — links on provider-owned records
+  // belong to the provider); created records receive their links via link().
   const linksBySource = new Map();
   for (const edge of edges) {
     const kind = LINK_KIND_BY_EDGE_TYPE[edge?.type];
@@ -181,7 +240,7 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     const fromRecord = byNodeId.get(edge.from);
     const toRecord = byNodeId.get(edge.to);
     if (!fromRecord || !toRecord) {
-      skipped.push({ kind: "edge", ref: `${edge.from}->${edge.to}`, reason: "endpoint not ingested (missing or failed node)" });
+      skipped.push({ kind: "edge", ref: `${edge.from}->${edge.to}`, reason: "endpoint not ingested (missing, failed, or skipped node)" });
       continue;
     }
     if (!linksBySource.has(fromRecord)) linksBySource.set(fromRecord, []);
@@ -189,10 +248,17 @@ export async function ingestProviderGraph(store, graph, options = {}) {
   }
 
   let linked = 0;
-  for (const [recordId, links] of linksBySource) {
+  for (const recordId of byNodeId.values()) {
+    const links = linksBySource.get(recordId) ?? [];
     try {
-      await store.link(recordId, links, { agent, note: "ingest-graph edge pass" });
-      linked += links.length;
+      if (updatedRecordIds.has(recordId)) {
+        // Wholesale replacement (including down to []): provider-owned links.
+        await store.update(recordId, { links, parse_wikilinks: false }, { agent, note: "ingest-graph edge pass" });
+        linked += links.length;
+      } else if (links.length) {
+        await store.link(recordId, links, { agent, note: "ingest-graph edge pass" });
+        linked += links.length;
+      }
     } catch (err) {
       skipped.push({ kind: "edge", ref: recordId, reason: err?.message || String(err) });
     }
