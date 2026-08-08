@@ -12,6 +12,7 @@ import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
@@ -137,6 +138,9 @@ Options:
   --provider-project NUMBER
   --online               Verify GitHub auth/project and create the claim label if missing.
   --yes, --headless
+  --uninstall             Remove a prior install instead of installing.
+                          Usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]
+                          Run \`flow-agents init --uninstall --help\` for uninstall-specific options.
 `);
 }
 
@@ -605,6 +609,21 @@ export function ensureBundle(runtime: Runtime): string {
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
 
+// Relative paths install.sh's claude-code rsync excludes (see installScript()'s
+// claude-code call: capability.instructionPath="CLAUDE.md", the three provider-settings
+// files, and mergeConfig.configRelPath=".claude/settings.json"). Mirrored here (not
+// imported -- installScript() builds a bash script, not a reusable list) so the
+// project-scoped ownership manifest walk skips exactly what the rsync itself never
+// unconditionally overwrites/owns as a plain file.
+const CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL = new Set([
+  "AGENTS.md",
+  "CLAUDE.md",
+  "context/settings/backlog-provider-settings.json",
+  "context/settings/assignment-provider-settings.json",
+  "context/settings/change-provider-settings.json",
+  ".claude/settings.json",
+]);
+
 type InstallMergeConflict = {
   path: string;
   existingValue: unknown;
@@ -1064,6 +1083,15 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  // `flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]` removes what
+  // a prior claude-code install wrote. Dispatched here (rather than as its own top-level
+  // subcommand) so it stays discoverable from `flow-agents init --help` and shares init's own
+  // flag surface (--runtime, --global, --dest, --yes/--headless); the implementation itself
+  // lives in uninstall.ts, which owns its own --help/usage.
+  if (argv.includes("--uninstall")) {
+    const { main: uninstallMain } = await import("./uninstall.js");
+    return uninstallMain(argv.filter((arg) => arg !== "--uninstall"));
+  }
   if (argv.includes("--help") || argv.includes("-h")) {
     usage();
     return 0;
@@ -1156,6 +1184,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
             "(drift detection will report unbaselined until the next successful --global sync)."
         );
       }
+      // Write the ownership manifest `flow-agents init --uninstall` reads back (kontourai/flow-agents#uninstall).
+      // Derived from the bundle SOURCE trees (never dest), so it can never misattribute a
+      // pre-existing dest entry (e.g. a legacy skill symlink) that this install did not itself
+      // write. settings.json is intentionally excluded -- it is merge-owned, not file-owned;
+      // uninstall strips only the managed hook/statusLine entries from it (see uninstall.ts).
+      const globalManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
+        mappings: [
+          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
+          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
+        ],
+        runtime: "claude-code",
+        version: globalManifestPkgJson["version"] ?? "0.0.0",
+        global: true,
+      }));
       return configureWorkflowProviders(options);
     }
     // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
@@ -1261,6 +1304,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
     writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? []);
+    // Project-scoped claude-code: write the same ownership manifest the --global path writes
+    // (see above), so `flow-agents init --uninstall --runtime claude-code <dest>` has a
+    // manifest-backed removal path here too, not just for --global. The source tree is the
+    // whole bundle root, matching exactly what install.sh's rsync copies into dest (see
+    // CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL / installScript()'s claude-code exclude list) --
+    // settings.json is excluded because it is merge-owned, not file-owned.
+    if (options.runtime === "claude-code" && !options.global) {
+      const projectManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
+        mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
+        excludeRel: CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL,
+        runtime: "claude-code",
+        version: projectManifestPkgJson["version"] ?? "0.0.0",
+        global: false,
+      }));
+    }
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or

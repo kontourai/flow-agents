@@ -70,6 +70,7 @@ CHECKS=(
   "Published Codex install integration|bash evals/integration/test_published_codex_install.sh"
   "Public workflow CLI integration|bash evals/integration/test_public_workflow_cli.sh"
   "Bundle lifecycle integration|bash evals/integration/test_bundle_lifecycle.sh"
+  "Init uninstall integration|bash evals/integration/test_init_uninstall.sh"
   "Activate npx context integration|bash evals/integration/test_activate_npx_context.sh"
   "Kit conformance levels integration|bash evals/integration/test_kit_conformance_levels.sh"
   "Local Flow Kit install integration|bash evals/integration/test_local_flow_kit_install.sh"
