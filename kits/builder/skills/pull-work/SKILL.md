@@ -50,16 +50,26 @@ When knowledge integration is enabled for the workspace (see the knowledge kit's
 
 **Smart Fetch Strategy (avoid full backlog fetch when possible):**
 
-1. **Check Knowledge Kit cache first** — read `cache_version` and `provider_fetched_at` from the last `backlog.board` record.
-   - If `cache_version` matches current store version AND `provider_fetched_at` within TTL (default 5 min): **use cache, skip provider fetch entirely**.
-   - If `cache_version` differs OR TTL expired: proceed to conditional fetch.
+1. **Check Knowledge Kit cache first** — read `updated_at` from the last `backlog.board` record. `updated_at`
+   is a real, persisted field the store sets automatically on every `create()`/`update()`
+   (`kits/knowledge/adapters/default-store/index.js`) — no separate bookkeeping field is written or read.
+   - If `updated_at` is within TTL (default 5 min): **use cache, skip provider fetch entirely**.
+   - If TTL expired, or no `backlog.board` record exists yet: proceed to conditional fetch.
 
-2. **Conditional provider fetch** — call the configured board adapter's fetch operation with conditional headers if the provider supports them (ETag/If-None-Match, Last-Modified/If-Modified-Since — see Knowledge Kit's shared utilities at `kits/knowledge/adapters/shared/conditional-get.js`).
-   - **304 Not Modified**: provider unchanged. Update `provider_fetched_at` on cached board record, use cache.
-   - **200 OK**: provider changed. Fetch full board + items (GitHub Issues API does not support incremental item list or ETag on list endpoints; a full fetch is required when board state changes).
-   - **No conditional support**: fetch full board + items.
+2. **Conditional provider fetch** — when the configured board adapter is (or wraps) a `WorkItemProvider`, its
+   `cacheTtlMs` option and conditional-GET validator machinery (`kits/knowledge/adapters/shared/conditional-get.js`,
+   wired into `_issues()`) already avoid a full body transfer when the injected runner supports ETag/If-None-Match
+   or Last-Modified/If-Modified-Since.
+   - **Provider reports no change**: skip re-ingest — the existing `backlog.board` record's item data is still
+     correct. Its `updated_at` is intentionally NOT refreshed by this no-op path, so the next TTL check re-polls
+     the provider rather than treating an unrelated timestamp as extended.
+   - **Provider reports a change, or the runner has no conditional support**: fetch the full board + items
+     (GitHub Issues API does not support incremental item list or ETag on list endpoints for the common runner
+     shapes; a full fetch is required when board state changes or conditional support is absent).
 
-3. **On full fetch**: ingest ALL items into Knowledge Kit via `knowledge.ingest` (category: `backlog.board`) and `knowledge.compile` (category: `backlog.item`). Record `provider_fetched_at` and `cache_version` on the board record.
+3. **On full fetch**: ingest ALL items into Knowledge Kit via `knowledge.ingest` (category: `backlog.board`) and
+   `knowledge.compile` (category: `backlog.item`). The `update()`/`create()` call itself sets `updated_at`, which
+   is exactly what step 1 reads on the next pass — do not invent additional cache-bookkeeping fields.
 
 4. **Query Knowledge Kit** for candidate selection (instant, uses cached data).
 
@@ -183,9 +193,13 @@ For `local-file`, pass `--assignment-provider local-file` and omit
 `selected-work` claim, and projects the next step. Do not call it before
 provider ownership is confirmed, and do not attempt to attach `selected-work`
 again after start. If readiness, ownership, or source context is unresolved,
-**stop before run creation** — the `selected-work` expectation must not be recorded — using the same verdict
-split as the readiness section above: unresolved ownership or scope is `FAIL`; unverifiable readiness (source
-context or provider evidence that cannot be confirmed) is `NOT_VERIFIED`.
+**stop before run creation** — the `selected-work` expectation must not be recorded. Use `FAIL` only when a
+check EXECUTED and affirmatively disproved eligibility (the durable assignment check ran and returned a
+conflicting/held holder, or scope is affirmatively wrong). Use `NOT_VERIFIED` when a required check COULD NOT
+BE EXECUTED (the provider was unreachable, the assignment interface was unavailable, or readiness/source
+context could not be confirmed) — this is the same rule as the preflight section above ("a missing durable
+assignment check is `NOT_VERIFIED` when ownership matters", not `FAIL`); an unresolved ownership check is
+never itself a `FAIL`.
 Do not use a private writer command, enter at a later step, or infer an active
 run from an artifact path.
 
