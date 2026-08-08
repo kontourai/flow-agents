@@ -50,6 +50,15 @@ export function computeBodyHash(body) {
 export function processConditionalResponse(response, cached) {
   // 304 Not Modified: return cached data, no body transfer
   if (response.status === 304) {
+    if (!cached) {
+      throw new Error(
+        "processConditionalResponse: runner contract violation — received a " +
+        "304 Not Modified response with no prior cache entry to revalidate " +
+        "against. A conditional (304) response is only valid on a re-fetch " +
+        "after a prior 200 response populated the cache; a runner must never " +
+        "report notModified on the first fetch."
+      );
+    }
     return {
       data: cached.data,
       notModified: true,

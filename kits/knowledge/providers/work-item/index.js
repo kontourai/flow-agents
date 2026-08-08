@@ -15,9 +15,21 @@
  * A runner MUST be provided — there is no default. This enforces the unidirectional
  * provider boundary (Surface must not import producer runtime code).
  *
+ * **Runner contract**: `(args: string[], conditional?: { validators?: {etag?,
+ * lastModified?}, headers?: Record<string,string> }) => Promise<string | any[] |
+ * { issues: any[], etag?: string, lastModified?: string, notModified?: boolean }>`.
+ * `args` is the read-only `gh` argv the runner would execute (or interpret).
+ * `conditional` — present when a prior fetch cached validators — carries them
+ * both as structured `validators` and as pre-built `headers` (If-None-Match /
+ * If-Modified-Since) for runners that speak HTTP directly; a runner that
+ * ignores the second argument keeps working exactly as before (legacy
+ * single-arg fixture runners are unaffected).
+ *
  * **Conditional GET support (opt-in)**: If the runner returns `{ issues, etag, lastModified }`
  * the provider will send `If-None-Match`/`If-Modified-Since` on subsequent fetches.
- * A `304 Not Modified` returns cached issues with `notModified: true`.
+ * A `304 Not Modified` returns cached issues with `notModified: true`. A runner
+ * that reports `notModified` on the FIRST fetch (no cache to revalidate against)
+ * is a contract violation and raises a clear error — never a TypeError.
  * GitHub's REST API does not reliably support ETag on list endpoints; this is for
  * providers that do. Uses shared conditional-get utilities.
  *
@@ -29,6 +41,7 @@ import {
   buildConditionalHeaders,
   processConditionalResponse,
   createCacheEntry,
+  isCacheFresh,
 } from "../../adapters/shared/conditional-get.js";
 
 const PROVIDER_ID = "work-item";
@@ -67,13 +80,21 @@ function blockerNumber(entry) {
 }
 
 export class WorkItemProvider {
-  constructor({ repo, runner, agent } = {}) {
+  /**
+   * @param {{ repo?: string, runner: Function, agent?: string, cacheTtlMs?: number }} options
+   *   `cacheTtlMs` (optional): when set, a cache entry older than this is
+   *   treated as expired and triggers a refresh even without `forceRefresh`.
+   *   Default (unset): cache for the provider instance's lifetime, matching
+   *   prior behavior.
+   */
+  constructor({ repo, runner, agent, cacheTtlMs } = {}) {
     if (!runner) {
       throw new Error("WorkItemProvider requires an injected `runner` function — no default. Provide a function(args: string[]) => Promise<{ issues: any[], etag?: string, lastModified?: string }> that executes read-only gh commands or returns fixture data.");
     }
     this.repo = repo || "";
     this.runner = runner;
     this.agent = agent;
+    this.cacheTtlMs = cacheTtlMs;
     this.id = PROVIDER_ID;
     this._cache = null;
     this._cacheEntry = null; // { data, validators, cachedAt }
@@ -94,21 +115,23 @@ export class WorkItemProvider {
 
   async _issues(options = {}) {
     const { forceRefresh = false } = options;
-    if (this._cacheEntry && !forceRefresh) return this._cacheEntry.data;
+    const cacheExpired =
+      this.cacheTtlMs != null && this._cacheEntry && !isCacheFresh(this._cacheEntry, this.cacheTtlMs);
+    if (this._cacheEntry && !forceRefresh && !cacheExpired) return this._cacheEntry.data;
 
     const args = ["issue", "list"];
     if (this.repo) args.push("--repo", this.repo);
     args.push("--state", "all", "--json", "number,title,state,labels,body", "--limit", "200");
 
-    // Build conditional headers from cached validators (if runner supports it)
-    // Note: GitHub's `gh issue list` does not support --header for ETag/If-Modified-Since.
-    // This pattern is for custom runners that wrap GitHub API directly.
-    // if (this._cacheEntry?.validators) {
-    //   const condHeaders = buildConditionalHeaders(this._cacheEntry.validators);
-    //   Object.entries(condHeaders).forEach(([k, v]) => args.push("--header", `${k}: ${v}`));
-    // }
+    // Close the validator loop: pass cached validators to the runner both as
+    // structured data and as pre-built conditional headers, so a runner that
+    // wraps the GitHub API directly (or a fixture runner) can send
+    // If-None-Match / If-Modified-Since on a re-fetch. `gh issue list` itself
+    // has no --header flag; this is for runners that speak HTTP.
+    const validators = this._cacheEntry?.validators;
+    const conditional = { validators, headers: buildConditionalHeaders(validators) };
 
-    const out = await this.runner(args);
+    const out = await this.runner(args, conditional);
 
     // Runner may return { issues: [...], etag, lastModified, notModified }
     let result;
