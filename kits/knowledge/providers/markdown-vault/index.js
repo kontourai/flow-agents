@@ -27,6 +27,8 @@ function edgeTypeFor(linkKind) {
   switch (linkKind) {
     case "blocks":
       return "blocks";
+    case "merged-into":
+      return "merged-into";
     case "supersedes":
     case "refines":
       return "supersedes";
@@ -65,7 +67,7 @@ export class MarkdownVaultProvider {
     return {
       id: PROVIDER_ID,
       node_types: ["note", "person"],
-      edge_types: ["supersedes", "evidence-of", "mentions", "relates"],
+      edge_types: ["supersedes", "merged-into", "blocks", "evidence-of", "mentions", "relates"],
       writable: false,
       write_mode: "proposals-only",
       proposal_targets: ["create-node"],

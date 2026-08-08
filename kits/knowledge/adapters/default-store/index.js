@@ -507,7 +507,10 @@ export class DefaultKnowledgeStore {
 
     // Merge explicit links + wikilinks from body
     const explicitLinks = input.links || [];
-    const wikilinks = extractWikilinks(input.body || "");
+    // parse_wikilinks: false suppresses body-derived links — for ingested
+    // content whose body text is untrusted (provider issue bodies must not
+    // inject graph edges via [[...]]; #1214 review F3).
+    const wikilinks = input.parse_wikilinks === false ? [] : extractWikilinks(input.body || "");
     const links = mergeLinks(explicitLinks, wikilinks);
 
     const record = {
@@ -587,11 +590,12 @@ export class DefaultKnowledgeStore {
 
     // Merge links if updated
     let newLinks = record.links || [];
+    const parseWikilinks = fields.parse_wikilinks !== false;
     if (fields.links !== undefined) {
-      const wikilinks = extractWikilinks(fields.body !== undefined ? fields.body : record.body);
+      const wikilinks = parseWikilinks ? extractWikilinks(fields.body !== undefined ? fields.body : record.body) : [];
       newLinks = mergeLinks(fields.links, wikilinks);
     } else if (fields.body !== undefined) {
-      const wikilinks = extractWikilinks(fields.body);
+      const wikilinks = parseWikilinks ? extractWikilinks(fields.body) : [];
       newLinks = mergeLinks(record.links || [], wikilinks);
     }
 

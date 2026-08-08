@@ -67,13 +67,14 @@ When knowledge integration is enabled for the workspace (see the knowledge kit's
      (GitHub Issues API does not support incremental item list or ETag on list endpoints for the common runner
      shapes; a full fetch is required when board state changes or conditional support is absent).
 
-3. **On full fetch**: ingest ALL items AND their edges into Knowledge Kit — items become records
-   (category: `backlog.item`, board snapshot under `backlog.board`) and provider edges become record links, via
-   the shared helper `kits/knowledge/adapters/shared/ingest-graph.js` (`ingestProviderGraph`). Dropping edges
-   flattens the cached board into disconnected items: blocker/relation structure is exactly what readiness
-   assessment needs from a board cache, and the Surface projection over an edge-less store carries no evidence
-   or identity links. The `update()`/`create()` call itself sets `updated_at`, which is exactly what step 1
-   reads on the next pass — do not invent additional cache-bookkeeping fields.
+3. **On full fetch**: ingest ALL items AND their edges into Knowledge Kit via the shared helper
+   `kits/knowledge/adapters/shared/ingest-graph.js` (`ingestProviderGraph`): items upsert as records
+   (category: `backlog.item`, keyed by a slugified provider-id alias so re-ingest refreshes rather than
+   duplicates), provider edges become record links, and the helper's `board` option upserts the
+   `backlog.board` snapshot record whose `updated_at` refresh is exactly what step 1 reads on the next
+   pass — do not invent additional cache-bookkeeping fields. Dropping edges flattens the cached board
+   into disconnected items: blocker/relation structure is exactly what readiness assessment needs from
+   a board cache, and the Surface projection over an edge-less store carries no evidence or identity links.
 
 4. **Query Knowledge Kit** for candidate selection (instant, uses cached data).
 

@@ -7,6 +7,16 @@
  * board's 385 edges previously ingested to zero links, leaving the Surface
  * projection structurally blind and blocker data provider-only).
  *
+ * Re-ingest is an UPSERT, not a duplicate: each provider node id is slugified
+ * into a store alias, and a node whose alias already resolves updates the
+ * existing record in place (title/body/tags refresh, `updated_at` bumps —
+ * which is exactly what the pull-work TTL check reads). The alias also gives
+ * records a durable provider identity across sessions.
+ *
+ * Provider bodies are untrusted text: ingest suppresses the store's
+ * [[wikilink]] extraction (`parse_wikilinks: false`) so issue bodies cannot
+ * inject graph edges.
+ *
  * Edge types map to the link kinds `MarkdownVaultProvider.edgeTypeFor` maps
  * back — the exact inverse, so an ingested graph round-trips through
  * `readEdges()` with its types intact.
@@ -17,6 +27,7 @@
 /** Provider edge type -> vault link kind (inverse of markdown-vault edgeTypeFor). */
 const LINK_KIND_BY_EDGE_TYPE = Object.freeze({
   blocks: "blocks",
+  "merged-into": "merged-into",
   supersedes: "supersedes",
   "evidence-of": "source",
   mentions: "appears-in",
@@ -24,22 +35,51 @@ const LINK_KIND_BY_EDGE_TYPE = Object.freeze({
 });
 
 /**
+ * Slugify a provider node id into a store alias (SLUG_PATTERN allows
+ * [a-z0-9._/-], no leading/trailing separator). `issue:7` → `issue-7`.
+ * Returns null when nothing slug-safe remains.
+ */
+export function aliasForNodeId(nodeId) {
+  const slug = String(nodeId ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._/-]+/g, "-")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+  return slug.length ? slug : null;
+}
+
+/** Tags carried onto the record from provider node attributes (labels + state). */
+function tagsForNode(node) {
+  const tags = [];
+  const attrs = node?.attributes ?? {};
+  if (Array.isArray(attrs.labels)) {
+    for (const label of attrs.labels) if (typeof label === "string" && label) tags.push(label);
+  }
+  if (typeof attrs.state === "string" && attrs.state) tags.push(attrs.state.toLowerCase());
+  return tags;
+}
+
+/**
  * Ingest a provider graph into a knowledge store, preserving edges as links.
  *
- * Nodes are created first (building a provider-node-id → record-id map), then
- * edges are grouped by source record and written with `store.link()`. Failures
- * are collected and reported, never thrown mid-batch: a partly unusable graph
- * still ingests its usable part, and the report says exactly what was skipped
- * and why.
+ * Nodes are upserted first (building a provider-node-id → record-id map), then
+ * edges are grouped by source record and written with `store.link()` (itself an
+ * idempotent merge, so re-ingesting the same edges is a no-op). Failures are
+ * collected and reported, never thrown mid-batch: a partly unusable graph still
+ * ingests its usable part, and the report says exactly what was skipped and why.
  *
- * @param {Object} store - KnowledgeStoreAdapter (create/link, e.g. DefaultKnowledgeStore)
+ * @param {Object} store - KnowledgeStoreAdapter (create/update/link/get, e.g. DefaultKnowledgeStore)
  * @param {{ nodes: Array, edges: Array }} graph - Provider graph (readGraph() shape)
  * @param {Object} options
  * @param {string} options.agent - Provenance agent (required by the store)
  * @param {string} [options.itemCategory="backlog.item"] - Category for node records
  * @param {string} [options.itemType="raw"] - Record type for node records
  * @param {number} [options.bodyLimit=4000] - Truncate node bodies to this length
- * @returns {Promise<{ byNodeId: Map<string,string>, created: number, linked: number, skipped: Array<{ kind: "node"|"edge", ref: string, reason: string }> }>}
+ * @param {Object} [options.board] - Board snapshot record to upsert alongside the
+ *   items: `{ title, body, alias = "board", category = "backlog.board" }`. Its
+ *   `updated_at` refresh is what the pull-work TTL check reads on the next pass.
+ * @returns {Promise<{ byNodeId: Map<string,string>, created: number, updated: number,
+ *   linked: number, boardRecordId: string|null,
+ *   skipped: Array<{ kind: "node"|"edge"|"board", ref: string, reason: string }> }>}
  */
 export async function ingestProviderGraph(store, graph, options = {}) {
   const {
@@ -47,6 +87,7 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     itemCategory = "backlog.item",
     itemType = "raw",
     bodyLimit = 4000,
+    board,
   } = options;
   if (!agent) {
     throw new Error("ingestProviderGraph requires options.agent for store provenance");
@@ -56,19 +97,53 @@ export async function ingestProviderGraph(store, graph, options = {}) {
 
   const byNodeId = new Map();
   const skipped = [];
+  let created = 0;
+  let updated = 0;
 
-  // Pass 1: nodes → records. Empty bodies normalize to the title (the store
-  // requires a body field; no content is invented beyond the node's own title).
+  const upsert = async ({ nodeRef, alias, title, body, tags, type, category }) => {
+    const existing = alias ? await store.get(alias) : null;
+    if (existing) {
+      await store.update(
+        existing.id,
+        { title, body, ...(tags.length ? { tags } : {}), parse_wikilinks: false },
+        { agent, note: "ingest-graph refresh" },
+      );
+      updated += 1;
+      return existing.id;
+    }
+    const recordId = await store.create({
+      type,
+      title,
+      body,
+      category,
+      ...(alias ? { aliases: [alias] } : {}),
+      ...(tags.length ? { tags } : {}),
+      parse_wikilinks: false,
+      provenance: { agent },
+    });
+    created += 1;
+    return recordId;
+  };
+
+  // Pass 1: nodes → records (upsert by alias). Empty bodies normalize to the
+  // title (the store requires a body; no content is invented beyond the node's
+  // own title).
   for (const node of nodes) {
+    if (byNodeId.has(node?.id)) {
+      skipped.push({ kind: "node", ref: String(node?.id), reason: "duplicate node id in graph" });
+      continue;
+    }
     const title = typeof node?.title === "string" && node.title.trim() ? node.title : String(node?.id ?? "untitled");
     const rawBody = typeof node?.body === "string" && node.body.trim() ? node.body : title;
     try {
-      const recordId = await store.create({
-        type: itemType,
+      const recordId = await upsert({
+        nodeRef: node?.id,
+        alias: aliasForNodeId(node?.id),
         title: title.slice(0, 200),
         body: rawBody.slice(0, bodyLimit),
+        tags: tagsForNode(node),
+        type: itemType,
         category: itemCategory,
-        provenance: { agent },
       });
       byNodeId.set(node.id, recordId);
     } catch (err) {
@@ -76,7 +151,26 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     }
   }
 
-  // Pass 2: edges → links, grouped by source record.
+  // Board snapshot upsert (optional): gives the pull-work TTL loop its record.
+  let boardRecordId = null;
+  if (board && typeof board === "object") {
+    try {
+      boardRecordId = await upsert({
+        nodeRef: "board",
+        alias: aliasForNodeId(board.alias ?? "board"),
+        title: String(board.title ?? "board snapshot").slice(0, 200),
+        body: String(board.body ?? `${byNodeId.size} items ingested`).slice(0, bodyLimit),
+        tags: [],
+        type: "snapshot",
+        category: board.category ?? "backlog.board",
+      });
+    } catch (err) {
+      skipped.push({ kind: "board", ref: String(board.alias ?? "board"), reason: err?.message || String(err) });
+    }
+  }
+
+  // Pass 2: edges → links, grouped by source record. store.link() merges
+  // idempotently on (target_id, kind), so re-ingested edges do not duplicate.
   const linksBySource = new Map();
   for (const edge of edges) {
     const kind = LINK_KIND_BY_EDGE_TYPE[edge?.type];
@@ -87,7 +181,7 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     const fromRecord = byNodeId.get(edge.from);
     const toRecord = byNodeId.get(edge.to);
     if (!fromRecord || !toRecord) {
-      skipped.push({ kind: "edge", ref: `${edge.from}->${edge.to}`, reason: "endpoint not ingested" });
+      skipped.push({ kind: "edge", ref: `${edge.from}->${edge.to}`, reason: "endpoint not ingested (missing or failed node)" });
       continue;
     }
     if (!linksBySource.has(fromRecord)) linksBySource.set(fromRecord, []);
@@ -104,7 +198,7 @@ export async function ingestProviderGraph(store, graph, options = {}) {
     }
   }
 
-  return { byNodeId, created: byNodeId.size, linked, skipped };
+  return { byNodeId, created, updated, linked, boardRecordId, skipped };
 }
 
-export default { ingestProviderGraph };
+export default { ingestProviderGraph, aliasForNodeId };
