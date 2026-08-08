@@ -42,6 +42,8 @@ import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import * as critiqueResolutionRuntime from "../../build/src/cli/critique-resolution.js";
 import { BuilderBuildRunInputError, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
+import { resultDigestClaimedByCanonicalRun } from "../../build/src/cli/merge-change.js";
+import { attachEvidence } from "@kontourai/flow";
 import { runtimeCorrelationIdentityDeclaration } from "../../build/src/run-correlation.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
@@ -7189,16 +7191,31 @@ test("prior claim identity is rejected after re-entry and a new identity can rec
   ]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
-  const future = new Date(Date.now() + 10_000).toISOString();
+  // Flow 5.0 fails closed on any claim/event timestamped after its (real,
+  // caller-cannot-override — see evaluateBuilderFlowRun's forbidden "now"
+  // field) evaluation clock: reconciliationForClaim marks it stale/unknown
+  // rather than verified. This fixture used to push these claims 10s into the
+  // future purely to guarantee they postdate the earlier claims recorded
+  // above; a real "now" (fresh per shared claim, still monotonically after
+  // the earlier writes) gives the same guarantee without being literally
+  // future-dated relative to Flow's own evaluation instant.
+  const future = new Date().toISOString();
   const failure = [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", status: "fail", routeReason: "implementation_defect", timestamp: future }), ...verifiedTestsPrerequisites(session, future)];
   const first = await writeAndSync(session, failure);
   assert.equal(first.run.state.current_step, "execute");
-  await writeAndSync(session, [withIdentitySuffix(bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change", timestamp: future }), "reentry")]);
+  // This claim must postdate the route-back visit entry it is re-entering
+  // (Flow rejects evidence that is not current for the visit), so it needs a
+  // fresh "now" of its own rather than reusing `future` from above.
+  await writeAndSync(session, [withIdentitySuffix(bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" }), "reentry")]);
   const replay = await writeAndSync(session, failure);
   assert.equal(replay.attached, false);
   assert.equal(replay.run.state.current_step, "verify");
   assert.equal(replay.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
-  const newIdentity = failure.map((entry, index) => withIdentitySuffix(entry, `visit-2-${index}`));
+  // Same reasoning as the reentry claim above: this must be current for the
+  // fresh verify-gate visit the reentry claim just opened, so it needs its
+  // own fresh "now" rather than the stale `future` baked into `failure`.
+  const newIdentityContent = [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", status: "fail", routeReason: "implementation_defect" }), ...verifiedTestsPrerequisites(session)];
+  const newIdentity = newIdentityContent.map((entry, index) => withIdentitySuffix(entry, `visit-2-${index}`));
   const currentHead = flowRunHead(replay.run.state);
   for (const entry of newIdentity) {
     if (entry.claim.metadata?.gate_claim) entry.claim.metadata.gate_claim.flow_run_head = currentHead;
@@ -7718,6 +7735,132 @@ test("Flow completion authenticates the exact issued publish-change observation 
   const recovered = await complete({ sessionDir: session.sessionDir, action });
   assert.equal(recovered.attached, false, "recovery detects the already-attached operation claim");
   assert.equal(snapshotFile(path.join(session.sessionDir, "state.json")), projectedBeforeRecovery, "recovery restores the Flow-owned projection");
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+/**
+ * Map item: workflow.ts:1520-1584 (recoverExactCurrentCompletionRequest) calls
+ * recoverBuilderFlowSession as its FIRST step, unconditionally, before any
+ * trust.bundle/ledger/completion verification. Flow 4.0+'s assertTransition
+ * Provenance throws flow.transition.from_step.fabricated when a request would
+ * carry the run past a gate it has not evaluated from a step it never
+ * occupied — the map flagged this as needing a live 5.x run, not a code read,
+ * because recoverBuilderFlowSession's "does re-evaluating during repair
+ * appraise a step the run never occupied" question could not be settled from
+ * source alone.
+ *
+ * This drives a real Flow 5.x run to "verify" with its verify-gate NEVER
+ * evaluated (no evidence attached there at all — the sharpest form of
+ * "never-occupied from the write side"), then calls recoverBuilderFlowSession
+ * directly and proves it completes without tripping the provenance guard.
+ */
+test("recoverBuilderFlowSession does not trip Flow 5.x's fabricated-transition provenance guard at a never-evaluated gate", async () => {
+  const session = makeSession("recovery-never-evaluated-verify-gate");
+  const ambient = claimAmbientSessionAssignment(session);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const steps = [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+  ];
+  let latest = null;
+  for (const entries of steps) latest = await writeAndSync(session, entries());
+  assert.equal(latest.run.state.current_step, "verify");
+  assert.equal(latest.run.manifest.evidence.some((entry) => entry.gate_id === "verify-gate"), false, "verify-gate must be genuinely never-evaluated for this to be the sharp case");
+
+  const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(recovered.run.state.current_step, "verify", "recovery must not fabricate a transition past the never-evaluated gate");
+  assert.equal(recovered.run.state.status, "active");
+
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("Flow 5.0 refuses the removed authorityTrace attachEvidence option", async () => {
+  // Flow 3.9 accepted `authorityTrace` as an attachEvidence option and wrote it
+  // to `evidence.authority_trace` — display-only metadata Flow itself never used
+  // to authorize a gate. Flow 5.0 validates attachment options against an
+  // allowlist and throws on anything outside it; `authorityTrace` never made
+  // that list (see docs/migrations/5.0.0.md). This is why
+  // advancePublishChangeGate (builder-flow-runtime.ts) and
+  // trustBundleAttachOptions (builder-flow-run-adapter.ts) no longer pass it —
+  // the option itself is gone, not merely deprecated.
+  const session = makeSession("authority-trace-option-removed");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  // Option-allowlist validation runs synchronously before any run lookup, so
+  // the target gate need not be real for this to demonstrate the throw.
+  await assert.rejects(
+    async () => attachEvidence(session.slug, {
+      cwd: session.projectRoot,
+      gate: "pull-work-gate",
+      file: "does-not-need-to-exist-for-option-validation.json",
+      authorityTrace: "any-action-id",
+    }),
+    /flow\.attach_evidence\.options\.invalid: unsupported option authorityTrace/,
+  );
+});
+
+/**
+ * Map item 2 (merge-change.ts resultDigestClaimedByCanonicalRun): proves the
+ * NEW representation end-to-end against a manifest that Flow 5.x itself
+ * produced via a real attachEvidence call (advancePublishChangeGate), not a
+ * hand-written fixture. The old fixture pattern (merge-change-operation-
+ * authority.test.mjs, merge-change.test.mjs) hand-writes `evidence.authority_
+ * trace` directly into a manifest object and was flagged as actively
+ * misleading: nothing on the real 5.x write path can produce that shape
+ * anymore (the option that used to write it no longer exists — see the test
+ * above), so a fixture that hand-writes it proves nothing about whether the
+ * real system still authenticates.
+ */
+test("resultDigestClaimedByCanonicalRun authenticates a real Flow-5.x-attached publish-change record end-to-end", async () => {
+  const { session, ambient, action } = await preparePublishChangeTransaction("publish-change-result-digest-e2e");
+  const complete = createPublishChangeOperationCompleter((request) => publishChangeObservation(request));
+  const completed = await complete({ sessionDir: session.sessionDir, action });
+  assert.notEqual(completed.run.state.current_step, "pr-open", "the gate must have actually advanced via the real attach path");
+
+  const resultBytes = fs.readFileSync(path.join(session.sessionDir, "publish-change.result.json"));
+  const resultDigest = createHash("sha256").update(resultBytes).digest("hex");
+  const persistedResult = JSON.parse(resultBytes.toString("utf8"));
+  const observation = { ...persistedResult };
+  delete observation.operation_action_id;
+  const startDefinition = { id: completed.run.startDefinition.id, version: completed.run.startDefinition.version };
+
+  const authenticated = resultDigestClaimedByCanonicalRun(
+    completed.run.manifest,
+    action.action_id,
+    observation,
+    resultDigest,
+    action.binding,
+    session.slug,
+    startDefinition,
+  );
+  assert.equal(authenticated, true, "a genuine Flow 5.x-attached publish-change record must authenticate");
+
+  // The digest is bound to this exact publish-change.result.json's bytes; any
+  // other action id or digest must not authenticate against this same record.
+  assert.equal(
+    resultDigestClaimedByCanonicalRun(completed.run.manifest, "c".repeat(64), observation, resultDigest, action.binding, session.slug, startDefinition),
+    false,
+    "an action id not bound by this record's authority trace is unauthenticated",
+  );
+  assert.equal(
+    resultDigestClaimedByCanonicalRun(completed.run.manifest, action.action_id, observation, "c".repeat(64), action.binding, session.slug, startDefinition),
+    false,
+    "a result whose bytes do not match the canonical provider artifact digest is unauthenticated",
+  );
+
+  // Confirm the new representation actually lives where the map said it would:
+  // a claim-scoped authorityRef inside the attached bundle's own authorityTrace
+  // array, never a flat evidence.authority_trace string.
+  const attachedEntry = completed.run.manifest.evidence.find((entry) => entry.gate_id === action.binding.gate_ids[0] && entry.producer === "publish-change-operation-authority");
+  assert.ok(attachedEntry, "the publish-change evidence entry must exist in the real manifest");
+  assert.equal(attachedEntry.authority_trace, undefined, "the real write path must not produce the legacy flat field");
+  assert.ok(Array.isArray(attachedEntry.bundle?.authorityTrace) && attachedEntry.bundle.authorityTrace.length === 1, "the real write path must embed a scoped authorityTrace record in the bundle");
+  assert.equal(attachedEntry.bundle.authorityTrace[0].authorityRef, `publish-change-operation-authority:${action.action_id}`);
+
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 

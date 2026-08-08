@@ -159,6 +159,42 @@ test("Flow evidence matching rejects narrative-shaped entries", () => {
     assert.equal(evidenceMatchesExpectation(entry, expectation), false, `${entry.id} must not satisfy trust.bundle`);
   }
 
+  // Flow 5.0 always re-derives the claim report from the attached bundle's own
+  // `claims`/`evidence`/`events` at evaluation time (never trusting a separately
+  // supplied, possibly-stale `bundle_report` or an omitted evaluation clock) —
+  // so the positive control must be a genuinely valid, self-consistent Hachure
+  // bundle rather than an empty bundle paired with a hand-asserted report.
+  const now = new Date().toISOString();
+  const claim = {
+    id: "implementation-scope-claim",
+    subjectType: "change",
+    subjectId: "narrative-arch-isolation/positive-control",
+    claimType: "builder.execute.scope",
+    fieldOrBehavior: "positive control fixture",
+    value: "pass",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const evidence = {
+    id: "evidence.implementation-scope",
+    claimId: claim.id,
+    evidenceType: "human_attestation",
+    method: "attestation",
+    sourceRef: "narrative-arch-isolation.test.mjs",
+    excerptOrSummary: "positive control fixture",
+    observedAt: now,
+    collectedBy: "flow-agents-test",
+  };
+  const event = {
+    id: "event.implementation-scope",
+    claimId: claim.id,
+    status: "verified",
+    actor: "flow-agents-test",
+    method: "attestation",
+    evidenceIds: [evidence.id],
+    createdAt: now,
+    verifiedAt: now,
+  };
   const trustBundleEntry = {
     id: "trust-bundle",
     kind: "trust.bundle",
@@ -167,21 +203,13 @@ test("Flow evidence matching rejects narrative-shaped entries", () => {
     bundle: {
       schemaVersion: 5,
       source: "narrative-arch-isolation-positive-control",
-      claims: [],
-      evidence: [],
+      claims: [claim],
+      evidence: [evidence],
       policies: [],
-      events: [],
-    },
-    bundle_report: {
-      claims: [{
-        id: "implementation-scope-claim",
-        claimType: "builder.execute.scope",
-        subjectType: "change",
-        status: "verified",
-      }],
+      events: [event],
     },
   };
-  assert.equal(evidenceMatchesExpectation(trustBundleEntry, expectation), true, "valid trust.bundle remains a positive control");
+  assert.equal(evidenceMatchesExpectation(trustBundleEntry, expectation, undefined, null, now), true, "valid trust.bundle remains a positive control");
 });
 
 test("narrative.promote is external-only and cannot be completed by the workflow writer", () => {
