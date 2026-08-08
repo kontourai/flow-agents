@@ -120,6 +120,101 @@ the `session.usage` event.
 | `delegations[]` | array | per-sub-agent delegation facts + derived outcome (#415) — see below; `[]` when `--agents-dir` is absent |
 | `signals` | object | harness-capability declaration — what telemetry this runtime exposed (see below + `harness-capability-matrix.md`) |
 | `tenant_id` | string\|null | self-description only; the `ApiSink` stamps the authoritative tenant (ADR 0003 call 2) |
+| `terminal_status` | enum\|absent | honest run-termination taxonomy (#925) — see below. Present only on `flow_run_record`-produced records today; optional/additive on `0.2`. |
+| `tokens_unattributed` | boolean\|absent | `true` when one or more `phases[]` entries carry `null` token fields (no attribution source available for them). Optional/additive on `0.2`. |
+
+## `flow_run_record` mode — deriving from the canonical Flow run store (#922/#925 phase A)
+
+**Problem this repairs.** Every historical record before this change carried `run_id: "unknown"`
+(a runtime *session* id, not a Flow run id — unjoinable to `.kontourai/flow/runs/<run-id>/`),
+`producer_authority: "unavailable"`, and exactly one `{"phase":"unattributed", ...}` phase entry —
+zero of the ~1,180 records on record ever attributed real per-phase cost or an honest terminal
+outcome. Root cause: the emitter only ever read the `session.usage` event and the Builder
+workflow *sidecar* (`--state`/`--critique`, a task-slug-directory JSON distinct from Flow's own run
+store) — it never read the Flow run's own `state.json`, which is the one place a run's real
+step-by-step transition history, route-backs, and lifecycle (pause/resume/cancel) actually live.
+
+**The new source.** `economics-record.sh --flow-run-dir <path/to/.kontourai/flow/runs/RUN_ID>`
+bypasses the `session.usage`-event path entirely (no positional event / stdin required) and calls
+`scripts/telemetry/flow-run-economics.mjs`, which reads `state.json` (validated against
+`schemas/flow-run.schema.json`'s shape: `schema_version`, `run_id`, `status`, `current_step`,
+`transitions[]`, optionally `lifecycle[]` / `gate_outcome_history[]`) plus checks for
+`evidence/manifest.json`. Everything below is **derived, never fabricated**; an unreadable or
+malformed run directory yields **no record at all** (fail-open no-op, consistent with the rest of
+this emitter), never a guessed one.
+
+- **`run_id`** — the Flow run id (`state.run_id`, the run directory's own basename) — joinable to
+  `.kontourai/flow/runs/<run-id>/` directly. `run_correlation` stays an explicit
+  `{"status":"incomplete","reason":"..."}` in this mode: no runtime session is known here, and this
+  mode never conflates the Flow run id with a session id (per #922's boundary). Binding a real
+  session identity into `run_correlation.identities.runtime_session` alongside `flow_run` is
+  **out of scope for phase A** — see "What phase A does NOT do" below.
+- **`terminal_status`** (#925 taxonomy) — derived from Flow's own `status` enum, honestly:
+  `completed`, `canceled`, `failed`, and `accepted_by_exception` map straight across; `active`,
+  `blocked`, `needs_decision`, and `paused` all map to **`active_abandoned`** — the run had **not**
+  reached a terminal state as of this record's `at` timestamp, and this mode **never** reports such
+  a run as `completed`. This is the fault-injected case the eval proves: taking a snapshot of a
+  known-active run must never yield `terminal_status: "completed"`.
+- **`phases[]`** — one bucket per Builder step actually visited, walked from `transitions[].at`
+  timestamps: the interval between transition *i-1* and transition *i* is attributed to the step
+  transition *i-1* moved the run **into** (`to_step`, or the unchanged step when a transition
+  blocked in place). Route-back re-entries into the same step accumulate onto the **same** bucket
+  (a real run's `execute` phase, for example, sums every execute↔verify route-back loop into one
+  total). The step active **before the first transition** is never attributed a duration — there is
+  no observed entry timestamp for it, and this tool does not estimate one from filesystem metadata
+  or a run "start" convention Flow does not itself record. `input_tokens`/`output_tokens`/
+  `cache_creation_input_tokens`/`cache_read_input_tokens`/`estimated_cost_usd` are `null` (not `0`)
+  on every phase in this mode, tagged `source: "flow-run-record"` — token attribution is a wholly
+  separate, explicit step (see `economics-enrich-tokens.mjs` below), never auto-run here. The
+  top-level `tokens_unattributed` is `true` whenever any phase has `null` tokens (always true today,
+  since this mode never merges in transcript-derived tokens automatically).
+- **`iterations.route_backs`** — count of `transitions[]` entries with `type == "route_back"`
+  (Flow's own route-back ledger entry, `schemas/flow-run.schema.json` transition `$defs`).
+  **`iterations.count`** — `route_backs + 1` (the initial pass, plus one additional pass per
+  route-back), per this contract's "deliver-loop passes" definition.
+- **`defects.gate_fires`** — from the append-only `gate_outcome_history[]` ledger (entries with
+  `status` `block`/`route-back`) when the run has one; legacy runs that predate that ledger fall
+  back to counting `transitions[]` entries with `status == "blocked"` (every route-back or in-place
+  block is itself a gate firing against the run).
+- **`defects.verification_verdict`** — the **last** transition departing the `verify` step, bounded
+  by whether the run ever reached a terminal state: `PASS` if that last transition is `allowed`;
+  `FAIL` only if it is `blocked` **and** the run has since terminated without a later pass (a block
+  that is still open on a still-`active_abandoned` run is `NOT_VERIFIED`, not `FAIL` — the run has
+  not finished attempting verification); `NOT_VERIFIED` if `verify` was never reached.
+- **`time.human_wait_s`** — real pause→resume (and pause→cancel, and an still-open pause→`now`)
+  intervals summed from the run's `lifecycle[]` ledger. `time.wall_clock_s` is the sum of the
+  emitted `phases[].wall_clock_s`, preserving the phase-sum invariant.
+- **`producer_authority: "flow_run_record"`** — a new enum value distinct from
+  `authenticated_runtime_binding`. This mode reads real on-disk Flow run state (not a
+  caller-fabricated event pretending to be validated), so it does **not** require
+  `FLOW_AGENTS_ECONOMICS_FIXTURE_MODE`; it is, however, **local-only** — `economics-record.sh` never
+  attempts a console relay for a `flow_run_record` producer regardless of
+  `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`, since that authority level is not (yet) an authenticated
+  runtime binding console can trust as a de-duplicable per-run fact. Wiring an authenticated,
+  relayable version of this path is #922's broader runtime-binding scope.
+
+**Token attribution — `economics-enrich-tokens.mjs` (optional, separate tool).**
+`scripts/telemetry/economics-enrich-tokens.mjs --transcript <path> --windows-json <path>` streams a
+runtime transcript (JSONL, one `{"type":"assistant","timestamp":...,"message":{"usage":{...}}}` line
+per turn — the same shape `scripts/telemetry/lib/usage.sh`'s `usage_parse_transcript` already reads)
+with `node:readline` (constant memory regardless of transcript size) and sums each assistant turn's
+real `.message.usage` block into whichever phase window (`{phase, start, end}` — the exact
+`phase_windows` `flow-run-economics.mjs` already computed from transition timestamps) its
+`timestamp` falls inside. Malformed lines are counted (`malformed_lines_skipped`) and skipped, never
+fatal. A transcript is **never auto-discovered** — the caller passes `--transcript` explicitly (no
+cwd/path/time/"most recent" heuristic — see #922's boundary on heuristic joins). A phase window with
+no matching lines, or a missing/unreadable transcript, is absence of a signal and is **never**
+reported as a real zero: token fields for phases the slicer could not attribute stay out of its
+output entirely, leaving the caller's `null` + `tokens_unattributed:true` in place.
+
+**What phase A does NOT do (deferred to #922/#925 phase B).** `economics-record.sh`'s
+`--flow-run-dir` mode does not itself invoke `economics-enrich-tokens.mjs` or merge its output in —
+the two tools are independently runnable and independently tested; gluing them together
+automatically (and doing so from the live `Stop` hook, replacing today's session.usage-event path
+with a Flow-run-derived one end-to-end) is explicit phase-B follow-up. Phase A also does not bind a
+real runtime session identity into this mode's `run_correlation` (it stays `incomplete`), and does
+not attempt cost pricing for flow-run-record-mode tokens (`cost.estimated_cost_usd` stays `0`,
+matching this contract's existing "cost legitimately degrades to 0 on unpriced data" language).
 
 ## `delegations[]` — per-sub-agent routing facts + outcome (#415)
 

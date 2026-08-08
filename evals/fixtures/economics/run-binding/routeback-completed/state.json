@@ -1,0 +1,84 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-routeback-completed",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/routeback-completed",
+  "status": "completed",
+  "current_step": "pr-open",
+  "params": {},
+  "next_action": "none",
+  "updated_at": "2026-02-01T00:19:50.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-01T00:00:00.000Z"
+    },
+    {
+      "from_step": "design-probe",
+      "to_step": "plan",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "design-probe-gate",
+      "at": "2026-02-01T00:01:40.000Z"
+    },
+    {
+      "from_step": "plan",
+      "to_step": "execute",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "plan-gate",
+      "at": "2026-02-01T00:03:40.000Z"
+    },
+    {
+      "from_step": "execute",
+      "to_step": "verify",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "execute-gate",
+      "at": "2026-02-01T00:13:40.000Z"
+    },
+    {
+      "from_step": "verify",
+      "to_step": "execute",
+      "status": "blocked",
+      "type": "route_back",
+      "reason": "verification found a defect",
+      "gate_id": "verify-gate",
+      "attempt": 1,
+      "route_reason": "implementation_defect",
+      "at": "2026-02-01T00:14:40.000Z"
+    },
+    {
+      "from_step": "execute",
+      "to_step": "verify",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "execute-gate",
+      "at": "2026-02-01T00:18:00.000Z"
+    },
+    {
+      "from_step": "verify",
+      "to_step": "merge-ready",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "verify-gate",
+      "at": "2026-02-01T00:19:00.000Z"
+    },
+    {
+      "from_step": "merge-ready",
+      "to_step": "pr-open",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "merge-ready-gate",
+      "at": "2026-02-01T00:19:20.000Z"
+    }
+  ],
+  "lifecycle": [],
+  "exceptions": []
+}

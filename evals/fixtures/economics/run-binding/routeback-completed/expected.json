@@ -1,0 +1,21 @@
+{
+  "run_id": "econ-fixture-routeback-completed",
+  "terminal_status": "completed",
+  "phase_wall_clock_s": {
+    "design-probe": 100,
+    "plan": 120,
+    "execute": 800,
+    "verify": 120,
+    "merge-ready": 20,
+    "pr-open": 30
+  },
+  "total_wall_clock_s": 1190,
+  "iterations": {
+    "count": 2,
+    "route_backs": 1
+  },
+  "defects": {
+    "gate_fires": 1,
+    "verification_verdict": "PASS"
+  }
+}

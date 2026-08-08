@@ -260,6 +260,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_economics_record.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_economics_run_binding.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
