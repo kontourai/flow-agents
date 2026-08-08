@@ -174,6 +174,13 @@ export type ActiveKitsReadResult = { ok: true; entries: ActiveKitEntry[] } | { o
  * filesystem mutation -- never fall back to `readActiveKits`'s loose parse (which silently drops
  * malformed entries and silently coerces an invalid `scope` to `"project"`) once this function is
  * available at the call site.
+ *
+ * Intentionally STRICT (any single malformed entry fails the WHOLE read) where
+ * `scripts/hooks/lib/kit-catalog.js`'s `readActiveBuiltinKitIds` is intentionally LENIENT (skips
+ * a malformed entry individually, honors the rest) -- this is a write path, so it is conservative
+ * about partially-corrupt input; the hook's is a read-only steering path, which must instead be
+ * maximally resilient so one bad entry can never silently disable enforcement. Not an oversight;
+ * see `readActiveBuiltinKitIds`'s own docstring for the reverse cross-reference.
  */
 export function readActiveKitsValidated(dest: string, packageRoot: string): ActiveKitsReadResult {
   const record = readInstallRecord(dest);

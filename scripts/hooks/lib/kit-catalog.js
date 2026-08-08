@@ -223,7 +223,22 @@ function workflowTriggerValidationErrors(manifest, manifestPath) {
  * active" decision) -- and, unlike the other `null` cases, that one prints a single stderr
  * diagnostic naming the corruption, because silently reinterpreting "can't decide" as "everything
  * is active" must never be as quiet as the ordinary legacy/absent case.
+ *
+ * Intentionally LENIENT (skip malformed entries individually, honor the rest) where
+ * `src/lib/kit-registry.ts`'s `readActiveKitsValidated` is intentionally STRICT (any malformed
+ * entry fails the whole read) -- this is a read-only steering path, so it must be maximally
+ * resilient against one bad entry silently disabling enforcement; `readActiveKitsValidated` is a
+ * write path, so it is conservative about partially-corrupt input instead. See
+ * `readActiveKitsValidated`'s own docstring for the reverse cross-reference.
  */
+// De-duped per installJsonPath (module-level, not per-call): a single logical hook invocation is
+// one Node process (see workflow-steering.js's entry point), but `kitWorkflowSteering` calls
+// `workflowTriggersFor` -> `readActiveBuiltinKitIds` once per matched steering category, and a
+// single prompt can match more than one category (`looksLikeImplementationWork` /
+// `looksLikeKnowledgeWork` are independent, non-exclusive regex tests) -- without this, one
+// malformed active_kits array printed the same WARNING more than once per invocation.
+const _warnedMalformedActiveKitsPaths = new Set();
+
 function readActiveBuiltinKitIds(root) {
   try {
     const installJsonPath = path.join(root, '.flow-agents', 'install.json');
@@ -240,13 +255,16 @@ function readActiveBuiltinKitIds(root) {
       }
     }
     if (record.active_kits.length > 0 && ids.size === 0) {
-      process.stderr.write(
-        `[flow-agents] WARNING: ${installJsonPath}: active_kits has ${malformedCount} ` +
-        `entr${malformedCount === 1 ? 'y' : 'ies'} and none has a valid id -- cannot determine ` +
-        `which built-in kits are active. Failing open: steering every installed built-in kit's ` +
-        `workflow_triggers as if active_kits were absent, not treating this as zero active kits. ` +
-        `Repair or regenerate this install's active_kits (kontourai/flow-agents kit-activation-registry).\n`
-      );
+      if (!_warnedMalformedActiveKitsPaths.has(installJsonPath)) {
+        _warnedMalformedActiveKitsPaths.add(installJsonPath);
+        process.stderr.write(
+          `[flow-agents] WARNING: ${installJsonPath}: active_kits has ${malformedCount} ` +
+          `entr${malformedCount === 1 ? 'y' : 'ies'} and none has a valid id -- cannot determine ` +
+          `which built-in kits are active. Failing open: steering every installed built-in kit's ` +
+          `workflow_triggers as if active_kits were absent, not treating this as zero active kits. ` +
+          `Repair or regenerate this install's active_kits (kontourai/flow-agents kit-activation-registry).\n`
+        );
+      }
       return null;
     }
     return ids;

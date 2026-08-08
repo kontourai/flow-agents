@@ -669,6 +669,7 @@ type ActivateFilePlan = { skillName: string; rel: string; manifestPath: string; 
 type ActivateFileConflict = { plan: ActivateFilePlan; reason: string };
 
 function planActivateFiles(
+  dest: string,
   skillNames: string[],
   skillsSourceRoot: string,
   skillsDestRoot: string,
@@ -686,6 +687,19 @@ function planActivateFiles(
       const destFile = path.join(destDir, ...rel.split("/"));
       const manifestPath = `${skillsPrefix}/${name}/${rel}`;
       const plan: ActivateFilePlan = { skillName: name, rel, manifestPath, srcFile, destFile };
+      // PLAN-TIME containment, reusing assertManifestEntryParentContained -- the exact primitive
+      // deactivateBuiltinKit/uninstall.ts use for removal, not a re-implementation -- BEFORE any
+      // lstat-based classification below. r2 review HIGH finding: classification used to run off
+      // fs.lstatSync(destFile) on the FINAL path component only; if the skill DIRECTORY itself
+      // had been replaced by a symlink to a location that does not yet contain the file,
+      // lstatSync(destFile) threw ENOENT (nothing exists at the resolved-through-symlink
+      // location), silently treated as "ordinary new file, safe to copy" -- the OS transparently
+      // resolves a symlinked ancestor, so this check must run unconditionally for every planned
+      // file, not only ones that already exist. Throws on the first violation, aborting the WHOLE
+      // activate call before any write (propagates to activateBuiltinKit's try/catch) -- exactly
+      // how a poisoned manifest entry aborts the whole uninstall/deactivate plan, never partially
+      // proceeding on files planned before the bad one.
+      assertManifestEntryParentContained(dest, destFile, manifestPath);
       let destStat: fs.Stats | undefined;
       try {
         destStat = fs.lstatSync(destFile);
@@ -715,6 +729,30 @@ function planActivateFiles(
     }
   }
   return { toCopy, conflicts };
+}
+
+/**
+ * Write one file, NEVER following a symlink (or any non-regular-file) sitting at `destFile`
+ * itself: if one is present, it is unlinked first so a fresh regular file is created AT that
+ * exact path, never through it to wherever it points. r2 review HIGH-adjacent finding: `--force`
+ * used to fold a symlinked-file conflict straight into a plain `fs.copyFileSync(src, destFile)`,
+ * which follows the symlink and overwrites its EXTERNAL target while the CLI reported
+ * `overwritten (--force): <in-dest manifest path>` as if the write had landed inside `dest`.
+ * Returns whether an existing symlink/non-regular-file was replaced, so the caller can report
+ * truthfully what actually happened rather than what was merely planned.
+ */
+function writeActivateFileNeverFollowingSymlink(plan: ActivateFilePlan): { replacedSymlink: boolean } {
+  let existingStat: fs.Stats | undefined;
+  try {
+    existingStat = fs.lstatSync(plan.destFile);
+  } catch {
+    existingStat = undefined;
+  }
+  const replacedSymlink = Boolean(existingStat && (existingStat.isSymbolicLink() || !existingStat.isFile()));
+  if (replacedSymlink) fs.rmSync(plan.destFile, { force: true });
+  fs.mkdirSync(path.dirname(plan.destFile), { recursive: true });
+  fs.copyFileSync(plan.srcFile, plan.destFile);
+  return { replacedSymlink };
 }
 
 async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
@@ -785,7 +823,17 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
   }
 
   const manifestByPath = new Map(manifest.files.map((entry) => [entry.path, entry]));
-  const { toCopy, conflicts } = planActivateFiles(skillNames, skillsSourceRoot, skillsDestRoot, skillsPrefix, manifestByPath);
+  let toCopy: ActivateFilePlan[];
+  let conflicts: ActivateFileConflict[];
+  try {
+    ({ toCopy, conflicts } = planActivateFiles(dest, skillNames, skillsSourceRoot, skillsDestRoot, skillsPrefix, manifestByPath));
+  } catch (error) {
+    // r2 review HIGH finding: a plan-time containment violation (a symlinked skill directory
+    // pointing outside dest) must hard-abort the WHOLE call before any write, naming the entry --
+    // never partially proceed on files planned before the bad one.
+    console.error(`kit activate: ${(error as Error).message}`);
+    return 2;
+  }
   // With --force, a conflict is overwritten instead of preserved -- fold it into the copy set.
   const preserved = force ? [] : conflicts;
   const forced = force ? conflicts : [];
@@ -800,9 +848,29 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
   }
 
   const newManifestEntries: OwnedFileEntry[] = [];
+  const applyPreserved: { relPath: string; reason: string }[] = [];
+  const replacedSymlinkPaths = new Set<string>();
   for (const plan of filesToWrite) {
-    fs.mkdirSync(path.dirname(plan.destFile), { recursive: true });
-    fs.copyFileSync(plan.srcFile, plan.destFile);
+    // APPLY-TIME containment re-check (TOCTOU), same class and same reused primitive as
+    // deactivateBuiltinKit's own apply-time re-check: violation here does NOT abort the rest of
+    // the run (plan-time already ruled out every OTHER entry) -- preserve-not-write this one file
+    // and continue, matching uninstall.ts's own apply-vs-plan asymmetry (plan aborts everything;
+    // apply preserves just the one entry that changed underneath it).
+    try {
+      assertManifestEntryParentContained(dest, plan.destFile, plan.manifestPath);
+    } catch (error) {
+      const reason = error instanceof ManifestContainmentViolationError
+        ? "parent directory now resolves outside the install root through a symlink"
+        : `could not verify parent directory containment: ${(error as Error).message}`;
+      applyPreserved.push({ relPath: plan.manifestPath, reason: `${reason}; preserved (re-checked immediately before write)` });
+      continue;
+    }
+    // r2 review HIGH-adjacent finding: NEVER follow a symlink (or write through any non-regular-
+    // file) sitting at the exact destination path -- --force used to fold a symlinked-FILE
+    // conflict into a plain fs.copyFileSync, which follows the symlink and overwrites its
+    // EXTERNAL target while the report claimed the in-dest manifest path was overwritten.
+    const { replacedSymlink } = writeActivateFileNeverFollowingSymlink(plan);
+    if (replacedSymlink) replacedSymlinkPaths.add(plan.manifestPath);
     newManifestEntries.push({ path: plan.manifestPath, sha256: hashFile(plan.destFile) });
   }
   writeOwnedFilesManifest(dest, mergeOwnedFilesManifestEntries(manifest, newManifestEntries));
@@ -811,14 +879,27 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
   const nextActiveKits: ActiveKitEntry[] = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
   writeActiveKits(dest, root, nextActiveKits);
 
-  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s), ${filesToWrite.length} file(s) copied) at ${dest}`);
+  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s), ${newManifestEntries.length} file(s) copied) at ${dest}`);
   if (preserved.length) {
     console.log(`${preserved.length} file(s) were user-modified and NOT overwritten (rerun with --force to overwrite):`);
     for (const entry of preserved) console.log(`  preserved: ${entry.plan.manifestPath}  [${entry.reason}]`);
   }
+  if (applyPreserved.length) {
+    console.log(`${applyPreserved.length} file(s) were preserved due to a containment check immediately before write:`);
+    for (const entry of applyPreserved) console.log(`  preserved: ${entry.relPath}  [${entry.reason}]`);
+  }
   if (forced.length) {
-    console.log(`${forced.length} user-modified file(s) were overwritten because --force was given:`);
-    for (const entry of forced) console.log(`  overwritten (--force): ${entry.plan.manifestPath}  [${entry.reason}]`);
+    // Truthful report (r2 review): say what ACTUALLY happened at write time (recorded in
+    // replacedSymlinkPaths), never just restate the plan-time classification reason.
+    console.log(`${forced.length} conflicting file(s) were overwritten because --force was given:`);
+    for (const entry of forced) {
+      const wasPreservedAtApply = applyPreserved.some((p) => p.relPath === entry.plan.manifestPath);
+      if (wasPreservedAtApply) continue; // already reported above; --force cannot override a containment violation
+      const action = replacedSymlinkPaths.has(entry.plan.manifestPath)
+        ? "replaced symlink with a regular file (--force)"
+        : "overwritten (--force)";
+      console.log(`  ${action}: ${entry.plan.manifestPath}  [${entry.reason}]`);
+    }
   }
 
   // Dependency awareness (non-blocking): suggest, never auto-install.
@@ -931,11 +1012,23 @@ async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<numb
   const relevantEntries = manifest.files.filter((entry) => ownedPrefixes.some((prefix) => entry.path.startsWith(prefix)));
 
   const planned: DeactivatePlanEntry[] = [];
-  for (const entry of relevantEntries) {
-    const absPath = resolveManifestEntryPath(dest, entry.path);
-    const expectedSha256 = resolveManifestEntrySha256(entry.path, entry.sha256);
-    assertManifestEntryParentContained(dest, absPath, entry.path);
-    planned.push({ relPath: entry.path, absPath, expectedSha256 });
+  try {
+    for (const entry of relevantEntries) {
+      const absPath = resolveManifestEntryPath(dest, entry.path);
+      const expectedSha256 = resolveManifestEntrySha256(entry.path, entry.sha256);
+      assertManifestEntryParentContained(dest, absPath, entry.path);
+      planned.push({ relPath: entry.path, absPath, expectedSha256 });
+    }
+  } catch (error) {
+    // r2 review MEDIUM finding: this plan-time loop's three throwing calls (a malformed manifest
+    // path/sha256, or a poisoned entry whose parent resolves outside dest -- e.g. the r2 activate
+    // HIGH finding's exact poisoned-manifest byproduct) were previously unguarded, reaching
+    // kit.ts's top-level `.catch` and printing a raw Node stack trace with internal file paths.
+    // uninstall.ts's own equivalent plan-time call is protected by its caller's try/catch
+    // (buildPlan() wrapped in main()); this mirrors that -- a clean, defined CLI error before any
+    // removal, matching uninstall.ts's own "malformed manifest entry" exit code (2).
+    console.error(`kit deactivate: ${(error as Error).message}`);
+    return 2;
   }
 
   if (dryRun) {

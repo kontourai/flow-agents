@@ -41,6 +41,20 @@
 #      filtered by active_kits (which only ever lists built-in kits), before and after a built-in
 #      kit is deactivated.
 #
+# r2 delta review fix-round scenarios (kit-activation-review-r2-delta.md):
+#   Q. HIGH: `kit activate` has parent-directory containment parity with `kit deactivate` -- a
+#      symlinked skill DIRECTORY (planted where a file does not yet exist) makes activate abort
+#      cleanly before any write, naming the entry; the external tree is never touched.
+#   R. HIGH-adjacent: `--force` on a symlinked destination FILE never follows the symlink -- it
+#      replaces the symlink with a regular file INSIDE dest and reports truthfully what happened;
+#      the external target the symlink pointed at is untouched.
+#   S. MEDIUM: a poisoned manifest entry (parent resolves outside dest, e.g. a byproduct of the Q
+#      hole before this fix) makes `kit deactivate`'s plan-time containment check fail with a
+#      clean CLI error, not a raw stack trace, touching zero files.
+#   T. LOW: the fully-malformed-active_kits stderr diagnostic prints at most once per process
+#      invocation, even when `workflowTriggersFor` is called more than once (matching
+#      `kitWorkflowSteering`'s multi-category call pattern).
+#
 # Isolation: every scenario runs against its own fixture $HOME / project dest under a private
 # TMPDIR_EVAL; the real $HOME is never touched.
 set -euo pipefail
@@ -759,7 +773,7 @@ else
   _fail "corrupt-registry: error message does not clearly name the corruption"
   cat "$O_OUT"
 fi
-if echo "$O_OUT" | grep -Eqi "at .*kit-registry|at .*kit\.js|    at "; then
+if grep -Eqi "at .*kit-registry|at .*kit\.js|    at " "$O_OUT"; then
   _fail "corrupt-registry: raw stack trace leaked to output (not a clean error)"
 else
   _pass "corrupt-registry: no raw stack trace in the output"
@@ -821,6 +835,199 @@ if [[ "$P_AFTER" == '["thirdparty-kit"]' ]]; then
   _pass "third-party steering: after deactivating builder, the local kit's trigger STILL loads (never filtered by active_kits)"
 else
   _fail "third-party steering: expected [\"thirdparty-kit\"] after deactivating builder, got $P_AFTER"
+fi
+echo ""
+
+# ─── Scenario Q: symlinked skill DIRECTORY makes activate abort cleanly, never write outside dest ──
+echo "--- Scenario Q: kit activate has parent-directory containment parity with kit deactivate (symlinked skill directory) ---"
+
+Q_HOME="$TMPDIR_EVAL/q-home"
+mkdir -p "$Q_HOME"
+HOME="$Q_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$Q_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+
+Q_OUTSIDE="$TMPDIR_EVAL/q-outside"
+mkdir -p "$Q_OUTSIDE"
+# Plant the symlink where deactivate just removed the skill directory -- the directory does not
+# exist yet, only the symlink pointing at an external, currently-empty location.
+ln -s "$Q_OUTSIDE" "$Q_HOME/.claude/skills/deliver"
+
+Q_SNAPSHOT_BEFORE="$(tree_snapshot "$Q_OUTSIDE")"
+Q_OUT="$TMPDIR_EVAL/q-activate.out"
+set +e
+HOME="$Q_HOME" $FA kit activate builder --global >"$Q_OUT" 2>&1
+Q_RC=$?
+set -e
+
+if [[ "$Q_RC" -eq 2 ]]; then
+  _pass "symlinked-dir activate: clean, defined exit code (2), aborting before any write"
+else
+  _fail "symlinked-dir activate: expected exit 2, got $Q_RC"
+  cat "$Q_OUT"
+fi
+if grep -q "skills/deliver/SKILL.md" "$Q_OUT" && grep -q "escapes the install root through a symlinked parent directory" "$Q_OUT"; then
+  _pass "symlinked-dir activate: error message names the entry and the containment violation"
+else
+  _fail "symlinked-dir activate: error message does not clearly name the corruption"
+  cat "$Q_OUT"
+fi
+Q_SNAPSHOT_AFTER="$(tree_snapshot "$Q_OUTSIDE")"
+if [[ "$Q_SNAPSHOT_BEFORE" == "$Q_SNAPSHOT_AFTER" ]]; then
+  _pass "symlinked-dir activate: external tree is byte-identical before/after -- nothing was written outside dest"
+else
+  _fail "symlinked-dir activate: external tree changed -- a write escaped dest"
+  diff <(echo "$Q_SNAPSHOT_BEFORE") <(echo "$Q_SNAPSHOT_AFTER") || true
+fi
+if node - "$Q_HOME/.claude/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (record.active_kits.some((k) => k.id === "builder")) throw new Error("builder incorrectly recorded active after an aborted activate");
+console.log("ok");
+NODE
+then
+  _pass "symlinked-dir activate: builder is NOT recorded active after the aborted call"
+else
+  _fail "symlinked-dir activate: builder was incorrectly recorded active despite the abort"
+fi
+echo ""
+
+# ─── Scenario R: --force on a symlinked destination FILE never follows it ────────────────────
+echo "--- Scenario R: --force on a symlinked destination file replaces the symlink with a regular file inside dest, and never follows it externally ---"
+
+R_HOME="$TMPDIR_EVAL/r-home"
+mkdir -p "$R_HOME"
+HOME="$R_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$R_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+
+R_VICTIM_DIR="$TMPDIR_EVAL/r-victim"
+mkdir -p "$R_VICTIM_DIR"
+printf 'SENTINEL-DO-NOT-OVERWRITE\n' > "$R_VICTIM_DIR/victim.txt"
+mkdir -p "$R_HOME/.claude/skills/deliver"
+R_TARGET="$R_HOME/.claude/skills/deliver/SKILL.md"
+ln -s "$R_VICTIM_DIR/victim.txt" "$R_TARGET"
+
+R_OUT="$TMPDIR_EVAL/r-activate-force.out"
+set +e
+HOME="$R_HOME" $FA kit activate builder --global --force >"$R_OUT" 2>&1
+R_RC=$?
+set -e
+
+if [[ "$R_RC" -eq 0 ]]; then
+  _pass "force-symlinked-file activate: exits 0"
+else
+  _fail "force-symlinked-file activate: expected exit 0, got $R_RC"
+  cat "$R_OUT"
+fi
+if [[ "$(cat "$R_VICTIM_DIR/victim.txt")" == "SENTINEL-DO-NOT-OVERWRITE" ]]; then
+  _pass "force-symlinked-file activate: external victim file the symlink pointed at is untouched"
+else
+  _fail "force-symlinked-file activate: external victim file was overwritten through the symlink"
+fi
+if [[ -f "$R_TARGET" && ! -L "$R_TARGET" ]]; then
+  _pass "force-symlinked-file activate: destination is now a REAL file (symlink replaced), never followed"
+else
+  _fail "force-symlinked-file activate: destination is still a symlink (or missing)"
+fi
+if [[ -f "$R_TARGET" ]] && ! grep -q 'SENTINEL' "$R_TARGET"; then
+  _pass "force-symlinked-file activate: destination holds canonical skill content, not the sentinel"
+else
+  _fail "force-symlinked-file activate: destination does not hold canonical skill content"
+fi
+if grep -q 'replaced symlink with a regular file (--force): skills/deliver/SKILL.md' "$R_OUT"; then
+  _pass "force-symlinked-file activate: report line truthfully names the symlink replacement, not a bare 'overwritten' claim"
+else
+  _fail "force-symlinked-file activate: report line does not truthfully describe what happened"
+  cat "$R_OUT"
+fi
+echo ""
+
+# ─── Scenario S: poisoned manifest entry makes deactivate fail cleanly, not with a stack trace ─
+echo "--- Scenario S: a poisoned manifest entry (parent resolves outside dest) makes kit deactivate fail cleanly, no stack trace, zero files touched ---"
+
+S_HOME="$TMPDIR_EVAL/s-home"
+mkdir -p "$S_HOME"
+HOME="$S_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+
+S_OUTSIDE="$TMPDIR_EVAL/s-outside"
+mkdir -p "$S_OUTSIDE"
+printf 'poisoned\n' > "$S_OUTSIDE/SKILL.md"
+rm -rf "$S_HOME/.claude/skills/deliver"
+ln -s "$S_OUTSIDE" "$S_HOME/.claude/skills/deliver"
+# Poison the manifest's recorded sha256 for skills/deliver/SKILL.md to any well-formed hex value:
+# the plan-time containment check fires before any hash comparison, so the value's correctness is
+# irrelevant here -- only its shape needs to pass resolveManifestEntrySha256's format check.
+node - "$S_HOME/.claude/.flow-agents/owned-files.json" << 'NODE'
+const fs = require("node:fs");
+const p = process.argv[2];
+const m = JSON.parse(fs.readFileSync(p, "utf8"));
+const entry = m.files.find((f) => f.path === "skills/deliver/SKILL.md");
+if (!entry) throw new Error("fixture assumption broken: manifest missing skills/deliver/SKILL.md");
+entry.sha256 = "0".repeat(64);
+fs.writeFileSync(p, `${JSON.stringify(m, null, 2)}\n`, "utf8");
+NODE
+
+S_OUT="$TMPDIR_EVAL/s-deactivate.out"
+set +e
+HOME="$S_HOME" $FA kit deactivate builder --global >"$S_OUT" 2>&1
+S_RC=$?
+set -e
+
+if [[ "$S_RC" -eq 2 ]]; then
+  _pass "poisoned-manifest deactivate: clean, defined exit code (2), matching uninstall.ts's malformed-manifest-entry precedent"
+else
+  _fail "poisoned-manifest deactivate: expected exit 2, got $S_RC"
+  cat "$S_OUT"
+fi
+if grep -q 'escapes the install root through a symlinked parent directory' "$S_OUT"; then
+  _pass "poisoned-manifest deactivate: error message names the containment violation"
+else
+  _fail "poisoned-manifest deactivate: error message does not explain the failure"
+  cat "$S_OUT"
+fi
+if grep -Eqi "at .*kit-registry|at .*kit\.js|    at " "$S_OUT"; then
+  _fail "poisoned-manifest deactivate: raw stack trace leaked to output"
+else
+  _pass "poisoned-manifest deactivate: no raw stack trace in the output"
+fi
+if [[ -f "$S_OUTSIDE/SKILL.md" ]] && grep -q 'poisoned' "$S_OUTSIDE/SKILL.md"; then
+  _pass "poisoned-manifest deactivate: external tree survived untouched"
+else
+  _fail "poisoned-manifest deactivate: external tree was touched"
+fi
+echo ""
+
+# ─── Scenario T: the fully-malformed active_kits diagnostic prints at most once per process ────
+echo "--- Scenario T: fully-malformed active_kits stderr diagnostic prints at most once per process invocation ---"
+
+T_PROJECT="$TMPDIR_EVAL/t-project"
+mkdir -p "$T_PROJECT"
+(cd "$T_PROJECT" && git init -q)
+$FA init --runtime claude-code --dest "$T_PROJECT" --yes >/dev/null 2>&1
+node - "$T_PROJECT/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const p = process.argv[2];
+const record = JSON.parse(fs.readFileSync(p, "utf8"));
+record.active_kits = [{ kit_id: "builder" }, {}];
+fs.writeFileSync(p, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+NODE
+
+T_ERR="$TMPDIR_EVAL/t-dedupe.err"
+node -e "
+const { workflowTriggersFor } = require('$T_PROJECT/scripts/hooks/lib/kit-catalog.js');
+// Mirrors kitWorkflowSteering's multi-category call pattern (workflow-steering.js): a single
+// prompt matching BOTH implementation-work-detected and knowledge-capture-detected calls
+// workflowTriggersFor (and therefore readActiveBuiltinKitIds) more than once in ONE process.
+workflowTriggersFor('$T_PROJECT', 'implementation-work-detected');
+workflowTriggersFor('$T_PROJECT', 'knowledge-capture-detected');
+workflowTriggersFor('$T_PROJECT', 'implementation-work-detected');
+" 2>"$T_ERR"
+
+T_WARNING_COUNT="$(grep -c 'WARNING' "$T_ERR" || true)"
+if [[ "$T_WARNING_COUNT" -eq 1 ]]; then
+  _pass "dedupe diagnostic: exactly one WARNING printed across 3 workflowTriggersFor calls in the same process"
+else
+  _fail "dedupe diagnostic: expected exactly 1 WARNING, got $T_WARNING_COUNT"
+  cat "$T_ERR"
 fi
 echo ""
 
