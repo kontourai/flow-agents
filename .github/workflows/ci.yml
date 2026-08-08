@@ -493,6 +493,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
 
+      - name: Economics run binding integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check economics-run-binding-integration
+
       - name: Console board sync integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-board-sync-integration

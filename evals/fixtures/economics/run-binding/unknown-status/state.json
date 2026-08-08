@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-unknown-status",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/unknown-status",
+  "status": "rejected",
+  "current_step": "verify",
+  "params": {},
+  "next_action": "none",
+  "updated_at": "2026-02-04T00:00:00.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-04T00:00:00.000Z"
+    }
+  ],
+  "lifecycle": [],
+  "exceptions": []
+}

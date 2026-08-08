@@ -20,6 +20,8 @@
 #   - adapters/shared/conditional-get.test.js            (issue #1206: conditional-GET utilities)
 #   - providers/work-item/conditional.test.js            (issue #1206: runner validator loop,
 #                                                 derived conditional_get, single-flight cache)
+#   - adapters/shared/ingest-graph.test.js               (issue #1214: edge-preserving provider-graph
+#                                                 ingest; blocks round-trip; projection not blind)
 # Deterministic, dependency-free, fixture-driven — never touches a real board.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -35,7 +37,8 @@ if node --test \
   kits/knowledge/providers/surface-adapter/surface-adapter.test.js \
   kits/knowledge/adapters/default-store/cache-version.test.js \
   kits/knowledge/adapters/shared/conditional-get.test.js \
-  kits/knowledge/providers/work-item/conditional.test.js; then
+  kits/knowledge/providers/work-item/conditional.test.js \
+  kits/knowledge/adapters/shared/ingest-graph.test.js; then
   echo "  PASS: knowledge store provider conformance + health verbs + promote sub-flow"
 else
   echo "  FAIL: knowledge store provider conformance + health verbs + promote sub-flow"
