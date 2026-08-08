@@ -192,6 +192,60 @@ describe("buildKnowledgeTrustBundle: injected-store path", () => {
   });
 });
 
+describe("buildKnowledgeTrustBundle: record status 'implemented' (verify round — regression guard for finding #4)", () => {
+  // The original finding #4 defect mapped record status "implemented" ->
+  // claim status "verified" (fabricated trust). statusFor() was fixed to
+  // only ever return "superseded" (retired) or "proposed" (everything
+  // else, including "implemented"). No other test in this file drives a
+  // record to status "implemented" through the store's real transition, so
+  // the "no claim ever carries status verified" guard elsewhere in this
+  // file is happy-path-only against that specific defect. This closes that
+  // gap: a record genuinely at status "implemented" (via the store's real
+  // retire() transition, not a hand-built fixture) must still produce a
+  // claim (implemented records are not filtered out — only "retired" is),
+  // and that claim's status must be "proposed", never "verified".
+  test("an 'implemented' record still yields a claim, with status 'proposed' — never 'verified'", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = new DefaultKnowledgeStore({ storeRoot: dir });
+      const implementedId = await store.create({
+        type: "concept",
+        title: "Shipped concept",
+        body: "concept body",
+        category: "eng",
+        provenance: { agent: "tester" },
+      });
+
+      // Real store transition to "implemented" (active -> implemented is a
+      // valid VALID_STATUS_TRANSITIONS edge; implementedByRef is required
+      // evidence for this targetStatus — see
+      // kits/knowledge/evals/retirement/suite.test.js "retire with
+      // targetStatus='implemented' and implementedByRef transitions to
+      // 'implemented'" for the same evidence shape exercised there).
+      await store.retire(implementedId, "implemented", {
+        agent: "tester",
+        rationale: "Shipped in PR #42.",
+        implementedByRef: "https://github.com/org/repo/pull/42",
+      });
+
+      const record = await store.get(implementedId);
+      assert.equal(record.status, "implemented", "precondition: the store transition actually landed");
+
+      const bundle = await buildKnowledgeTrustBundle({ storeRoot: dir });
+
+      const claim = bundle.claims.find((c) => c.subjectId === implementedId);
+      assert.ok(claim, "an 'implemented' record must still yield a claim — only 'retired' is filtered out");
+      assert.equal(claim.status, "proposed", "an 'implemented' record's claim status must be 'proposed'");
+
+      for (const c of bundle.claims) {
+        assert.notEqual(c.status, "verified", `claim ${c.id} must never be labeled verified`);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / finding 7)", () => {
   test("repeated readGraph() calls without a mutation hit the underlying store only once", async () => {
     const dir = makeTempDir();
