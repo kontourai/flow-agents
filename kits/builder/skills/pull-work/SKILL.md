@@ -46,7 +46,7 @@ bypassed — and **the gate must record `NOT_VERIFIED` for the `selected-work` e
 
 ### Knowledge Integration
 
-When `knowledge_integration` is configured in `.datum/config.json` (`lite` or `full` mode):
+When knowledge integration is enabled for the workspace (see the knowledge kit's configuration; `lite` or `full` mode):
 
 **Smart Fetch Strategy (avoid full backlog fetch when possible):**
 
@@ -54,7 +54,7 @@ When `knowledge_integration` is configured in `.datum/config.json` (`lite` or `f
    - If `cache_version` matches current store version AND `provider_fetched_at` within TTL (default 5 min): **use cache, skip provider fetch entirely**.
    - If `cache_version` differs OR TTL expired: proceed to conditional fetch.
 
-2. **Conditional provider fetch** — call `BoardProvider.getBoard()` with conditional headers if the provider supports them (ETag/If-None-Match, Last-Modified/If-Modified-Since — see Knowledge Kit's shared utilities at `kits/knowledge/adapters/shared/conditional-get.js`).
+2. **Conditional provider fetch** — call the configured board adapter's fetch operation with conditional headers if the provider supports them (ETag/If-None-Match, Last-Modified/If-Modified-Since — see Knowledge Kit's shared utilities at `kits/knowledge/adapters/shared/conditional-get.js`).
    - **304 Not Modified**: provider unchanged. Update `provider_fetched_at` on cached board record, use cache.
    - **200 OK**: provider changed. Fetch full board + items (GitHub Issues API does not support incremental item list or ETag on list endpoints; a full fetch is required when board state changes).
    - **No conditional support**: fetch full board + items.
@@ -67,7 +67,7 @@ When `knowledge_integration` is configured in `.datum/config.json` (`lite` or `f
 
 6. **Before starting work: re-verify assignment** on the selected item (race window check).
 
-**Gate rule**: If provider fetch fails (network, auth, rate limit) and no valid cache exists → `NOT_VERIFIED`. If cache exists but stale and provider fetch fails → use cache with `STALE_CACHE` warning recorded, but assignment verification must still pass.
+**Gate rule (fail-closed)**: A cache is only ever an optimization to skip a redundant fetch when the canonical source is already known-fresh — it is never a substitute for the canonical readiness source. If the provider fetch fails (network, auth, rate limit) for any reason, stop with `NOT_VERIFIED` — regardless of whether a cache, stale or otherwise, exists. Assignment and liveness verification (steps 5-6) are always real-time against the provider and are never satisfied from cache.
 
 ## Model Routing
 
@@ -183,7 +183,9 @@ For `local-file`, pass `--assignment-provider local-file` and omit
 `selected-work` claim, and projects the next step. Do not call it before
 provider ownership is confirmed, and do not attempt to attach `selected-work`
 again after start. If readiness, ownership, or source context is unresolved,
-**stop before run creation with `FAIL` in the pull-work artifact** — the `selected-work` expectation must not be recorded.
+**stop before run creation** — the `selected-work` expectation must not be recorded — using the same verdict
+split as the readiness section above: unresolved ownership or scope is `FAIL`; unverifiable readiness (source
+context or provider evidence that cannot be confirmed) is `NOT_VERIFIED`.
 Do not use a private writer command, enter at a later step, or infer an active
 run from an artifact path.
 
