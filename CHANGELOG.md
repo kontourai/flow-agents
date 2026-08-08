@@ -1,5 +1,31 @@
 # Changelog
 
+## [5.10.0](https://github.com/kontourai/flow-agents/compare/v5.9.0...v5.10.0) (2026-08-08)
+
+
+### Features
+
+* **cli:** init --uninstall for claude-code with ownership manifest ([#1209](https://github.com/kontourai/flow-agents/issues/1209)) ([67d19d2](https://github.com/kontourai/flow-agents/commit/67d19d2ad722a56b4a6d3e0cbeaac66ba6ee54e2))
+* **console:** receipt relay on the at-least-once class + eval console isolation ([#1087](https://github.com/kontourai/flow-agents/issues/1087) slice B, [#1094](https://github.com/kontourai/flow-agents/issues/1094) item C) ([#1096](https://github.com/kontourai/flow-agents/issues/1096)) ([33e12f3](https://github.com/kontourai/flow-agents/commit/33e12f3171f1bf1aa04572cc427b03834a8dafaa))
+* **evals:** add opencode/pi/strands behavioral providers with builder flag ([#1203](https://github.com/kontourai/flow-agents/issues/1203)) ([21fda05](https://github.com/kontourai/flow-agents/commit/21fda0500ebb1a3c0a7114868feac0c87e1f4c4e))
+* **telemetry:** stamp the durable economics record with install identity via a shared resolver ([#970](https://github.com/kontourai/flow-agents/issues/970)) ([#1188](https://github.com/kontourai/flow-agents/issues/1188)) ([d81df2b](https://github.com/kontourai/flow-agents/commit/d81df2bd4c60e1d0e35231600b46ba9100203e09))
+* **transport:** at-least-once console delivery with a durable outbox ([#1087](https://github.com/kontourai/flow-agents/issues/1087) slice A) ([#1090](https://github.com/kontourai/flow-agents/issues/1090)) ([e84a4ce](https://github.com/kontourai/flow-agents/commit/e84a4cea7ca53ee40b58602d22565c5441f234e5))
+
+
+### Fixes
+
+* **cli:** emit the assignment-provider claim argv when a mutation lacks a matching actor ([#1194](https://github.com/kontourai/flow-agents/issues/1194)) ([#1202](https://github.com/kontourai/flow-agents/issues/1202)) ([c9bec5d](https://github.com/kontourai/flow-agents/commit/c9bec5dbb927443a3a887404127470aeae3805c6))
+* **cli:** fail closed when hooks and sidecar writes target finished or advanced runs ([#1191](https://github.com/kontourai/flow-agents/issues/1191)) ([#1197](https://github.com/kontourai/flow-agents/issues/1197)) ([72771dd](https://github.com/kontourai/flow-agents/commit/72771dd0a8088d4ce865c4b66d5195f9a9a5297e))
+* **cli:** transient-vs-domain failure taxonomy for hook and evidence writes ([#1192](https://github.com/kontourai/flow-agents/issues/1192)) ([#1204](https://github.com/kontourai/flow-agents/issues/1204)) ([bf70b39](https://github.com/kontourai/flow-agents/commit/bf70b3961257a5f35bc6c1c35f2935ae90801ec2))
+* **knowledge:** Surface-schema-valid trust bundles, complete cache versioning, honest conditional-GET, coherent pull-work gates ([#1207](https://github.com/kontourai/flow-agents/issues/1207)) ([db1695c](https://github.com/kontourai/flow-agents/commit/db1695c4c206dbdcb1a210b58bc8851134662a25))
+* require terminal delivery publication before merge ([#1034](https://github.com/kontourai/flow-agents/issues/1034)) ([e22b7a8](https://github.com/kontourai/flow-agents/commit/e22b7a874be68fda67985f5c8a65066c15f3134e))
+* skip directory fsync on Windows in state-file-lock ([#1001](https://github.com/kontourai/flow-agents/issues/1001)) ([fa12229](https://github.com/kontourai/flow-agents/commit/fa12229214cad3025f4dff81f0411c030abfdf83))
+
+
+### Documentation
+
+* **decisions:** merge-readiness is an attestation, not a claim ([#1097](https://github.com/kontourai/flow-agents/issues/1097)) ([35b888b](https://github.com/kontourai/flow-agents/commit/35b888bd789418415bc96357628e28e06d314a18))
+
 ## [5.9.0](https://github.com/kontourai/flow-agents/compare/v5.8.0...v5.9.0) (2026-08-04)
 
 
