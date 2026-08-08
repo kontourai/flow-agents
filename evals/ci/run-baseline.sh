@@ -21,6 +21,7 @@ CHECKS=(
   "Static eval suite|bash evals/run.sh static"
   "Public API unit tests|node --test src/cli/public-api.test.mjs"
   "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
+  "Knowledge integration suites|node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
   "Evidence command serialization integration|bash evals/integration/test_evidence_command_serialization.sh"
@@ -149,6 +150,7 @@ LANE_SOURCE_AND_STATIC=(
   "Static eval suite"
   "Public API unit tests"
   "Liveness fleet unit tests"
+  "Knowledge integration suites"
 )
 
 LANE_WORKFLOW_CONTRACTS=(

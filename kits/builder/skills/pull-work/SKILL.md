@@ -29,6 +29,7 @@ Select ready backlog work and prepare a bounded handoff without implementing it.
 - `WorkItemProvider` reads the selected item, acceptance criteria, relationships, and provider state.
 - `RepositoryAdapter` supplies target revision, worktree capability, and changed-file overlap context.
 - `AssignmentProvider` is the sole durable ownership interface: claim, release, supersede, status, and list.
+- `KnowledgeStoreAdapter` (optional) supplies cached backlog state via Knowledge Kit for instant lookup; see "Knowledge Integration" below.
 
 An optional GitHub adapter may implement these interfaces. Do not require GitHub issue numbers, labels, Projects, pull requests, `gh`, or provider-native dependency APIs.
 
@@ -36,13 +37,47 @@ An optional GitHub adapter may implement these interfaces. Do not require GitHub
 
 A configured `BoardProvider` is the canonical Backlog Readiness Source
 (`docs/decisions/backlog-readiness-source.md`). When the configured board
-yields zero ready items or cannot be read, record the provider warning
-(`zero_ready_items`, or the read failure) in the pull-work artifact and route
+yields zero ready items or cannot be read, **stop with `NOT_VERIFIED`** in the pull-work artifact and route
 to triage/intake for an explicit readiness decision. Never silently
 substitute `WorkItemProvider` issue-level listing for board-driven selection:
 a deliberate issue-listing pass must carry the `board_provider_bypassed`
 warning it received into the artifact, with the reason the board was
-bypassed.
+bypassed — and **the gate must record `NOT_VERIFIED` for the `selected-work` expectation**.
+
+### Knowledge Integration
+
+When knowledge integration is enabled for the workspace (see the knowledge kit's configuration; `lite` or `full` mode):
+
+**Smart Fetch Strategy (avoid full backlog fetch when possible):**
+
+1. **Check Knowledge Kit cache first** — read `updated_at` from the last `backlog.board` record. `updated_at`
+   is a real, persisted field the store sets automatically on every `create()`/`update()`
+   (`kits/knowledge/adapters/default-store/index.js`) — no separate bookkeeping field is written or read.
+   - If `updated_at` is within TTL (default 5 min): **use cache, skip provider fetch entirely**.
+   - If TTL expired, or no `backlog.board` record exists yet: proceed to conditional fetch.
+
+2. **Conditional provider fetch** — when the configured board adapter is (or wraps) a `WorkItemProvider`, its
+   `cacheTtlMs` option and conditional-GET validator machinery (`kits/knowledge/adapters/shared/conditional-get.js`,
+   wired into `_issues()`) already avoid a full body transfer when the injected runner supports ETag/If-None-Match
+   or Last-Modified/If-Modified-Since.
+   - **Provider reports no change**: skip re-ingest — the existing `backlog.board` record's item data is still
+     correct. Its `updated_at` is intentionally NOT refreshed by this no-op path, so the next TTL check re-polls
+     the provider rather than treating an unrelated timestamp as extended.
+   - **Provider reports a change, or the runner has no conditional support**: fetch the full board + items
+     (GitHub Issues API does not support incremental item list or ETag on list endpoints for the common runner
+     shapes; a full fetch is required when board state changes or conditional support is absent).
+
+3. **On full fetch**: ingest ALL items into Knowledge Kit via `knowledge.ingest` (category: `backlog.board`) and
+   `knowledge.compile` (category: `backlog.item`). The `update()`/`create()` call itself sets `updated_at`, which
+   is exactly what step 1 reads on the next pass — do not invent additional cache-bookkeeping fields.
+
+4. **Query Knowledge Kit** for candidate selection (instant, uses cached data).
+
+5. **Verify assignment + liveness for EACH candidate** via `AssignmentProvider` + liveness (real-time, not cached).
+
+6. **Before starting work: re-verify assignment** on the selected item (race window check).
+
+**Gate rule (fail-closed)**: A cache is only ever an optimization to skip a redundant fetch when the canonical source is already known-fresh — it is never a substitute for the canonical readiness source. If the provider fetch fails (network, auth, rate limit) for any reason, stop with `NOT_VERIFIED` — regardless of whether a cache, stale or otherwise, exists. Assignment and liveness verification (steps 5-6) are always real-time against the provider and are never satisfied from cache.
 
 ## Model Routing
 
@@ -100,7 +135,7 @@ collapse them into a coarse display label. Record `assignment_preflight`, the
 classification, holder context, provider capability, and any unavailable
 liveness dimension. A missing optional liveness observation may be recorded as
 skipped, but a missing durable assignment check is `NOT_VERIFIED` when ownership
-matters.
+matters — **the `selected-work` gate must fail if any selected candidate lacks a verified assignment status**.
 
 An explicit override of `held` or `reclaimable` records the requester,
 authorization, reason, consequence, and `reclaimable_override`. Reclaimable
@@ -158,7 +193,13 @@ For `local-file`, pass `--assignment-provider local-file` and omit
 `selected-work` claim, and projects the next step. Do not call it before
 provider ownership is confirmed, and do not attempt to attach `selected-work`
 again after start. If readiness, ownership, or source context is unresolved,
-stop before run creation with `FAIL` or `NOT_VERIFIED` in the pull-work artifact.
+**stop before run creation** — the `selected-work` expectation must not be recorded. Use `FAIL` only when a
+check EXECUTED and affirmatively disproved eligibility (the durable assignment check ran and returned a
+conflicting/held holder, or scope is affirmatively wrong). Use `NOT_VERIFIED` when a required check COULD NOT
+BE EXECUTED (the provider was unreachable, the assignment interface was unavailable, or readiness/source
+context could not be confirmed) — this is the same rule as the preflight section above ("a missing durable
+assignment check is `NOT_VERIFIED` when ownership matters", not `FAIL`); an unresolved ownership check is
+never itself a `FAIL`.
 Do not use a private writer command, enter at a later step, or infer an active
 run from an artifact path.
 
