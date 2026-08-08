@@ -1295,9 +1295,48 @@ function listCommand(argv: string[]): number {
   return 0;
 }
 
+const ASSIGNMENT_USAGE: Record<string, string> = {
+  claim: "usage: flow-agents assignment-provider claim --provider local-file --artifact-root <path> --subject-id <slug> --branch <branch> --artifact-dir <reldir> [--actor-json <path>] [--ttl-seconds <n>] [--reason <text>]",
+  release: "usage: flow-agents assignment-provider release --provider local-file --artifact-root <path> --subject-id <slug> [--actor-json <path>] [--reason <text>]",
+  supersede: "usage: flow-agents assignment-provider supersede --provider local-file --artifact-root <path> --subject-id <slug> --from-actor-json <path> --to-actor-json <path> [--ttl-seconds <n>] [--branch <branch>] [--artifact-dir <reldir>] [--reason <text>]",
+  "render-claim": "usage: flow-agents assignment-provider render-claim --provider github --subject-id <slug> --input-json <path> --actor-json <path>",
+  "render-release": "usage: flow-agents assignment-provider render-release --provider github --subject-id <slug> --input-json <path>",
+  "render-supersede": "usage: flow-agents assignment-provider render-supersede --provider github --subject-id <slug> --input-json <path> --actor-json <path>",
+  status: "usage: flow-agents assignment-provider status --provider <local-file|github> [--subject-id <slug>] [--artifact-root <path>] [--issue-json <path>] [--repo <owner/name>] [--label-name <name>] [--claim-comment-marker <marker>] [--liveness-events-json <path>|--liveness-stream <path>] [--self-actor <key>] [--now <iso8601>]",
+  list: "usage: flow-agents assignment-provider list --provider <local-file|github> [--artifact-root <path>] [--issues-json <path>] [--actor-json <path>|--actor <key>] [--label-name <name>] [--claim-comment-marker <marker>]",
+};
+
+function hasHelp(argv: string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+function printAssignmentUsage(): void {
+  console.log(`Usage: flow-agents assignment-provider <command> [flags]
+
+Commands:
+  claim            Claim a subject for the current actor (local-file provider).
+  release          Release the current actor's claim on a subject.
+  supersede        Transfer a claim from one actor to another.
+  render-claim     Render the gh argv for a GitHub assignment claim.
+  render-release   Render the gh argv for a GitHub assignment release.
+  render-supersede Render the gh argv for a GitHub assignment supersede.
+  status           Report assignment and effective state for a subject.
+  list             List active claims for a provider.
+
+Run \`flow-agents assignment-provider <command> --help\` for command-specific flags.`);
+}
+
 export function main(argv = process.argv.slice(2)): number {
   try {
     const [command, ...rest] = argv;
+    if (command === "--help" || command === "-h") {
+      printAssignmentUsage();
+      return 0;
+    }
+    if (typeof command === "string" && hasHelp(rest) && Object.prototype.hasOwnProperty.call(ASSIGNMENT_USAGE, command)) {
+      console.log(ASSIGNMENT_USAGE[command]);
+      return 0;
+    }
     if (command === "claim") return claimLocalFile(rest);
     if (command === "release") return releaseLocalFile(rest);
     if (command === "supersede") return supersedeLocalFile(rest);

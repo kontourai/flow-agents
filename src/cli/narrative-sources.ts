@@ -257,6 +257,10 @@ function intentEconomicsVerb(flags: ReturnType<typeof parseArgs>["flags"]): numb
 }
 
 export function main(argv: string[] = process.argv.slice(2)): number {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    usage();
+    return 0;
+  }
   const args = parseArgs(argv);
   const verb = args.positionals[0];
   try {
