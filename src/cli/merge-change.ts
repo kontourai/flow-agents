@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { parseArgs, flagString } from "../lib/args.js";
 import { atomicWriteFile } from "../lib/fs.js";
 import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
-import { inspectBuilderFlowSession } from "../builder-flow-runtime.js";
+import { inspectBuilderFlowSession, publishChangeAuthorityRef } from "../builder-flow-runtime.js";
 import { validateRunStateConsistency } from "@kontourai/flow";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync } from "./assignment-provider.js";
 import { validateTrustBundle } from "./workflow-sidecar.js";
@@ -153,6 +153,27 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * Same authentication as builder-flow-runtime.ts's
+ * entryAuthenticatesPublishChangeAction: primary path checks the claim-scoped
+ * `authorityRef` embedded in the evidence's TrustBundle authorityTrace array
+ * (Flow 5.0's replacement for the removed `authorityTrace` attachEvidence
+ * option); legacy fallback recognizes the flat `authority_trace` string that
+ * flow-agents wrote before this migration, for evidence attached to a
+ * long-running run before an in-place upgrade. See the longer rationale on
+ * publishChangeAuthorityRef's call site in builder-flow-runtime.ts.
+ */
+function evidenceAuthenticatesPublishChangeAction(evidence: Record<string, unknown>, actionId: string): boolean {
+  const bundle = evidence.bundle;
+  if (bundle && typeof bundle === "object" && !Array.isArray(bundle) && Array.isArray((bundle as Record<string, unknown>).authorityTrace)) {
+    const expected = publishChangeAuthorityRef(actionId);
+    const found = ((bundle as Record<string, unknown>).authorityTrace as unknown[]).some((trace) =>
+      trace && typeof trace === "object" && !Array.isArray(trace) && (trace as Record<string, unknown>).authorityRef === expected);
+    if (found) return true;
+  }
+  return evidence.authority_trace === actionId;
+}
+
 export function resultDigestClaimedByCanonicalRun(manifest: unknown, actionId: string, observation: ReturnType<typeof assertAuthenticatedPublishChangeObservation>, digest: string, binding: PublishChangeActionBinding, slug: string, startDefinition: { id: string; version: string }): boolean {
   const root = record(manifest, "canonical Flow evidence manifest");
   if (root.run_id !== slug || root.definition_id !== startDefinition.id || root.definition_version !== startDefinition.version || !Array.isArray(root.evidence)) return false;
@@ -160,7 +181,7 @@ export function resultDigestClaimedByCanonicalRun(manifest: unknown, actionId: s
   return root.evidence.some((entry) => {
     try {
       const evidence = record(entry, "canonical publish-change evidence");
-      if (evidence.gate_id !== binding.gate_ids[0] || evidence.producer !== "publish-change-operation-authority" || evidence.authority_trace !== actionId || !Array.isArray(evidence.expectation_ids) || evidence.expectation_ids.length !== 1 || evidence.expectation_ids[0] !== "pull-request-opened") return false;
+      if (evidence.gate_id !== binding.gate_ids[0] || evidence.producer !== "publish-change-operation-authority" || !evidenceAuthenticatesPublishChangeAction(evidence, actionId) || !Array.isArray(evidence.expectation_ids) || evidence.expectation_ids.length !== 1 || evidence.expectation_ids[0] !== "pull-request-opened") return false;
       const bundle = record(evidence.bundle, "canonical publish-change evidence bundle");
       if (!Array.isArray(bundle.claims)) return false;
       return bundle.claims.some((claim) => {
