@@ -213,7 +213,9 @@ this emitter), never a guessed one.
   runtime binding console can trust as a de-duplicable per-run fact. Wiring an authenticated,
   relayable version of this path is #922's broader runtime-binding scope.
 - **Top-level `cost.*` preserves `null`, never coalesces to a fabricated `0` (#925 review finding
-  3).** When `tokens_unattributed` is `true` (any phase has `null` tokens — always true today, since
+  3).** Scope honesty: this holds at the EMITTER. At least one downstream aggregate
+  (`learning-review-proposals.sh`) still coalesces `null // 0` when consuming `economics.jsonl` —
+  tracked in #1225; the never-fabricate property is not yet system-wide. When `tokens_unattributed` is `true` (any phase has `null` tokens — always true today, since
   this mode never auto-merges transcript-derived tokens), every top-level `cost.input_tokens` /
   `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens` /
   `estimated_cost_usd` is **`null`**, not a summed-with-nulls-as-zero `0`. `cost` stays a *required*
