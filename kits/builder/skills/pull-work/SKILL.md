@@ -29,6 +29,7 @@ Select ready backlog work and prepare a bounded handoff without implementing it.
 - `WorkItemProvider` reads the selected item, acceptance criteria, relationships, and provider state.
 - `RepositoryAdapter` supplies target revision, worktree capability, and changed-file overlap context.
 - `AssignmentProvider` is the sole durable ownership interface: claim, release, supersede, status, and list.
+- `KnowledgeStoreAdapter` (optional) supplies cached backlog state via Knowledge Kit for instant lookup; see "Knowledge Integration" below.
 
 An optional GitHub adapter may implement these interfaces. Do not require GitHub issue numbers, labels, Projects, pull requests, `gh`, or provider-native dependency APIs.
 
@@ -36,13 +37,37 @@ An optional GitHub adapter may implement these interfaces. Do not require GitHub
 
 A configured `BoardProvider` is the canonical Backlog Readiness Source
 (`docs/decisions/backlog-readiness-source.md`). When the configured board
-yields zero ready items or cannot be read, record the provider warning
-(`zero_ready_items`, or the read failure) in the pull-work artifact and route
+yields zero ready items or cannot be read, **stop with `NOT_VERIFIED`** in the pull-work artifact and route
 to triage/intake for an explicit readiness decision. Never silently
 substitute `WorkItemProvider` issue-level listing for board-driven selection:
 a deliberate issue-listing pass must carry the `board_provider_bypassed`
 warning it received into the artifact, with the reason the board was
-bypassed.
+bypassed — and **the gate must record `NOT_VERIFIED` for the `selected-work` expectation**.
+
+### Knowledge Integration
+
+When `knowledge_integration` is configured in `.datum/config.json` (`lite` or `full` mode):
+
+**Smart Fetch Strategy (avoid full backlog fetch when possible):**
+
+1. **Check Knowledge Kit cache first** — read `cache_version` and `provider_fetched_at` from the last `backlog.board` record.
+   - If `cache_version` matches current store version AND `provider_fetched_at` within TTL (default 5 min): **use cache, skip provider fetch entirely**.
+   - If `cache_version` differs OR TTL expired: proceed to conditional fetch.
+
+2. **Conditional provider fetch** — call `BoardProvider.getBoard()` with conditional headers if the provider supports them (ETag/If-None-Match, Last-Modified/If-Modified-Since — see Knowledge Kit's shared utilities at `kits/knowledge/adapters/shared/conditional-get.js`).
+   - **304 Not Modified**: provider unchanged. Update `provider_fetched_at` on cached board record, use cache.
+   - **200 OK**: provider changed. Fetch full board + items (GitHub Issues API does not support incremental item list or ETag on list endpoints; a full fetch is required when board state changes).
+   - **No conditional support**: fetch full board + items.
+
+3. **On full fetch**: ingest ALL items into Knowledge Kit via `knowledge.ingest` (category: `backlog.board`) and `knowledge.compile` (category: `backlog.item`). Record `provider_fetched_at` and `cache_version` on the board record.
+
+4. **Query Knowledge Kit** for candidate selection (instant, uses cached data).
+
+5. **Verify assignment + liveness for EACH candidate** via `AssignmentProvider` + liveness (real-time, not cached).
+
+6. **Before starting work: re-verify assignment** on the selected item (race window check).
+
+**Gate rule**: If provider fetch fails (network, auth, rate limit) and no valid cache exists → `NOT_VERIFIED`. If cache exists but stale and provider fetch fails → use cache with `STALE_CACHE` warning recorded, but assignment verification must still pass.
 
 ## Model Routing
 
@@ -100,7 +125,7 @@ collapse them into a coarse display label. Record `assignment_preflight`, the
 classification, holder context, provider capability, and any unavailable
 liveness dimension. A missing optional liveness observation may be recorded as
 skipped, but a missing durable assignment check is `NOT_VERIFIED` when ownership
-matters.
+matters — **the `selected-work` gate must fail if any selected candidate lacks a verified assignment status**.
 
 An explicit override of `held` or `reclaimable` records the requester,
 authorization, reason, consequence, and `reclaimable_override`. Reclaimable
@@ -158,7 +183,7 @@ For `local-file`, pass `--assignment-provider local-file` and omit
 `selected-work` claim, and projects the next step. Do not call it before
 provider ownership is confirmed, and do not attempt to attach `selected-work`
 again after start. If readiness, ownership, or source context is unresolved,
-stop before run creation with `FAIL` or `NOT_VERIFIED` in the pull-work artifact.
+**stop before run creation with `FAIL` in the pull-work artifact** — the `selected-work` expectation must not be recorded.
 Do not use a private writer command, enter at a later step, or infer an active
 run from an artifact path.
 

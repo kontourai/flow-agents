@@ -378,7 +378,38 @@ export class DefaultKnowledgeStore {
     this._recordsDir = path.join(this._root, "records");
     this._graphPath = path.join(this._root, "graph-index.json");
     this._aliasPath = path.join(this._root, "alias-index.json");
+    this._cacheVersionPath = path.join(this._root, "cache-version.json");
     fs.mkdirSync(this._recordsDir, { recursive: true });
+    this._initCacheVersion();
+  }
+
+  _initCacheVersion() {
+    if (!fs.existsSync(this._cacheVersionPath)) {
+      this._writeCacheVersion(1);
+    }
+  }
+
+  _readCacheVersion() {
+    try {
+      const text = fs.readFileSync(this._cacheVersionPath, "utf8");
+      return JSON.parse(text).version || 1;
+    } catch {
+      return 1;
+    }
+  }
+
+  _writeCacheVersion(version) {
+    fs.writeFileSync(this._cacheVersionPath, JSON.stringify({ version, updatedAt: new Date().toISOString() }), "utf8");
+  }
+
+  _incrementCacheVersion() {
+    const v = this._readCacheVersion() + 1;
+    this._writeCacheVersion(v);
+    return v;
+  }
+
+  getCacheVersion() {
+    return this._readCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -511,6 +542,9 @@ export class DefaultKnowledgeStore {
     // Persist the alias map only after the record is on disk.
     if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
 
+    // Invalidate cache
+    this._incrementCacheVersion();
+
     return id;
   }
 
@@ -592,6 +626,9 @@ export class DefaultKnowledgeStore {
     this._writeRecord(updated);
 
     if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -647,6 +684,9 @@ export class DefaultKnowledgeStore {
     saveGraph(this._graphPath, graph);
 
     this._writeRecord(updated);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -888,6 +928,9 @@ export class DefaultKnowledgeStore {
       };
       this._writeRecord(updatedSuperseded);
     }
+
+    // Invalidate cache (once per supersede operation)
+    this._incrementCacheVersion();
   }
 
 
@@ -942,6 +985,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updated);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------

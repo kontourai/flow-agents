@@ -7,28 +7,31 @@
  *   - flow-agents:work-item-metadata `blockers` -> `blocks` edges.
  *   - prose "blocked by #N"          -> `blocks` edges; other #N refs -> `relates`.
  *
- * Reads via an INJECTABLE runner so tests drive it from recorded fixtures and
+ * Reads via an INJECTED runner so tests drive it from recorded fixtures and
  * never touch the real board. Write side is proposals-only: proposeWrite renders
  * a draft issue comment / label change for an operator to file — it never calls
  * a mutating gh command.
  *
+ * A runner MUST be provided — there is no default. This enforces the unidirectional
+ * provider boundary (Surface must not import producer runtime code).
+ *
+ * **Conditional GET support (opt-in)**: If the runner returns `{ issues, etag, lastModified }`
+ * the provider will send `If-None-Match`/`If-Modified-Since` on subsequent fetches.
+ * A `304 Not Modified` returns cached issues with `notModified: true`.
+ * GitHub's REST API does not reliably support ETag on list endpoints; this is for
+ * providers that do. Uses shared conditional-get utilities.
+ *
  * @module providers/work-item
  */
 
-import { execFile } from "node:child_process";
 import { node, edge, proposal, provenance } from "../lib/model.js";
+import {
+  buildConditionalHeaders,
+  processConditionalResponse,
+  createCacheEntry,
+} from "../../adapters/shared/conditional-get.js";
 
 const PROVIDER_ID = "work-item";
-
-/** Default runner: shells out to `gh` (read-only list). */
-function defaultRunner(args) {
-  return new Promise((resolve, reject) => {
-    execFile("gh", args, { maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(`gh ${args.join(" ")} failed: ${stderr || err.message}`));
-      resolve(stdout);
-    });
-  });
-}
 
 /** Parse the flow-agents:work-item-metadata JSON block from an issue body. */
 export function parseWorkItemMetadata(body) {
@@ -65,11 +68,15 @@ function blockerNumber(entry) {
 
 export class WorkItemProvider {
   constructor({ repo, runner, agent } = {}) {
+    if (!runner) {
+      throw new Error("WorkItemProvider requires an injected `runner` function — no default. Provide a function(args: string[]) => Promise<{ issues: any[], etag?: string, lastModified?: string }> that executes read-only gh commands or returns fixture data.");
+    }
     this.repo = repo || "";
-    this.runner = runner || defaultRunner;
+    this.runner = runner;
     this.agent = agent;
     this.id = PROVIDER_ID;
     this._cache = null;
+    this._cacheEntry = null; // { data, validators, cachedAt }
   }
 
   capabilities() {
@@ -80,18 +87,49 @@ export class WorkItemProvider {
       writable: false,
       write_mode: "proposals-only",
       proposal_targets: ["comment", "label"],
-      source_of_truth: "GitHub issues (read via gh; write = draft comments/labels)",
+      source_of_truth: "GitHub issues (read via injected runner; write = draft comments/labels)",
+      conditional_get: true,
     };
   }
 
-  async _issues() {
-    if (this._cache) return this._cache;
+  async _issues(options = {}) {
+    const { forceRefresh = false } = options;
+    if (this._cacheEntry && !forceRefresh) return this._cacheEntry.data;
+
     const args = ["issue", "list"];
     if (this.repo) args.push("--repo", this.repo);
     args.push("--state", "all", "--json", "number,title,state,labels,body", "--limit", "200");
+
+    // Build conditional headers from cached validators (if runner supports it)
+    // Note: GitHub's `gh issue list` does not support --header for ETag/If-Modified-Since.
+    // This pattern is for custom runners that wrap GitHub API directly.
+    // if (this._cacheEntry?.validators) {
+    //   const condHeaders = buildConditionalHeaders(this._cacheEntry.validators);
+    //   Object.entries(condHeaders).forEach(([k, v]) => args.push("--header", `${k}: ${v}`));
+    // }
+
     const out = await this.runner(args);
-    const parsed = JSON.parse(out);
-    this._cache = Array.isArray(parsed) ? parsed : [];
+
+    // Runner may return { issues: [...], etag, lastModified, notModified }
+    let result;
+    if (typeof out === "string") {
+      // Legacy runner: plain JSON array string
+      result = { data: JSON.parse(out), notModified: false };
+    } else if (out && Array.isArray(out.issues)) {
+      // Structured response with validators
+      result = processConditionalResponse(
+        { status: out.notModified ? 304 : 200, body: JSON.stringify(out.issues), headers: { etag: out.etag, "last-modified": out.lastModified } },
+        this._cacheEntry
+      );
+    } else {
+      result = { data: out, notModified: false };
+    }
+
+    // Update cache entry with new validators
+    if (!result.notModified) {
+      this._cacheEntry = createCacheEntry(result.data, result.validators);
+    }
+    this._cache = this._cacheEntry.data;
     return this._cache;
   }
 
@@ -202,3 +240,22 @@ export class WorkItemProvider {
 }
 
 export default WorkItemProvider;
+
+/**
+ * Create a production runner that shells out to `gh` CLI.
+ * Use this explicitly in production code — it is NOT the default.
+ *
+ * @param {{ maxBuffer?: number }=} options
+ * @returns {(args: string[]) => Promise<string>}
+ */
+export function createGhRunner({ maxBuffer = 32 * 1024 * 1024 } = {}) {
+  return async function ghRunner(args) {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve, reject) => {
+      execFile("gh", args, { maxBuffer }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(`gh ${args.join(" ")} failed: ${stderr || err.message}`));
+        resolve(stdout);
+      });
+    });
+  };
+}

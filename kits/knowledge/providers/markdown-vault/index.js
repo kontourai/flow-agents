@@ -52,6 +52,16 @@ export class MarkdownVaultProvider {
     this.storeRoot = storeRoot || "(injected store)";
     this.agent = agent;
     this.id = PROVIDER_ID;
+    this._cache = null;
+    this._cacheVersion = null;
+  }
+
+  _checkCache() {
+    const currentVersion = this.store.getCacheVersion?.();
+    if (currentVersion !== undefined && currentVersion !== this._cacheVersion) {
+      this._cache = null;
+      this._cacheVersion = currentVersion;
+    }
   }
 
   capabilities() {
@@ -76,6 +86,7 @@ export class MarkdownVaultProvider {
   }
 
   async readNodes(options = {}) {
+    this._checkCache();
     const records = await this._allRecords();
     const nodes = records.map((r) => {
       const attributes = { record_type: r.type };
