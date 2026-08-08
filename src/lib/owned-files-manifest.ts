@@ -150,11 +150,20 @@ export function readOwnedFilesManifest(dest: string): OwnedFilesManifest | null 
 
 /**
  * Resolve one manifest file entry's relative path to a safe absolute path under `dest`, or
- * throw a clear, entry-naming error. This is the single containment check every manifest-backed
- * removal MUST go through before touching the filesystem -- a manifest is not a trusted input
- * (it can be hand-edited, corrupted, or -- for project-scoped installs -- committed to a shared
- * repo and edited by anyone with write access), and an unvalidated `path.join(dest, ...)` lets a
- * `"../../victim"` entry resolve and delete files anywhere the process can reach.
+ * throw a clear, entry-naming error. This is the LEXICAL half of the containment check every
+ * manifest-backed removal MUST go through before touching the filesystem -- a manifest is not a
+ * trusted input (it can be hand-edited, corrupted, or -- for project-scoped installs -- committed
+ * to a shared repo and edited by anyone with write access), and an unvalidated
+ * `path.join(dest, ...)` lets a `"../../victim"` entry resolve and delete files anywhere the
+ * process can reach.
+ *
+ * This function alone is NOT sufficient: it never touches the filesystem for the entry's own
+ * path components, so it cannot detect an INTERMEDIATE directory that is on-disk a symlink
+ * pointing outside `dest` (a lexically-in-bounds entry like "skills/evilfile" still resolves to a
+ * physically out-of-bounds file when `dest/skills` is itself a symlink -- the kernel follows it
+ * at the moment `fs.lstatSync`/`fs.rmSync` actually touch the path). Every caller MUST also call
+ * `assertManifestEntryParentContained` immediately before touching the entry -- see that
+ * function's docstring for why this is a second, separate check rather than folded in here.
  *
  * Deliberately throws rather than skip-and-continue: a manifest containing even one unsafe entry
  * is treated as untrustworthy as a whole, not partially honored. Resolves `dest` itself through
@@ -199,4 +208,55 @@ export function resolveManifestEntrySha256(entryPathForError: string, sha256: un
     throw new Error(`owned-files.json entry "${entryPathForError}" has an invalid sha256: ${JSON.stringify(sha256)}`);
   }
   return sha256;
+}
+
+/**
+ * The FILESYSTEM half of manifest entry containment: verify `absPath`'s PARENT directory, once
+ * resolved through any symlinks (`fs.realpathSync`, which resolves every intermediate component
+ * in the chain, not just the last one), still sits inside `dest`'s own resolved root.
+ *
+ * Deliberately checks only the PARENT, never `absPath` itself: the final path component is the
+ * removal target, and for a manifest-mode entry that target is refused/preserved (never removed)
+ * the moment it turns out to be a symlink at all (see planFromManifest's `stat.isSymbolicLink()`
+ * check) -- so the final component reaching this function is always either a plain file or
+ * already absent, and requiring IT to resolve inside `dest` would be redundant. (The unrelated,
+ * legitimate legacy-mode skill-symlink-chain feature -- `dest/skills/<name>` as a symlink to
+ * `~/.agents/skills/<name>` -- is handled entirely by a different code path,
+ * `diffSkillsForLegacyRemoval`/`skillContentMatchesBundle`, which resolves and re-verifies that
+ * symlink's target explicitly; it never goes through `resolveManifestEntryPath` at all, since a
+ * manifest never legitimately references a path through that chain -- the manifest writer itself
+ * never creates symlinks. This check cannot collide with that feature.)
+ *
+ * Must be called immediately before every removal that used `resolveManifestEntryPath`, at BOTH
+ * plan time (`planFromManifest`, so a poisoned or coincidentally-symlinked path is never even
+ * planned -- throws, aborting the whole run) and again at apply time (`applyPlan`'s `removeFiles`
+ * loop, treated as a TOCTOU-class re-check -- preserve, don't delete, don't abort the rest of the
+ * run -- since a symlink could be swapped into an intermediate directory during the window
+ * between planning and confirmation, same class as the content-hash TOCTOU check).
+ *
+ * A parent directory that does not exist at all is not a containment violation (nothing to escape
+ * through) -- the caller's normal "entry already gone" handling takes over via the subsequent
+ * `lstatSync` on the entry itself.
+ */
+export function assertManifestEntryParentContained(dest: string, absPath: string, relPathForError: string): void {
+  const parent = path.dirname(absPath);
+  let parentReal: string;
+  try {
+    parentReal = fs.realpathSync(parent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  let destReal: string;
+  try {
+    destReal = fs.realpathSync(dest);
+  } catch {
+    destReal = path.resolve(dest);
+  }
+  const relative = path.relative(destReal, parentReal);
+  if (relative !== "" && (relative.startsWith("..") || path.isAbsolute(relative))) {
+    throw new Error(
+      `owned-files.json entry escapes the install root through a symlinked parent directory: "${relPathForError}" (parent resolves to ${parentReal}, outside ${destReal})`
+    );
+  }
 }

@@ -37,6 +37,11 @@
 //   - Legacy-mode skill matching compares `path.basename(realDir) !== name`; a skill renamed only
 //     by case on a case-insensitive-but-case-preserving filesystem (default macOS/APFS) fails
 //     that check and is preserved rather than removed -- safe (never deletes), just imprecise.
+//   - The unrecognized-residue walk (`listOwnedTree(destDir)` inside `diffBundleFilesAgainstDest`
+//     / `diffSkillsForLegacyRemoval`) has no depth/size bound on the dest side of each fixed
+//     legacy-managed directory name; it is read-only reporting (never follows symlinks, never
+//     deletes), so an adversarially deep/wide tree there is at most a slow run, not a data-
+//     integrity risk -- not worth bounding given the small fixed set of directory names it walks.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
@@ -51,11 +56,12 @@ import {
   readOwnedFilesManifest,
   resolveManifestEntryPath,
   resolveManifestEntrySha256,
+  assertManifestEntryParentContained,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
 import { ensureBundle, globalDest } from "./init.js";
 
-type InstallMergeModule = { isManagedHookGroup: (hookGroup: unknown) => boolean; FA_MARKERS: string[] };
+type InstallMergeModule = { isManagedHookGroup: (hookGroup: unknown) => boolean; isManagedInnerHook: (hook: unknown) => boolean; FA_MARKERS: string[] };
 
 function loadInstallMergeModule(): InstallMergeModule {
   const installMergePath = path.join(root, "scripts", "install-merge.js");
@@ -137,23 +143,15 @@ function settingsPathFor(dest: string, global: boolean): string {
   return global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json");
 }
 
-/**
- * True when a single INNER hook object (`{ type, command, statusMessage, ... }`, one entry of a
- * hook group's `hooks` array) carries an FA marker in its `statusMessage`. Deliberately entry-
- * granular, not group-granular: the Claude Code settings schema allows multiple entries in one
- * group's `hooks` array, and nothing prevents a user (or another tool) appending its own hook
- * into a group FA also writes into. Stripping at group granularity would silently delete that
- * co-located user hook (and, if it was the only other content in the file, the whole
- * settings.json) along with the FA one.
- */
-function isManagedInnerHook(hook: unknown, faMarkers: string[]): boolean {
-  if (typeof hook !== "object" || hook === null) return false;
-  const statusMessage = (hook as Record<string, unknown>)["statusMessage"];
-  const sm = typeof statusMessage === "string" ? statusMessage : "";
-  return faMarkers.some((marker) => sm.includes(marker));
-}
+// Entry-granular "is this hook FA-owned" is imported from install-merge.js's
+// isManagedInnerHook (see loadInstallMergeModule/buildPlan) rather than duplicated here --
+// mergeSettings' hooks step (the ordinary `flow-agents init` merge/re-install path) and this
+// module's settings stripping now both strip at inner-hook granularity via the exact same
+// function, so the two paths can never independently drift on which hooks count as FA-owned.
+// A group mixing a user hook with an FA hook keeps the user hook (and every other group-level
+// field, e.g. `matcher`); a group is dropped entirely only when every inner hook was FA-owned.
 
-function planSettings(dest: string, global: boolean, faMarkers: string[]): SettingsPlan {
+function planSettings(dest: string, global: boolean, isManagedInnerHook: (hook: unknown) => boolean): SettingsPlan {
   const settingsPath = settingsPathFor(dest, global);
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null };
@@ -184,7 +182,7 @@ function planSettings(dest: string, global: boolean, faMarkers: string[]): Setti
           keptGroups.push(group);
           continue;
         }
-        const keptInner = innerHooks.filter((hook) => !isManagedInnerHook(hook, faMarkers));
+        const keptInner = innerHooks.filter((hook) => !isManagedInnerHook(hook));
         const removedInner = innerHooks.length - keptInner.length;
         if (removedInner === 0) {
           keptGroups.push(group);
@@ -255,6 +253,12 @@ function planFromManifest(dest: string, manifest: OwnedFilesManifest): { removeF
     const absPath = resolveManifestEntryPath(dest, (entry as { path?: unknown }).path);
     const expectedSha256 = resolveManifestEntrySha256(String((entry as { path?: unknown }).path), (entry as { sha256?: unknown }).sha256);
     const relPath = entry.path;
+    // Second, filesystem-real half of containment (see assertManifestEntryParentContained's
+    // docstring): resolveManifestEntryPath alone is purely lexical and cannot catch an
+    // intermediate directory that is on-disk a symlink pointing outside dest. Checked here at
+    // plan time too (not just at apply time) so a poisoned/coincidentally-symlinked entry is
+    // never even planned -- throws, aborting the whole run before any deletion.
+    assertManifestEntryParentContained(dest, absPath, relPath);
     let stat: fs.Stats;
     try {
       stat = fs.lstatSync(absPath);
@@ -534,8 +538,8 @@ function planResidue(dest: string, global: boolean): ResidueEntry[] {
 // ─── Plan assembly ──────────────────────────────────────────────────────────────────────────
 
 function buildPlan(dest: string, global: boolean): UninstallPlan {
-  const { FA_MARKERS } = loadInstallMergeModule();
-  const settings = planSettings(dest, global, FA_MARKERS);
+  const { isManagedInnerHook } = loadInstallMergeModule();
+  const settings = planSettings(dest, global, isManagedInnerHook);
 
   const manifest = readOwnedFilesManifest(dest);
   let mode: UninstallPlan["mode"];
@@ -624,6 +628,24 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
   for (const entry of plan.removeFiles) {
     try {
       if (!fs.existsSync(entry.absPath)) continue; // already gone -- nothing to do, not a failure
+      // Re-verify real (symlink-resolved) parent containment immediately before touching
+      // anything, same TOCTOU class as the hash re-check below: an intermediate directory could
+      // have been swapped for a symlink pointing outside dest during the window between planning
+      // and confirmation. Preserve, don't delete, and don't abort the rest of the run -- unlike
+      // the plan-time check (which aborts everything before any deletion has happened), apply is
+      // already mid-run, so treating this the same as any other "changed since planning" case
+      // keeps the report accurate without turning one suspicious entry into a hard stop for
+      // items already confirmed safe.
+      let containmentOk = true;
+      try {
+        assertManifestEntryParentContained(plan.dest, entry.absPath, entry.relPath);
+      } catch {
+        containmentOk = false;
+      }
+      if (!containmentOk) {
+        preservedAtApply.push({ relPath: entry.relPath, absPath: entry.absPath, reason: "parent directory now resolves outside the install root through a symlink; preserved (re-checked immediately before removal)" });
+        continue;
+      }
       const stat = fs.lstatSync(entry.absPath);
       if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
         preservedAtApply.push({ relPath: entry.relPath, absPath: entry.absPath, reason: "content changed since the plan was computed; preserved (re-checked immediately before removal)" });
@@ -637,6 +659,30 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
     }
   }
   for (const entry of plan.removeSymlinks) {
+    // TOCTOU re-check, same class as the containment/hash re-checks above: if the symlink's
+    // target was swapped between plan and apply (an attacker, or a coincidental race), the
+    // removal below only ever touches the ORIGINALLY-resolved `entry.targetDir` (never re-
+    // resolving the live symlink), so a swap alone cannot redirect what gets deleted -- but
+    // proceeding to unlink+delete under a stale assumption is still wrong. Detect the swap and
+    // preserve rather than silently acting on out-of-date information.
+    let currentSymlinkStat: fs.Stats | undefined;
+    try {
+      currentSymlinkStat = fs.lstatSync(entry.symlinkPath);
+    } catch {
+      currentSymlinkStat = undefined;
+    }
+    if (currentSymlinkStat?.isSymbolicLink()) {
+      let currentRealTarget: string | undefined;
+      try {
+        currentRealTarget = fs.realpathSync(entry.symlinkPath);
+      } catch {
+        currentRealTarget = undefined;
+      }
+      if (currentRealTarget !== undefined && path.resolve(currentRealTarget) !== path.resolve(entry.targetDir)) {
+        preservedAtApply.push({ relPath: entry.relPath, absPath: entry.symlinkPath, reason: "symlink target changed since the plan was computed; preserved (re-checked immediately before removal)" });
+        continue;
+      }
+    }
     let stillMatches: boolean;
     try {
       stillMatches = skillContentMatchesBundle(entry.bundleSkillDir, entry.targetDir);

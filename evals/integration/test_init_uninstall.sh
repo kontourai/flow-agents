@@ -383,6 +383,82 @@ fi
 
 echo ""
 
+# ─── Scenario E2: CRITICAL fix (r2 delta) — symlinked INTERMEDIATE path component ─────────────
+echo "--- Scenario E2: Manifest entry through a symlinked intermediate directory refuses and deletes nothing ---"
+
+SYMCOMP_HOME="$TMPDIR_EVAL/symcomp-home"
+mkdir -p "$SYMCOMP_HOME"
+HOME="$SYMCOMP_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+
+# An entirely lexically-in-bounds manifest path ("skills" + "/" + "evilfile") whose PARENT
+# directory is, on disk, a symlink pointing entirely outside dest. path.resolve/path.relative
+# alone (r1's fix) cannot see this -- it never touches the filesystem for the entry's own
+# components -- but the kernel follows the symlink the moment lstatSync/rmSync actually run.
+# (Subdir/filename kept as separate variables/argv, same as elsewhere in this file, purely so
+# this fixture-only manifest path is never a bare literal validate-source could mistake for a
+# real source reference.)
+SYMCOMP_SUBDIR="skills"
+SYMCOMP_NAME="evilfile"
+SYMCOMP_VICTIM_DIR="$TMPDIR_EVAL/symcomp-victim-outside-claude"
+mkdir -p "$SYMCOMP_VICTIM_DIR"
+: > "$SYMCOMP_VICTIM_DIR/$SYMCOMP_NAME"
+SYMCOMP_EMPTY_HASH="$(shasum -a 256 "$SYMCOMP_VICTIM_DIR/$SYMCOMP_NAME" | awk '{print $1}')"
+
+# Replace the real "skills" directory the install just created with a symlink to the victim dir.
+rm -rf "$SYMCOMP_HOME/.claude/skills"
+ln -s "$SYMCOMP_VICTIM_DIR" "$SYMCOMP_HOME/.claude/skills"
+
+node - "$SYMCOMP_HOME/.claude/.flow-agents/owned-files.json" "$SYMCOMP_SUBDIR/$SYMCOMP_NAME" "$SYMCOMP_EMPTY_HASH" << 'NODE'
+const fs = require("node:fs");
+const [, , manifestPath, entryPath, hash] = process.argv;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.files.push({ path: entryPath, sha256: hash });
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+NODE
+
+SYMCOMP_SETTINGS_BEFORE="$(cat "$SYMCOMP_HOME/.claude/settings.json")"
+
+set +e
+HOME="$SYMCOMP_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/symcomp.out" 2>&1
+SYMCOMP_STATUS=$?
+set -e
+
+if [[ "$SYMCOMP_STATUS" -ne 0 ]]; then
+  _pass "symlink-component: manifest entry through a symlinked parent directory causes the run to refuse (exit $SYMCOMP_STATUS)"
+else
+  _fail "symlink-component: run exited 0 despite a symlinked intermediate path component"
+fi
+
+if [[ -f "$SYMCOMP_VICTIM_DIR/evilfile" ]]; then
+  _pass "symlink-component: victim file outside the install root survived"
+else
+  _fail "symlink-component: victim file outside the install root was deleted"
+fi
+
+if grep -q "$SYMCOMP_SUBDIR/$SYMCOMP_NAME" "$TMPDIR_EVAL/symcomp.out" && grep -qi 'symlink' "$TMPDIR_EVAL/symcomp.out"; then
+  _pass "symlink-component: error message names the offending entry and identifies the symlink"
+else
+  _fail "symlink-component: error message does not clearly identify the offending entry"
+  sed -n '1,20p' "$TMPDIR_EVAL/symcomp.out"
+fi
+
+SYMCOMP_SETTINGS_AFTER="$(cat "$SYMCOMP_HOME/.claude/settings.json" 2>/dev/null || echo MISSING)"
+if [[ "$SYMCOMP_SETTINGS_BEFORE" == "$SYMCOMP_SETTINGS_AFTER" ]]; then
+  _pass "symlink-component: settings.json was never touched (the whole run aborted before any mutation)"
+else
+  _fail "symlink-component: settings.json was modified even though the run refused"
+fi
+
+# The dest-side symlink itself (the legitimate part of this fixture's setup) must survive too --
+# this failure mode is "refuse the whole run," never "silently unlink the symlink and move on."
+if [[ -L "$SYMCOMP_HOME/.claude/skills" ]]; then
+  _pass "symlink-component: the dest-side skills symlink itself was left untouched"
+else
+  _fail "symlink-component: the dest-side skills symlink was removed despite the run refusing"
+fi
+
+echo ""
+
 # ─── Scenario F: HIGH fix — mixed hook group keeps the co-located user hook ───────────────────
 echo "--- Scenario F: Mixed hook group -- co-located user hook survives, settings.json is not wrongly deleted ---"
 
@@ -530,6 +606,54 @@ else
     _pass "toctou: an unrelated unmutated file was still removed normally"
   else
     _fail "toctou: an unrelated unmutated file was not removed"
+  fi
+fi
+
+echo ""
+
+# ─── Scenario H2: MEDIUM coverage (r2 delta) — TOCTOU on the legacy symlink-chain branch ──────
+echo "--- Scenario H2: TOCTOU on the legacy-mode skill symlink-chain branch is preserved, not deleted ---"
+
+TOCTOU2_HOME="$TMPDIR_EVAL/toctou2-home"
+mkdir -p "$TOCTOU2_HOME"
+TOCTOU2_DEST="$TMPDIR_EVAL/toctou2-project"
+mkdir -p "$TOCTOU2_DEST"
+HOME="$TOCTOU2_HOME" $FA init --runtime claude-code --dest "$TOCTOU2_DEST" --yes >/dev/null 2>&1
+rm -f "$TOCTOU2_DEST/.flow-agents/owned-files.json"
+
+TOCTOU2_SKILL_NAME="deliver"
+TOCTOU2_EXTERNAL_SKILLS="$TMPDIR_EVAL/toctou2-external-skills-store"
+mkdir -p "$TOCTOU2_EXTERNAL_SKILLS"
+mv "$TOCTOU2_DEST/.claude/skills/$TOCTOU2_SKILL_NAME" "$TOCTOU2_EXTERNAL_SKILLS/$TOCTOU2_SKILL_NAME"
+ln -s "$TOCTOU2_EXTERNAL_SKILLS/$TOCTOU2_SKILL_NAME" "$TOCTOU2_DEST/.claude/skills/$TOCTOU2_SKILL_NAME"
+
+TOCTOU2_TARGET_FILE="$TOCTOU2_EXTERNAL_SKILLS/$TOCTOU2_SKILL_NAME/SKILL.md"
+if [[ ! -f "$TOCTOU2_TARGET_FILE" ]]; then
+  _fail "toctou2: fixture symlink-chain skill file was not set up; cannot run scenario"
+else
+  TOCTOU2_OUT="$TMPDIR_EVAL/toctou2-uninstall.out"
+  # Same TEST-ONLY hook as Scenario H, but targeting the file THROUGH the symlink chain's
+  # resolved external directory -- exercises applyPlan's removeSymlinks re-check
+  # (skillContentMatchesBundle), not the removeFiles re-hash Scenario H already covers.
+  HOME="$TOCTOU2_HOME" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_MUTATE_FILE="$TOCTOU2_TARGET_FILE"     $FA init --uninstall --runtime claude-code --dest "$TOCTOU2_DEST" --yes >"$TOCTOU2_OUT" 2>&1
+
+  if [[ -f "$TOCTOU2_TARGET_FILE" ]] && grep -q 'TOCTOU-test-mutation' "$TOCTOU2_TARGET_FILE"; then
+    _pass "toctou2: symlink-chain target file mutated between plan and apply survived with its new content intact"
+  else
+    _fail "toctou2: symlink-chain target file mutated between plan and apply was deleted anyway"
+  fi
+
+  if [[ -L "$TOCTOU2_DEST/.claude/skills/$TOCTOU2_SKILL_NAME" ]]; then
+    _pass "toctou2: the symlink itself was left in place (not unlinked out from under a changed target)"
+  else
+    _fail "toctou2: the symlink was removed despite its target changing since the plan was computed"
+  fi
+
+  if sed -n '/^Preserved/,/^$/p' "$TOCTOU2_OUT" | grep -q "skills/$TOCTOU2_SKILL_NAME" && grep -q 're-checked immediately before removal' "$TOCTOU2_OUT"; then
+    _pass "toctou2: report names the symlink chain as preserved due to the apply-time re-check"
+  else
+    _fail "toctou2: report does not explain why the symlink chain was preserved"
+    sed -n '1,80p' "$TOCTOU2_OUT"
   fi
 fi
 
