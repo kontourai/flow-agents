@@ -378,20 +378,25 @@ else
   fail "paused-mid-execute mismatch: wall_clock_s got $pme_wc want $pme_wc_exp; human_wait_s got $pme_hw want $pme_hw_exp"
 fi
 
-# RED: the pre-fix committed version of flow-run-economics.mjs (before this fix round), run
-# read-only via `git show HEAD:...` against a temp file -- never touches the working tree.
-PRE_FIX_SCRIPT="$TMP/pre-fix-flow-run-economics.mjs"
-if git -C "$ROOT" show HEAD:scripts/telemetry/flow-run-economics.mjs > "$PRE_FIX_SCRIPT" 2>/dev/null && [[ -s "$PRE_FIX_SCRIPT" ]]; then
-  PRE_FIX_OUT="$TMP/pre-fix-pme.json"
-  node "$PRE_FIX_SCRIPT" --flow-run-dir "$FIX/paused-mid-execute" --now "$NOW_PME" > "$PRE_FIX_OUT" 2>/dev/null
-  pre_wc="$(jq -r '.phases[] | select(.phase=="execute") | .wall_clock_s // "MISSING"' "$PRE_FIX_OUT" 2>/dev/null)"
-  if [[ "$pre_wc" != "$pme_wc_exp" ]]; then
-    pass "RED: the pre-fix committed code reports execute.wall_clock_s=$pre_wc (raw calendar span, includes the pause) -- proves this assertion has power"
+# RED: a targeted source mutation that removes the pause-subtraction (activeS = raw duration,
+# never subtracting pauseS) -- NOT a `git show HEAD:...` diff. HEAD now carries this fix itself
+# (this eval's own fix round is committed), so comparing against HEAD would compare fixed code
+# against fixed code and prove nothing; a fault injection proves the assertion's power
+# independent of git history / rebase / squash. Restored byte-identical immediately after.
+MUTANT_PAUSE="$TMP/flow-run-economics.pause-mutant.mjs"
+sed -E 's/const activeS = Math\.max\(0, w\.wall_clock_s - pauseS\);/const activeS = w.wall_clock_s;/' \
+  "$FLOW_RUN_ECON" > "$MUTANT_PAUSE"
+if ! diff -q "$FLOW_RUN_ECON" "$MUTANT_PAUSE" >/dev/null 2>&1; then
+  MUTANT_OUT="$TMP/pre-fix-pme.json"
+  node "$MUTANT_PAUSE" --flow-run-dir "$FIX/paused-mid-execute" --now "$NOW_PME" > "$MUTANT_OUT" 2>/dev/null
+  mut_wc="$(jq -r '.phases[] | select(.phase=="execute") | .wall_clock_s // "MISSING"' "$MUTANT_OUT" 2>/dev/null)"
+  if [[ "$mut_wc" != "$pme_wc_exp" ]]; then
+    pass "RED: removing the pause-subtraction reports execute.wall_clock_s=$mut_wc (raw calendar span, includes the pause) -- proves this assertion has power"
   else
-    fail "RED proof inconclusive: pre-fix code already reported $pre_wc (expected the inflated raw span, not $pme_wc_exp) — HEAD may already carry this fix"
+    fail "RED proof inconclusive: mutant still reported $mut_wc (expected the inflated raw span, not $pme_wc_exp) — injection did not take"
   fi
 else
-  fail "could not read pre-fix flow-run-economics.mjs from HEAD for the RED proof"
+  fail "RED fault injection did not modify the script (sed pattern no longer matches source)"
 fi
 
 # ── AC11: window-boundary mutation power (review finding 4a) — RED/GREEN -------------------------
