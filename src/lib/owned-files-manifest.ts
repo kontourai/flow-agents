@@ -147,3 +147,56 @@ export function readOwnedFilesManifest(dest: string): OwnedFilesManifest | null 
     return null;
   }
 }
+
+/**
+ * Resolve one manifest file entry's relative path to a safe absolute path under `dest`, or
+ * throw a clear, entry-naming error. This is the single containment check every manifest-backed
+ * removal MUST go through before touching the filesystem -- a manifest is not a trusted input
+ * (it can be hand-edited, corrupted, or -- for project-scoped installs -- committed to a shared
+ * repo and edited by anyone with write access), and an unvalidated `path.join(dest, ...)` lets a
+ * `"../../victim"` entry resolve and delete files anywhere the process can reach.
+ *
+ * Deliberately throws rather than skip-and-continue: a manifest containing even one unsafe entry
+ * is treated as untrustworthy as a whole, not partially honored. Resolves `dest` itself through
+ * `realpathSync` first so containment is checked against the REAL install root, not a symlink
+ * placed at `dest` that could otherwise be used to redirect the containment check itself.
+ */
+export function resolveManifestEntryPath(dest: string, relPath: unknown): string {
+  if (typeof relPath !== "string" || relPath.length === 0) {
+    throw new Error(`owned-files.json entry has an invalid path: ${JSON.stringify(relPath)}`);
+  }
+  if (relPath.startsWith("/") || relPath.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(relPath)) {
+    throw new Error(`owned-files.json entry has an absolute path, refusing to use it: "${relPath}"`);
+  }
+  const parts = relPath.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`owned-files.json entry escapes the install root (unsafe path segment): "${relPath}"`);
+  }
+  let destReal: string;
+  try {
+    destReal = fs.realpathSync(dest);
+  } catch {
+    destReal = path.resolve(dest);
+  }
+  const realTarget = path.resolve(destReal, ...parts);
+  const relative = path.relative(destReal, realTarget);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`owned-files.json entry escapes the install root: "${relPath}" resolves outside ${destReal}`);
+  }
+  // Containment is proven against the REAL (symlink-resolved) root above, but the path this
+  // function RETURNS is built from the original, unresolved `dest` -- every other part of the
+  // uninstall plan (pruneEmptyDirs' root, the durable artifact root, residue checks, etc.)
+  // consistently uses the unresolved `dest` too, and mixing the two bases here would make
+  // dest-relative containment/pruning logic elsewhere silently stop matching (a real regression
+  // caught while testing this fix: pruneEmptyDirs' prefix check failed silently whenever `dest`
+  // crosses a symlink, e.g. macOS's /tmp -> /private/tmp, leaving emptied directories behind).
+  return path.resolve(dest, ...parts);
+}
+
+/** Validate a manifest entry's `sha256` field is a well-formed hex digest, or throw naming the entry. */
+export function resolveManifestEntrySha256(entryPathForError: string, sha256: unknown): string {
+  if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(sha256)) {
+    throw new Error(`owned-files.json entry "${entryPathForError}" has an invalid sha256: ${JSON.stringify(sha256)}`);
+  }
+  return sha256;
+}
