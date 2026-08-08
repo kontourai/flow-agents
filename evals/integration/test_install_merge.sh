@@ -366,6 +366,71 @@ fi
 
 echo ""
 
+# ─── Scenario 4B: Mixed hook group survives re-install (r2 delta HIGH fix) ────
+echo "--- Scenario 4B: Mixed hook group -- user entry co-located with an FA entry survives an ordinary re-install ---"
+#
+# Distinct from Scenario 4 above: here the user hook is injected INTO the SAME group array an FA
+# hook already occupies (the Claude Code settings schema allows multiple entries per group, and
+# nothing prevents a user or another tool appending into a group flow-agents also writes into),
+# not into its own separate top-level group. isManagedHookGroup used to drop the WHOLE group the
+# moment any inner entry matched an FA marker, silently deleting the co-located user entry (and
+# any other group-level field, e.g. a custom `matcher`) on every ordinary `flow-agents init`
+# re-install -- not just via `--uninstall`. mergeSettings now strips at inner-hook granularity.
+
+MIXED_MERGE_DEST="$TMPDIR_EVAL/mixed-merge-claude"
+mkdir -p "$MIXED_MERGE_DEST"
+
+# First install (creates the FA-owned Stop group this scenario injects into).
+(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$MIXED_MERGE_DEST" >/dev/null 2>&1)
+
+# Inject a user hook entry directly into the FA group's own `hooks` array, plus a custom
+# group-level field, to prove both the entry AND the group shape survive.
+node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+const s = JSON.parse(fs.readFileSync(path, "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+if (stopGroups.length === 0) throw new Error("fixture assumption broken: no FA Stop group to inject into");
+stopGroups[0].hooks.push({ type: "command", command: "echo my-precious-mixed-user-hook" });
+stopGroups[0].customGroupField = "user-set-value";
+fs.writeFileSync(path, `${JSON.stringify(s, null, 2)}
+`, "utf8");
+NODE
+
+# Second install (upgrade / re-install) -- exercises mergeSettings via install-merge.js.
+(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$MIXED_MERGE_DEST" >/dev/null 2>&1)
+
+if node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const userGroup = stopGroups.find((g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo my-precious-mixed-user-hook")));
+if (!userGroup) throw new Error("user hook co-located in an FA group was deleted after re-install: " + JSON.stringify(stopGroups));
+if (userGroup.customGroupField !== "user-set-value") throw new Error("group-level field was not preserved: " + JSON.stringify(userGroup));
+console.log("ok");
+NODE
+then
+  _pass "mixed-group re-install: co-located user hook entry AND its group-level field survived"
+else
+  _fail "mixed-group re-install: co-located user hook entry or its group-level field was lost"
+fi
+
+if node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasFA = stopGroups.some((g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry") || String(h.statusMessage || "").includes("Running Flow Agents hook policy")));
+if (!hasFA) throw new Error("FA hook entries missing from Stop after re-install: " + JSON.stringify(stopGroups));
+console.log("ok");
+NODE
+then
+  _pass "mixed-group re-install: FA hook entries are still present (current bundle's set, refreshed)"
+else
+  _fail "mixed-group re-install: FA hook entries missing after re-install"
+fi
+
+echo ""
+
 # ─── Scenario 5: Global target ───────────────────────────────────────────────
 echo "--- Scenario 5: Global target (--global flag merges into user settings) ---"
 

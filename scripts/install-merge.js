@@ -81,6 +81,24 @@ function emitConflict(onConflict, item) {
 }
 
 /**
+ * Returns true if a single INNER hook object (one entry of a hook group's `hooks` array --
+ * `{ type, command, timeout, statusMessage }`) is owned by flow-agents, by checking whether its
+ * `statusMessage` contains one of the FA_MARKERS strings. This is the single source of truth for
+ * "is this hook FA-owned" at entry granularity -- `isManagedHookGroup` below (whole-group,
+ * consumed by mergeSettings' hooks step) and src/cli/uninstall.ts's entry-granular settings
+ * stripping are both defined in terms of this function (uninstall.ts imports it directly), so
+ * the two can never independently drift on which hooks count as FA-owned.
+ *
+ * @param {unknown} innerHook
+ * @returns {boolean}
+ */
+function isManagedInnerHook(innerHook) {
+  if (typeof innerHook !== "object" || innerHook === null) return false;
+  const sm = typeof innerHook.statusMessage === "string" ? innerHook.statusMessage : "";
+  return FA_MARKERS.some((marker) => sm.includes(marker));
+}
+
+/**
  * Returns true if a hook-group entry is owned by flow-agents.
  * A hook-group in Claude Code settings looks like:
  *   { hooks: [ { type, command, timeout, statusMessage } ] }
@@ -96,11 +114,7 @@ function emitConflict(onConflict, item) {
 function isManagedHookGroup(hookGroup) {
   if (typeof hookGroup !== "object" || hookGroup === null) return false;
   const innerHooks = Array.isArray(hookGroup.hooks) ? hookGroup.hooks : [];
-  return innerHooks.some((innerHook) => {
-    if (typeof innerHook !== "object" || innerHook === null) return false;
-    const sm = typeof innerHook.statusMessage === "string" ? innerHook.statusMessage : "";
-    return FA_MARKERS.some((marker) => sm.includes(marker));
-  });
+  return innerHooks.some((innerHook) => isManagedInnerHook(innerHook));
 }
 
 /**
@@ -229,10 +243,25 @@ function mergeSettings(existing, managed, options = {}) {
       ? managedHooks[eventKey]
       : [];
 
-    // Keep user-owned (non-FA) groups from existing.
-    const userGroups = existingGroups.filter(
-      (group) => !isManagedHookGroup(group)
-    );
+    // Keep user-owned content from existing groups at ENTRY granularity, not group
+    // granularity: the Claude Code settings schema allows multiple entries in one group's
+    // `hooks` array, and nothing prevents a user (or another tool) appending its own hook into
+    // a group flow-agents also writes into. Stripping the whole group the moment ANY inner
+    // entry matched an FA marker silently deleted that co-located user hook on every ordinary
+    // re-install/upgrade (#findings: uninstall r1 HIGH, r2 delta HIGH -- this is the same
+    // classifier, now fixed at its one source instead of only on the uninstall path). A group
+    // survives, with every other group-level field (`matcher`, etc.) preserved via the spread,
+    // whenever at least one of its inner hooks is not FA-owned; it is dropped entirely only when
+    // every inner hook was FA-owned, exactly as before.
+    const userGroups = [];
+    for (const group of existingGroups) {
+      if (typeof group !== "object" || group === null || !Array.isArray(group.hooks)) {
+        if (!isManagedHookGroup(group)) userGroups.push(group);
+        continue;
+      }
+      const keptInner = group.hooks.filter((hook) => !isManagedInnerHook(hook));
+      if (keptInner.length > 0) userGroups.push(Object.assign({}, group, { hooks: keptInner }));
+    }
 
     // Append the new FA groups from managed (may be empty if event not in managed).
     mergedHooks[eventKey] = [...userGroups, ...managedGroups];
@@ -388,4 +417,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { mergeSettings, isManagedHookGroup, FA_MARKERS };
+module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS };

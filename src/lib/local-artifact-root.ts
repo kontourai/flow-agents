@@ -221,6 +221,16 @@ export function skillsManifestPath(cwd = process.cwd()): string {
   return path.join(durableFlowAgentsRoot(cwd), "skills-manifest.json");
 }
 
+/**
+ * Path to the ownership manifest recording every file a claude-code install wrote (path +
+ * sha256), a sibling of `install.json` under the same durable root. Used by `flow-agents init
+ * --uninstall` to remove exactly the files an install owns while preserving anything a user
+ * has since modified (content hash no longer matches).
+ */
+export function ownedFilesManifestPath(cwd = process.cwd()): string {
+  return path.join(durableFlowAgentsRoot(cwd), "owned-files.json");
+}
+
 export function telemetryDataDir(cwd = process.cwd()): string {
   return path.resolve(cwd, KONTOURAI_DIR, "telemetry");
 }
