@@ -209,6 +209,7 @@ LANE_RUNTIME_AND_KIT=(
   "Published Codex install integration"
   "Public workflow CLI integration"
   "Bundle lifecycle integration"
+  "Init uninstall integration"
   "Activate npx context integration"
   "Kit conformance levels integration"
   "Local Flow Kit install integration"
