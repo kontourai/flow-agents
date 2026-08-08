@@ -42,6 +42,11 @@
 //     legacy-managed directory name; it is read-only reporting (never follows symlinks, never
 //     deletes), so an adversarially deep/wide tree there is at most a slow run, not a data-
 //     integrity risk -- not worth bounding given the small fixed set of directory names it walks.
+//   - Exit code does not distinguish a containment-violation preserve (a symlink swap correctly
+//     detected and blocked mid-apply) from an ordinary content-drift preserve (ordinary TOCTOU or
+//     ordinary "user modified this") -- both exit 0, consistent with this file's existing
+//     content-hash TOCTOU preserve design; the report's "Preserved" section always names the
+//     specific reason, so this is a coarser exit code, not a report accuracy gap.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
@@ -57,6 +62,7 @@ import {
   resolveManifestEntryPath,
   resolveManifestEntrySha256,
   assertManifestEntryParentContained,
+  ManifestContainmentViolationError,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
 import { ensureBundle, globalDest } from "./init.js";
@@ -637,13 +643,22 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
       // keeps the report accurate without turning one suspicious entry into a hard stop for
       // items already confirmed safe.
       let containmentOk = true;
+      let containmentPreserveReason: string | undefined;
       try {
         assertManifestEntryParentContained(plan.dest, entry.absPath, entry.relPath);
-      } catch {
+      } catch (error) {
         containmentOk = false;
+        // Distinguish a genuine containment violation (the function's own thrown error type)
+        // from an unrelated filesystem error (e.g. ELOOP/EACCES resolving a component other than
+        // a missing leaf, which the function re-throws verbatim) -- both are always fail-safe
+        // (preserve, never delete), but the report should never claim "symlink escape" for what
+        // was actually an I/O error.
+        containmentPreserveReason = error instanceof ManifestContainmentViolationError
+          ? "parent directory now resolves outside the install root through a symlink"
+          : `could not verify parent directory containment: ${(error as Error).message}`;
       }
       if (!containmentOk) {
-        preservedAtApply.push({ relPath: entry.relPath, absPath: entry.absPath, reason: "parent directory now resolves outside the install root through a symlink; preserved (re-checked immediately before removal)" });
+        preservedAtApply.push({ relPath: entry.relPath, absPath: entry.absPath, reason: `${containmentPreserveReason}; preserved (re-checked immediately before removal)` });
         continue;
       }
       const stat = fs.lstatSync(entry.absPath);
@@ -858,13 +873,25 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 0;
     }
 
-    // TEST-ONLY hook: simulates a file changing during the plan/confirm/apply window (e.g. the
-    // interactive confirmation prompt's stdin wait) so the apply-time TOCTOU re-verification can
-    // be exercised deterministically without racing a real background process. Never read
-    // outside this module's own eval fixtures; not part of the public CLI surface.
+    // TEST-ONLY hooks: simulate the filesystem changing during the plan/confirm/apply window
+    // (e.g. the interactive confirmation prompt's stdin wait) so the apply-time TOCTOU
+    // re-verification can be exercised deterministically without racing a real background
+    // process. Never read outside this module's own eval fixtures; not part of the public CLI
+    // surface.
     const toctouTestMutateFile = process.env["FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_MUTATE_FILE"];
     if (toctouTestMutateFile) {
       fs.appendFileSync(toctouTestMutateFile, "\nTOCTOU-test-mutation\n", "utf8");
+    }
+    // Re-points an existing symlink, or replaces an existing directory with a new symlink, at
+    // PATH to point at TARGET -- used to exercise both the removeSymlinks branch's live-target
+    // re-check (re-pointing an already-planned symlink) and the manifest-mode apply-time
+    // containment re-check (swapping a plain directory a plan already captured for a symlink
+    // escaping dest) after planning but before removal.
+    const toctouSymlinkSwapPath = process.env["FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_PATH"];
+    const toctouSymlinkSwapTarget = process.env["FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_TARGET"];
+    if (toctouSymlinkSwapPath && toctouSymlinkSwapTarget) {
+      fs.rmSync(toctouSymlinkSwapPath, { recursive: true, force: true });
+      fs.symlinkSync(toctouSymlinkSwapTarget, toctouSymlinkSwapPath);
     }
 
     const confirmed = await confirmDestructive(dest, args.flags);

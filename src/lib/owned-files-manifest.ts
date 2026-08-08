@@ -238,6 +238,17 @@ export function resolveManifestEntrySha256(entryPathForError: string, sha256: un
  * through) -- the caller's normal "entry already gone" handling takes over via the subsequent
  * `lstatSync` on the entry itself.
  */
+/**
+ * Thrown by `assertManifestEntryParentContained` only for a genuine containment violation (the
+ * parent directory really does resolve outside `dest`). Distinct from any other error the same
+ * function can propagate (e.g. an `fs.realpathSync` failure such as `ELOOP`/`EACCES` on a
+ * component other than a missing leaf) so callers can tell "we detected an escape" from "we
+ * could not determine containment because of an unrelated I/O error" and report each accurately
+ * -- both are still always treated as fail-safe (preserve, never delete), only the REASON text
+ * shown to the user differs.
+ */
+export class ManifestContainmentViolationError extends Error {}
+
 export function assertManifestEntryParentContained(dest: string, absPath: string, relPathForError: string): void {
   const parent = path.dirname(absPath);
   let parentReal: string;
@@ -255,7 +266,7 @@ export function assertManifestEntryParentContained(dest: string, absPath: string
   }
   const relative = path.relative(destReal, parentReal);
   if (relative !== "" && (relative.startsWith("..") || path.isAbsolute(relative))) {
-    throw new Error(
+    throw new ManifestContainmentViolationError(
       `owned-files.json entry escapes the install root through a symlinked parent directory: "${relPathForError}" (parent resolves to ${parentReal}, outside ${destReal})`
     );
   }

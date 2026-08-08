@@ -659,6 +659,122 @@ fi
 
 echo ""
 
+# ─── Scenario H3: MEDIUM coverage (r3 delta) — removeSymlinks target-SWAP re-check ────────────
+echo "--- Scenario H3: A symlink RE-POINTED between plan and apply is preserved, neither target touched ---"
+#
+# Distinct from H2: H2 mutates the CONTENT at the symlink's existing, unchanged target (exercises
+# skillContentMatchesBundle's re-hash). This scenario re-points the symlink ITSELF to a different
+# real directory between plan and apply (fs.realpathSync(entry.symlinkPath) now disagrees with
+# the plan-time-captured entry.targetDir) -- the branch H2 never touches. The new target holds
+# BYTE-IDENTICAL bundle content (so a content-only re-check would incorrectly allow removal);
+# only the live-target re-check can catch this.
+
+SWAP_HOME="$TMPDIR_EVAL/swap-home"
+mkdir -p "$SWAP_HOME"
+SWAP_DEST="$TMPDIR_EVAL/swap-project"
+mkdir -p "$SWAP_DEST"
+HOME="$SWAP_HOME" $FA init --runtime claude-code --dest "$SWAP_DEST" --yes >/dev/null 2>&1
+rm -f "$SWAP_DEST/.flow-agents/owned-files.json"
+
+SWAP_SKILL_NAME="deliver"
+SWAP_EXTERNAL_ORIGINAL="$TMPDIR_EVAL/swap-external-original"
+SWAP_EXTERNAL_NEW="$TMPDIR_EVAL/swap-external-new"
+mkdir -p "$SWAP_EXTERNAL_ORIGINAL" "$SWAP_EXTERNAL_NEW"
+mv "$SWAP_DEST/.claude/skills/$SWAP_SKILL_NAME" "$SWAP_EXTERNAL_ORIGINAL/$SWAP_SKILL_NAME"
+cp -a "$SWAP_EXTERNAL_ORIGINAL/$SWAP_SKILL_NAME" "$SWAP_EXTERNAL_NEW/$SWAP_SKILL_NAME"
+ln -s "$SWAP_EXTERNAL_ORIGINAL/$SWAP_SKILL_NAME" "$SWAP_DEST/.claude/skills/$SWAP_SKILL_NAME"
+
+SWAP_OUT="$TMPDIR_EVAL/swap-uninstall.out"
+# TEST-ONLY hook (see uninstall.ts main()): re-points the symlink to the NEW external target
+# after buildPlan() (which captured the ORIGINAL target) but before apply.
+HOME="$SWAP_HOME"   FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_PATH="$SWAP_DEST/.claude/skills/$SWAP_SKILL_NAME"   FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_TARGET="$SWAP_EXTERNAL_NEW/$SWAP_SKILL_NAME"   $FA init --uninstall --runtime claude-code --dest "$SWAP_DEST" --yes >"$SWAP_OUT" 2>&1
+SWAP_STATUS=$?
+
+if [[ "$SWAP_STATUS" -eq 0 ]]; then
+  _pass "symlink-swap: run still exits 0 (accepted design -- a correctly-blocked preserve is not a failure)"
+else
+  _fail "symlink-swap: run exited $SWAP_STATUS, expected 0"
+fi
+
+if [[ -d "$SWAP_EXTERNAL_ORIGINAL/$SWAP_SKILL_NAME" ]]; then
+  _pass "symlink-swap: the ORIGINAL (plan-time) target directory survived untouched"
+else
+  _fail "symlink-swap: the original target directory was deleted"
+fi
+
+if [[ -d "$SWAP_EXTERNAL_NEW/$SWAP_SKILL_NAME" ]]; then
+  _pass "symlink-swap: the NEW (swapped-in) target directory survived untouched"
+else
+  _fail "symlink-swap: the new (swapped-in) target directory was deleted"
+fi
+
+if [[ -L "$SWAP_DEST/.claude/skills/$SWAP_SKILL_NAME" ]]; then
+  _pass "symlink-swap: the symlink itself was left in place"
+else
+  _fail "symlink-swap: the symlink was removed"
+fi
+
+if sed -n '/^Preserved/,/^$/p' "$SWAP_OUT" | grep -q "skills/$SWAP_SKILL_NAME" && grep -q 'symlink target changed since the plan was computed' "$SWAP_OUT"; then
+  _pass "symlink-swap: report names the swapped symlink as preserved with the target-changed reason"
+else
+  _fail "symlink-swap: report does not explain the swapped symlink was preserved"
+  sed -n '1,80p' "$SWAP_OUT"
+fi
+
+echo ""
+
+# ─── Scenario H4: MEDIUM coverage (r3 delta) — manifest-mode apply-time containment re-check ──
+echo "--- Scenario H4: A directory swapped for an escaping symlink AFTER planning is preserved, never followed ---"
+#
+# Distinct from Scenario E2: E2 exercises only the PLAN-time containment call (planFromManifest),
+# which aborts the whole run before confirmation -- it never reaches applyPlan's own containment
+# re-check at all. This scenario plants the symlink AFTER a successful plan (a plain, real
+# directory at plan time) but BEFORE apply, so only the apply-time re-check
+# (assertManifestEntryParentContained inside applyPlan's removeFiles loop) can catch it. The
+# swapped-to directory holds byte-identical content (so a content-only re-check would incorrectly
+# allow removal); only the parent-containment re-check can catch this.
+
+CONTAIN_HOME="$TMPDIR_EVAL/contain-home"
+mkdir -p "$CONTAIN_HOME"
+HOME="$CONTAIN_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+
+CONTAIN_SKILL_DIR="$CONTAIN_HOME/.claude/skills/plan-work"
+if [[ ! -d "$CONTAIN_SKILL_DIR" ]]; then
+  _fail "manifest-apply-containment: fixture skill plan-work was not installed; cannot run scenario"
+else
+  CONTAIN_SAFE_DIR="$TMPDIR_EVAL/contain-external-safe"
+  mkdir -p "$CONTAIN_SAFE_DIR"
+  cp -a "$CONTAIN_SKILL_DIR/." "$CONTAIN_SAFE_DIR/"
+
+  CONTAIN_OUT="$TMPDIR_EVAL/contain-uninstall.out"
+  # TEST-ONLY hook: replaces the plan-work skill directory -- a plain directory at plan time,
+  # captured as a normal removable entry -- with a symlink escaping dest, after planning but
+  # before apply.
+  HOME="$CONTAIN_HOME"     FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_PATH="$CONTAIN_SKILL_DIR"     FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_TARGET="$CONTAIN_SAFE_DIR"     $FA init --uninstall --runtime claude-code --global --yes >"$CONTAIN_OUT" 2>&1
+  CONTAIN_STATUS=$?
+
+  if [[ "$CONTAIN_STATUS" -eq 0 ]]; then
+    _pass "manifest-apply-containment: run still exits 0 (accepted design -- a correctly-blocked preserve is not a failure)"
+  else
+    _fail "manifest-apply-containment: run exited $CONTAIN_STATUS, expected 0"
+  fi
+
+  if [[ -f "$CONTAIN_SAFE_DIR/SKILL.md" ]]; then
+    _pass "manifest-apply-containment: the external directory the symlink now points to survived untouched"
+  else
+    _fail "manifest-apply-containment: the external directory was deleted through the swapped symlink"
+  fi
+
+  if sed -n '/^Preserved/,/^$/p' "$CONTAIN_OUT" | grep -q 'skills/plan-work/SKILL.md' && grep -q 'outside the install root through a symlink' "$CONTAIN_OUT"; then
+    _pass "manifest-apply-containment: report names the entry as preserved due to the apply-time containment re-check"
+  else
+    _fail "manifest-apply-containment: report does not explain why the entry was preserved"
+    sed -n '1,80p' "$CONTAIN_OUT"
+  fi
+fi
+
+echo ""
+
 # ─── Scenario I: HIGH fix — uninstall without confirmation deletes nothing ────────────────────
 echo "--- Scenario I: Uninstall without confirmation (--yes) deletes nothing ---"
 
