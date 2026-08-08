@@ -25,6 +25,8 @@ function nodeTypeFor(recordType) {
 /** Vault link kind -> closed graph edge type. */
 function edgeTypeFor(linkKind) {
   switch (linkKind) {
+    case "blocks":
+      return "blocks";
     case "supersedes":
     case "refines":
       return "supersedes";
