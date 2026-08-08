@@ -28,7 +28,17 @@
     },
     "observation_semantics": { "enum": ["snapshot"] },
     "producer_authority": {
-      "enum": ["authenticated_runtime_binding", "fixture_input", "unavailable"]
+      "enum": ["authenticated_runtime_binding", "fixture_input", "unavailable", "flow_run_record"],
+      "description": "authenticated_runtime_binding = live authenticated session.usage Stop path; fixture_input = explicit local fixture/operator invocation, never relayed; unavailable = no attributable producer; flow_run_record = derived directly from the canonical Flow run store (.kontourai/flow/runs/<run-id>/state.json) by flow-run-economics.mjs, not from a session.usage event. Local-only: a flow_run_record producer is never console-relayed by economics-record.sh (see docs/specs/economics-record-contract.md)."
+    },
+    "terminal_status": {
+      "type": "string",
+      "enum": ["completed", "canceled", "failed", "accepted_by_exception", "active_abandoned"],
+      "description": "Honest run-termination taxonomy (flow-agents#925), derived from the Flow run's own `status` field. 'active_abandoned' means the run was still active/blocked/needs_decision/paused when THIS record was produced -- it is NEVER reported as 'completed'. Optional/additive on v0.2 (present only on flow_run_record-produced records today); a future shape version may promote it to required."
+    },
+    "tokens_unattributed": {
+      "type": "boolean",
+      "description": "true when one or more phases[] entries carry null token fields because no token-attribution source (session.usage, or the separate economics-enrich-tokens.mjs transcript slicer) was available for them. Absence of a signal must never look like a real zero -- see phases[].items token fields, which allow null for exactly this reason. Optional/additive on v0.2."
     },
     "at": { "type": ["string", "null"] },
     "task_slug": { "type": ["string", "null"] },
@@ -37,6 +47,7 @@
     "cost": {
       "type": "object",
       "additionalProperties": true,
+      "description": "Review finding 3 fix: leaf fields allow null, matching phases[]. `cost` stays a REQUIRED key (present as an object) even when every leaf is null -- widening the leaves to null, rather than making the whole `cost` block optional/absent, was chosen deliberately so the R7 Goodhart guard ('cost and defects are co-required' -- see the top-level allOf/required and docs/specs/economics-record-contract.md) stays structurally intact, and so an existing consumer keeps the same `.cost.input_tokens` access path and only needs to add a null check (identical to how phases[] already teaches the same pattern), rather than also needing an existence check on `cost` itself. A record where every phase's token fields are null AND tokens_unattributed:true MUST carry null (not a coalesced 0) in every corresponding top-level cost.* leaf -- a real 0 and 'we don't know' must never be byte-identical here.",
       "required": [
         "input_tokens",
         "output_tokens",
@@ -46,11 +57,11 @@
         "by_model"
       ],
       "properties": {
-        "input_tokens": { "type": "number" },
-        "output_tokens": { "type": "number" },
-        "cache_creation_input_tokens": { "type": "number" },
-        "cache_read_input_tokens": { "type": "number" },
-        "estimated_cost_usd": { "type": "number" },
+        "input_tokens": { "type": ["number", "null"] },
+        "output_tokens": { "type": ["number", "null"] },
+        "cache_creation_input_tokens": { "type": ["number", "null"] },
+        "cache_read_input_tokens": { "type": ["number", "null"] },
+        "estimated_cost_usd": { "type": ["number", "null"] },
         "by_model": { "type": "array" }
       }
     },
@@ -71,12 +82,21 @@
         "required": ["phase"],
         "properties": {
           "phase": { "type": "string" },
-          "input_tokens": { "type": "number" },
-          "output_tokens": { "type": "number" },
-          "cache_creation_input_tokens": { "type": "number" },
-          "cache_read_input_tokens": { "type": "number" },
-          "estimated_cost_usd": { "type": "number" },
-          "wall_clock_s": { "type": "number" }
+          "input_tokens": { "type": ["number", "null"] },
+          "output_tokens": { "type": ["number", "null"] },
+          "cache_creation_input_tokens": { "type": ["number", "null"] },
+          "cache_read_input_tokens": { "type": ["number", "null"] },
+          "estimated_cost_usd": { "type": ["number", "null"] },
+          "wall_clock_s": { "type": "number" },
+          "human_wait_s": {
+            "type": "number",
+            "description": "Review finding 2 fix: real lifecycle pause/resume time that overlapped THIS phase's window, already subtracted out of wall_clock_s (which is now genuinely ACTIVE time, not raw calendar time). Best-effort per-phase attribution of the same total the top-level time.human_wait_s reports; may sum to slightly less than that top-level total in the one disclosed edge case where a pause falls in the undropped pre-first-transition gap (no phase window exists yet to attribute it to -- see docs/specs/economics-record-contract.md). Optional/additive; 0 when no pause overlapped this phase or the producer does not compute pause attribution (e.g. the legacy session-usage source)."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["session-usage", "flow-run-record", "transcript-slice"],
+            "description": "Where this phase entry's token/cost fields came from. 'session-usage' = the legacy session.usage-event path (a single unattributed-or-phase-known bucket). 'flow-run-record' = wall_clock_s from Flow run transitions, tokens null (never fabricated; see flow-run-economics.mjs). 'transcript-slice' = tokens summed from a transcript by economics-enrich-tokens.mjs over this phase's real transition-timestamp window. Optional/additive."
+          }
         }
       }
     },

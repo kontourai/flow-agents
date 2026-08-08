@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-paused-mid-execute",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/paused-mid-execute",
+  "status": "paused",
+  "current_step": "execute",
+  "params": {},
+  "next_action": "resume execute",
+  "updated_at": "2026-02-05T00:01:48.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-05T00:00:00.000Z"
+    },
+    {
+      "from_step": "design-probe",
+      "to_step": "plan",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "design-probe-gate",
+      "at": "2026-02-05T00:00:20.000Z"
+    },
+    {
+      "from_step": "plan",
+      "to_step": "execute",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "plan-gate",
+      "at": "2026-02-05T00:00:50.000Z"
+    }
+  ],
+  "lifecycle": [
+    {
+      "action": "pause",
+      "from_status": "active",
+      "to_status": "paused",
+      "prior_status": "active",
+      "reason": "fixture: mirrors kontourai-flow-agents-944's real shape -- paused shortly after entering execute, never resumed",
+      "at": "2026-02-05T00:01:48.000Z",
+      "authority": {
+        "kind": "operator_request",
+        "actor": "econ-fixture",
+        "request_ref": "fixture://pause-944-mirror",
+        "requested_at": "2026-02-05T00:01:48.000Z"
+      }
+    }
+  ],
+  "exceptions": []
+}
